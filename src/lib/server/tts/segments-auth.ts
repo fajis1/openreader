@@ -1,0 +1,64 @@
+import { and, eq, inArray } from 'drizzle-orm';
+import type { NextRequest } from 'next/server';
+import { db } from '@/db';
+import { documents } from '@/db/schema';
+import { requireAuthContext } from '@/lib/server/auth/auth';
+import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
+import type { ReaderType } from '@/types/user-state';
+
+export type ResolvedSegmentDocumentScope = {
+  testNamespace: string | null;
+  storageUserId: string;
+  authEnabled: boolean;
+  userId: string | null;
+  isAnonymousUser: boolean;
+  documentVersion: number;
+  readerType: ReaderType;
+};
+
+function toReaderType(documentType: string): ReaderType {
+  if (documentType === 'pdf') return 'pdf';
+  if (documentType === 'epub') return 'epub';
+  return 'html';
+}
+
+export async function resolveSegmentDocumentScope(
+  request: NextRequest,
+  documentId: string,
+): Promise<ResolvedSegmentDocumentScope | Response> {
+  const ctxOrRes = await requireAuthContext(request);
+  if (ctxOrRes instanceof Response) return ctxOrRes;
+
+  const testNamespace = getOpenReaderTestNamespace(request.headers);
+  const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
+  const storageUserId = ctxOrRes.userId ?? unclaimedUserId;
+  const allowedUserIds = ctxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
+
+  const rows = (await db
+    .select({
+      userId: documents.userId,
+      lastModified: documents.lastModified,
+      type: documents.type,
+    })
+    .from(documents)
+    .where(and(eq(documents.id, documentId), inArray(documents.userId, allowedUserIds)))) as Array<{
+      userId: string;
+      lastModified: number;
+      type: string;
+    }>;
+
+  const doc = rows.find((row) => row.userId === storageUserId) ?? rows[0];
+  if (!doc) {
+    return Response.json({ error: 'Document not found' }, { status: 404 });
+  }
+
+  return {
+    testNamespace,
+    storageUserId: doc.userId,
+    authEnabled: ctxOrRes.authEnabled,
+    userId: ctxOrRes.userId,
+    isAnonymousUser: Boolean(ctxOrRes.user?.isAnonymous),
+    documentVersion: Number(doc.lastModified),
+    readerType: toReaderType(doc.type),
+  };
+}

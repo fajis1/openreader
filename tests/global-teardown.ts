@@ -4,6 +4,7 @@ import { db } from '../src/db';
 import { audiobooks, audiobookChapters, documents } from '../src/db/schema';
 import { deleteDocumentPrefix } from '../src/lib/server/documents/blobstore';
 import { deleteAudiobookPrefix } from '../src/lib/server/audiobooks/blobstore';
+import { deleteTtsSegmentPrefix } from '../src/lib/server/tts/segments-blobstore';
 import { getS3Client, getS3Config, isS3Configured } from '../src/lib/server/storage/s3';
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -75,6 +76,7 @@ export default async function globalTeardown(): Promise<void> {
   const config = getS3Config();
   const docsNsRootPrefix = `${config.prefix}/documents_v1/ns/`;
   const audiobooksNsRootPrefix = `${config.prefix}/audiobooks_v1/ns/`;
+  const ttsSegmentsNsRootPrefix = `${config.prefix}/tts_segments_v1/ns/`;
 
   // Remove SQL audiobook rows for namespaced objects (covers auth claim flows too).
   const audiobookKeys = await listKeysByPrefix(audiobooksNsRootPrefix);
@@ -103,4 +105,5 @@ export default async function globalTeardown(): Promise<void> {
 
   await deleteDocumentPrefix(docsNsRootPrefix);
   await deleteAudiobookPrefix(audiobooksNsRootPrefix);
+  await deleteTtsSegmentPrefix(ttsSegmentsNsRootPrefix);
 }

@@ -7,10 +7,12 @@
 import { db } from '@/db';
 import { documents, audiobooks } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { isS3Configured } from '@/lib/server/storage/s3';
+import { getS3Config, isS3Configured } from '@/lib/server/storage/s3';
 import { deleteDocumentBlob } from '@/lib/server/documents/blobstore';
 import { deleteDocumentPreviewArtifacts } from '@/lib/server/documents/previews-blobstore';
+import { deleteDocumentPreviewRows } from '@/lib/server/documents/previews';
 import { audiobookPrefix, deleteAudiobookPrefix } from '@/lib/server/audiobooks/blobstore';
+import { deleteTtsSegmentPrefix } from '@/lib/server/tts/segments-blobstore';
 
 type DocumentRow = { id: string };
 type AudiobookRow = { id: string };
@@ -29,7 +31,7 @@ export async function deleteUserStorageData(
   userId: string,
   namespace: string | null,
 ): Promise<void> {
-  if (!isS3Configured()) return;
+  const s3Enabled = isS3Configured();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const database = db as any;
@@ -42,25 +44,36 @@ export async function deleteUserStorageData(
 
   let docsDeleted = 0;
   for (const doc of userDocs) {
-    try {
-      await deleteDocumentBlob(doc.id, namespace);
-      docsDeleted++;
-    } catch (error) {
-      console.error(`[user-data-cleanup] Failed to delete document blob ${doc.id}:`, error);
+    if (s3Enabled) {
+      try {
+        await deleteDocumentBlob(doc.id, namespace);
+        docsDeleted++;
+      } catch (error) {
+        console.error(`[user-data-cleanup] Failed to delete document blob ${doc.id}:`, error);
+      }
+
+      try {
+        await deleteDocumentPreviewArtifacts(doc.id, namespace);
+      } catch (error) {
+        console.error(`[user-data-cleanup] Failed to delete preview for ${doc.id}:`, error);
+      }
     }
 
+    // Always clean up DB rows — documentPreviews has no FK cascade on user.
     try {
-      await deleteDocumentPreviewArtifacts(doc.id, namespace);
+      await deleteDocumentPreviewRows(doc.id, namespace);
     } catch (error) {
-      console.error(`[user-data-cleanup] Failed to delete preview for ${doc.id}:`, error);
+      console.error(`[user-data-cleanup] Failed to delete preview rows for ${doc.id}:`, error);
     }
   }
 
   // --- Audiobooks ---
-  const userBooks: AudiobookRow[] = await database
-    .select({ id: audiobooks.id })
-    .from(audiobooks)
-    .where(eq(audiobooks.userId, userId));
+  const userBooks: AudiobookRow[] = s3Enabled
+    ? await database
+        .select({ id: audiobooks.id })
+        .from(audiobooks)
+        .where(eq(audiobooks.userId, userId))
+    : [];
 
   let booksDeleted = 0;
   for (const book of userBooks) {
@@ -73,11 +86,25 @@ export async function deleteUserStorageData(
     }
   }
 
-  if (docsDeleted > 0 || booksDeleted > 0) {
+  // --- TTS segments ---
+  let segmentsDeleted = 0;
+  if (s3Enabled) {
+    try {
+      const cfg = getS3Config();
+      const nsSegment = namespace ? `ns/${namespace}/` : '';
+      const ttsPrefix = `${cfg.prefix}/tts_segments_v1/${nsSegment}users/${encodeURIComponent(userId)}/`;
+      segmentsDeleted = await deleteTtsSegmentPrefix(ttsPrefix);
+    } catch (error) {
+      console.error(`[user-data-cleanup] Failed to delete TTS segment blobs for user ${userId}:`, error);
+    }
+  }
+
+  if (docsDeleted > 0 || booksDeleted > 0 || segmentsDeleted > 0) {
     console.log(
       `[user-data-cleanup] Cleaned up S3 data for user ${userId}: ` +
       `${docsDeleted}/${userDocs.length} document(s), ` +
-      `${booksDeleted}/${userBooks.length} audiobook(s)`,
+      `${booksDeleted}/${userBooks.length} audiobook(s), ` +
+      `${segmentsDeleted} tts segment object(s)`,
     );
   }
 }

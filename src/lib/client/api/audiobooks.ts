@@ -7,7 +7,9 @@ import type {
   CreateChapterPayload,
   VoicesResponse,
   AlignmentPayload,
-  AlignmentResponse
+  AlignmentResponse,
+  TTSSegmentsEnsureRequest,
+  TTSSegmentsEnsureResponse,
 } from '@/types/client';
 import type { TTSAudiobookChapter, TTSAudioBuffer } from '@/types/tts';
 
@@ -249,5 +251,60 @@ export const alignAudio = async (payload: AlignmentPayload): Promise<AlignmentRe
   });
 
   if (!response.ok) return null;
+  return await response.json();
+};
+
+export const ensureTtsSegments = async (
+  payload: TTSSegmentsEnsureRequest,
+  headers: TTSRequestHeaders,
+  signal?: AbortSignal,
+): Promise<TTSSegmentsEnsureResponse> => {
+  const response = await fetch('/api/tts/segments/ensure', {
+    method: 'POST',
+    headers: headers as HeadersInit,
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  if (!response.ok) {
+    let problem: unknown = undefined;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/problem+json') || contentType.includes('application/json')) {
+      problem = await response.json().catch(() => null);
+    }
+
+    const err = new Error(`TTS segment ensure failed with status ${response.status}`) as TTSRequestError;
+    err.status = response.status;
+    if (typeof problem === 'object' && problem !== null) {
+      const rec = problem as Record<string, unknown>;
+      if (typeof rec.code === 'string') err.code = rec.code;
+      if (typeof rec.type === 'string') err.type = rec.type;
+      if (typeof rec.title === 'string') err.title = rec.title;
+      if (typeof rec.detail === 'string') err.detail = rec.detail;
+    }
+
+    throw err;
+  }
+
+  return await response.json();
+};
+
+export const fetchTtsSegmentManifest = async (params: {
+  documentId: string;
+  settingsHash: string;
+  fromIndex: number;
+  toIndex: number;
+}): Promise<TTSSegmentsEnsureResponse> => {
+  const query = new URLSearchParams({
+    documentId: params.documentId,
+    settingsHash: params.settingsHash,
+    fromIndex: String(params.fromIndex),
+    toIndex: String(params.toIndex),
+  });
+  const response = await fetch(`/api/tts/segments/manifest?${query.toString()}`);
+  if (!response.ok) {
+    const data = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(data?.error || 'Failed to fetch segment manifest');
+  }
   return await response.json();
 };

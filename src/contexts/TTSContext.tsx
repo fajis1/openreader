@@ -36,7 +36,7 @@ import { useMediaSession } from '@/hooks/audio/useMediaSession';
 import { useAudioContext } from '@/hooks/audio/useAudioContext';
 import { getLastDocumentLocation, setLastDocumentLocation } from '@/lib/client/dexie';
 import { getDocumentProgress, scheduleDocumentProgressSync } from '@/lib/client/api/user-state';
-import { withRetry, generateTTS, alignAudio } from '@/lib/client/api/audiobooks';
+import { withRetry, ensureTtsSegments } from '@/lib/client/api/audiobooks';
 import { preprocessSentenceForAudio, splitTextToTtsBlocks, splitTextToTtsBlocksEPUB } from '@/lib/shared/nlp';
 import { isKokoroModel } from '@/lib/shared/kokoro';
 import { supportsNativeModelSpeed, supportsTtsInstructions } from '@/lib/shared/tts-provider-catalog';
@@ -50,9 +50,9 @@ import type {
   TTSAudioBuffer,
 } from '@/types/tts';
 import type {
-  TTSRequestPayload,
   TTSRequestHeaders,
   TTSRetryOptions,
+  TTSSegmentManifestItem,
 } from '@/types/client';
 import type { ReaderType } from '@/types/user-state';
 
@@ -105,6 +105,7 @@ const MAX_CONTINUATION_CARRY_CHARS = 220;
 const MAX_CONTINUATION_CARRY_WORDS = 40;
 const LOOP_GUARD_MIN_INDEX = 2;
 const LOOP_GUARD_MIN_PROGRESS = 0.6;
+const AUDIO_CACHE_MAX_ITEMS = 25;
 const SENTENCE_ENDING = /[.?!…]["'”’)\]]*\s*$/;
 const wordHighlightFeatureEnabled =
   process.env.NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT?.toLowerCase() !== 'false';
@@ -322,7 +323,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
   // Audio and voice management hooks
   const audioContext = useAudioContext();
-  const audioCache = useAudioCache(25);
+  const audioCache = useAudioCache(AUDIO_CACHE_MAX_ITEMS);
   const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl, configTTSProvider, configTTSModel);
   const {
     authEnabled,
@@ -360,6 +361,11 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   // Get document ID from URL params
   const { id } = useParams();
   const pathname = usePathname();
+  const documentId = useMemo(() => {
+    if (typeof id === 'string') return id;
+    if (Array.isArray(id)) return id[0];
+    return '';
+  }, [id]);
 
   const currentReaderType: ReaderType = useMemo(() => {
     if (pathname.startsWith('/epub/')) return 'epub';
@@ -406,11 +412,16 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const restartSeqRef = useRef(0);
   // Track continuation slices for PDF/EPUB page transitions
   const continuationCarryRef = useRef<Map<string, string>>(new Map());
+  // Preserve autoplay intent across location changes. Some browsers can emit pause
+  // events while we stop/unload between pages, which momentarily flips `isPlaying`
+  // false and can prevent automatic resume on the next page.
+  const resumeAfterLocationChangeRef = useRef(false);
   const epubContinuationRef = useRef<string | null>(null);
   const pageTurnEstimateRef = useRef<TTSPageTurnEstimate | null>(null);
   const pageTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pageFirstBlockFingerprintRef = useRef<Map<string, string>>(new Map());
   const sentenceAlignmentCacheRef = useRef<Map<string, TTSSentenceAlignment>>(new Map());
+  const segmentManifestCacheRef = useRef<Map<string, TTSSegmentManifestItem>>(new Map());
   const [currentSentenceAlignment, setCurrentSentenceAlignment] = useState<TTSSentenceAlignment | undefined>();
   const [currentWordIndex, setCurrentWordIndex] = useState<number | null>(null);
   const isPlayingRef = useRef(false);
@@ -508,6 +519,19 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       // ignore
     }
   }, [audioContext]);
+
+  const setSegmentManifestCache = useCallback((key: string, item: TTSSegmentManifestItem) => {
+    const cache = segmentManifestCacheRef.current;
+    if (cache.has(key)) {
+      cache.delete(key);
+    }
+    cache.set(key, item);
+    while (cache.size > AUDIO_CACHE_MAX_ITEMS) {
+      const oldestKey = cache.keys().next().value;
+      if (typeof oldestKey !== 'string') break;
+      cache.delete(oldestKey);
+    }
+  }, []);
 
   const isAutoplayBlockedError = useCallback((err: unknown) => {
     const msg = (() => {
@@ -620,6 +644,12 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * @param {boolean} shouldPause - Whether to pause playback
    */
   const skipToLocation = useCallback((location: TTSLocation, shouldPause = false) => {
+    if (shouldPause) {
+      resumeAfterLocationChangeRef.current = false;
+    } else if (isPlayingRef.current) {
+      resumeAfterLocationChangeRef.current = true;
+    }
+
     // Reset state for new content in correct order
     abortAudio();
     if (shouldPause) setIsPlaying(false);
@@ -836,9 +866,13 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     if (handleBlankSection(workingText)) return;
 
     const shouldPause = normalizedOptions.shouldPause ?? false;
+    const pendingAutoResume = resumeAfterLocationChangeRef.current;
+    const shouldResumePlayback = !shouldPause && (isPlaying || pendingAutoResume);
+    if (shouldPause || pendingAutoResume) {
+      resumeAfterLocationChangeRef.current = false;
+    }
 
     // Keep track of previous state and pause playback
-    const wasPlaying = isPlaying;
     setIsPlaying(false);
     abortAudio(true); // Clear pending requests since text is changing
     setIsProcessing(true); // Set processing state before text processing starts
@@ -917,7 +951,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         setIsProcessing(false);
 
         // Restore playback state if needed
-        if (!shouldPause && wasPlaying) {
+        if (shouldResumePlayback) {
           setIsPlaying(true);
         }
       })
@@ -1053,54 +1087,15 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * @param {string} sentence - The sentence to generate audio for
    * @returns {Promise<TTSAudioBuffer | undefined>} The generated audio buffer
    */
-  const getAudio = useCallback(async (sentence: string, preload = false): Promise<TTSAudioBuffer | undefined> => {
+  const getAudio = useCallback(async (
+    sentence: string,
+    sentenceIndex: number,
+    preload = false,
+  ): Promise<TTSAudioBuffer | undefined> => {
     const alignmentEnabledForCurrentDoc =
       wordHighlightFeatureEnabled &&
       ((!isEPUB && pdfHighlightEnabled && pdfWordHighlightEnabled) ||
         (isEPUB && epubHighlightEnabled && epubWordHighlightEnabled));
-    // Helper to ensure we have an alignment for a given
-    // sentence/audio pair, even when the audio itself is
-    // served from the local cache.
-    const ensureAlignment = (arrayBuffer: TTSAudioBuffer) => {
-      if (!alignmentEnabledForCurrentDoc) return;
-      const alignmentKey = buildCacheKey(
-        sentence,
-        voice,
-        effectiveNativeSpeed,
-        configTTSProvider,
-        ttsModel,
-      );
-      if (sentenceAlignmentCacheRef.current.has(alignmentKey)) return;
-
-      try {
-        const audioBytes = Array.from(new Uint8Array(arrayBuffer));
-        const alignmentBody = {
-          text: sentence,
-          audio: audioBytes,
-        };
-
-        void alignAudio(alignmentBody)
-          .then(async (data) => {
-            if (!data || !Array.isArray(data.alignments) || !data.alignments[0]) {
-              return;
-            }
-            const alignment = data.alignments[0] as TTSSentenceAlignment;
-            sentenceAlignmentCacheRef.current.set(alignmentKey, alignment);
-
-            const currentSentence = sentencesRef.current[currentIndexRef.current];
-            if (currentSentence === sentence) {
-              setCurrentSentenceAlignment(alignment);
-              setCurrentWordIndex(null);
-            }
-          })
-          .catch((err) => {
-            console.warn('Alignment request failed:', err);
-          });
-      } catch (err) {
-        console.warn('Failed to start alignment request:', err);
-      }
-    };
-
     const audioCacheKey = buildCacheKey(
       sentence,
       voice,
@@ -1109,83 +1104,94 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       ttsModel,
     );
 
-    // Check if the audio is already cached
     const cachedAudio = audioCache.get(audioCacheKey);
     if (cachedAudio) {
-      console.log('Using cached audio for sentence:', sentence.substring(0, 20));
-      // If we have audio but no alignment (e.g. after a
-      // navigation or TTS reset), kick off a fresh alignment
-      // request using the cached audio buffer.
-      ensureAlignment(cachedAudio);
+      const cachedManifest = segmentManifestCacheRef.current.get(audioCacheKey);
+      if (alignmentEnabledForCurrentDoc && cachedManifest?.alignment) {
+        sentenceAlignmentCacheRef.current.set(audioCacheKey, cachedManifest.alignment);
+      }
       return cachedAudio;
     }
 
-    // If the user is already out of quota, avoid spamming requests.
-    // Cached audio above is still allowed to play.
-    if (isAtLimit) {
-      if (!preload) {
-        setIsPlaying(false);
-      }
+    if (!documentId) {
+      if (!preload) setIsPlaying(false);
       return undefined;
     }
 
+    if (isAtLimit) {
+      if (!preload) setIsPlaying(false);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    activeAbortControllers.current.add(controller);
+
+    const reqHeaders: TTSRequestHeaders = {
+      'Content-Type': 'application/json',
+      'x-openai-key': openApiKey || '',
+      'x-tts-provider': configTTSProvider,
+    };
+    if (openApiBaseUrl) {
+      reqHeaders['x-openai-base-url'] = openApiBaseUrl;
+    }
+
+    const locator = isEPUB
+      ? { location: String(currDocPage), readerType: currentReaderType }
+      : { page: Number(currDocPageNumber || 1), readerType: currentReaderType };
+
+    const retryOptions: TTSRetryOptions = {
+      maxRetries: 2,
+      initialDelay: 300,
+      maxDelay: 300,
+    };
+
     try {
-      console.log('Requesting audio for sentence:', sentence);
-
-      // Create an AbortController for this request
-      const controller = new AbortController();
-      activeAbortControllers.current.add(controller);
-
-      const reqHeaders: TTSRequestHeaders = {
-        'Content-Type': 'application/json',
-        'x-openai-key': openApiKey || '',
-        'x-tts-provider': configTTSProvider,
-      };
-      if (openApiBaseUrl) {
-        reqHeaders['x-openai-base-url'] = openApiBaseUrl;
-      }
-
-      const reqBody: TTSRequestPayload = {
-        text: sentence,
-        voice,
-        speed: effectiveNativeSpeed,
-        format: 'mp3',
-        model: ttsModel,
-        instructions: supportsTtsInstructions(ttsModel) ? ttsInstructions : undefined,
-      };
-
-      // Allow one narrow client retry for transient browser->/api/tts transport failures.
-      // HTTP failures are not retried client-side.
-      const retryOptions: TTSRetryOptions = {
-        maxRetries: 2,
-        initialDelay: 300,
-        maxDelay: 300,
-      };
-
       onTTSStart();
-      let arrayBuffer: TTSAudioBuffer;
-      try {
-        arrayBuffer = await withRetry(
-          async () => {
-            return await generateTTS(reqBody, reqHeaders, controller.signal);
+      const ensured = await withRetry(
+        async () => ensureTtsSegments({
+          documentId,
+          settings: {
+            ttsProvider: configTTSProvider,
+            ttsModel,
+            voice,
+            nativeSpeed: effectiveNativeSpeed,
+            ...(supportsTtsInstructions(ttsModel) && ttsInstructions ? { ttsInstructions } : {}),
           },
-          retryOptions
-        );
-      } finally {
-        onTTSComplete();
+          segments: [
+            {
+              segmentIndex: sentenceIndex,
+              text: sentence,
+              locator,
+            },
+          ],
+        }, reqHeaders, controller.signal),
+        retryOptions,
+      );
+
+      const segment = ensured.segments[0];
+      if (!segment || segment.status !== 'completed' || !segment.audioUrl) {
+        throw new Error('Failed to prepare segment audio');
       }
 
-      // Remove the controller once the request is complete
-      activeAbortControllers.current.delete(controller);
+      const response = await fetch(segment.audioUrl, { signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`Segment audio fetch failed: ${response.status}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('Received empty segment audio buffer');
+      }
 
-      // Cache the array buffer
       audioCache.set(audioCacheKey, arrayBuffer);
-
-      // Fire-and-forget alignment request; do not block audio playback
-      ensureAlignment(arrayBuffer);
-
+      setSegmentManifestCache(audioCacheKey, segment);
+      if (alignmentEnabledForCurrentDoc && segment.alignment) {
+        sentenceAlignmentCacheRef.current.set(audioCacheKey, segment.alignment);
+      }
       return arrayBuffer;
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return undefined;
+      }
       const status = (() => {
         if (typeof error === 'object' && error !== null && 'status' in error) {
           const maybe = (error as { status?: unknown }).status;
@@ -1193,7 +1199,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         }
         return undefined;
       })();
-
       const code = (() => {
         if (typeof error === 'object' && error !== null && 'code' in error) {
           const maybe = (error as { code?: unknown }).code;
@@ -1201,23 +1206,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         }
         return undefined;
       })();
-
-      // Check if this was an abort error
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.log('TTS request aborted:', sentence.substring(0, 20));
-        return;
-      }
-
-      // If a preload request fails, we should not flip the global playback state.
-      // Otherwise the UI can lose the pause button while the current sentence
-      // continues playing.
-      if (!preload) {
-        setIsPlaying(false);
-      }
-
-      // Handle daily quota exceeded (429 + Problem Details code)
       if (status === 429 && code === 'USER_DAILY_QUOTA_EXCEEDED') {
-        // Avoid noisy toasts from background preloading; keep the user-facing error for active playback.
         if (!preload) {
           toast.error('Daily TTS limit reached.', {
             id: 'tts-limit-error',
@@ -1226,18 +1215,19 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         }
         triggerRateLimit();
         refreshRateLimit().catch(console.error);
-        // Do NOT re-throw, just return undefined to stop playback gracefully
         return undefined;
       }
-
-      // Avoid noisy toasts from background preloading.
       if (!preload) {
+        setIsPlaying(false);
         toast.error('TTS failed. Skipped sentence and paused.', {
           id: 'tts-api-error',
           duration: 7000,
         });
       }
       throw error;
+    } finally {
+      activeAbortControllers.current.delete(controller);
+      onTTSComplete();
     }
   }, [
     voice,
@@ -1253,11 +1243,16 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     pdfWordHighlightEnabled,
     epubHighlightEnabled,
     epubWordHighlightEnabled,
-    triggerRateLimit,
-    refreshRateLimit,
     onTTSComplete,
     onTTSStart,
-    isAtLimit
+    isAtLimit,
+    documentId,
+    currDocPage,
+    currDocPageNumber,
+    currentReaderType,
+    refreshRateLimit,
+    triggerRateLimit,
+    setSegmentManifestCache,
   ]);
 
   /**
@@ -1267,17 +1262,22 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * @param {boolean} [preload=false] - Whether this is a preload request
    * @returns {Promise<string>} The URL of the processed audio
    */
-  const processSentence = useCallback(async (sentence: string, preload = false): Promise<string> => {
+  const processSentence = useCallback(async (
+    sentence: string,
+    sentenceIndex: number,
+    preload = false,
+  ): Promise<string> => {
     if (!audioContext) throw new Error('Audio context not initialized');
+    const requestKey = `${sentenceIndex}::${sentence}`;
 
     // Check if there's a pending preload request for this sentence
-    const pendingRequest = preloadRequests.current.get(sentence);
+    const pendingRequest = preloadRequests.current.get(requestKey);
     if (pendingRequest) {
       console.log('Using pending preload request for:', sentence.substring(0, 20));
       setIsProcessing(true); // Show processing state when using pending request
       // If this is not a preload request, remove it from the pending map
       if (!preload) {
-        preloadRequests.current.delete(sentence);
+        preloadRequests.current.delete(requestKey);
       }
       return pendingRequest;
     }
@@ -1288,7 +1288,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     // Create the audio processing promise
     const processPromise = (async () => {
       try {
-        const audioBuffer = await getAudio(sentence, preload);
+        const audioBuffer = await getAudio(sentence, sentenceIndex, preload);
         if (!audioBuffer) {
           // If quota or other handled error returns undefined, ensure we don't throw "No audio data"
           // Just return empty string to signal graceful failure/skip
@@ -1308,11 +1308,11 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
     // If this is a preload request, store it in the map
     if (preload) {
-      preloadRequests.current.set(sentence, processPromise);
+      preloadRequests.current.set(requestKey, processPromise);
       // Clean up the map entry once the promise resolves or rejects
       void processPromise
         .finally(() => {
-          preloadRequests.current.delete(sentence);
+          preloadRequests.current.delete(requestKey);
         })
         .catch(() => {
           // Prevent unhandled rejections from the cleanup-only chained promise.
@@ -1341,7 +1341,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     const createHowl = async (retryCount = 0): Promise<Howl | null> => {
       let playErrorAttempts = 0;
       // Get the processed audio data URI directly from processSentence
-      const audioDataUri = await processSentence(sentence);
+      const audioDataUri = await processSentence(sentence, sentenceIndex);
       if (!audioDataUri) {
         // Graceful exit for rate limit / abort / intentionally skipped sentence
         console.log('Skipping playback for sentence (no audio generated)');
@@ -1698,7 +1698,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         return;
       }
 
-      const pending = preloadRequests.current.get(nextSentence);
+      const preloadKey = `${sentenceIndex}::${nextSentence}`;
+      const pending = preloadRequests.current.get(preloadKey);
       if (pending) {
         void pending
           .finally(() => {
@@ -1710,7 +1711,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         return;
       }
 
-      void processSentence(nextSentence, true)
+      void processSentence(nextSentence, sentenceIndex, true)
         .catch((error) => {
           const status = (() => {
             if (typeof error === 'object' && error !== null && 'status' in error) {

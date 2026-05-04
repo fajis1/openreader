@@ -85,3 +85,46 @@ export interface AlignmentPayload {
 export interface AlignmentResponse {
   alignments: TTSSentenceAlignment[];
 }
+
+export interface TTSSegmentSettings {
+  ttsProvider: string;
+  ttsModel: string;
+  voice: string;
+  nativeSpeed: number;
+  ttsInstructions?: string;
+}
+
+export interface TTSSegmentLocator {
+  page?: number;
+  location?: string;
+  readerType?: 'pdf' | 'epub' | 'html';
+}
+
+export interface TTSSegmentInput {
+  segmentIndex: number;
+  text: string;
+  locator?: TTSSegmentLocator;
+}
+
+export interface TTSSegmentsEnsureRequest {
+  documentId: string;
+  segments: TTSSegmentInput[];
+  settings: TTSSegmentSettings;
+}
+
+export interface TTSSegmentManifestItem {
+  segmentId: string;
+  segmentIndex: number;
+  audioUrl: string;
+  durationMs: number;
+  alignment: TTSSentenceAlignment | null;
+  locator: TTSSegmentLocator | null;
+  status: 'pending' | 'completed' | 'error';
+}
+
+export interface TTSSegmentsEnsureResponse {
+  documentId: string;
+  documentVersion: number;
+  settingsHash: string;
+  segments: TTSSegmentManifestItem[];
+}
