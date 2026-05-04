@@ -170,6 +170,7 @@ Secret key used by auth/session handling.
 
 - Required with `BASE_URL` to enable auth
 - Generate with `openssl rand -hex 32`
+- Also used to HMAC-hash server-side TTS segment text fingerprints
 - Related docs: [Auth](../configure/auth)
 
 ### AUTH_TRUSTED_ORIGINS

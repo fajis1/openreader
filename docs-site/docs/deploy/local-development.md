@@ -7,45 +7,137 @@ import TabItem from '@theme/TabItem';
 
 ## Prerequisites
 
-- Node.js (recommended with [nvm](https://github.com/nvm-sh/nvm))
-- `pnpm` (recommended) or `npm`
+<details>
+<summary><strong>Node.js + pnpm (required)</strong></summary>
+
+<Tabs groupId="local-dev-node-pnpm-os">
+<TabItem value="macos" label="macOS" default>
 
 ```bash
-npm install -g pnpm
+brew install nvm pnpm
+mkdir -p ~/.nvm
+echo 'export NVM_DIR="$HOME/.nvm"' >> ~/.zshrc
+echo '[ -s "$(brew --prefix nvm)/nvm.sh" ] && . "$(brew --prefix nvm)/nvm.sh"' >> ~/.zshrc
+source ~/.zshrc
+nvm install --lts
+nvm use --lts
+node -v
+pnpm -v
 ```
 
-- A reachable TTS API server
-- [SeaweedFS](https://github.com/seaweedfs/seaweedfs) `weed` binary (required unless using external S3 storage)
+</TabItem>
+<TabItem value="linux" label="Linux">
+
+```bash
+# Debian/Ubuntu example
+sudo apt update
+sudo apt install -y curl
+curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm install --lts
+nvm use --lts
+corepack enable
+corepack prepare pnpm@latest --activate
+node -v
+pnpm -v
+```
+
+</TabItem>
+</Tabs>
+
+</details>
+
+<details>
+<summary><strong>SeaweedFS <code>weed</code> binary (required unless using external S3)</strong></summary>
+
+<Tabs groupId="local-dev-seaweed-os">
+<TabItem value="macos" label="macOS" default>
+
+```bash
+brew install seaweedfs
+weed version
+```
 
 :::warning SeaweedFS Compatibility Note (April 16, 2026)
 If you see intermittent S3 `InternalError` upload failures with embedded storage, use SeaweedFS `4.18`.
 OpenReader currently pins `4.18` in CI and Docker builds while `4.19` compatibility is investigated.
 :::
 
-<Tabs groupId="seaweedfs-install">
-  <TabItem value="macos" label="macOS" default>
+</TabItem>
+<TabItem value="linux" label="Linux">
 
 ```bash
-brew install seaweedfs
+# Linux amd64 example (pin 4.18)
+mkdir -p "$HOME/.local/bin"
+curl -fsSL -o /tmp/seaweedfs.tar.gz \
+  https://github.com/seaweedfs/seaweedfs/releases/download/4.18/linux_amd64.tar.gz
+tar -xzf /tmp/seaweedfs.tar.gz -C /tmp weed
+install -m 0755 /tmp/weed "$HOME/.local/bin/weed"
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+export PATH="$HOME/.local/bin:$PATH"
+weed version
 ```
 
-  </TabItem>
-  <TabItem value="linux" label="Linux">
+:::warning SeaweedFS Compatibility Note (April 16, 2026)
+If you see intermittent S3 `InternalError` upload failures with embedded storage, use SeaweedFS `4.18`.
+OpenReader currently pins `4.18` in CI and Docker builds while `4.19` compatibility is investigated.
+:::
 
-Install the `weed` binary from the [SeaweedFS releases](https://github.com/seaweedfs/seaweedfs/releases) and ensure it is available on `PATH`.
-
-  </TabItem>
+</TabItem>
 </Tabs>
 
-Optional, depending on features:
+</details>
 
-- [libreoffice](https://www.libreoffice.org) (required for DOCX conversion)
+<details>
+<summary><strong>LibreOffice (optional, for DOCX conversion)</strong></summary>
+
+<Tabs groupId="local-dev-libreoffice-os">
+<TabItem value="macos" label="macOS" default>
 
 ```bash
 brew install libreoffice
 ```
 
-- [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (optional, for word-by-word highlighting)
+</TabItem>
+<TabItem value="linux" label="Linux">
+
+```bash
+# Debian/Ubuntu example
+sudo apt update
+sudo apt install -y libreoffice
+```
+
+</TabItem>
+</Tabs>
+
+</details>
+
+<details>
+<summary><strong>whisper.cpp (optional, for word-by-word highlighting)</strong></summary>
+
+Install build dependencies:
+
+<Tabs groupId="local-dev-whisper-deps-os">
+<TabItem value="macos" label="macOS" default>
+
+```bash
+brew install cmake
+```
+
+</TabItem>
+<TabItem value="linux" label="Linux">
+
+```bash
+# Debian/Ubuntu example
+sudo apt update
+sudo apt install -y git build-essential cmake
+```
+
+</TabItem>
+</Tabs>
+
+Build whisper.cpp:
 
 ```bash
 # clone and build whisper.cpp (no model download needed – OpenReader handles that)
@@ -58,11 +150,20 @@ cmake --build build -j --config Release
 echo WHISPER_CPP_BIN="$(pwd)/build/bin/whisper-cli"
 ```
 
+If you are not on Debian/Ubuntu, install equivalent packages with your distro package manager:
+
+- Fedora/RHEL: use `dnf` (`gcc gcc-c++ make cmake curl git tar xz`)
+- Arch: use `pacman` (`base-devel cmake curl git tar xz`)
+
 :::tip
 Set `WHISPER_CPP_BIN` in your `.env` to enable word-by-word highlighting.
 :::
 
+</details>
+
 ## Steps
+
+### Required flow
 
 1. Clone the repository.
 
@@ -85,14 +186,47 @@ cp .env.example .env
 
 Then edit `.env`.
 
-- No auth mode: leave `BASE_URL` or `AUTH_SECRET` unset.
-- Auth enabled mode: set both `BASE_URL` (typically `http://localhost:3003`) and `AUTH_SECRET` (generate with `openssl rand -hex 32`).
+Use one of these `.env` mode templates:
 
-Optional:
+<Tabs groupId="local-env-modes">
+  <TabItem value="no-auth" label="No Auth (simple)" default>
 
-- `AUTH_TRUSTED_ORIGINS=http://localhost:3003,http://192.168.0.116:3003`
-- Stable S3 credentials via `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`
-- External S3 storage by setting `USE_EMBEDDED_WEED_MINI=false` and related S3 vars
+```env
+API_BASE=http://host.docker.internal:8880/v1
+API_KEY=none
+# Leave BASE_URL and AUTH_SECRET unset to keep auth disabled
+```
+
+  </TabItem>
+  <TabItem value="auth-enabled" label="Auth Enabled">
+
+```env
+API_BASE=http://host.docker.internal:8880/v1
+API_KEY=none
+BASE_URL=http://localhost:3003
+AUTH_SECRET=<generate-with-openssl-rand-hex-32>
+# Optional when you need multiple local origins:
+# AUTH_TRUSTED_ORIGINS=http://localhost:3003,http://127.0.0.1:3003
+```
+
+  </TabItem>
+  <TabItem value="external-s3" label="External S3">
+
+```env
+API_BASE=http://host.docker.internal:8880/v1
+API_KEY=none
+USE_EMBEDDED_WEED_MINI=false
+S3_BUCKET=your-bucket
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=your-access-key
+S3_SECRET_ACCESS_KEY=your-secret-key
+# Optional for non-AWS providers:
+# S3_ENDPOINT=https://your-s3-compatible-endpoint
+# S3_FORCE_PATH_STYLE=true
+```
+
+  </TabItem>
+</Tabs>
 
 :::info
 For all environment variables, see [Environment Variables](../reference/environment-variables).
@@ -103,23 +237,10 @@ Storage configuration details are in [Object / Blob Storage](../configure/object
 Refer to [Database](../configure/database) for database modes.
 Learn about migration behavior and commands in [Migrations](../configure/migrations).
 
-4. Run DB migrations.
-
-- Migrations run automatically on startup through the shared entrypoint for both `pnpm dev` and `pnpm start`.
-- You only need manual migration commands for one-off troubleshooting or explicit migration workflows:
-
-```bash
-pnpm migrate
-```
-
-:::info
-If `POSTGRES_URL` is set, migrations target Postgres; otherwise local SQLite is used. To disable automatic startup migrations, set `RUN_DRIZZLE_MIGRATIONS=false` and/or `RUN_FS_MIGRATIONS=false`. You can run storage migration manually with `pnpm migrate-fs`.
-:::
-
-5. Start the app.
+4. Start the app.
 
 <Tabs groupId="local-run-mode">
-  <TabItem value="dev" label="Dev" default>
+  <TabItem value="dev" label="Dev (recommended)" default>
 
 ```bash
 pnpm dev
@@ -141,3 +262,17 @@ pnpm start
 :::
 
 Visit [http://localhost:3003](http://localhost:3003).
+
+### Optional workflows
+
+Run manual DB migrations only for troubleshooting or explicit migration workflows:
+
+- Migrations run automatically on startup through the shared entrypoint for both `pnpm dev` and `pnpm start`.
+
+```bash
+pnpm migrate
+```
+
+:::info
+If `POSTGRES_URL` is set, migrations target Postgres; otherwise local SQLite is used. To disable automatic startup migrations, set `RUN_DRIZZLE_MIGRATIONS=false` and/or `RUN_FS_MIGRATIONS=false`. You can run storage migration manually with `pnpm migrate-fs`.
+:::

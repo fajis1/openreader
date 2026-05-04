@@ -21,13 +21,13 @@ It supports multiple TTS providers including OpenAI, Replicate, DeepInfra, and c
     - [**Replicate**](https://replicate.com/explore): includes a built-in catalog and supports any Replicate model ID via `Other`
     - [**DeepInfra**](https://deepinfra.com/models/text-to-speech): Kokoro-82M and other hosted models
     - [**OpenAI API**](https://platform.openai.com/docs/pricing#transcription-and-speech): `tts-1`, `tts-1-hd`, and `gpt-4o-mini-tts`
-- 🛜 **Server-side Document Storage**
-  - Documents are persisted in server blob/object storage for consistent access
-- 📚 **External Library Import**
-  - Import documents from server-mounted folders
-- 🎧 **Server-side Audiobook Export** in `m4b`/`mp3` with resumable chapter generation
 - 📖 **Read Along Experience**
   - Real-time highlighting for PDF/EPUB, with optional word-level [whisper.cpp](https://github.com/ggml-org/whisper.cpp) timestamps
+- 🛜 **Document Storage**
+  - Documents are persisted in server blob/object storage for consistent access
+- ⚡ **Segment-based TTS Playback** for reusable generation + preloading
+  - Stores segment audio in object storage for fast replay/resume
+- 🎧 **Audiobook Export** in `m4b`/`mp3` with resumable chapter generation
 - 🔐 **Auth Optional by Design**
   - Run no-auth for local use, or enable auth with user isolation and claim flow
 - 🗂️ **Flexible Storage and Database Modes** with embedded defaults or external S3/Postgres

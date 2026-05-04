@@ -20,6 +20,10 @@ Startup migration phases:
 - DB schema migrations (`pnpm migrate`)
 - Storage/data migration (`pnpm migrate-fs`) for legacy filesystem content into S3 + DB rows
 
+Recent schema addition:
+
+- `0001_tts_segments` (SQLite + Postgres) creates the `tts_segments` table used by server-side TTS segment caching and alignment metadata.
+
 :::info
 In most setups, you do not need to run migration commands manually because startup handles this automatically.
 :::
@@ -98,6 +102,13 @@ App-specific tables are manually maintained in the standard Drizzle schema files
 - `src/db/schema_postgres.ts`
 
 Both sets of schema files are included in the Drizzle configs, so `drizzle-kit generate` and `drizzle-kit migrate` handle all tables together.
+
+When app schema changes (for example `tts_segments`), keep these in sync:
+
+- `src/db/schema_sqlite.ts`
+- `src/db/schema_postgres.ts`
+- `drizzle/sqlite/*.sql` + `drizzle/sqlite/meta/_journal.json`
+- `drizzle/postgres/*.sql` + `drizzle/postgres/meta/_journal.json`
 
 <Tabs groupId="generate-migration-commands">
   <TabItem value="project-script" label="Project Script" default>

@@ -7,10 +7,17 @@ import TabItem from '@theme/TabItem';
 
 This page documents storage backends, blob upload routing, and core Docker mount behavior.
 
+## Scope of this page
+
+- Focus: object/blob backends, keyspaces, upload/read paths, and storage debugging.
+- Not covered here: relational metadata tables and SQL state modeling (see [Database](./database)).
+
 ## Storage backends
 
-- Embedded (default): SQLite metadata + embedded SeaweedFS (`weed mini`) blobs.
-- External: Postgres + external S3-compatible object storage.
+- Embedded (default): embedded SeaweedFS (`weed mini`) blob storage.
+- External: external S3-compatible object storage.
+
+Metadata database mode (SQLite vs Postgres) is configured separately in [Database](./database).
 
 :::warning SeaweedFS Compatibility Note (April 16, 2026)
 OpenReader currently pins embedded SeaweedFS to `4.18` in CI and Docker builds.
@@ -103,6 +110,58 @@ aws s3 cp "s3://$S3_BUCKET/$S3_PREFIX/audiobooks_v1/<path>/<file>.m4b" "./audiob
 ```
 
 Embedded default example: `S3_ENDPOINT=http://127.0.0.1:8333` (or your mapped host/port).
+
+  </TabItem>
+</Tabs>
+
+## TTS Segment Storage
+
+Server-side TTS segment audio is stored in object storage under the `tts_segments_v1` keyspace.
+
+Typical key layout:
+
+- `${S3_PREFIX}/tts_segments_v1/users/<url-encoded-user-id>/docs/<document-id>/<document-version>/<settings-hash>/<segment-id>.mp3`
+- `${S3_PREFIX}/tts_segments_v1/ns/<test-namespace>/users/<url-encoded-user-id>/docs/...` (test namespace mode)
+
+Notes:
+
+- For the corresponding SQL metadata model (`tts_segments`), see [Database](./database).
+
+## Account Deletion Cleanup
+
+Account deletion performs best-effort object cleanup:
+
+- Document blobs + preview artifacts
+- Audiobook blobs
+- TTS segment blobs under `tts_segments_v1`
+
+If object deletion fails, account deletion still proceeds and orphaned objects may require manual cleanup.
+
+## TTS Segment Storage Debug Commands
+
+Use these commands to inspect segment objects.
+
+<Tabs groupId="tts-segment-storage-access-cli">
+  <TabItem value="aws-s3" label="AWS S3" default>
+
+```bash
+# List all TTS segment objects
+aws s3 ls "s3://$S3_BUCKET/$S3_PREFIX/tts_segments_v1/" --recursive
+
+# Filter to one document id (replace <document-id>)
+aws s3 ls "s3://$S3_BUCKET/$S3_PREFIX/tts_segments_v1/" --recursive | grep "/docs/<document-id>/"
+```
+
+  </TabItem>
+  <TabItem value="s3-compatible" label="Embedded / MinIO / R2 / etc">
+
+```bash
+# List all TTS segment objects
+aws s3 ls "s3://$S3_BUCKET/$S3_PREFIX/tts_segments_v1/" --recursive --endpoint-url "$S3_ENDPOINT"
+
+# Filter to one document id (replace <document-id>)
+aws s3 ls "s3://$S3_BUCKET/$S3_PREFIX/tts_segments_v1/" --recursive --endpoint-url "$S3_ENDPOINT" | grep "/docs/<document-id>/"
+```
 
   </TabItem>
 </Tabs>
