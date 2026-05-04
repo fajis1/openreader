@@ -13,6 +13,7 @@ import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
 import { resolveDocumentId } from '@/lib/client/dexie';
 import { DocumentHeaderMenu } from '@/components/documents/DocumentHeaderMenu';
+import { SegmentsSidebar } from '@/components/reader/SegmentsSidebar';
 import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
@@ -24,7 +25,7 @@ export default function HTMLPage() {
   const { isAtLimit } = useAuthRateLimit();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'segments'>(null);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const [padPct, setPadPct] = useState<number>(100); // 0..100 (100 = full width)
   const [maxPadPx, setMaxPadPx] = useState<number>(0);
@@ -34,6 +35,7 @@ export default function HTMLPage() {
   useEffect(() => {
     setIsLoading(true);
     setError(null);
+    setActiveSidebar(null);
     inFlightDocIdRef.current = null;
     loadedDocIdRef.current = null;
   }, [id]);
@@ -149,7 +151,10 @@ export default function HTMLPage() {
               zoomLevel={padPct}
               onZoomIncrease={() => setPadPct(p => Math.min(p + 10, 100))}
               onZoomDecrease={() => setPadPct(p => Math.max(p - 10, 0))}
-              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenSettings={() => setActiveSidebar((prev) => prev === 'settings' ? null : 'settings')}
+              onOpenSegments={() => setActiveSidebar((prev) => prev === 'segments' ? null : 'segments')}
+              isSettingsOpen={activeSidebar === 'settings'}
+              isSegmentsOpen={activeSidebar === 'segments'}
               minZoom={0}
               maxZoom={100}
             />
@@ -177,7 +182,16 @@ export default function HTMLPage() {
       ) : (
         <TTSPlayer />
       )}
-      <DocumentSettings html isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
+      <DocumentSettings
+        html
+        isOpen={activeSidebar === 'settings'}
+        setIsOpen={(isOpen) => setActiveSidebar((prev) => isOpen ? 'settings' : (prev === 'settings' ? null : prev))}
+      />
+      <SegmentsSidebar
+        isOpen={activeSidebar === 'segments'}
+        setIsOpen={(isOpen) => setActiveSidebar((prev) => isOpen ? 'segments' : (prev === 'segments' ? null : prev))}
+        documentId={id as string}
+      />
     </>
   );
 }

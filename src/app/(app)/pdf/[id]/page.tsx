@@ -9,6 +9,7 @@ import { DocumentSkeleton } from '@/components/documents/DocumentSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 import { DocumentSettings } from '@/components/documents/DocumentSettings';
 import { DocumentHeaderMenu } from '@/components/documents/DocumentHeaderMenu';
+import { SegmentsSidebar } from '@/components/reader/SegmentsSidebar';
 import { Header } from '@/components/Header';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import type { TTSAudiobookChapter } from '@/types/tts';
@@ -39,8 +40,7 @@ export default function PDFViewerPage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isAudiobookModalOpen, setIsAudiobookModalOpen] = useState(false);
+  const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'audiobook' | 'segments'>(null);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const inFlightDocIdRef = useRef<string | null>(null);
   const loadedDocIdRef = useRef<string | null>(null);
@@ -48,6 +48,7 @@ export default function PDFViewerPage() {
   useEffect(() => {
     setIsLoading(true);
     setError(null);
+    setActiveSidebar(null);
     inFlightDocIdRef.current = null;
     loadedDocIdRef.current = null;
   }, [id]);
@@ -176,8 +177,12 @@ export default function PDFViewerPage() {
               zoomLevel={zoomLevel}
               onZoomIncrease={handleZoomIn}
               onZoomDecrease={handleZoomOut}
-              onOpenSettings={() => setIsSettingsOpen(true)}
-              onOpenAudiobook={() => setIsAudiobookModalOpen(true)}
+              onOpenSettings={() => setActiveSidebar((prev) => prev === 'settings' ? null : 'settings')}
+              onOpenAudiobook={() => setActiveSidebar((prev) => prev === 'audiobook' ? null : 'audiobook')}
+              onOpenSegments={() => setActiveSidebar((prev) => prev === 'segments' ? null : 'segments')}
+              isSettingsOpen={activeSidebar === 'settings'}
+              isAudiobookOpen={activeSidebar === 'audiobook'}
+              isSegmentsOpen={activeSidebar === 'segments'}
               showAudiobookExport={canExportAudiobook}
               minZoom={50}
               maxZoom={300}
@@ -197,8 +202,8 @@ export default function PDFViewerPage() {
       </div>
       {canExportAudiobook && (
         <AudiobookExportModal
-          isOpen={isAudiobookModalOpen}
-          setIsOpen={setIsAudiobookModalOpen}
+          isOpen={activeSidebar === 'audiobook'}
+          setIsOpen={(isOpen) => setActiveSidebar((prev) => isOpen ? 'audiobook' : (prev === 'audiobook' ? null : prev))}
           documentType="pdf"
           documentId={id as string}
           onGenerateAudiobook={handleGenerateAudiobook}
@@ -215,7 +220,15 @@ export default function PDFViewerPage() {
       ) : (
         <TTSPlayer currentPage={currDocPage} numPages={currDocPages} />
       )}
-      <DocumentSettings isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
+      <DocumentSettings
+        isOpen={activeSidebar === 'settings'}
+        setIsOpen={(isOpen) => setActiveSidebar((prev) => isOpen ? 'settings' : (prev === 'settings' ? null : prev))}
+      />
+      <SegmentsSidebar
+        isOpen={activeSidebar === 'segments'}
+        setIsOpen={(isOpen) => setActiveSidebar((prev) => isOpen ? 'segments' : (prev === 'segments' ? null : prev))}
+        documentId={id as string}
+      />
     </>
   );
 }

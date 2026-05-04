@@ -69,6 +69,10 @@ interface TTSContextType extends TTSPlaybackState {
   voice: string;
   availableVoices: string[];
 
+  // Sentence/segment list and cursor (for the segments sidebar)
+  sentences: string[];
+  currentSentenceIndex: number;
+
   // Alignment metadata for the current sentence
   currentSentenceAlignment?: TTSSentenceAlignment;
   currentWordIndex?: number | null;
@@ -1992,6 +1996,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     isPlaying,
     isProcessing,
     currentSentence: sentences[currentIndex] || '',
+    sentences,
+    currentSentenceIndex: currentIndex,
     currentSentenceAlignment,
     currentWordIndex,
     currDocPage,

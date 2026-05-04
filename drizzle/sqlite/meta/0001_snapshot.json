@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8c86c476-e208-4bc1-8fff-7111b3d7ab38",
+  "id": "c7822c2d-e42e-4c2e-868d-77175178be88",
   "prevId": "23271fb3-935b-4a9b-a890-e73fc9943bef",
   "tables": {
     "audiobook_chapters": {
@@ -511,6 +511,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "settings_hash": {
+          "name": "settings_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "settings_json": {
           "name": "settings_json",
           "type": "text",
@@ -601,7 +608,7 @@
             "user_id",
             "document_id",
             "document_version",
-            "settings_json"
+            "settings_hash"
           ],
           "isUnique": false
         },

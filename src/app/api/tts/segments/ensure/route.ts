@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '@/db';
 import { ttsSegments } from '@/db/schema';
 import { isS3Configured, getS3Config } from '@/lib/server/storage/s3';
 import { generateTTSBuffer } from '@/lib/server/tts/generate';
-import { getTtsSegmentAudioObject, putTtsSegmentAudioObject } from '@/lib/server/tts/segments-blobstore';
+import {
+  deleteTtsSegmentAudioObjects,
+  getTtsSegmentAudioObject,
+  putTtsSegmentAudioObject,
+} from '@/lib/server/tts/segments-blobstore';
 import {
   buildTtsSegmentAudioKey,
   buildTtsSegmentId,
   buildTtsSegmentSettingsHash,
+  buildTtsSegmentSettingsJson,
   buildTtsSegmentTextHash,
   locatorFingerprint,
   normalizeLocator,
@@ -120,6 +125,62 @@ function buildSegmentAudioUrls(documentId: string, segmentId: string): {
   };
 }
 
+async function cleanupStaleErroredVariants(input: {
+  userId: string;
+  documentId: string;
+  documentVersion: number;
+  segmentIndex: number;
+  activeSegmentId: string;
+  activeSettingsHash: string;
+}): Promise<void> {
+  const staleRows = (await db
+    .select({
+      segmentId: ttsSegments.segmentId,
+      settingsHash: ttsSegments.settingsHash,
+      audioKey: ttsSegments.audioKey,
+    })
+    .from(ttsSegments)
+    .where(and(
+      eq(ttsSegments.userId, input.userId),
+      eq(ttsSegments.documentId, input.documentId),
+      eq(ttsSegments.documentVersion, input.documentVersion),
+      eq(ttsSegments.segmentIndex, input.segmentIndex),
+      ne(ttsSegments.segmentId, input.activeSegmentId),
+    ))) as Array<{
+      segmentId: string;
+      settingsHash: string;
+      audioKey: string | null;
+    }>;
+
+  const staleRowsForSettings = staleRows.filter((row) => row.settingsHash === input.activeSettingsHash);
+  const staleIds = staleRowsForSettings.map((row) => row.segmentId);
+
+  if (staleIds.length === 0) return;
+
+  await db
+    .delete(ttsSegments)
+    .where(and(
+      eq(ttsSegments.userId, input.userId),
+      inArray(ttsSegments.segmentId, staleIds),
+    ));
+
+  const staleAudioKeys = staleRowsForSettings
+    .map((row) => row.audioKey)
+    .filter((key): key is string => Boolean(key));
+  if (staleAudioKeys.length > 0) {
+    try {
+      await deleteTtsSegmentAudioObjects(staleAudioKeys);
+    } catch (error) {
+      console.warn('Failed deleting stale TTS segment audio objects:', {
+        documentId: input.documentId,
+        userId: input.userId,
+        segmentIndex: input.segmentIndex,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   let didCreateDeviceIdCookie = false;
   let deviceIdToSet: string | null = null;
@@ -135,6 +196,7 @@ export async function POST(request: NextRequest) {
     if (scope instanceof Response) return scope;
 
     const settingsHash = buildTtsSegmentSettingsHash(parsed.settings);
+    const settingsJson = buildTtsSegmentSettingsJson(parsed.settings);
     const nowMs = Date.now();
     const storagePrefix = getS3Config().prefix;
     const secret = textHmacSecret();
@@ -181,6 +243,7 @@ export async function POST(request: NextRequest) {
       segmentIndex: number;
       locatorJson: string | null;
       settingsHash: string;
+      settingsJson: unknown;
       textHash: string;
       textLength: number;
       audioKey: string | null;
@@ -200,6 +263,15 @@ export async function POST(request: NextRequest) {
       const existing = existingById.get(segment.segmentId);
 
       if (existing?.status === 'completed' && existing.audioKey) {
+        await cleanupStaleErroredVariants({
+          userId: scope.storageUserId,
+          documentId: parsed.documentId,
+          documentVersion: scope.documentVersion,
+          segmentIndex: segment.original.segmentIndex,
+          activeSegmentId: segment.segmentId,
+          activeSettingsHash: settingsHash,
+        });
+
         let alignment = existing.alignmentJson
           ? (JSON.parse(existing.alignmentJson) as TTSSegmentManifestItem['alignment'])
           : null;
@@ -272,6 +344,7 @@ export async function POST(request: NextRequest) {
           segmentIndex: segment.original.segmentIndex,
           locatorJson: segment.locator ? JSON.stringify(segment.locator) : null,
           settingsHash,
+          settingsJson,
           textHash: segment.textHash,
           textLength: segment.text.length,
           audioKey,
@@ -289,6 +362,7 @@ export async function POST(request: NextRequest) {
             segmentIndex: segment.original.segmentIndex,
             locatorJson: segment.locator ? JSON.stringify(segment.locator) : null,
             settingsHash,
+            settingsJson,
             textHash: segment.textHash,
             textLength: segment.text.length,
             audioKey,
@@ -397,6 +471,15 @@ export async function POST(request: NextRequest) {
             updatedAt: Date.now(),
           })
           .where(and(eq(ttsSegments.segmentId, segment.segmentId), eq(ttsSegments.userId, scope.storageUserId)));
+
+        await cleanupStaleErroredVariants({
+          userId: scope.storageUserId,
+          documentId: parsed.documentId,
+          documentVersion: scope.documentVersion,
+          segmentIndex: segment.original.segmentIndex,
+          activeSegmentId: segment.segmentId,
+          activeSettingsHash: settingsHash,
+        });
 
         manifest.push({
           segmentId: segment.segmentId,

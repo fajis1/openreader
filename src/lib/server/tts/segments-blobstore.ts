@@ -81,6 +81,31 @@ export async function presignTtsSegmentAudioGet(
   );
 }
 
+export async function deleteTtsSegmentAudioObjects(keys: string[]): Promise<number> {
+  const uniqueKeys = Array.from(new Set(keys.filter((key) => typeof key === 'string' && key.length > 0)));
+  if (uniqueKeys.length === 0) return 0;
+
+  const cfg = getS3Config();
+  const client = getS3ProxyClient();
+  let deleted = 0;
+
+  for (let i = 0; i < uniqueKeys.length; i += 1000) {
+    const chunk = uniqueKeys.slice(i, i + 1000);
+    const deleteRes = await client.send(
+      new DeleteObjectsCommand({
+        Bucket: cfg.bucket,
+        Delete: {
+          Objects: chunk.map((Key) => ({ Key })),
+          Quiet: true,
+        },
+      }),
+    );
+    deleted += deleteRes.Deleted?.length ?? 0;
+  }
+
+  return deleted;
+}
+
 export async function deleteTtsSegmentPrefix(prefix: string): Promise<number> {
   const cfg = getS3Config();
   const client = getS3ProxyClient();

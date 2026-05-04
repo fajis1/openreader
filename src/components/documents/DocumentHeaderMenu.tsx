@@ -2,7 +2,7 @@
 
 import { Menu, MenuButton, MenuItem, MenuItems, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
-import { DotsVerticalIcon, FileSettingsIcon, DownloadIcon } from '@/components/icons/Icons';
+import { DotsVerticalIcon, FileSettingsIcon, DownloadIcon, ListIcon } from '@/components/icons/Icons';
 import { ZoomControl } from '@/components/documents/ZoomControl';
 import { UserMenu } from '@/components/auth/UserMenu';
 
@@ -12,6 +12,10 @@ interface DocumentHeaderMenuProps {
   onZoomDecrease: () => void;
   onOpenSettings: () => void;
   onOpenAudiobook?: () => void;
+  onOpenSegments?: () => void;
+  isSettingsOpen?: boolean;
+  isAudiobookOpen?: boolean;
+  isSegmentsOpen?: boolean;
   showAudiobookExport?: boolean;
   minZoom?: number;
   maxZoom?: number;
@@ -23,6 +27,10 @@ export function DocumentHeaderMenu({
   onZoomDecrease,
   onOpenSettings,
   onOpenAudiobook,
+  onOpenSegments,
+  isSettingsOpen = false,
+  isAudiobookOpen = false,
+  isSegmentsOpen = false,
   showAudiobookExport,
   minZoom = 0,
   maxZoom = 100
@@ -38,22 +46,45 @@ export function DocumentHeaderMenu({
         min={minZoom}
         max={maxZoom}
       />
+      {onOpenSegments && (
+        <button
+          onClick={onOpenSegments}
+          className={`inline-flex items-center py-1 px-2 rounded-md border bg-base text-xs transition-all duration-200 ease-in-out hover:scale-[1.09] ${
+            isSegmentsOpen
+              ? 'border-accent text-accent bg-offbase'
+              : 'border-offbase text-foreground hover:bg-offbase hover:text-accent'
+          }`}
+          aria-label={isSegmentsOpen ? 'Close segments sidebar' : 'Open segments sidebar'}
+          title={isSegmentsOpen ? 'Hide Segments' : 'Segments'}
+        >
+          <ListIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09]" />
+        </button>
+      )}
       {showAudiobookExport && onOpenAudiobook && (
         <button
           onClick={onOpenAudiobook}
-          className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
-          aria-label="Open audiobook export"
-          title="Export Audiobook"
+          className={`inline-flex items-center py-1 px-2 rounded-md border bg-base text-xs transition-all duration-200 ease-in-out hover:scale-[1.09] ${
+            isAudiobookOpen
+              ? 'border-accent text-accent bg-offbase'
+              : 'border-offbase text-foreground hover:bg-offbase hover:text-accent'
+          }`}
+          aria-label={isAudiobookOpen ? 'Close audiobook export' : 'Open audiobook export'}
+          title={isAudiobookOpen ? 'Hide Export Audiobook' : 'Export Audiobook'}
         >
-          <DownloadIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent" />
+          <DownloadIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09]" />
         </button>
       )}
       <button
         onClick={onOpenSettings}
-        className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
-        aria-label="Open settings"
+        className={`inline-flex items-center py-1 px-2 rounded-md border bg-base text-xs transition-all duration-200 ease-in-out hover:scale-[1.09] ${
+          isSettingsOpen
+            ? 'border-accent text-accent bg-offbase'
+            : 'border-offbase text-foreground hover:bg-offbase hover:text-accent'
+        }`}
+        aria-label={isSettingsOpen ? 'Close settings' : 'Open settings'}
+        title={isSettingsOpen ? 'Hide Settings' : 'Settings'}
       >
-        <FileSettingsIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent" />
+        <FileSettingsIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09]" />
       </button>
       <UserMenu />
     </div>
@@ -102,16 +133,30 @@ export function DocumentHeaderMenu({
 
             {/* Actions Section */}
             <div className="p-1">
+              {onOpenSegments && (
+                <MenuItem>
+                  {({ active }) => (
+                    <button
+                      onClick={onOpenSegments}
+                      className={`${active || isSegmentsOpen ? 'bg-offbase text-accent' : 'text-foreground'
+                        } group flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs`}
+                    >
+                      <ListIcon className="h-4 w-4" />
+                      {isSegmentsOpen ? 'Hide Segments' : 'Segments'}
+                    </button>
+                  )}
+                </MenuItem>
+              )}
               {showAudiobookExport && onOpenAudiobook && (
                 <MenuItem>
                   {({ active }) => (
                     <button
                       onClick={onOpenAudiobook}
-                      className={`${active ? 'bg-offbase text-accent' : 'text-foreground'
+                      className={`${active || isAudiobookOpen ? 'bg-offbase text-accent' : 'text-foreground'
                         } group flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs`}
                     >
                       <DownloadIcon className="h-4 w-4" />
-                      Export Audiobook
+                      {isAudiobookOpen ? 'Hide Audiobook' : 'Export Audiobook'}
                     </button>
                   )}
                 </MenuItem>
@@ -120,11 +165,11 @@ export function DocumentHeaderMenu({
                 {({ active }) => (
                   <button
                     onClick={onOpenSettings}
-                    className={`${active ? 'bg-offbase text-accent' : 'text-foreground'
+                    className={`${active || isSettingsOpen ? 'bg-offbase text-accent' : 'text-foreground'
                       } group flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs`}
                   >
                     <FileSettingsIcon className="h-4 w-4" />
-                    Settings
+                    {isSettingsOpen ? 'Hide Settings' : 'Settings'}
                   </button>
                 )}
               </MenuItem>

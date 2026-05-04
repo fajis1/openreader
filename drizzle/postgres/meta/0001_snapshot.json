@@ -1,5 +1,5 @@
 {
-  "id": "40f491fc-703e-42c5-a56b-a3f60068f269",
+  "id": "f4752b9c-f77d-45c6-91a1-ce5eb03b246b",
   "prevId": "a6243c0b-4032-4549-aa08-1f7602362f15",
   "version": "7",
   "dialect": "postgresql",
@@ -510,6 +510,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "settings_hash": {
+          "name": "settings_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "settings_json": {
           "name": "settings_json",
           "type": "jsonb",
@@ -605,7 +611,7 @@
               "nulls": "last"
             },
             {
-              "expression": "settings_json",
+              "expression": "settings_hash",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

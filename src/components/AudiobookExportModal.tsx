@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { Dialog, DialogPanel, Transition, TransitionChild, Button, Listbox, ListboxButton, ListboxOptions, ListboxOption, Menu, MenuButton, MenuItems, MenuItem } from '@headlessui/react';
+import { Transition, Button, Listbox, ListboxButton, ListboxOptions, ListboxOption, Menu, MenuButton, MenuItems, MenuItem } from '@headlessui/react';
 import { useTimeEstimation } from '@/hooks/useTimeEstimation';
 import { ProgressPopup } from '@/components/ProgressPopup';
 import { ProgressCard } from '@/components/ProgressCard';
@@ -11,6 +11,7 @@ import { LoadingSpinner } from '@/components/Spinner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTTS } from '@/contexts/TTSContext';
 import { VoicesControlBase } from '@/components/player/VoicesControlBase';
+import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { supportsNativeModelSpeed, supportsTtsInstructions } from '@/lib/shared/tts-provider-catalog';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 import { 
@@ -458,42 +459,19 @@ export function AudiobookExportModal({
         completedChapters={chapters.filter(c => c.status === 'completed').length}
       />
 
-      <Transition appear show={isOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={() => setIsOpen(false)}>
-          <TransitionChild
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 overlay-dim backdrop-blur-sm" />
-          </TransitionChild>
-
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-start justify-center p-4 pt-6 text-center sm:items-center sm:pt-4">
-              <TransitionChild
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <DialogPanel className="w-full max-w-2xl transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
-                  {isLoadingExisting ? (
-                    <div className="flex justify-center py-8">
-                      <LoadingSpinner />
-                    </div>
-                  ) : (
-	                    <>
+      <ReaderSidebarShell
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        ariaLabel="Export audiobook"
+        title="Export Audiobook"
+      >
+                {isLoadingExisting ? (
+                  <div className="flex justify-center py-8">
+                    <LoadingSpinner />
+                  </div>
+                ) : (
+                  <>
 			                      <div className="space-y-4">
-			                        <div className="flex justify-between items-start gap-3">
-			                          <h3 className="text-lg font-medium text-foreground">Export Audiobook</h3>
-			                        </div>
 			                        {!isGenerating && (
 			                          <div className="w-full rounded-xl border border-offbase bg-background">
 			                            {/* Header */}
@@ -912,26 +890,9 @@ export function AudiobookExportModal({
                         )}
                       </div>
 
-                      <div className="mt-6 flex justify-end">
-                        <Button
-                          type="button"
-                          className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
-                               font-medium text-foreground hover:bg-offbase focus:outline-none 
-                               focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                               transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
-                          onClick={() => setIsOpen(false)}
-                        >
-                          Close
-                        </Button>
-                      </div>
                     </>
                   )}
-                </DialogPanel>
-              </TransitionChild>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
+      </ReaderSidebarShell>
       {/* Confirm delete chapter */}
       <ConfirmDialog
         isOpen={pendingDeleteChapter !== null}

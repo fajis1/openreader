@@ -38,6 +38,18 @@ export function buildTtsSegmentSettingsHash(settings: TTSSegmentSettings): strin
   return createHash('sha256').update(settingsCanonical(settings)).digest('hex');
 }
 
+export function buildTtsSegmentSettingsJson(settings: TTSSegmentSettings): TTSSegmentSettings | string {
+  const canonical: TTSSegmentSettings = {
+    ttsProvider: settings.ttsProvider,
+    ttsModel: settings.ttsModel,
+    voice: settings.voice,
+    nativeSpeed: Number.isFinite(Number(settings.nativeSpeed)) ? Number(settings.nativeSpeed) : 1,
+    ttsInstructions: settings.ttsInstructions || '',
+  };
+  // Postgres jsonb accepts the object directly; SQLite text needs a canonical JSON string.
+  return process.env.POSTGRES_URL ? canonical : settingsCanonical(settings);
+}
+
 export function normalizeSegmentText(text: string): string {
   return preprocessSentenceForAudio(text || '').trim();
 }

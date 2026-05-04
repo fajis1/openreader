@@ -1,17 +1,11 @@
 'use client';
 
-import { Fragment, useState, useCallback, useEffect } from 'react';
-import { Dialog, DialogPanel, Transition, TransitionChild, Listbox, ListboxButton, ListboxOptions, ListboxOption, Button } from '@headlessui/react';
+import { Fragment, useState, useEffect } from 'react';
+import { Transition, Listbox, ListboxButton, ListboxOptions, ListboxOption } from '@headlessui/react';
 import { useConfig, ViewType } from '@/contexts/ConfigContext';
 import { ChevronUpDownIcon, CheckIcon } from '@/components/icons/Icons';
-import { useEPUB } from '@/contexts/EPUBContext';
-import { usePDF } from '@/contexts/PDFContext';
-import { AudiobookExportModal } from '@/components/AudiobookExportModal';
-import { useParams } from 'next/navigation';
-import type { TTSAudiobookChapter } from '@/types/tts';
-import type { AudiobookGenerationSettings } from '@/types/client';
+import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 
-const canExportAudiobook = process.env.NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT !== 'false';
 const canWordHighlight = process.env.NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT?.toLowerCase() !== 'false';
 
 const viewTypeTextMapping = [
@@ -41,19 +35,14 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     pdfWordHighlightEnabled,
     epubWordHighlightEnabled,
   } = useConfig();
-  const { createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
-  const { createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
-  const { id } = useParams();
   const [localMargins, setLocalMargins] = useState({
     header: headerMargin,
     footer: footerMargin,
     left: leftMargin,
     right: rightMargin
   });
-  const [isAudiobookModalOpen, setIsAudiobookModalOpen] = useState(false);
   const selectedView = viewTypeTextMapping.find(v => v.id === viewType) || viewTypeTextMapping[0];
 
-  // Sync local margins with global state
   useEffect(() => {
     setLocalMargins({
       header: headerMargin,
@@ -80,85 +69,14 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     }
   };
 
-  const handleGenerateAudiobook = useCallback(async (
-    onProgress: (progress: number) => void,
-    signal: AbortSignal,
-    onChapterComplete: (chapter: TTSAudiobookChapter) => void,
-    settings: AudiobookGenerationSettings
-  ) => {
-    if (epub) {
-      return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, settings.format, settings);
-    } else {
-      return createPDFAudioBook(onProgress, signal, onChapterComplete, id as string, settings.format, settings);
-    }
-  }, [epub, createEPUBAudioBook, createPDFAudioBook, id]);
-
-  const handleRegenerateChapter = useCallback(async (
-    chapterIndex: number,
-    bookId: string,
-    settings: AudiobookGenerationSettings,
-    signal: AbortSignal
-  ) => {
-    if (epub) {
-      return regenerateEPUBChapter(chapterIndex, bookId, settings.format, signal, settings);
-    } else {
-      return regeneratePDFChapter(chapterIndex, bookId, settings.format, signal, settings);
-    }
-  }, [epub, regenerateEPUBChapter, regeneratePDFChapter]);
-
   return (
-    <>
-      <AudiobookExportModal
-        isOpen={isAudiobookModalOpen}
-        setIsOpen={setIsAudiobookModalOpen}
-        documentType={epub ? 'epub' : 'pdf'}
-        documentId={id as string}
-        onGenerateAudiobook={handleGenerateAudiobook}
-        onRegenerateChapter={handleRegenerateChapter}
-      />
-
-      <Transition appear show={isOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={() => setIsOpen(false)}>
-          <TransitionChild
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 overlay-dim backdrop-blur-sm" />
-          </TransitionChild>
-
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-start justify-center p-4 pt-6 text-center sm:items-center sm:pt-4">
-              <TransitionChild
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <DialogPanel className="w-full max-w-md transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
-                  {!html && <div className="space-y-2 mb-4">
-                    <Button
-                      type="button"
-                      className="w-full inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm
-                                    font-medium text-background hover:bg-secondary-accent focus:outline-none 
-                                    focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                                    transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background
-                                    disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-[1] disabled:hover:bg-accent"
-                      onClick={() => setIsAudiobookModalOpen(true)}
-                      disabled={!canExportAudiobook}
-                    >
-                      Export Audiobook {!canExportAudiobook && '(disabled by configuration)'}
-                    </Button>
-                  </div>}
-
-                  <div className="space-y-4">
+    <ReaderSidebarShell
+      isOpen={isOpen}
+      onClose={() => setIsOpen(false)}
+      ariaLabel="Document settings"
+      title="Settings"
+    >
+      <div className="space-y-4">
                     {!epub && !html && <div className="space-y-6">
                       <div className="space-y-2">
                         <label className="block text-sm font-medium text-foreground">
@@ -425,26 +343,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                         </p>
                       </div>
                     )}
-                  </div>
-
-                  <div className="mt-3 flex justify-end">
-                    <Button
-                      type="button"
-                      className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
-                               font-medium text-foreground hover:bg-offbase focus:outline-none 
-                               focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                               transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent z-1"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      Close
-                    </Button>
-                  </div>
-                </DialogPanel>
-              </TransitionChild>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
-    </>
+      </div>
+    </ReaderSidebarShell>
   );
 }

@@ -127,3 +127,27 @@ export interface TTSSegmentsEnsureResponse {
   documentId: string;
   segments: TTSSegmentManifestItem[];
 }
+
+export interface TTSSegmentVariant {
+  segmentId: string;
+  settings: TTSSegmentSettings | null;
+  audioPresignUrl: string | null;
+  audioFallbackUrl: string | null;
+  durationMs: number | null;
+  status: 'pending' | 'completed' | 'error';
+  textLength: number;
+  alignmentWordCount: number;
+  audioKey: string | null;
+  updatedAt: number | null;
+}
+
+export interface TTSSegmentRow {
+  segmentIndex: number;
+  locator: TTSSegmentLocator | null;
+  variants: TTSSegmentVariant[];
+}
+
+export interface TTSSegmentsManifestResponse {
+  documentId: string;
+  segments: TTSSegmentRow[];
+}

@@ -12,6 +12,7 @@ import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
 import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { DocumentHeaderMenu } from '@/components/documents/DocumentHeaderMenu';
+import { SegmentsSidebar } from '@/components/reader/SegmentsSidebar';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
@@ -29,8 +30,7 @@ export default function EPUBPage() {
   const { isAtLimit } = useAuthRateLimit();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isAudiobookModalOpen, setIsAudiobookModalOpen] = useState(false);
+  const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'audiobook' | 'segments'>(null);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const [padPct, setPadPct] = useState<number>(100); // 0..100 (100 = full width, 0 = max padding)
   const [maxPadPx, setMaxPadPx] = useState<number>(0);
@@ -40,6 +40,7 @@ export default function EPUBPage() {
   useEffect(() => {
     setIsLoading(true);
     setError(null);
+    setActiveSidebar(null);
     inFlightDocIdRef.current = null;
     loadedDocIdRef.current = null;
   }, [id]);
@@ -180,8 +181,12 @@ export default function EPUBPage() {
               zoomLevel={padPct}
               onZoomIncrease={() => setPadPct(p => Math.min(p + 10, 100))}
               onZoomDecrease={() => setPadPct(p => Math.max(p - 10, 0))}
-              onOpenSettings={() => setIsSettingsOpen(true)}
-              onOpenAudiobook={() => setIsAudiobookModalOpen(true)}
+              onOpenSettings={() => setActiveSidebar((prev) => prev === 'settings' ? null : 'settings')}
+              onOpenAudiobook={() => setActiveSidebar((prev) => prev === 'audiobook' ? null : 'audiobook')}
+              onOpenSegments={() => setActiveSidebar((prev) => prev === 'segments' ? null : 'segments')}
+              isSettingsOpen={activeSidebar === 'settings'}
+              isAudiobookOpen={activeSidebar === 'audiobook'}
+              isSegmentsOpen={activeSidebar === 'segments'}
               showAudiobookExport={canExportAudiobook}
               minZoom={0}
               maxZoom={100}
@@ -203,8 +208,8 @@ export default function EPUBPage() {
       </div>
       {canExportAudiobook && (
         <AudiobookExportModal
-          isOpen={isAudiobookModalOpen}
-          setIsOpen={setIsAudiobookModalOpen}
+          isOpen={activeSidebar === 'audiobook'}
+          setIsOpen={(isOpen) => setActiveSidebar((prev) => isOpen ? 'audiobook' : (prev === 'audiobook' ? null : prev))}
           documentType="epub"
           documentId={id as string}
           onGenerateAudiobook={handleGenerateAudiobook}
@@ -221,7 +226,16 @@ export default function EPUBPage() {
       ) : (
         <TTSPlayer />
       )}
-      <DocumentSettings epub isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
+      <DocumentSettings
+        epub
+        isOpen={activeSidebar === 'settings'}
+        setIsOpen={(isOpen) => setActiveSidebar((prev) => isOpen ? 'settings' : (prev === 'settings' ? null : prev))}
+      />
+      <SegmentsSidebar
+        isOpen={activeSidebar === 'segments'}
+        setIsOpen={(isOpen) => setActiveSidebar((prev) => isOpen ? 'segments' : (prev === 'segments' ? null : prev))}
+        documentId={id as string}
+      />
     </>
   );
 }

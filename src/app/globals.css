@@ -265,6 +265,20 @@ h1, h2, h3, h4, h5, h6 {
   background-color: color-mix(in srgb, var(--foreground), transparent 75%);
 }
 
+/* Shared floating reader-sidebar sizing (Segments/Settings/Audiobook) */
+.reader-sidebar-panel {
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .reader-sidebar-panel {
+    width: min(
+      calc(100% - 1.5rem),
+      clamp(360px, 32vw, 480px)
+    );
+  }
+}
+
 /* Scrollbar styling for better fullscreen experience */
 *::-webkit-scrollbar {
   width: 10px;
