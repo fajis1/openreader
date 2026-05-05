@@ -5,6 +5,7 @@ import {
   ensureDocumentsListed,
   uploadAndDisplay,
   expectProcessingTransition,
+  pauseTTSAndVerify,
 } from './helpers';
 
 test.describe('Accessibility smoke', () => {
@@ -81,8 +82,6 @@ test.describe('Accessibility smoke', () => {
     await playBtn.click();
     await expectProcessingTransition(page);
     await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
-
-    await page.getByRole('button', { name: 'Pause' }).click();
-    await expect(page.getByRole('button', { name: 'Play' })).toBeVisible({ timeout: 10000 });
+    await pauseTTSAndVerify(page);
   });
 });

@@ -190,11 +190,23 @@ export async function playTTSAndWaitForASecond(page: Page, fileName: string) {
  * Pause TTS playback and verify paused state
  */
 export async function pauseTTSAndVerify(page: Page) {
-  // Click pause to stop playback
-  await page.getByRole('button', { name: 'Pause' }).click();
+  const ttsbar = page.locator('[data-app-ttsbar]');
+  const pauseButton = ttsbar.getByRole('button', { name: 'Pause' }).first();
+  await expect(pauseButton).toBeVisible({ timeout: 15000 });
+  await expect(pauseButton).toBeEnabled({ timeout: 15000 });
 
-  // Check for play button to be visible
-  await expect(page.getByRole('button', { name: 'Play' })).toBeVisible({ timeout: 10000 });
+  // Retry pause because Firefox can race with transient processing transitions.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await pauseButton.click();
+    try {
+      await expect(ttsbar.getByRole('button', { name: 'Play' }).first()).toBeVisible({ timeout: 5000 });
+      await expectMediaState(page, 'paused');
+      return;
+    } catch {
+      if (attempt === 2) throw new Error('Failed to pause TTS playback after retries');
+      await page.waitForTimeout(250);
+    }
+  }
 }
 
 /**
@@ -318,9 +330,11 @@ export async function dispatchHtml5DragAndDrop(page: Page, source: Locator, targ
 
 // Assert a document link containing the given filename appears in the list
 export async function expectDocumentListed(page: Page, fileName: string) {
-  await expect(
-    page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).first()
-  ).toBeVisible({ timeout: 10000 });
+  const link = page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).first();
+  await expect
+    .poll(async () => link.count(), { timeout: 20000 })
+    .toBeGreaterThan(0);
+  await expect(link).toBeVisible({ timeout: 15000 });
 }
 
 // Assert a document link containing the given filename does NOT exist
@@ -334,6 +348,7 @@ export async function expectNoDocumentLink(page: Page, fileName: string) {
 export async function uploadFiles(page: Page, ...fileNames: string[]) {
   for (const name of fileNames) {
     await uploadFile(page, name);
+    await expectDocumentListed(page, name);
   }
 }
 

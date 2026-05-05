@@ -433,6 +433,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const [currentSentenceAlignment, setCurrentSentenceAlignment] = useState<TTSSentenceAlignment | undefined>();
   const [currentWordIndex, setCurrentWordIndex] = useState<number | null>(null);
   const isPlayingRef = useRef(false);
+  const pauseEpochRef = useRef(0);
   const sentencesRef = useRef<string[]>([]);
   const currentIndexRef = useRef(0);
   const setTextRef = useRef<(text: string, options?: boolean | SetTextOptions) => void>(() => { });
@@ -642,14 +643,21 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     }
   }, [activeHowl, clearRateWatchdog]);
 
+  const recordManualPause = useCallback(() => {
+    // Cancel any queued auto-resume intent and mark an explicit user pause.
+    resumeAfterLocationChangeRef.current = false;
+    pauseEpochRef.current += 1;
+  }, []);
+
   /**
    * Pauses the current audio playback
    * Used for external control of playback state
    */
   const pause = useCallback(() => {
+    recordManualPause();
     pauseActiveHowl();
     setIsPlaying(false);
-  }, [pauseActiveHowl]);
+  }, [pauseActiveHowl, recordManualPause]);
 
   /**
    * Navigates to a specific location in the document
@@ -882,6 +890,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     if (handleBlankSection(workingText)) return;
 
     const shouldPause = normalizedOptions.shouldPause ?? false;
+    const pauseEpochAtStart = pauseEpochRef.current;
     const pendingAutoResume = resumeAfterLocationChangeRef.current;
     const shouldResumePlayback = !shouldPause && (isPlaying || pendingAutoResume);
     if (shouldPause || pendingAutoResume) {
@@ -968,7 +977,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         setIsProcessing(false);
 
         // Restore playback state if needed
-        if (shouldResumePlayback) {
+        // Respect explicit pauses that happened while sentence splitting was in flight.
+        if (shouldResumePlayback && pauseEpochRef.current === pauseEpochAtStart) {
           setIsPlaying(true);
         }
       })
@@ -990,6 +1000,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    */
   const togglePlay = useCallback(() => {
     if (isPlaying) {
+      recordManualPause();
       pauseActiveHowl();
       setIsPlaying(false);
       return;
@@ -1014,7 +1025,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     }
 
     setIsPlaying(true);
-  }, [activeHowl, applyPlaybackRateToHowl, isPlaying, pauseActiveHowl, unlockPlaybackOnUserGesture]);
+  }, [activeHowl, applyPlaybackRateToHowl, isPlaying, pauseActiveHowl, recordManualPause, unlockPlaybackOnUserGesture]);
 
 
   /**
