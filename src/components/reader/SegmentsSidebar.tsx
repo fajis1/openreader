@@ -2,10 +2,12 @@
 
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverButton, PopoverPanel, Transition } from '@headlessui/react';
+import toast from 'react-hot-toast';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { RefreshIcon, InfoIcon } from '@/components/icons/Icons';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
+import { locatorGroupKey, normalizeEpubLocationToken } from '@/lib/shared/tts-locator';
 import type {
   TTSSegmentLocator,
   TTSSegmentRow,
@@ -23,8 +25,17 @@ interface SegmentsSidebarProps {
 type FetchState =
   | { kind: 'idle' }
   | { kind: 'loading' }
-  | { kind: 'ready'; data: TTSSegmentRow[]; fetchedAt: number }
+  | {
+    kind: 'ready';
+    data: TTSSegmentRow[];
+    fetchedAt: number;
+    nextCursor: string | null;
+    hasMore: boolean;
+    loadingMore: boolean;
+  }
   | { kind: 'error'; message: string };
+
+const MANIFEST_PAGE_SIZE = 150;
 
 function formatDuration(ms: number | null | undefined): string {
   if (!ms || !Number.isFinite(ms) || ms <= 0) return '—';
@@ -83,6 +94,10 @@ function locatorMatchesCurrent(
 ): boolean {
   if (!locator) return false;
   if (typeof locator.location === 'string' && locator.location.length > 0) {
+    if (locator.readerType === 'epub') {
+      if (typeof currentLocation !== 'string') return false;
+      return normalizeEpubLocationToken(locator.location) === normalizeEpubLocationToken(currentLocation);
+    }
     return String(locator.location) === String(currentLocation);
   }
   if (typeof locator.page === 'number' && Number.isFinite(locator.page)) {
@@ -91,11 +106,71 @@ function locatorMatchesCurrent(
   return false;
 }
 
-function latestUpdatedAt(row: TTSSegmentRow): number {
-  return row.variants.reduce((max, variant) => {
-    const updated = typeof variant.updatedAt === 'number' ? variant.updatedAt : 0;
-    return Math.max(max, updated);
-  }, 0);
+function formatLocatorGroupLabel(locator: TTSSegmentLocator | null): string {
+  if (!locator) return 'Unknown location';
+  const parts: string[] = [];
+  if (typeof locator.page === 'number' && Number.isFinite(locator.page)) {
+    parts.push(`Page ${Math.floor(locator.page)}`);
+  }
+  if (typeof locator.location === 'string' && locator.location) {
+    parts.push(locator.location);
+  }
+  if (locator.readerType) {
+    parts.push(locator.readerType.toUpperCase());
+  }
+  return parts.join(' · ') || 'Unknown location';
+}
+
+function compareRows(a: TTSSegmentRow, b: TTSSegmentRow): number {
+  const aPage = typeof a.locator?.page === 'number' ? a.locator.page : Number.MAX_SAFE_INTEGER;
+  const bPage = typeof b.locator?.page === 'number' ? b.locator.page : Number.MAX_SAFE_INTEGER;
+  if (aPage !== bPage) return aPage - bPage;
+  const aLoc = a.locator?.location || '';
+  const bLoc = b.locator?.location || '';
+  const byLocation = aLoc.localeCompare(bLoc);
+  if (byLocation !== 0) return byLocation;
+  if (a.segmentIndex !== b.segmentIndex) return a.segmentIndex - b.segmentIndex;
+  return locatorGroupKey(a.locator).localeCompare(locatorGroupKey(b.locator));
+}
+
+function mergeRows(existing: TTSSegmentRow[], incoming: TTSSegmentRow[]): TTSSegmentRow[] {
+  const map = new Map<string, TTSSegmentRow>();
+  const upsert = (row: TTSSegmentRow) => {
+    const key = `${row.segmentIndex}|${locatorGroupKey(row.locator)}`;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, row);
+      return;
+    }
+    const bySegmentId = new Map<string, TTSSegmentVariant>();
+    for (const variant of prev.variants) bySegmentId.set(variant.segmentId, variant);
+    for (const variant of row.variants) bySegmentId.set(variant.segmentId, variant);
+    map.set(key, {
+      ...row,
+      variants: Array.from(bySegmentId.values()),
+    });
+  };
+  existing.forEach(upsert);
+  incoming.forEach(upsert);
+  return Array.from(map.values()).sort(compareRows);
+}
+
+function findScrollableAncestor(node: HTMLElement, fallback: HTMLElement | null): HTMLElement | null {
+  let current: HTMLElement | null = node.parentElement;
+  while (current) {
+    const style = window.getComputedStyle(current);
+    const overflowY = style.overflowY.toLowerCase();
+    const canScroll = (overflowY === 'auto' || overflowY === 'scroll') && current.scrollHeight > current.clientHeight + 1;
+    if (canScroll) return current;
+    current = current.parentElement;
+  }
+  return fallback;
+}
+
+function isElementFullyVisibleWithinContainer(element: HTMLElement, container: HTMLElement): boolean {
+  const elRect = element.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  return elRect.top >= containerRect.top && elRect.bottom <= containerRect.bottom;
 }
 
 export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSidebarProps) {
@@ -105,14 +180,15 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
     currDocPage,
     currDocPageNumber,
     isPlaying,
-    stopAndPlayFromIndex,
+    playFromSegment,
   } = useTTS();
   const { ttsProvider, ttsModel, voice, voiceSpeed, ttsInstructions, updateConfigKey } = useConfig();
 
   const [state, setState] = useState<FetchState>({ kind: 'idle' });
   const [isClearing, setIsClearing] = useState(false);
-  const [clearError, setClearError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const didAutoScrollOnOpenRef = useRef(false);
 
   const activeSettings = useMemo<TTSSegmentSettings>(() => ({
     ttsProvider,
@@ -122,15 +198,33 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
     ttsInstructions: ttsInstructions || '',
   }), [ttsProvider, ttsModel, voice, voiceSpeed, ttsInstructions]);
 
-  const loadManifest = useCallback(async () => {
+  const loadManifest = useCallback(async (
+    mode: 'reset' | 'append' = 'reset',
+    cursorOverride: string | null = null,
+  ) => {
     if (!documentId) return;
+    const cursor = mode === 'append' ? cursorOverride : null;
+    if (mode === 'append' && !cursor) return;
+
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    setState({ kind: 'loading' });
+    if (mode === 'reset') {
+      setState({ kind: 'loading' });
+    } else {
+      setState((prev) => {
+        if (prev.kind !== 'ready') return prev;
+        return { ...prev, loadingMore: true };
+      });
+    }
     try {
+      const params = new URLSearchParams({
+        documentId,
+        limit: String(MANIFEST_PAGE_SIZE),
+      });
+      if (cursor) params.set('cursor', cursor);
       const res = await fetch(
-        `/api/tts/segments/manifest?documentId=${encodeURIComponent(documentId)}`,
+        `/api/tts/segments/manifest?${params.toString()}`,
         { signal: controller.signal, cache: 'no-store' },
       );
       if (!res.ok) {
@@ -138,33 +232,71 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
         throw new Error(body || `Request failed (${res.status})`);
       }
       const data = (await res.json()) as TTSSegmentsManifestResponse;
-      setState({ kind: 'ready', data: data.segments, fetchedAt: Date.now() });
+      setState((prev) => {
+        const merged = mode === 'append' && prev.kind === 'ready'
+          ? mergeRows(prev.data, data.segments)
+          : mergeRows([], data.segments);
+        return {
+          kind: 'ready',
+          data: merged,
+          fetchedAt: Date.now(),
+          nextCursor: data.nextCursor,
+          hasMore: data.hasMore,
+          loadingMore: false,
+        };
+      });
     } catch (err) {
       if (controller.signal.aborted) return;
+      if (mode === 'append' && err instanceof Error && err.message.includes('Invalid cursor')) {
+        setState((prev) => {
+          if (prev.kind !== 'ready') return prev;
+          return {
+            ...prev,
+            loadingMore: false,
+            hasMore: false,
+            nextCursor: null,
+          };
+        });
+        return;
+      }
       setState({ kind: 'error', message: err instanceof Error ? err.message : 'Failed to load' });
     }
   }, [documentId]);
 
   const handleClearCache = useCallback(async () => {
     if (!documentId || isClearing) return;
-    const confirmed = window.confirm('Clear cached segments for this document? This removes generated audio and metadata for listed segments.');
+    const confirmed = window.confirm('Clear cached segments for this document version? This removes stored segment metadata and audio objects.');
     if (!confirmed) return;
 
     setIsClearing(true);
-    setClearError(null);
     try {
       const res = await fetch('/api/tts/segments/clear', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ documentId }),
       });
+      const payload = (await res.json().catch(() => null)) as {
+        error?: string;
+        deletedSegments?: number;
+        requestedAudioObjects?: number;
+        deletedAudioObjects?: number;
+        warning?: string;
+      } | null;
       if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(body || `Request failed (${res.status})`);
+        throw new Error(payload?.error || `Request failed (${res.status})`);
       }
-      await loadManifest();
+
+      if (payload?.warning) {
+        toast.error(`Segments cleared, but audio cleanup was partial: ${payload.warning}`);
+      } else if (payload) {
+        const deletedSegments = Number(payload.deletedSegments ?? 0);
+        const deletedAudioObjects = Number(payload.deletedAudioObjects ?? 0);
+        const requestedAudioObjects = Number(payload.requestedAudioObjects ?? deletedAudioObjects);
+        toast.success(`Cleared ${deletedSegments} segments and ${deletedAudioObjects}/${requestedAudioObjects} audio objects.`);
+      }
+      await loadManifest('reset');
     } catch (error) {
-      setClearError(error instanceof Error ? error.message : 'Failed to clear segments cache');
+      toast.error(error instanceof Error ? error.message : 'Failed to clear segments cache');
     } finally {
       setIsClearing(false);
     }
@@ -172,10 +304,29 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
 
   useEffect(() => {
     if (!isOpen) return;
-    void loadManifest();
+    void loadManifest('reset');
     return () => {
       abortRef.current?.abort();
     };
+  }, [isOpen, loadManifest]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const node = listRef.current;
+    if (!node) return;
+
+    const onScroll = () => {
+      setState((prev) => {
+        if (prev.kind !== 'ready' || !prev.hasMore || prev.loadingMore) return prev;
+        const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+        if (distance > 280) return prev;
+        void loadManifest('append', prev.nextCursor);
+        return { ...prev, loadingMore: true };
+      });
+    };
+
+    node.addEventListener('scroll', onScroll);
+    return () => node.removeEventListener('scroll', onScroll);
   }, [isOpen, loadManifest]);
 
   const handleSelectVariant = useCallback(async (settings: TTSSegmentSettings | null) => {
@@ -189,60 +340,131 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
     ]);
   }, [updateConfigKey]);
 
-  const handleJump = useCallback((index: number) => {
-    stopAndPlayFromIndex(index);
-  }, [stopAndPlayFromIndex]);
+  const handleRefresh = useCallback(() => {
+    didAutoScrollOnOpenRef.current = false;
+    void loadManifest('reset');
+  }, [loadManifest]);
 
-  const segmentsByIndex = useMemo(() => {
-    if (state.kind !== 'ready') return new Map<number, TTSSegmentRow>();
-    const map = new Map<number, { row: TTSSegmentRow; score: number; updatedAt: number }>();
-    for (const row of state.data) {
-      const isCurrent = locatorMatchesCurrent(row.locator, currDocPage, currDocPageNumber);
-      const score = isCurrent ? 2 : row.locator ? 0 : 1;
-      if (score === 0) continue;
+  const handleJump = useCallback((index: number, locator: TTSSegmentLocator | null) => {
+    playFromSegment(index, locator);
+  }, [playFromSegment]);
 
-      const candidateUpdatedAt = latestUpdatedAt(row);
-      const existing = map.get(row.segmentIndex);
-      if (!existing) {
-        map.set(row.segmentIndex, { row, score, updatedAt: candidateUpdatedAt });
-        continue;
+  const rowsToRender = useMemo(() => {
+    if (state.kind !== 'ready') return [] as Array<{
+      segmentIndex: number;
+      sentenceText: string;
+      row: TTSSegmentRow;
+      isCurrentLocation: boolean;
+      groupKey: string;
+      groupLabel: string;
+    }>;
+    const currentRowsFromManifest = state.data.filter((row) =>
+      locatorMatchesCurrent(row.locator, currDocPage, currDocPageNumber),
+    );
+    const nonCurrentRows = state.data.filter((row) =>
+      !locatorMatchesCurrent(row.locator, currDocPage, currDocPageNumber),
+    );
+
+    const inferredCurrentLocator = (() => {
+      const first = currentRowsFromManifest[0]?.locator;
+      if (first) return first;
+      if (typeof currDocPage === 'string' && currDocPage.length > 0) {
+        return {
+          location: currDocPage,
+          readerType: 'epub' as const,
+        };
       }
+      if (typeof currDocPageNumber === 'number' && Number.isFinite(currDocPageNumber)) {
+        return {
+          page: Math.floor(currDocPageNumber),
+          readerType: 'pdf' as const,
+        };
+      }
+      return null;
+    })();
 
-      if (score > existing.score || (score === existing.score && candidateUpdatedAt >= existing.updatedAt)) {
-        map.set(row.segmentIndex, { row, score, updatedAt: candidateUpdatedAt });
+    const variantsByIndex = new Map<number, TTSSegmentVariant[]>();
+    for (const row of currentRowsFromManifest) {
+      if (!variantsByIndex.has(row.segmentIndex)) {
+        variantsByIndex.set(row.segmentIndex, []);
+      }
+      const merged = variantsByIndex.get(row.segmentIndex)!;
+      const seenIds = new Set(merged.map((variant) => variant.segmentId));
+      for (const variant of row.variants ?? []) {
+        if (seenIds.has(variant.segmentId)) continue;
+        seenIds.add(variant.segmentId);
+        merged.push(variant);
       }
     }
 
-    const selected = new Map<number, TTSSegmentRow>();
-    for (const [idx, entry] of map) selected.set(idx, entry.row);
-    return selected;
-  }, [state, currDocPage, currDocPageNumber]);
+    const currentRows: TTSSegmentRow[] = sentences.map((_, segmentIndex) => ({
+      segmentIndex,
+      locator: inferredCurrentLocator,
+      variants: variantsByIndex.get(segmentIndex) ?? [],
+    }));
 
-  const indicesToRender = useMemo(() => {
-    const indices = new Set<number>();
-    for (let i = 0; i < sentences.length; i += 1) indices.add(i);
-    if (state.kind === 'ready') {
-      for (const row of state.data) {
-        if (Number.isInteger(row.segmentIndex) && row.segmentIndex >= 0) {
-          indices.add(row.segmentIndex);
-        }
-      }
-    }
-    return Array.from(indices).sort((a, b) => a - b);
-  }, [sentences, state]);
-
-  const rowsToRender: Array<{ segmentIndex: number; sentenceText: string; row: TTSSegmentRow | null }> = [];
-  for (const i of indicesToRender) {
-    rowsToRender.push({
-      segmentIndex: i,
-      sentenceText: sentences[i] ?? '',
-      row: segmentsByIndex.get(i) ?? null,
+    const mergedRows = [...currentRows, ...nonCurrentRows].sort(compareRows);
+    return mergedRows.map((row) => {
+      const isCurrentLocation = locatorMatchesCurrent(row.locator, currDocPage, currDocPageNumber);
+      return {
+        segmentIndex: row.segmentIndex,
+        sentenceText: isCurrentLocation ? (sentences[row.segmentIndex] ?? '') : '',
+        row,
+        isCurrentLocation,
+        groupKey: locatorGroupKey(row.locator),
+        groupLabel: formatLocatorGroupLabel(row.locator),
+      };
     });
-  }
+  }, [state, currDocPage, currDocPageNumber, sentences]);
 
   const totalVariants = state.kind === 'ready'
-    ? state.data.reduce((sum, r) => sum + r.variants.length, 0)
+    ? rowsToRender.reduce((sum, r) => sum + r.row.variants.length, 0)
     : 0;
+
+  useEffect(() => {
+    if (!isOpen) {
+      didAutoScrollOnOpenRef.current = false;
+      return;
+    }
+    if (didAutoScrollOnOpenRef.current) return;
+    if (state.kind !== 'ready' || rowsToRender.length === 0) return;
+
+    const container = listRef.current;
+    if (!container) return;
+    const activeRow = container.querySelector<HTMLElement>('[data-active-segment="true"]');
+    if (!activeRow) return;
+
+    requestAnimationFrame(() => {
+      activeRow.scrollIntoView({ block: 'center', behavior: 'auto' });
+      didAutoScrollOnOpenRef.current = true;
+    });
+  }, [isOpen, state.kind, rowsToRender.length, currentSentenceIndex]);
+
+  useEffect(() => {
+    if (!isOpen || !isPlaying) return;
+    if (state.kind !== 'ready' || rowsToRender.length === 0) return;
+
+    const root = listRef.current;
+    if (!root) return;
+    const activeRow = root.querySelector<HTMLElement>('[data-active-segment="true"]');
+    if (!activeRow) return;
+
+    const scrollContainer = findScrollableAncestor(activeRow, root);
+    if (!scrollContainer) return;
+    if (isElementFullyVisibleWithinContainer(activeRow, scrollContainer)) return;
+
+    requestAnimationFrame(() => {
+      activeRow.scrollIntoView({ block: 'center', behavior: 'auto' });
+    });
+  }, [
+    isOpen,
+    isPlaying,
+    state.kind,
+    rowsToRender.length,
+    currentSentenceIndex,
+    currDocPage,
+    currDocPageNumber,
+  ]);
 
   const headerActions = (
     <>
@@ -258,7 +480,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
       </button>
       <button
         type="button"
-        onClick={() => void loadManifest()}
+        onClick={handleRefresh}
         aria-label="Refresh segments"
         title="Refresh"
         className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-offbase bg-base text-muted hover:bg-offbase hover:text-accent transition-colors"
@@ -268,36 +490,29 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
     </>
   );
 
-  const footer = (
-    <div className="border-t border-offbase px-4 py-2">
-      <p className="text-xs text-muted leading-relaxed">
-        Click an index or sentence to jump. Click a voice label to switch the active voice.
-      </p>
-      {clearError && (
-        <p className="mt-1 text-xs text-red-500">
-          {clearError}
-        </p>
-      )}
-    </div>
-  );
-
   return (
     <ReaderSidebarShell
       isOpen={isOpen}
       onClose={() => setIsOpen(false)}
       ariaLabel="TTS segments"
       title="Segments"
+      subtitle="Click an index or sentence to jump. Click a voice label to switch the active voice."
       headerActions={headerActions}
-      footer={footer}
       bodyClassName="flex-1 overflow-y-auto px-0 py-0"
     >
       <div className="px-4 py-2 border-b border-offbase">
         <div className="text-xs text-muted">
           {state.kind === 'ready' ? (
             <>
-              {state.data.length} indexed
+              {rowsToRender.length} indexed
               <span> · </span>
               {totalVariants} variants
+              {state.hasMore ? (
+                <>
+                  <span> · </span>
+                  more…
+                </>
+              ) : null}
             </>
           ) : state.kind === 'loading' ? (
             <span>Loading…</span>
@@ -309,7 +524,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div ref={listRef} className="flex-1 overflow-y-auto">
               {state.kind === 'error' && (
                 <div className="px-4 py-6 text-sm text-red-500">{state.message}</div>
               )}
@@ -328,27 +543,48 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
               )}
               {state.kind === 'ready' && rowsToRender.length > 0 && (
                 <ul className="divide-y divide-offbase">
-                  {rowsToRender.map(({ segmentIndex, sentenceText, row }) => {
-                    const isCurrent = segmentIndex === currentSentenceIndex;
-                    const variants = row?.variants ?? [];
+                  {rowsToRender.map(({ segmentIndex, sentenceText, row, isCurrentLocation, groupKey, groupLabel }, rowIndex) => {
+                    const previousGroupKey = rowIndex > 0 ? rowsToRender[rowIndex - 1]?.groupKey : null;
+                    const showGroupHeader = previousGroupKey !== groupKey;
+                    const isCurrent = isCurrentLocation && segmentIndex === currentSentenceIndex;
+                    const variants = row.variants ?? [];
+                    const bestVariant = variants
+                      .slice()
+                      .sort((a, b) => {
+                        const rank = (status: TTSSegmentVariant['status']) => {
+                          if (status === 'completed') return 3;
+                          if (status === 'pending') return 2;
+                          return 1;
+                        };
+                        const byRank = rank(b.status) - rank(a.status);
+                        if (byRank !== 0) return byRank;
+                        return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+                      })[0] ?? null;
                     const activeVariant = variants.find((v) => settingsAreEqual(v.settings, activeSettings))
-                      ?? variants[0]
-                      ?? null;
+                      ?? bestVariant;
                     const status = activeVariant?.status ?? 'pending';
-                    const canJump = sentenceText.length > 0;
+                    const canJump = !!row.locator || sentenceText.length > 0;
                     const playable = !!(activeVariant && activeVariant.audioPresignUrl);
                     return (
                       <li
-                        key={segmentIndex}
+                        key={`${groupKey}::${segmentIndex}`}
+                        data-active-segment={isCurrent ? 'true' : undefined}
                         className={`relative px-4 py-3 ${isCurrent ? 'bg-offbase/40' : ''}`}
                       >
+                        {showGroupHeader && (
+                          <div className="mb-2 -mx-4 px-4 py-1.5 bg-offbase/30 border-y border-offbase">
+                            <span className="text-[10px] uppercase tracking-[0.14em] text-muted">
+                              {groupLabel}
+                            </span>
+                          </div>
+                        )}
                         {isCurrent && (
                           <span className="absolute inset-y-2 left-0 w-0.5 bg-accent rounded-r" aria-hidden />
                         )}
                         <div className="flex items-start gap-3">
                           <button
                             type="button"
-                            onClick={() => { if (canJump) handleJump(segmentIndex); }}
+                            onClick={() => { if (canJump) handleJump(segmentIndex, row.locator); }}
                             disabled={!canJump}
                             className={`text-xs font-medium shrink-0 pt-0.5 ${canJump ? 'text-muted hover:text-accent' : 'text-muted/50 cursor-not-allowed'}`}
                             title={canJump ? (playable ? 'Play this segment' : 'Jump to this segment') : 'Text not loaded yet'}
@@ -360,7 +596,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
                           <div className="min-w-0 flex-1">
                             <button
                               type="button"
-                              onClick={() => { if (canJump) handleJump(segmentIndex); }}
+                              onClick={() => { if (canJump) handleJump(segmentIndex, row.locator); }}
                               disabled={!canJump}
                               className={`block w-full text-left ${canJump ? '' : 'cursor-not-allowed'}`}
                             >
@@ -427,14 +663,15 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
                             </div>
                           </div>
 
-                          {row && (
-                            <SegmentMetadataPopover row={row} />
-                          )}
+                          <SegmentMetadataPopover row={row} />
                         </div>
                       </li>
                     );
                   })}
                 </ul>
+              )}
+              {state.kind === 'ready' && state.loadingMore && (
+                <div className="px-4 py-3 text-xs text-muted">Loading more segments…</div>
               )}
       </div>
     </ReaderSidebarShell>

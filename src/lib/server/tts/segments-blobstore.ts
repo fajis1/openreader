@@ -100,7 +100,10 @@ export async function deleteTtsSegmentAudioObjects(keys: string[]): Promise<numb
         },
       }),
     );
-    deleted += deleteRes.Deleted?.length ?? 0;
+    // With Quiet=true, many S3-compatible providers omit Deleted entries even on success.
+    // Count attempted keys minus explicit per-key errors to avoid false partial-delete reports.
+    const errored = deleteRes.Errors?.length ?? 0;
+    deleted += Math.max(0, chunk.length - errored);
   }
 
   return deleted;

@@ -40,7 +40,11 @@ export const withRetry = async <T>(
 
       // Do not retry on explicit cancellation/abort errors - surface them
       // immediately so callers can stop work quickly when the user cancels.
-      if (lastError.name === 'AbortError' || lastError.message.includes('cancelled')) {
+      if (
+        lastError.name === 'AbortError'
+        || lastError.message.toLowerCase().includes('cancelled')
+        || lastError.message.toLowerCase().includes('aborted')
+      ) {
         break;
       }
 

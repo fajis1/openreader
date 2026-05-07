@@ -15,6 +15,8 @@ import {
   buildTtsSegmentSettingsHash,
   buildTtsSegmentSettingsJson,
   buildTtsSegmentTextHash,
+  canonicalLocatorJson,
+  canonicalizeLocatorJsonString,
   locatorFingerprint,
   normalizeLocator,
   normalizeSegmentText,
@@ -125,11 +127,22 @@ function buildSegmentAudioUrls(documentId: string, segmentId: string): {
   };
 }
 
-async function cleanupStaleErroredVariants(input: {
+function isAbortLikeError(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : '';
+  if (!message) return false;
+  return /abort/i.test(message);
+}
+
+async function cleanupStaleCanonicalVariants(input: {
   userId: string;
   documentId: string;
   documentVersion: number;
   segmentIndex: number;
+  activeLocatorJson: string | null;
   activeSegmentId: string;
   activeSettingsHash: string;
 }): Promise<void> {
@@ -138,6 +151,7 @@ async function cleanupStaleErroredVariants(input: {
       segmentId: ttsSegments.segmentId,
       settingsHash: ttsSegments.settingsHash,
       audioKey: ttsSegments.audioKey,
+      locatorJson: ttsSegments.locatorJson,
     })
     .from(ttsSegments)
     .where(and(
@@ -150,9 +164,14 @@ async function cleanupStaleErroredVariants(input: {
       segmentId: string;
       settingsHash: string;
       audioKey: string | null;
+      locatorJson: string | null;
     }>;
 
-  const staleRowsForSettings = staleRows.filter((row) => row.settingsHash === input.activeSettingsHash);
+  const activeCanonicalLocator = canonicalizeLocatorJsonString(input.activeLocatorJson);
+  const staleRowsForSettings = staleRows.filter((row) =>
+    row.settingsHash === input.activeSettingsHash
+    && canonicalizeLocatorJsonString(row.locatorJson) === activeCanonicalLocator,
+  );
   const staleIds = staleRowsForSettings.map((row) => row.segmentId);
 
   if (staleIds.length === 0) return;
@@ -164,9 +183,9 @@ async function cleanupStaleErroredVariants(input: {
       inArray(ttsSegments.segmentId, staleIds),
     ));
 
-  const staleAudioKeys = staleRowsForSettings
+  const staleAudioKeys = Array.from(new Set(staleRowsForSettings
     .map((row) => row.audioKey)
-    .filter((key): key is string => Boolean(key));
+    .filter((key): key is string => Boolean(key))));
   if (staleAudioKeys.length > 0) {
     try {
       await deleteTtsSegmentAudioObjects(staleAudioKeys);
@@ -263,11 +282,12 @@ export async function POST(request: NextRequest) {
       const existing = existingById.get(segment.segmentId);
 
       if (existing?.status === 'completed' && existing.audioKey) {
-        await cleanupStaleErroredVariants({
+        await cleanupStaleCanonicalVariants({
           userId: scope.storageUserId,
           documentId: parsed.documentId,
           documentVersion: scope.documentVersion,
           segmentIndex: segment.original.segmentIndex,
+          activeLocatorJson: existing.locatorJson,
           activeSegmentId: segment.segmentId,
           activeSettingsHash: settingsHash,
         });
@@ -333,6 +353,7 @@ export async function POST(request: NextRequest) {
         segmentId: segment.segmentId,
       });
 
+      const segmentLocatorJson = canonicalLocatorJson(segment.locator);
       await db
         .insert(ttsSegments)
         .values({
@@ -342,7 +363,7 @@ export async function POST(request: NextRequest) {
           readerType: scope.readerType,
           documentVersion: scope.documentVersion,
           segmentIndex: segment.original.segmentIndex,
-          locatorJson: segment.locator ? JSON.stringify(segment.locator) : null,
+          locatorJson: segmentLocatorJson,
           settingsHash,
           settingsJson,
           textHash: segment.textHash,
@@ -360,7 +381,7 @@ export async function POST(request: NextRequest) {
             readerType: scope.readerType,
             documentVersion: scope.documentVersion,
             segmentIndex: segment.original.segmentIndex,
-            locatorJson: segment.locator ? JSON.stringify(segment.locator) : null,
+            locatorJson: segmentLocatorJson,
             settingsHash,
             settingsJson,
             textHash: segment.textHash,
@@ -472,11 +493,12 @@ export async function POST(request: NextRequest) {
           })
           .where(and(eq(ttsSegments.segmentId, segment.segmentId), eq(ttsSegments.userId, scope.storageUserId)));
 
-        await cleanupStaleErroredVariants({
+        await cleanupStaleCanonicalVariants({
           userId: scope.storageUserId,
           documentId: parsed.documentId,
           documentVersion: scope.documentVersion,
           segmentIndex: segment.original.segmentIndex,
+          activeLocatorJson: canonicalLocatorJson(segment.locator),
           activeSegmentId: segment.segmentId,
           activeSettingsHash: settingsHash,
         });
@@ -492,11 +514,12 @@ export async function POST(request: NextRequest) {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to generate segment';
+        const aborted = isAbortLikeError(error);
         await db
           .update(ttsSegments)
           .set({
-            status: 'error',
-            error: message,
+            status: aborted ? 'pending' : 'error',
+            error: aborted ? null : message,
             updatedAt: Date.now(),
           })
           .where(and(eq(ttsSegments.segmentId, segment.segmentId), eq(ttsSegments.userId, scope.storageUserId)));
@@ -509,7 +532,7 @@ export async function POST(request: NextRequest) {
           durationMs: 0,
           alignment: null,
           locator: segment.locator,
-          status: 'error',
+          status: aborted ? 'pending' : 'error',
         });
       }
     }

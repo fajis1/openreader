@@ -75,6 +75,22 @@ export function locatorFingerprint(locator: TTSSegmentLocator | null): string {
   return createHash('sha256').update(stableStringify(locator)).digest('hex');
 }
 
+export function canonicalLocatorJson(locator: TTSSegmentLocator | null | undefined): string | null {
+  if (!locator) return null;
+  return stableStringify(locator);
+}
+
+export function canonicalizeLocatorJsonString(json: string | null | undefined): string | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json);
+    if (parsed === null || typeof parsed !== 'object') return null;
+    return stableStringify(parsed);
+  } catch {
+    return null;
+  }
+}
+
 export function buildTtsSegmentId(input: {
   documentId: string;
   documentVersion: number;

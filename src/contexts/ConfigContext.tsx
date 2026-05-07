@@ -26,6 +26,9 @@ interface ConfigContextType {
   skipBlank: boolean;
   epubTheme: boolean;
   smartSentenceSplitting: boolean;
+  segmentPreloadDepthPages: number;
+  segmentPreloadSentenceLookahead: number;
+  ttsSegmentMaxBlockLength: number;
   headerMargin: number;
   footerMargin: number;
   leftMargin: number;
@@ -278,6 +281,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     ttsInstructions,
     savedVoices,
     smartSentenceSplitting,
+    segmentPreloadDepthPages,
+    segmentPreloadSentenceLookahead,
+    ttsSegmentMaxBlockLength,
     pdfHighlightEnabled,
     pdfWordHighlightEnabled,
     epubHighlightEnabled,
@@ -354,6 +360,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       skipBlank,
       epubTheme,
       smartSentenceSplitting,
+      segmentPreloadDepthPages,
+      segmentPreloadSentenceLookahead,
+      ttsSegmentMaxBlockLength,
       headerMargin,
       footerMargin,
       leftMargin,

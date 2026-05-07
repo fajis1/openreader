@@ -62,6 +62,9 @@ function sanitizePreferencesPatch(input: unknown): SyncedPreferencesPatch {
         break;
       case 'voiceSpeed':
       case 'audioPlayerSpeed':
+      case 'segmentPreloadDepthPages':
+      case 'segmentPreloadSentenceLookahead':
+      case 'ttsSegmentMaxBlockLength':
       case 'headerMargin':
       case 'footerMargin':
       case 'leftMargin':

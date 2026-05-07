@@ -13,12 +13,14 @@ interface PdfAudiobookAdapterOptions {
     right: number;
   };
   smartSentenceSplitting: boolean;
+  maxBlockLength?: number;
 }
 
 async function extractPreparedPdfChapters({
   pdfDocument,
   margins,
   smartSentenceSplitting,
+  maxBlockLength,
 }: PdfAudiobookAdapterOptions): Promise<PreparedAudiobookChapter[]> {
   if (!pdfDocument) {
     throw new Error('No PDF document loaded');
@@ -35,7 +37,7 @@ async function extractPreparedPdfChapters({
     chapters.push({
       index: chapters.length,
       title: `Page ${chapters.length + 1}`,
-      text: smartSentenceSplitting ? normalizeTextForTts(trimmedText) : trimmedText,
+      text: smartSentenceSplitting ? normalizeTextForTts(trimmedText, { maxBlockLength }) : trimmedText,
     });
   }
 

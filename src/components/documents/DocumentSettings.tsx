@@ -1,10 +1,20 @@
 'use client';
 
-import { Fragment, useState, useEffect } from 'react';
-import { Transition, Listbox, ListboxButton, ListboxOptions, ListboxOption } from '@headlessui/react';
+import { useState, useEffect, type ChangeEvent } from 'react';
 import { useConfig, ViewType } from '@/contexts/ConfigContext';
-import { ChevronUpDownIcon, CheckIcon } from '@/components/icons/Icons';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
+import {
+  SEGMENT_PRELOAD_DEPTH_MIN,
+  SEGMENT_PRELOAD_DEPTH_MAX,
+  SEGMENT_PRELOAD_SENTENCE_LOOKAHEAD_MIN,
+  SEGMENT_PRELOAD_SENTENCE_LOOKAHEAD_MAX,
+  TTS_SEGMENT_MAX_BLOCK_LENGTH_MIN,
+  TTS_SEGMENT_MAX_BLOCK_LENGTH_MAX,
+  TTS_SEGMENT_MAX_BLOCK_LENGTH_STEP,
+  clampSegmentPreloadDepth,
+  clampSegmentPreloadSentenceLookahead,
+  clampTtsSegmentMaxBlockLength,
+} from '@/types/config';
 
 const canWordHighlight = process.env.NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT?.toLowerCase() !== 'false';
 
@@ -13,6 +23,81 @@ const viewTypeTextMapping = [
   { id: 'dual', name: 'Two Pages' },
   { id: 'scroll', name: 'Continuous Scroll' },
 ];
+
+const rangeInputClassName = 'w-full bg-offbase rounded-lg appearance-none cursor-pointer accent-accent [&::-webkit-slider-runnable-track]:bg-offbase [&::-webkit-slider-runnable-track]:rounded-lg [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-moz-range-track]:bg-offbase [&::-moz-range-track]:rounded-lg [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent';
+
+type MarginKey = 'header' | 'footer' | 'left' | 'right';
+
+type RangeSettingProps = {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  description: string;
+  valueWidth?: string;
+  formatter?: (value: number) => string;
+  onChange: (value: number) => void;
+};
+
+function RangeSetting({
+  label,
+  value,
+  min,
+  max,
+  step,
+  description,
+  valueWidth = 'w-10',
+  formatter = (next) => String(next),
+  onChange,
+}: RangeSettingProps) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-sm font-medium text-foreground">{label}</label>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(event) => onChange(Number(event.target.value))}
+          className={`flex-1 ${rangeInputClassName}`}
+        />
+        <span className={`${valueWidth} text-xs font-semibold text-right text-foreground`}>{formatter(value)}</span>
+      </div>
+      <p className="text-xs text-muted">{description}</p>
+    </div>
+  );
+}
+
+type ToggleRowProps = {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+};
+
+function ToggleRow({ label, description, checked, onChange, disabled = false }: ToggleRowProps) {
+  return (
+    <div className="rounded-xl border border-offbase bg-background px-3 py-2.5 shadow-sm">
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.checked)}
+          className="mt-0.5 form-checkbox h-4 w-4 text-accent rounded border-muted disabled:opacity-50 disabled:cursor-not-allowed"
+        />
+        <span className="space-y-0.5">
+          <span className="block text-sm font-medium text-foreground">{label}</span>
+          <span className="block text-xs text-muted">{description}</span>
+        </span>
+      </label>
+    </div>
+  );
+}
 
 export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
   isOpen: boolean,
@@ -25,6 +110,9 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     skipBlank,
     epubTheme,
     smartSentenceSplitting,
+    segmentPreloadDepthPages,
+    segmentPreloadSentenceLookahead,
+    ttsSegmentMaxBlockLength,
     headerMargin,
     footerMargin,
     leftMargin,
@@ -42,6 +130,15 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     right: rightMargin
   });
   const selectedView = viewTypeTextMapping.find(v => v.id === viewType) || viewTypeTextMapping[0];
+  const [localPreloadDepth, setLocalPreloadDepth] = useState(segmentPreloadDepthPages);
+  const [localSentenceLookahead, setLocalSentenceLookahead] = useState(segmentPreloadSentenceLookahead);
+  const [localMaxBlockLength, setLocalMaxBlockLength] = useState(ttsSegmentMaxBlockLength);
+  const marginValues: Record<MarginKey, number> = {
+    header: headerMargin,
+    footer: footerMargin,
+    left: leftMargin,
+    right: rightMargin,
+  };
 
   useEffect(() => {
     setLocalMargins({
@@ -52,21 +149,32 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     });
   }, [headerMargin, footerMargin, leftMargin, rightMargin]);
 
-  // Handler for slider change (updates local state only)
-  const handleMarginChange = (margin: keyof typeof localMargins) => (event: React.ChangeEvent<HTMLInputElement>) => {
-    setLocalMargins(prev => ({
-      ...prev,
-      [margin]: Number(event.target.value)
-    }));
-  };
+  useEffect(() => {
+    setLocalPreloadDepth(segmentPreloadDepthPages);
+  }, [segmentPreloadDepthPages]);
+
+  useEffect(() => {
+    setLocalSentenceLookahead(segmentPreloadSentenceLookahead);
+  }, [segmentPreloadSentenceLookahead]);
+
+  useEffect(() => {
+    setLocalMaxBlockLength(ttsSegmentMaxBlockLength);
+  }, [ttsSegmentMaxBlockLength]);
 
   // Handler for slider release
-  const handleMarginChangeComplete = (margin: keyof typeof localMargins) => () => {
+  const handleMarginChangeComplete = (margin: MarginKey) => () => {
     const value = localMargins[margin];
     const configKey = `${margin}Margin`;
-    if (value !== (useConfig)[configKey as keyof typeof useConfig]) {
+    if (value !== marginValues[margin]) {
       updateConfigKey(configKey as 'headerMargin' | 'footerMargin' | 'leftMargin' | 'rightMargin', value);
     }
+  };
+
+  const handleMarginSliderChange = (margin: MarginKey) => (event: ChangeEvent<HTMLInputElement>) => {
+    setLocalMargins((previous) => ({
+      ...previous,
+      [margin]: Number(event.target.value),
+    }));
   };
 
   return (
@@ -74,275 +182,202 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
       isOpen={isOpen}
       onClose={() => setIsOpen(false)}
       ariaLabel="Document settings"
-      title="Settings"
+      title="Reader Settings"
+      subtitle="Configure layout, preloading, and playback behavior for this document."
+      bodyClassName="flex-1 overflow-y-auto px-4 py-4 bg-[radial-gradient(circle_at_top_right,rgba(239,68,68,0.08),transparent_35%)]"
+      panelClassName="w-full sm:w-[30rem]"
     >
       <div className="space-y-4">
-                    {!epub && !html && <div className="space-y-6">
-                      <div className="space-y-2">
-                        <label className="block text-sm font-medium text-foreground">
-                          Text extraction margins
-                        </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {/* Header Margin */}
-                          <div className="space-y-1">
-                            <div className="flex justify-between">
-                              <span className="text-xs">Header</span>
-                              <span className="text-xs font-bold">{Math.round(localMargins.header * 100)}%</span>
-                            </div>
-                            <input
-                              type="range"
-                              min="0"
-                              max="0.2"
-                              step="0.01"
-                              value={localMargins.header}
-                              onChange={handleMarginChange('header')}
-                              onMouseUp={handleMarginChangeComplete('header')}
-                              onKeyUp={handleMarginChangeComplete('header')}
-                              onTouchEnd={handleMarginChangeComplete('header')}
-                              className="w-full bg-offbase rounded-lg appearance-none cursor-pointer accent-accent [&::-webkit-slider-runnable-track]:bg-offbase [&::-webkit-slider-runnable-track]:rounded-lg [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-moz-range-track]:bg-offbase [&::-moz-range-track]:rounded-lg [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent"
-                            />
-                          </div>
+        {!html && (
+          <section className="rounded-2xl border border-offbase bg-base px-4 py-3 space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Playback Flow</h3>
+              <p className="text-xs text-muted mt-0.5">Control segment generation and lookahead while audio is active.</p>
+            </div>
 
-                          {/* Footer Margin */}
-                          <div className="space-y-1">
-                            <div className="flex justify-between">
-                              <span className="text-xs">Footer</span>
-                              <span className="text-xs font-bold">{Math.round(localMargins.footer * 100)}%</span>
-                            </div>
-                            <input
-                              type="range"
-                              min="0"
-                              max="0.2"
-                              step="0.01"
-                              value={localMargins.footer}
-                              onChange={handleMarginChange('footer')}
-                              onMouseUp={handleMarginChangeComplete('footer')}
-                              onKeyUp={handleMarginChangeComplete('footer')}
-                              onTouchEnd={handleMarginChangeComplete('footer')}
-                              className="w-full bg-offbase rounded-lg appearance-none cursor-pointer accent-accent [&::-webkit-slider-runnable-track]:bg-offbase [&::-webkit-slider-runnable-track]:rounded-lg [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-moz-range-track]:bg-offbase [&::-moz-range-track]:rounded-lg [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent"
-                            />
-                          </div>
+            <ToggleRow
+              label="Skip blank pages"
+              description="Automatically skip pages with no readable text."
+              checked={skipBlank}
+              onChange={(checked) => updateConfigKey('skipBlank', checked)}
+            />
 
-                          {/* Left Margin */}
-                          <div className="space-y-1">
-                            <div className="flex justify-between">
-                              <span className="text-xs">Left</span>
-                              <span className="text-xs font-bold">{Math.round(localMargins.left * 100)}%</span>
-                            </div>
-                            <input
-                              type="range"
-                              min="0"
-                              max="0.2"
-                              step="0.01"
-                              value={localMargins.left}
-                              onChange={handleMarginChange('left')}
-                              onMouseUp={handleMarginChangeComplete('left')}
-                              onKeyUp={handleMarginChangeComplete('left')}
-                              onTouchEnd={handleMarginChangeComplete('left')}
-                              className="w-full bg-offbase rounded-lg appearance-none cursor-pointer accent-accent [&::-webkit-slider-runnable-track]:bg-offbase [&::-webkit-slider-runnable-track]:rounded-lg [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-moz-range-track]:bg-offbase [&::-moz-range-track]:rounded-lg [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent"
-                            />
-                          </div>
+            <ToggleRow
+              label="Smart sentence splitting"
+              description="Merge sentence fragments across page or section boundaries."
+              checked={smartSentenceSplitting}
+              onChange={(checked) => updateConfigKey('smartSentenceSplitting', checked)}
+            />
 
-                          {/* Right Margin */}
-                          <div className="space-y-1">
-                            <div className="flex justify-between">
-                              <span className="text-xs">Right</span>
-                              <span className="text-xs font-bold">{Math.round(localMargins.right * 100)}%</span>
-                            </div>
-                            <input
-                              type="range"
-                              min="0"
-                              max="0.2"
-                              step="0.01"
-                              value={localMargins.right}
-                              onChange={handleMarginChange('right')}
-                              onMouseUp={handleMarginChangeComplete('right')}
-                              onKeyUp={handleMarginChangeComplete('right')}
-                              onTouchEnd={handleMarginChangeComplete('right')}
-                              className="w-full bg-offbase rounded-lg appearance-none cursor-pointer accent-accent [&::-webkit-slider-runnable-track]:bg-offbase [&::-webkit-slider-runnable-track]:rounded-lg [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-moz-range-track]:bg-offbase [&::-moz-range-track]:rounded-lg [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent"
-                            />
-                          </div>
-                        </div>
-                        <p className="text-xs text-muted mt-2">
-                          Adjust margins to exclude content from edges of the page during text extraction (experimental)
-                        </p>
-                      </div>
-                      <Listbox
-                        value={selectedView}
-                        onChange={(newView) => updateConfigKey('viewType', newView.id as ViewType)}
-                      >
-                        <div className="relative z-10 space-y-2">
-                          <label className="block text-sm font-medium text-foreground">Mode</label>
-                          <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-1.5 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.009] hover:text-accent hover:bg-offbase">
-                            <span className="block truncate">{selectedView.name}</span>
-                            <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                              <ChevronUpDownIcon className="h-5 w-5 text-muted" />
-                            </span>
-                          </ListboxButton>
-                          <Transition
-                            as={Fragment}
-                            leave="transition ease-in duration-100"
-                            leaveFrom="opacity-100"
-                            leaveTo="opacity-0"
-                          >
-                            <ListboxOptions className="absolute mt-1 max-h-60 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none">
-                              {viewTypeTextMapping.map((view) => (
-                                <ListboxOption
-                                  key={view.id}
-                                  className={({ active }) =>
-                                    `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${active ? 'bg-offbase text-accent' : 'text-foreground'
-                                    }`
-                                  }
-                                  value={view}
-                                >
-                                  {({ selected }) => (
-                                    <>
-                                      <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
-                                        {view.name}
-                                      </span>
-                                      {selected ? (
-                                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
-                                          <CheckIcon className="h-5 w-5" />
-                                        </span>
-                                      ) : null}
-                                    </>
-                                  )}
-                                </ListboxOption>
-                              ))}
-                            </ListboxOptions>
-                          </Transition>
-                          {selectedView.id === 'scroll' && (
-                            <p className="text-sm text-warning pt-2">
-                              Note: Continuous scroll may perform poorly for larger documents.
-                            </p>
-                          )}
-                        </div>
-                      </Listbox>
+            <div className="rounded-xl border border-offbase bg-background px-3 py-3 space-y-3 shadow-sm">
+              <RangeSetting
+                label="Segment preload depth"
+                value={localPreloadDepth}
+                min={SEGMENT_PRELOAD_DEPTH_MIN}
+                max={SEGMENT_PRELOAD_DEPTH_MAX}
+                step={1}
+                description="How many upcoming pages or locations to queue in the background."
+                formatter={(value) => String(value)}
+                onChange={(value) => {
+                  const next = clampSegmentPreloadDepth(value);
+                  setLocalPreloadDepth(next);
+                  void updateConfigKey('segmentPreloadDepthPages', next);
+                }}
+              />
 
-                    </div>}
+              <RangeSetting
+                label="Segment lookahead per page/location"
+                value={localSentenceLookahead}
+                min={SEGMENT_PRELOAD_SENTENCE_LOOKAHEAD_MIN}
+                max={SEGMENT_PRELOAD_SENTENCE_LOOKAHEAD_MAX}
+                step={1}
+                description="How many segments to ensure from each queued page or section."
+                formatter={(value) => String(value)}
+                onChange={(value) => {
+                  const next = clampSegmentPreloadSentenceLookahead(value);
+                  setLocalSentenceLookahead(next);
+                  void updateConfigKey('segmentPreloadSentenceLookahead', next);
+                }}
+              />
 
-                    {!html && <div className="space-y-1">
-                      <label className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          checked={skipBlank}
-                          onChange={(e) => updateConfigKey('skipBlank', e.target.checked)}
-                          className="form-checkbox h-4 w-4 text-accent rounded border-muted"
-                        />
-                        <span className="text-sm font-medium text-foreground">Skip blank pages</span>
-                      </label>
-                      <p className="text-sm text-muted pl-6">
-                        Automatically skip pages with no text content
-                      </p>
-                    </div>}
-                    {!html && (
-                      <div className="space-y-1">
-                        <label className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={smartSentenceSplitting}
-                            onChange={(e) => updateConfigKey('smartSentenceSplitting', e.target.checked)}
-                            className="form-checkbox h-4 w-4 text-accent rounded border-muted"
-                          />
-                          <span className="text-sm font-medium text-foreground">
-                            Smart sentence splitting
-                          </span>
-                        </label>
-                        <p className="text-sm text-muted pl-6">
-                          Merge sentences across page or section breaks
-                        </p>
-                      </div>
-                    )}
-                    {!epub && !html && (
-                      <div className="space-y-2">
-                        <div className="space-y-1">
-                          <label className="flex items-center space-x-2">
-                            <input
-                              type="checkbox"
-                              checked={pdfHighlightEnabled}
-                              onChange={(e) => updateConfigKey('pdfHighlightEnabled', e.target.checked)}
-                              className="form-checkbox h-4 w-4 text-accent rounded border-muted"
-                            />
-                            <span className="text-sm font-medium text-foreground">Highlight text during playback</span>
-                          </label>
-                          <p className="text-sm text-muted pl-6">
-                            Visual text playback highlighting in the PDF viewer
-                          </p>
-                        </div>
-                        <div className="space-y-1 pl-6">
-                          <label className="flex items-center space-x-2">
-                            <input
-                              type="checkbox"
-                              checked={pdfWordHighlightEnabled && pdfHighlightEnabled}
-                              disabled={!pdfHighlightEnabled || !canWordHighlight}
-                              onChange={(e) =>
-                                updateConfigKey('pdfWordHighlightEnabled', e.target.checked)
-                              }
-                              className="form-checkbox h-4 w-4 text-accent rounded border-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                            />
-                            <span className="text-sm font-medium text-foreground">
-                              Word-by-word
-                            </span>
-                          </label>
-                          <p className="text-sm text-muted pl-6">
-                            Highlight individual words using audio timestamps generated by whisper.cpp {!canWordHighlight && '(disabled by configuration)'}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                    {epub && (
-                      <div className="space-y-2">
-                        <div className="space-y-1">
-                          <label className="flex items-center space-x-2">
-                            <input
-                              type="checkbox"
-                              checked={epubHighlightEnabled}
-                              onChange={(e) => updateConfigKey('epubHighlightEnabled', e.target.checked)}
-                              className="form-checkbox h-4 w-4 text-accent rounded border-muted"
-                            />
-                            <span className="text-sm font-medium text-foreground">Highlight text during playback</span>
-                          </label>
-                          <p className="text-sm text-muted pl-6">
-                            Visual text playback highlighting in the EPUB viewer
-                          </p>
-                        </div>
-                        <div className="space-y-1 pl-6">
-                          <label className="flex items-center space-x-2">
-                            <input
-                              type="checkbox"
-                              checked={epubWordHighlightEnabled && epubHighlightEnabled}
-                              disabled={!epubHighlightEnabled || !canWordHighlight}
-                              onChange={(e) =>
-                                updateConfigKey('epubWordHighlightEnabled', e.target.checked)
-                              }
-                              className="form-checkbox h-4 w-4 text-accent rounded border-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                            />
-                            <span className="text-sm font-medium text-foreground">
-                              Word-by-word
-                            </span>
-                          </label>
-                          <p className="text-sm text-muted pl-6">
-                            Highlight individual words using audio timestamps generated by whisper.cpp {!canWordHighlight && '(disabled by configuration)'}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                    {epub && (
-                      <div className="space-y-1">
-                        <label className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={epubTheme}
-                            onChange={(e) => updateConfigKey('epubTheme', e.target.checked)}
-                            className="form-checkbox h-4 w-4 text-accent rounded border-muted"
-                          />
-                          <span className="text-sm font-medium text-foreground">Use theme</span>
-                        </label>
-                        <p className="text-sm text-muted pl-6">
-                          Apply the current app theme to the EPUB viewer background and text colors
-                        </p>
-                      </div>
-                    )}
+              <RangeSetting
+                label="TTS segment max block length"
+                value={localMaxBlockLength}
+                min={TTS_SEGMENT_MAX_BLOCK_LENGTH_MIN}
+                max={TTS_SEGMENT_MAX_BLOCK_LENGTH_MAX}
+                step={TTS_SEGMENT_MAX_BLOCK_LENGTH_STEP}
+                description="Maximum character count used when chunking text into segment blocks."
+                valueWidth="w-14"
+                formatter={(value) => String(value)}
+                onChange={(value) => {
+                  const next = clampTtsSegmentMaxBlockLength(value);
+                  setLocalMaxBlockLength(next);
+                  void updateConfigKey('ttsSegmentMaxBlockLength', next);
+                }}
+              />
+            </div>
+          </section>
+        )}
+
+        {!epub && !html && (
+          <section className="rounded-2xl border border-offbase bg-base px-4 py-3 space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">PDF Layout & Extraction</h3>
+              <p className="text-xs text-muted mt-0.5">Set viewer mode and trim page edges before extraction.</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-foreground">Page mode</label>
+              <div
+                role="radiogroup"
+                aria-label="Page mode"
+                className="grid grid-cols-3 gap-1 rounded-full border border-offbase bg-background p-1"
+              >
+                {viewTypeTextMapping.map((view) => {
+                  const active = selectedView.id === view.id;
+                  return (
+                    <button
+                      key={view.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => updateConfigKey('viewType', view.id as ViewType)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                        active
+                          ? 'bg-accent text-background shadow-sm'
+                          : 'text-muted hover:bg-base hover:text-foreground'
+                      }`}
+                    >
+                      {view.name}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedView.id === 'scroll' ? (
+                <p className="text-xs text-warning">Continuous scroll may perform poorly for very large PDFs.</p>
+              ) : null}
+            </div>
+
+            <div className="rounded-xl border border-offbase bg-background px-3 py-3 shadow-sm">
+              <p className="text-xs font-medium text-foreground">Text extraction margins</p>
+              <p className="text-xs text-muted mt-0.5">
+                Exclude content near edges before sentence extraction.
+              </p>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(['header', 'footer', 'left', 'right'] as MarginKey[]).map((margin) => (
+                  <div key={margin} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="capitalize text-foreground">{margin}</span>
+                      <span className="font-semibold text-foreground">{Math.round(localMargins[margin] * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="0.2"
+                      step="0.01"
+                      value={localMargins[margin]}
+                      onChange={handleMarginSliderChange(margin)}
+                      onMouseUp={handleMarginChangeComplete(margin)}
+                      onKeyUp={handleMarginChangeComplete(margin)}
+                      onTouchEnd={handleMarginChangeComplete(margin)}
+                      className={rangeInputClassName}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {!epub && !html && (
+          <section className="rounded-2xl border border-offbase bg-base px-4 py-3 space-y-2">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">PDF Highlighting</h3>
+              <p className="text-xs text-muted mt-0.5">Control playback highlighting behavior in PDF mode.</p>
+            </div>
+            <ToggleRow
+              label="Highlight text during playback"
+              description="Visual sentence-level playback highlighting in the PDF viewer."
+              checked={pdfHighlightEnabled}
+              onChange={(checked) => updateConfigKey('pdfHighlightEnabled', checked)}
+            />
+            <ToggleRow
+              label="Word-by-word highlighting"
+              description={`Use whisper.cpp timing data to highlight words as speech progresses${!canWordHighlight ? ' (disabled by configuration)' : ''}.`}
+              checked={pdfWordHighlightEnabled && pdfHighlightEnabled}
+              disabled={!pdfHighlightEnabled || !canWordHighlight}
+              onChange={(checked) => updateConfigKey('pdfWordHighlightEnabled', checked)}
+            />
+          </section>
+        )}
+
+        {epub && (
+          <section className="rounded-2xl border border-offbase bg-base px-4 py-3 space-y-2">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">EPUB Appearance</h3>
+              <p className="text-xs text-muted mt-0.5">Apply app styling and playback highlighting in EPUB mode.</p>
+            </div>
+            <ToggleRow
+              label="Apply app theme"
+              description="Use selected theme on EPUB documents. May require refresh."
+              checked={epubTheme}
+              onChange={(checked) => updateConfigKey('epubTheme', checked)}
+            />
+            <ToggleRow
+              label="Highlight text during playback"
+              description="Visual sentence-level playback highlighting in the EPUB viewer."
+              checked={epubHighlightEnabled}
+              onChange={(checked) => updateConfigKey('epubHighlightEnabled', checked)}
+            />
+            <ToggleRow
+              label="Word-by-word highlighting"
+              description={`Use whisper.cpp timing data to highlight words as speech progresses${!canWordHighlight ? ' (disabled by configuration)' : ''}.`}
+              checked={epubWordHighlightEnabled && epubHighlightEnabled}
+              disabled={!epubHighlightEnabled || !canWordHighlight}
+              onChange={(checked) => updateConfigKey('epubWordHighlightEnabled', checked)}
+            />
+          </section>
+        )}
       </div>
     </ReaderSidebarShell>
   );

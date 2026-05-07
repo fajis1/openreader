@@ -8,6 +8,17 @@
 import nlp from 'compromise';
 
 export const MAX_BLOCK_LENGTH = 450;
+const MIN_BLOCK_LENGTH = 50;
+
+export interface TtsSplitOptions {
+  maxBlockLength?: number;
+}
+
+function resolveMaxBlockLength(options?: TtsSplitOptions): number {
+  const candidate = Number(options?.maxBlockLength ?? MAX_BLOCK_LENGTH);
+  if (!Number.isFinite(candidate)) return MAX_BLOCK_LENGTH;
+  return Math.max(MIN_BLOCK_LENGTH, Math.floor(candidate));
+}
 
 const splitOversizedText = (text: string, maxLen: number): string[] => {
   const normalized = text.replace(/\s+/g, ' ').trim();
@@ -138,7 +149,8 @@ export const preprocessSentenceForAudio = (text: string): string => {
  * @param {string} text - The text to split into sentences
  * @returns {string[]} Array of sentence blocks
  */
-export const splitTextToTtsBlocks = (text: string): string[] => {
+export const splitTextToTtsBlocks = (text: string, options?: TtsSplitOptions): string[] => {
+  const maxBlockLength = resolveMaxBlockLength(options);
   // Treat double-newlines as paragraph boundaries; single newlines are usually
   // just PDF line wrapping and should not force sentence/block boundaries.
   const paragraphs = text.split(/\n{2,}/);
@@ -160,10 +172,10 @@ export const splitTextToTtsBlocks = (text: string): string[] => {
 
     for (const sentence of mergedSentences) {
       const trimmedSentence = sentence.trim();
-      const sentenceParts = splitOversizedText(trimmedSentence, MAX_BLOCK_LENGTH);
+      const sentenceParts = splitOversizedText(trimmedSentence, maxBlockLength);
 
       for (const sentencePart of sentenceParts) {
-        if (currentBlock && (currentBlock.length + sentencePart.length + 1) > MAX_BLOCK_LENGTH) {
+        if (currentBlock && (currentBlock.length + sentencePart.length + 1) > maxBlockLength) {
           blocks.push(currentBlock.trim());
           currentBlock = sentencePart;
         } else {
@@ -186,7 +198,8 @@ export const splitTextToTtsBlocks = (text: string): string[] => {
  * EPUB block splitting used where we want the produced sentences
  * to closely match the original DOM text (for exact-match highlighting).
  */
-export const splitTextToTtsBlocksEPUB = (text: string): string[] => {
+export const splitTextToTtsBlocksEPUB = (text: string, options?: TtsSplitOptions): string[] => {
+  const maxBlockLength = resolveMaxBlockLength(options);
   const paragraphs = text.split(/\n+/);
   const blocks: string[] = [];
 
@@ -204,12 +217,12 @@ export const splitTextToTtsBlocksEPUB = (text: string): string[] => {
     for (const sentence of mergedSentences) {
       const trimmedSentence = sentence.trim();
       const sentenceParts =
-        trimmedSentence.length > MAX_BLOCK_LENGTH
-          ? splitOversizedText(trimmedSentence, MAX_BLOCK_LENGTH)
+        trimmedSentence.length > maxBlockLength
+          ? splitOversizedText(trimmedSentence, maxBlockLength)
           : [trimmedSentence];
 
       for (const sentencePart of sentenceParts) {
-        if (currentBlock && (currentBlock.length + sentencePart.length + 1) > MAX_BLOCK_LENGTH) {
+        if (currentBlock && (currentBlock.length + sentencePart.length + 1) > maxBlockLength) {
           blocks.push(currentBlock.trim());
           currentBlock = sentencePart;
         } else {
@@ -235,8 +248,8 @@ export const splitTextToTtsBlocksEPUB = (text: string): string[] => {
  * @param {string} text - The text to process
  * @returns {string} Normalized text
  */
-export const normalizeTextForTts = (text: string): string =>
-  splitTextToTtsBlocks(text).join(' ');
+export const normalizeTextForTts = (text: string, options?: TtsSplitOptions): string =>
+  splitTextToTtsBlocks(text, options).join(' ');
 
 // Helper functions to merge quoted dialogue across sentences
 const countDoubleQuotes = (s: string): number => {

@@ -22,6 +22,7 @@ import { setLastDocumentLocation } from '@/lib/client/dexie';
 import { scheduleDocumentProgressSync } from '@/lib/client/api/user-state';
 import { getDocumentMetadata } from '@/lib/client/api/documents';
 import { ensureCachedDocument } from '@/lib/client/cache/documents';
+import { EpubRenderedLocationCloneManager } from '@/lib/client/epub/rendered-location-walker';
 import { useTTS } from '@/contexts/TTSContext';
 import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
 import { createRangeCfi } from '@/lib/client/epub';
@@ -29,6 +30,7 @@ import { useParams } from 'next/navigation';
 import { useConfig } from './ConfigContext';
 import { CmpStr } from 'cmpstr';
 import type {
+  EpubRenderedLocationWalker,
   TTSSentenceAlignment,
   TTSAudiobookFormat,
   TTSAudiobookChapter,
@@ -44,6 +46,7 @@ interface EPUBContextType {
   setCurrentDocument: (id: string) => Promise<void>;
   clearCurrDoc: () => void;
   extractPageText: (book: Book, rendition: Rendition, shouldPause?: boolean) => Promise<string>;
+  walkUpcomingRenderedLocations: EpubRenderedLocationWalker;
   createFullAudioBook: (
     onProgress: (progress: number) => void,
     signal?: AbortSignal,
@@ -291,6 +294,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     baseUrl,
     ttsProvider,
     smartSentenceSplitting,
+    epubTheme,
     epubHighlightEnabled,
   } = useConfig();
   // Current document state
@@ -310,6 +314,17 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
   // Track current highlight CFI for removal
   const currentHighlightCfi = useRef<string | null>(null);
   const currentWordHighlightCfi = useRef<string | null>(null);
+  const renderedLocationCloneManagerRef = useRef<EpubRenderedLocationCloneManager>(
+    new EpubRenderedLocationCloneManager(),
+  );
+
+  useEffect(() => () => {
+    void renderedLocationCloneManagerRef.current.destroy();
+  }, []);
+
+  useEffect(() => {
+    renderedLocationCloneManagerRef.current.invalidate();
+  }, [currDocData]);
 
   /**
    * Clears all current document state and stops any active TTS
@@ -324,6 +339,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     renditionRef.current = undefined;
     locationRef.current = 1;
     tocRef.current = [];
+    renderedLocationCloneManagerRef.current.invalidate();
     stop();
   }, [setCurrDocPages, stop]);
 
@@ -413,6 +429,28 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
    * Extracts text content from the entire EPUB book
    * @returns {Promise<string[]>} Array of text content from each section
    */
+  const loadSpineSection = useCallback(async (href: string) => {
+    const book = bookRef.current;
+    if (!book?.isOpen) return null;
+    const section = book.spine.get(href);
+    if (!section) return null;
+    const loaded = await Promise.resolve(section.load(book.load.bind(book)));
+    const doc = (() => {
+      if (!loaded) return null;
+      if (typeof Document !== 'undefined' && loaded instanceof Document) {
+        return loaded;
+      }
+      const element = loaded as unknown as Element;
+      if (element?.ownerDocument) {
+        return element.ownerDocument;
+      }
+      const sectionWithDocument = section as unknown as { document?: Document };
+      return sectionWithDocument.document ?? null;
+    })();
+    if (!doc) return null;
+    return { section, doc };
+  }, []);
+
   const extractBookText = useCallback(async (): Promise<Array<{ text: string; href: string }>> => {
     try {
       if (!bookRef.current || !bookRef.current.isOpen) return [{ text: '', href: '' }];
@@ -424,17 +462,19 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       spine.each((item: SpineItem) => {
         const url = item.href || '';
         if (!url) return;
-        //console.log('Extracting text from section:', item as SpineItem);
-
-        const promise = book.load(url)
-          .then((section) => (section as Document))
-          .then((section) => ({
-            text: section.body.textContent || '',
-            href: url
-          }))
+        const promise = loadSpineSection(url)
+          .then((loaded) => {
+            if (!loaded?.doc) return { text: '', href: url };
+            const text = loaded.doc.body?.textContent || '';
+            return { text, href: url };
+          })
           .catch((err) => {
             console.error(`Error loading section ${url}:`, err);
             return { text: '', href: url };
+          })
+          .finally(() => {
+            const section = book.spine.get(url);
+            section?.unload?.();
           });
 
         promises.push(promise);
@@ -442,13 +482,50 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
 
       const textArray = await Promise.all(promises);
       const filteredArray = textArray.filter(item => item.text.trim() !== '');
-      console.log('Extracted entire EPUB text array:', filteredArray);
       return filteredArray;
     } catch (error) {
       console.error('Error extracting EPUB text:', error);
       return [{ text: '', href: '' }];
     }
-  }, []);
+  }, [loadSpineSection]);
+
+  const walkUpcomingRenderedLocations = useCallback<EpubRenderedLocationWalker>(async (startCfi, depth, signal) => {
+    if (!startCfi || depth <= 0 || signal.aborted) return [];
+    const visibleRendition = renditionRef.current;
+    if (!currDocData || !visibleRendition || typeof document === 'undefined') return [];
+
+    const visibleSettings = (visibleRendition as unknown as {
+      settings?: {
+        spread?: string;
+      };
+      manager?: { stage?: { container?: Element | null }; container?: Element | null };
+    }).settings;
+    const containerElement =
+      (visibleRendition as unknown as { manager?: { stage?: { container?: Element | null }; container?: Element | null } }).manager?.stage?.container
+      ?? (visibleRendition as unknown as { manager?: { container?: Element | null } }).manager?.container
+      ?? null;
+    const bounds = containerElement?.getBoundingClientRect?.();
+    const width = Math.max(320, Math.floor(bounds?.width || 900));
+    const height = Math.max(320, Math.floor(bounds?.height || 700));
+
+    const theme = epubTheme
+      ? {
+        foreground: getComputedStyle(document.documentElement).getPropertyValue('--foreground'),
+        base: getComputedStyle(document.documentElement).getPropertyValue('--base'),
+      }
+      : null;
+
+    return renderedLocationCloneManagerRef.current.walk({
+      data: currDocData,
+      startCfi,
+      depth,
+      signal,
+      width,
+      height,
+      spread: visibleSettings?.spread,
+      theme,
+    });
+  }, [currDocData, epubTheme]);
 
   const audiobookAdapter = useMemo(() => createEpubAudiobookSourceAdapter({
     extractBookText,
@@ -521,13 +598,55 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     renditionRef.current = rendition;
   }, []);
 
+  const safeRenditionNavigate = useCallback((navigation: 'next' | 'prev' | 'display', location?: string) => {
+    const book = bookRef.current;
+    const rendition = renditionRef.current;
+    if (!book?.isOpen || !rendition) return false;
+
+    const guardNavigationPromise = (promiseLike: unknown): void => {
+      const promise = Promise.resolve(promiseLike);
+      void promise.catch((error) => {
+        console.warn(`EPUB rendition ${navigation} failed:`, error);
+      });
+    };
+
+    try {
+      if (navigation === 'display') {
+        if (!location) return false;
+        guardNavigationPromise(rendition.display(location));
+        return true;
+      }
+      if (navigation === 'next') {
+        guardNavigationPromise(rendition.next());
+        return true;
+      }
+      guardNavigationPromise(rendition.prev());
+      return true;
+    } catch (error) {
+      console.warn(`EPUB rendition ${navigation} failed:`, error);
+      return false;
+    }
+  }, []);
+
   const handleLocationChanged = useCallback((location: string | number) => {
+    // Handle directional navigation before first-location initialization so
+    // "prev"/"next" are not treated as raw CFI strings.
+    if ((location === 'next' || location === 'prev') && renditionRef.current) {
+      if (!isEPUBSetOnce.current) {
+        setIsEPUB(true);
+        isEPUBSetOnce.current = true;
+      }
+      shouldPauseRef.current = false;
+      safeRenditionNavigate(location === 'next' ? 'next' : 'prev');
+      return;
+    }
+
     // Set the EPUB flag once the location changes
     if (!isEPUBSetOnce.current) {
       setIsEPUB(true);
       isEPUBSetOnce.current = true;
 
-      renditionRef.current?.display(location.toString());
+      safeRenditionNavigate('display', location.toString());
       return;
     }
 
@@ -538,7 +657,10 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     if (typeof location === 'string' && location !== 'next' && location !== 'prev' && renditionRef.current?.location) {
       const currentStartCfi = renditionRef.current.location?.start?.cfi;
       if (currentStartCfi && location !== currentStartCfi) {
-        renditionRef.current.display(location);
+        // Programmatic cross-location jumps (segments sidebar / TTS navigation)
+        // should keep autoplay intent after the rendition finishes navigating.
+        shouldPauseRef.current = false;
+        safeRenditionNavigate('display', location);
         return;
       }
     }
@@ -546,18 +668,17 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     // Handle special 'next' and 'prev' cases
     if (location === 'next' && renditionRef.current) {
       shouldPauseRef.current = false;
-      renditionRef.current.next();
+      safeRenditionNavigate('next');
       return;
     }
     if (location === 'prev' && renditionRef.current) {
       shouldPauseRef.current = false;
-      renditionRef.current.prev();
+      safeRenditionNavigate('prev');
       return;
     }
 
     // Save the location to IndexedDB if not initial
     if (id && locationRef.current !== 1) {
-      console.log('Saving location:', location);
       setLastDocumentLocation(id as string, location.toString());
       if (authEnabled) {
         scheduleDocumentProgressSync({
@@ -575,7 +696,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       extractPageText(bookRef.current, renditionRef.current, shouldPauseRef.current);
       shouldPauseRef.current = true;
     }
-  }, [id, skipToLocation, extractPageText, setIsEPUB, authEnabled]);
+  }, [id, skipToLocation, extractPageText, setIsEPUB, authEnabled, safeRenditionNavigate]);
 
   const clearWordHighlights = useCallback(() => {
     if (!renditionRef.current) return;
@@ -622,9 +743,14 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
               const cfi = content.cfiFromRange(range);
               // Store CFI for removal
               currentHighlightCfi.current = cfi;
-              renditionRef.current.annotations.add('highlight', cfi, {}, (e: MouseEvent) => {
-                console.log('Highlight clicked', e);
-              }, '', { fill: 'grey', 'fill-opacity': '0.4', 'mix-blend-mode': 'multiply' });
+              renditionRef.current.annotations.add(
+                'highlight',
+                cfi,
+                {},
+                () => {},
+                '',
+                { fill: 'grey', 'fill-opacity': '0.4', 'mix-blend-mode': 'multiply' },
+              );
 
               // Clear the browser selection so it doesn't look like user selected text
               sel?.removeAllRanges();
@@ -914,6 +1040,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       currDocText,
       clearCurrDoc,
       extractPageText,
+      walkUpcomingRenderedLocations,
       createFullAudioBook,
       regenerateChapter,
       bookRef,
@@ -937,6 +1064,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       currDocText,
       clearCurrDoc,
       extractPageText,
+      walkUpcomingRenderedLocations,
       createFullAudioBook,
       regenerateChapter,
       handleLocationChanged,

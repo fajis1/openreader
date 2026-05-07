@@ -47,6 +47,7 @@ import type {
   TTSAudiobookChapter,
 } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
+import { clampSegmentPreloadDepth } from '@/types/config';
 
 /**
  * Interface defining all available methods and properties in the PDF context
@@ -126,6 +127,8 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     baseUrl,
     ttsProvider,
     smartSentenceSplitting,
+    segmentPreloadDepthPages,
+    ttsSegmentMaxBlockLength,
   } = useConfig();
 
   // Current document state
@@ -144,7 +147,8 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       right: rightMargin,
     },
     smartSentenceSplitting,
-  }), [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, smartSentenceSplitting]);
+    maxBlockLength: ttsSegmentMaxBlockLength,
+  }), [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, smartSentenceSplitting, ttsSegmentMaxBlockLength]);
   const pageTextCacheRef = useRef<Map<number, string>>(new Map());
   const [currDocPage, setCurrDocPage] = useState<number>(currDocPageNumber);
 
@@ -173,7 +177,6 @@ export function PDFProvider({ children }: { children: ReactNode }) {
    * @param {PDFDocumentProxy} pdf - The loaded PDF document proxy object
    */
   const onDocumentLoadSuccess = useCallback((pdf: PDFDocumentProxy) => {
-    console.log('Document loaded:', pdf.numPages);
     pdfDocGenerationRef.current += 1;
     pdfDocumentRef.current = pdf;
     setCurrDocPages(pdf.numPages);
@@ -239,12 +242,27 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       const totalPages = currDocPages ?? currentPdf.numPages;
       const prevPageNumber = currDocPageNumber > 1 ? currDocPageNumber - 1 : undefined;
       const nextPageNumber = currDocPageNumber < totalPages ? currDocPageNumber + 1 : undefined;
+      const preloadDepth = clampSegmentPreloadDepth(segmentPreloadDepthPages);
+      const upcomingPageNumbers: number[] = [];
+      for (let offset = 1; offset <= preloadDepth; offset += 1) {
+        const pageNum = currDocPageNumber + offset;
+        if (pageNum > totalPages) break;
+        upcomingPageNumbers.push(pageNum);
+      }
 
-      const [text, prevText, nextText] = await Promise.all([
+      const [text, prevText, ...upcomingTexts] = await Promise.all([
         getPageText(currDocPageNumber),
         prevPageNumber ? getPageText(prevPageNumber) : Promise.resolve<string | undefined>(undefined),
-        nextPageNumber ? getPageText(nextPageNumber, true) : Promise.resolve<string | undefined>(undefined),
+        ...upcomingPageNumbers.map((pageNum) => getPageText(pageNum, true)),
       ]);
+      const nextText = upcomingTexts[0];
+      const additionalUpcoming = upcomingPageNumbers
+        .slice(1)
+        .map((pageNum, idx) => ({
+          location: pageNum,
+          text: upcomingTexts[idx + 1] || '',
+        }))
+        .filter((item) => item.text.trim().length > 0);
 
       if (generation !== pdfDocGenerationRef.current || pdfDocumentRef.current !== currentPdf) {
         return;
@@ -286,6 +304,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
           previousText: prevText,
           nextLocation: nextPageNumber,
           nextText: nextText,
+          upcomingLocations: additionalUpcoming,
         });
       }
     } catch (error) {
@@ -303,6 +322,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     footerMargin,
     leftMargin,
     rightMargin,
+    segmentPreloadDepthPages,
   ]);
 
   /**
@@ -482,6 +502,9 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       const clamped = Math.min(Math.max(location, 1), totalPages);
       setCurrDocPage(clamped);
     });
+    return () => {
+      registerVisualPageChangeHandler(null);
+    };
   }, [registerVisualPageChangeHandler, currDocPages, pdfDocument]);
 
   // Context value memoization

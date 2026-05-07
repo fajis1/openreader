@@ -111,6 +111,14 @@ test.describe('splitTextToTtsBlocks (PDF-oriented)', () => {
     expectNormalizedBlocks(result, MAX_BLOCK_LENGTH);
   });
 
+  test('supports configurable max block length', () => {
+    const input = Array(600).fill('word').join(' ');
+    const result = splitTextToTtsBlocks(input, { maxBlockLength: 220 });
+
+    expect(result.length).toBeGreaterThan(1);
+    expectNormalizedBlocks(result, 220 * 2);
+  });
+
   test('prefers sentence punctuation when chunking long PDF-like text', () => {
     const sentences = Array.from(
       { length: 80 },
@@ -174,6 +182,14 @@ test.describe('splitTextToTtsBlocksEPUB (highlight-friendly)', () => {
 
     expect(result.length).toBeGreaterThan(1);
     expectNormalizedBlocks(result, MAX_BLOCK_LENGTH);
+  });
+
+  test('supports configurable max block length for EPUB mode', () => {
+    const input = Array(600).fill('word').join(' ');
+    const result = splitTextToTtsBlocksEPUB(input, { maxBlockLength: 180 });
+
+    expect(result.length).toBeGreaterThan(1);
+    expectNormalizedBlocks(result, 180);
   });
 });
 

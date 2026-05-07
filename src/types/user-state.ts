@@ -8,6 +8,9 @@ export const SYNCED_PREFERENCE_KEYS = [
   'skipBlank',
   'epubTheme',
   'smartSentenceSplitting',
+  'segmentPreloadDepthPages',
+  'segmentPreloadSentenceLookahead',
+  'ttsSegmentMaxBlockLength',
   'headerMargin',
   'footerMargin',
   'leftMargin',
@@ -36,4 +39,3 @@ export interface DocumentProgressRecord {
   clientUpdatedAtMs: number;
   updatedAtMs: number;
 }
-

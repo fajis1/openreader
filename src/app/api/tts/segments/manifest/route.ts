@@ -3,6 +3,14 @@ import { and, asc, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { ttsSegments } from '@/db/schema';
 import { resolveSegmentDocumentScope } from '@/lib/server/tts/segments-auth';
+import {
+  compareManifestSegments,
+  decodeManifestCursor,
+  dedupeManifestVariants,
+  encodeManifestCursor,
+  locatorGroupKey,
+  parseManifestPageSize,
+} from '@/lib/server/tts/segments-manifest';
 import type {
   TTSSegmentLocator,
   TTSSegmentRow,
@@ -65,45 +73,17 @@ function buildSegmentAudioUrls(documentId: string, segmentId: string): {
   };
 }
 
-function statusRank(status: TTSSegmentVariant['status']): number {
-  if (status === 'completed') return 3;
-  if (status === 'pending') return 2;
-  return 1;
-}
-
-function dedupeVariants(variants: Array<{ dedupeKey: string; variant: TTSSegmentVariant }>): TTSSegmentVariant[] {
-  const byKey = new Map<string, TTSSegmentVariant>();
-  for (const { dedupeKey, variant } of variants) {
-    const existing = byKey.get(dedupeKey);
-    if (!existing) {
-      byKey.set(dedupeKey, variant);
-      continue;
-    }
-    const existingRank = statusRank(existing.status);
-    const nextRank = statusRank(variant.status);
-    const existingUpdatedAt = existing.updatedAt ?? 0;
-    const nextUpdatedAt = variant.updatedAt ?? 0;
-    if (nextRank > existingRank || (nextRank === existingRank && nextUpdatedAt >= existingUpdatedAt)) {
-      byKey.set(dedupeKey, variant);
-    }
-  }
-  return Array.from(byKey.values());
-}
-
-function locatorGroupKey(locator: TTSSegmentLocator | null): string {
-  if (!locator) return 'none';
-  const page = typeof locator.page === 'number' && Number.isFinite(locator.page)
-    ? String(Math.floor(locator.page))
-    : '';
-  const location = typeof locator.location === 'string' ? locator.location : '';
-  const readerType = locator.readerType || '';
-  return `p:${page}|l:${location}|r:${readerType}`;
+function isAbortLikeMessage(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return /abort/i.test(message);
 }
 
 export async function GET(request: NextRequest) {
   try {
     const documentIdRaw = request.nextUrl.searchParams.get('documentId');
     const documentId = documentIdRaw?.trim().toLowerCase();
+    const limit = parseManifestPageSize(request.nextUrl.searchParams.get('limit'));
+    const cursor = decodeManifestCursor(request.nextUrl.searchParams.get('cursor'));
     if (!documentId) {
       return NextResponse.json({ error: 'Missing documentId' }, { status: 400 });
     }
@@ -171,9 +151,11 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const status: TTSSegmentVariant['status'] = row.status === 'completed' || row.status === 'error'
-        ? row.status
-        : 'pending';
+      const status: TTSSegmentVariant['status'] = row.status === 'completed'
+        ? 'completed'
+        : row.status === 'error' && !isAbortLikeMessage(row.error)
+          ? 'error'
+          : 'pending';
 
       const audioUrls = row.status === 'completed' && row.audioKey
         ? buildSegmentAudioUrls(documentId, row.segmentId)
@@ -196,22 +178,40 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const segments = Array.from(grouped.values())
-      .map((segment) => ({
+    const segments = Array.from(grouped.entries())
+      .map(([groupKey, segment]) => ({
+        groupKey,
         segmentIndex: segment.segmentIndex,
         locator: segment.locator,
-        variants: dedupeVariants(segment.variants),
+        variants: dedupeManifestVariants(segment.variants),
       }))
-      .sort((a, b) => {
-        if (a.segmentIndex !== b.segmentIndex) return a.segmentIndex - b.segmentIndex;
-        const aPage = typeof a.locator?.page === 'number' ? a.locator.page : Number.MAX_SAFE_INTEGER;
-        const bPage = typeof b.locator?.page === 'number' ? b.locator.page : Number.MAX_SAFE_INTEGER;
-        if (aPage !== bPage) return aPage - bPage;
-        const aLoc = a.locator?.location || '';
-        const bLoc = b.locator?.location || '';
-        return aLoc.localeCompare(bLoc);
-      });
-    const response: TTSSegmentsManifestResponse = { documentId, segments };
+      .sort(compareManifestSegments);
+
+    let startIndex = 0;
+    if (cursor) {
+      const cursorIndex = segments.findIndex((segment) => segment.groupKey === cursor);
+      if (cursorIndex < 0) {
+        return NextResponse.json({ error: 'Invalid cursor' }, { status: 400 });
+      }
+      if (cursorIndex >= 0) startIndex = cursorIndex + 1;
+    }
+
+    const page = segments.slice(startIndex, startIndex + limit);
+    const hasMore = startIndex + page.length < segments.length;
+    const nextCursor = hasMore && page.length > 0
+      ? encodeManifestCursor(page[page.length - 1].groupKey)
+      : null;
+
+    const response: TTSSegmentsManifestResponse = {
+      documentId,
+      segments: page.map((segment) => ({
+        segmentIndex: segment.segmentIndex,
+        locator: segment.locator,
+        variants: segment.variants,
+      })),
+      nextCursor,
+      hasMore,
+    };
     return NextResponse.json(response);
   } catch (error) {
     console.error('Error listing TTS segments manifest:', error);

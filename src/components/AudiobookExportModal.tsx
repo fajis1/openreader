@@ -464,6 +464,7 @@ export function AudiobookExportModal({
         onClose={() => setIsOpen(false)}
         ariaLabel="Export audiobook"
         title="Export Audiobook"
+        subtitle="Only leaving the document cancels generation."
       >
                 {isLoadingExisting ? (
                   <div className="flex justify-center py-8">
@@ -882,9 +883,7 @@ export function AudiobookExportModal({
                         {chapters.length === 0 && !isGenerating && !isLoadingExisting && (
                           <div className="text-center">
                             <p className="text-sm text-muted">
-                            Audiobook settings are fixed after generation. Chapters will appear here as they are ready.
-                            <br></br>
-                            You can close this dialog while the audiobook is being generated. But returning to the home screen will cancel the generation.
+                              Audiobook settings are fixed after generation. Chapters will appear here as they are ready.
                             </p>
                           </div>
                         )}

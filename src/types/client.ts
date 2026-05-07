@@ -150,4 +150,6 @@ export interface TTSSegmentRow {
 export interface TTSSegmentsManifestResponse {
   documentId: string;
   segments: TTSSegmentRow[];
+  nextCursor: string | null;
+  hasMore: boolean;
 }

@@ -73,9 +73,8 @@ test.describe('PDF view modes and Navigator', () => {
     // Open document settings (page-level settings)
     await page.getByRole('button', { name: 'Open settings' }).click();
 
-    // The mode Listbox initially shows "Single Page" by default; switch to "Two Pages"
-    await page.getByRole('button', { name: /Single Page|Two Pages|Continuous Scroll/i }).click();
-    await page.getByRole('option', { name: 'Two Pages' }).click();
+    // Page mode now uses pill-style radios; switch from Single Page to Two Pages
+    await page.getByRole('radiogroup', { name: 'Page mode' }).getByRole('radio', { name: 'Two Pages' }).click();
     await page.getByRole('button', { name: 'Close' }).click();
 
     // Expect dual-page rendering (sample.pdf has >= 2 pages)
@@ -84,8 +83,7 @@ test.describe('PDF view modes and Navigator', () => {
 
     // Switch to Continuous Scroll
     await page.getByRole('button', { name: 'Open settings' }).click();
-    await page.getByRole('button', { name: /Single Page|Two Pages|Continuous Scroll/i }).click();
-    await page.getByRole('option', { name: 'Continuous Scroll' }).click();
+    await page.getByRole('radiogroup', { name: 'Page mode' }).getByRole('radio', { name: 'Continuous Scroll' }).click();
     await page.getByRole('button', { name: 'Close' }).click();
 
     // Expect continuous scroll renders at least as many pages as dual mode

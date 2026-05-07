@@ -58,6 +58,12 @@ export interface TTSSentenceAlignment {
   words: TTSSentenceWord[];
 }
 
+export type EpubRenderedLocationWalker = (
+  startCfi: string,
+  depth: number,
+  signal: AbortSignal,
+) => Promise<Array<{ location: string; text: string }>>;
+
 // Supported output formats for generated audiobooks
 export type TTSAudiobookFormat = 'mp3' | 'm4b';
 

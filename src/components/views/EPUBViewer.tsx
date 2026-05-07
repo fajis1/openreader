@@ -36,10 +36,12 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
     highlightPattern,
     clearHighlights,
     highlightWordIndex,
-    clearWordHighlights
+    clearWordHighlights,
+    walkUpcomingRenderedLocations,
   } = useEPUB();
   const {
     registerLocationChangeHandler,
+    registerEpubLocationWalker,
     pause,
     currentSentence,
     currentSentenceAlignment,
@@ -71,7 +73,12 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
   // Register the location change handler
   useEffect(() => {
     registerLocationChangeHandler(handleLocationChanged);
-  }, [registerLocationChangeHandler, handleLocationChanged]);
+    registerEpubLocationWalker(walkUpcomingRenderedLocations);
+    return () => {
+      registerLocationChangeHandler(null);
+      registerEpubLocationWalker(null);
+    };
+  }, [registerLocationChangeHandler, registerEpubLocationWalker, handleLocationChanged, walkUpcomingRenderedLocations]);
 
   // Handle highlighting
   useEffect(() => {
@@ -132,7 +139,7 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
           </button>
           <button
             type="button"
-            onClick={() => renditionRef.current?.prev()}
+            onClick={() => handleLocationChanged('prev')}
             className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out transform hover:scale-[1.09] hover:text-accent"
             aria-label="Previous section"
           >
@@ -146,7 +153,7 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
         )}
         <button
           type="button"
-          onClick={() => renditionRef.current?.next()}
+          onClick={() => handleLocationChanged('next')}
           className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out transform hover:scale-[1.09] hover:text-accent"
           aria-label="Next section"
         >

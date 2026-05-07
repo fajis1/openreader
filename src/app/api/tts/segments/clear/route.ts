@@ -48,12 +48,16 @@ export async function POST(request: NextRequest) {
     const audioKeys = rows
       .map((row) => row.audioKey)
       .filter((key): key is string => Boolean(key));
+    const uniqueAudioKeys = Array.from(new Set(audioKeys));
 
     let deletedAudioObjects = 0;
     let warning: string | undefined;
-    if (audioKeys.length > 0) {
+    if (uniqueAudioKeys.length > 0) {
       try {
-        deletedAudioObjects = await deleteTtsSegmentAudioObjects(audioKeys);
+        deletedAudioObjects = await deleteTtsSegmentAudioObjects(uniqueAudioKeys);
+        if (deletedAudioObjects < uniqueAudioKeys.length) {
+          warning = `Deleted ${deletedAudioObjects} of ${uniqueAudioKeys.length} audio objects.`;
+        }
       } catch (error) {
         warning = error instanceof Error ? error.message : 'Failed deleting some audio objects';
         console.warn('Failed clearing some TTS segment audio objects:', {
@@ -67,6 +71,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       documentId: parsed.documentId,
       deletedSegments: rows.length,
+      requestedAudioObjects: uniqueAudioKeys.length,
       deletedAudioObjects,
       ...(warning ? { warning } : {}),
     });
