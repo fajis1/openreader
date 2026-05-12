@@ -46,13 +46,13 @@ import {
 import {
   buildWalkerPlanningSourceUnits,
   selectUpcomingWalkerItems,
-} from '@/lib/shared/tts-epub-preload';
+} from '@/lib/client/epub/tts-epub-preload';
 import {
   completedEpubBoundarySegment,
   resolveEpubBoundaryHandoffStartIndex,
   resolveEpubReplaySuppressionAction,
   type CompletedEpubBoundarySegment,
-} from '@/lib/shared/tts-epub-handoff';
+} from '@/lib/client/epub/tts-epub-handoff';
 import { normalizeTtsLocationKey } from '@/lib/shared/tts-locator';
 import { isKokoroModel } from '@/lib/shared/kokoro';
 import { supportsNativeModelSpeed, supportsTtsInstructions } from '@/lib/shared/tts-provider-catalog';
@@ -2921,7 +2921,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     skipBackward,
   });
 
-  // Load last location on mount for both EPUB and PDF.
+  // Load last location on mount for EPUB/PDF/HTML.
   // Prefer server-backed progress when available, then fall back to local Dexie.
   useEffect(() => {
     if (!id) return;
@@ -2937,14 +2937,35 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       }
 
       if (!isEPUB) {
-        // For PDF documents, parse the location as "page:sentence"
+        // HTML stores "html:<location>:<sentenceIndex>".
+        // PDF stores "<page>:<sentenceIndex>".
         try {
+          if (currentReaderType === 'html') {
+            const htmlMatch = /^html:([^:]+):(\d+)$/.exec(lastLocation);
+            if (htmlMatch) {
+              const [, rawLocation, sentenceIndexStr] = htmlMatch;
+              const decodedLocation = decodeURIComponent(rawLocation);
+              const parsedNumber = Number(decodedLocation);
+              const location: TTSLocation = Number.isFinite(parsedNumber) && decodedLocation.trim() !== ''
+                ? parsedNumber
+                : decodedLocation || 1;
+              const sentenceIndex = parseInt(sentenceIndexStr, 10);
+              if (!isNaN(sentenceIndex)) {
+                setCurrDocPage(location);
+                pendingJumpTargetRef.current = {
+                  locationKey: normalizeLocationKey(location),
+                  index: Math.max(0, sentenceIndex),
+                };
+                return;
+              }
+            }
+          }
+
+          // Backward-compatible parser for legacy non-EPUB progress format.
           const [pageStr, sentenceIndexStr] = lastLocation.split(':');
           const page = parseInt(pageStr, 10);
           const sentenceIndex = parseInt(sentenceIndexStr, 10);
-
           if (!isNaN(page) && !isNaN(sentenceIndex)) {
-            // Skip to the page first, then the sentence index will be restored when setText is called
             setCurrDocPage(page);
             pendingJumpTargetRef.current = {
               locationKey: normalizeLocationKey(page),
@@ -2952,7 +2973,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
             };
           }
         } catch (error) {
-          console.warn('Error parsing PDF location:', error);
+          console.warn('Error parsing non-EPUB location:', error);
         }
       }
     };
@@ -2990,13 +3011,15 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     };
   }, [id, isEPUB, currentReaderType, authEnabled]);
 
-  // Save current position periodically for PDFs
+  // Save current position periodically for non-EPUB readers.
   useEffect(() => {
     if (id && !isEPUB && sentences.length > 0) {
-      const location = `${currDocPageNumber}:${currentIndex}`;
+      const location = currentReaderType === 'html'
+        ? `html:${encodeURIComponent(String(currDocPage || 1))}:${currentIndex}`
+        : `${currDocPageNumber}:${currentIndex}`;
       const timeoutId = setTimeout(() => {
         setLastDocumentLocation(id as string, location).catch(error => {
-          console.warn('Error saving PDF location:', error);
+          console.warn('Error saving non-EPUB location:', error);
         });
         if (authEnabled) {
           scheduleDocumentProgressSync({

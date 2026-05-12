@@ -422,7 +422,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
     // canonical resolution hasn't completed yet and for PDF/HTML, which don't
     // have a spine concept.
     const inferredCurrentLocator: TTSSegmentLocator | null = (() => {
-      if (typeof currDocPage === 'string' && currDocPage.length > 0) {
+      if (activeReaderType === 'epub' && typeof currDocPage === 'string' && currDocPage.length > 0) {
         const book = bookRef.current;
         const spine = book && book.isOpen ? resolveSpineFromCfi(book, currDocPage) : null;
         if (spine) {
@@ -433,6 +433,15 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
             charOffset: 0,
             cfi: currDocPage,
           };
+        }
+        return null;
+      }
+      if (activeReaderType === 'html') {
+        if (typeof currDocPage === 'string' && currDocPage.length > 0) {
+          return { readerType: 'html', location: currDocPage };
+        }
+        if (typeof currDocPageNumber === 'number' && Number.isFinite(currDocPageNumber)) {
+          return { readerType: 'html', location: String(Math.floor(currDocPageNumber)) };
         }
         return null;
       }

@@ -34,7 +34,7 @@ import {
   buildWordHighlightCacheKey,
   tokenizeCanonicalSegment,
   type EpubCanonicalWordToken,
-} from '@/lib/shared/epub-word-highlight';
+} from '@/lib/client/epub/epub-word-highlight';
 import { useParams } from 'next/navigation';
 import { useConfig } from './ConfigContext';
 import type {
