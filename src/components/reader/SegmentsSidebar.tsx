@@ -1,7 +1,8 @@
 'use client';
 
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverButton, PopoverPanel, Transition } from '@headlessui/react';
+import type { Book } from 'epubjs';
 import toast from 'react-hot-toast';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -9,7 +10,6 @@ import { RefreshIcon, InfoIcon } from '@/components/icons/Icons';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { compareSegmentLocators, locatorGroupKey, locatorIdentityKey } from '@/lib/shared/tts-locator';
 import { buildSegmentKey, buildSegmentKeyPrefix } from '@/lib/shared/tts-segment-plan';
-import { useEPUB } from '@/contexts/EPUBContext';
 import {
   canonicalizeEpubSegmentsAgainstSpineText,
   type CanonicalizedEpubSegment,
@@ -36,6 +36,7 @@ interface SegmentsSidebarProps {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
   documentId: string;
+  epubBookRef?: RefObject<Book | null>;
 }
 
 type FetchState =
@@ -172,7 +173,7 @@ function isElementFullyVisibleWithinContainer(element: HTMLElement, container: H
   return elRect.top >= containerRect.top && elRect.bottom <= containerRect.bottom;
 }
 
-export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSidebarProps) {
+export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: SegmentsSidebarProps) {
   const {
     sentences,
     currentSentenceIndex,
@@ -192,7 +193,6 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
     ttsSegmentMaxBlockLength,
     updateConfigKey,
   } = useConfig();
-  const { bookRef } = useEPUB();
 
   /**
    * Canonicalized per-sentence identities for the currently rendered page.
@@ -206,7 +206,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
       setSynthRowCanonical([]);
       return;
     }
-    const book = bookRef.current;
+    const book = epubBookRef?.current;
     if (!book?.isOpen) {
       setSynthRowCanonical([]);
       return;
@@ -234,7 +234,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
       if (!cancelled) setSynthRowCanonical(next);
     })();
     return () => { cancelled = true; };
-  }, [bookRef, currDocPage, sentences, documentId, activeReaderType, ttsSegmentMaxBlockLength]);
+  }, [epubBookRef, currDocPage, sentences, documentId, activeReaderType, ttsSegmentMaxBlockLength]);
 
   const [state, setState] = useState<FetchState>({ kind: 'idle' });
   const [isClearing, setIsClearing] = useState(false);
@@ -427,7 +427,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
     // have a spine concept.
     const inferredCurrentLocator: TTSSegmentLocator | null = (() => {
       if (activeReaderType === 'epub' && typeof currDocPage === 'string' && currDocPage.length > 0) {
-        const book = bookRef.current;
+        const book = epubBookRef?.current;
         const spine = book && book.isOpen ? resolveSpineFromCfi(book, currDocPage) : null;
         if (spine) {
           return {
@@ -545,7 +545,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId }: SegmentsSideb
     });
 
     return entries;
-  }, [state, currDocPage, currDocPageNumber, sentences, bookRef, documentId, activeReaderType, synthRowCanonical]);
+  }, [state, currDocPage, currDocPageNumber, sentences, epubBookRef, documentId, activeReaderType, synthRowCanonical]);
 
   const totalVariants = state.kind === 'ready'
     ? rowsToRender.reduce((sum, r) => sum + r.row.variants.length, 0)

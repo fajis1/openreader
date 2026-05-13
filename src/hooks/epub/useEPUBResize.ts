@@ -1,15 +1,36 @@
-import { useEffect, RefObject, useState } from 'react';
+import { useEffect, RefObject, useRef, useState } from 'react';
 import { debounce } from '@/lib/client/pdf';
 
 export function useEPUBResize(containerRef: RefObject<HTMLDivElement | null>) {
   const [isResizing, setIsResizing] = useState(false);
   const [dimensions, setDimensions] = useState<DOMRectReadOnly | null>(null);
+  const hasBaselineRectRef = useRef(false);
+  const lastRectRef = useRef<{ width: number; height: number } | null>(null);
   
-  useEffect(() => {    
+  useEffect(() => {
     const debouncedResize = debounce((...args: unknown[]) => {
       const entries = args[0] as ResizeObserverEntry[];
-      console.log('Debounced resize', entries[0].contentRect);
-      setDimensions(entries[0].contentRect);
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+
+      const nextWidth = Math.round(rect.width);
+      const nextHeight = Math.round(rect.height);
+      const prev = lastRectRef.current;
+      lastRectRef.current = { width: nextWidth, height: nextHeight };
+
+      // First callback after observer attach reflects initial layout, not a user
+      // resize. Treat it as baseline to avoid pausing TTS on page load.
+      if (!hasBaselineRectRef.current) {
+        hasBaselineRectRef.current = true;
+        setDimensions(rect);
+        return;
+      }
+
+      if (prev && prev.width === nextWidth && prev.height === nextHeight) {
+        return;
+      }
+
+      setDimensions(rect);
       setIsResizing((prev) => {
         if (!prev) return true;
         return prev;
@@ -17,9 +38,6 @@ export function useEPUBResize(containerRef: RefObject<HTMLDivElement | null>) {
     }, 150);
 
     const resizeObserver = new ResizeObserver((entries) => {
-      // if (!isResizing) {
-      //   setIsResizing(true);
-      // }
       debouncedResize(entries);
     });
 
@@ -28,7 +46,6 @@ export function useEPUBResize(containerRef: RefObject<HTMLDivElement | null>) {
         if (mutation.addedNodes.length) {
           const container = containerRef.current?.querySelector('.epub-container');
           if (container) {
-            console.log('Observer attached to epub-container');
             resizeObserver.observe(container);
             mutationObserver.disconnect();
             break;
@@ -45,7 +62,6 @@ export function useEPUBResize(containerRef: RefObject<HTMLDivElement | null>) {
 
       const container = containerRef.current.querySelector('.epub-container');
       if (container) {
-        console.log('Container already exists, attaching observer');
         resizeObserver.observe(container);
         mutationObserver.disconnect();
       }

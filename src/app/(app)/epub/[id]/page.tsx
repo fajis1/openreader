@@ -25,7 +25,7 @@ export default function EPUBPage() {
   const canExportAudiobook = useFeatureFlag('enableAudiobookExport');
   const { id } = useParams();
   const router = useRouter();
-  const { setCurrentDocument, currDocName, clearCurrDoc, createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
+  const { setCurrentDocument, currDocName, clearCurrDoc, createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter, bookRef } = useEPUB();
   const { stop } = useTTS();
   const { isAtLimit } = useAuthRateLimit();
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +36,7 @@ export default function EPUBPage() {
   const [maxPadPx, setMaxPadPx] = useState<number>(0);
   const inFlightDocIdRef = useRef<string | null>(null);
   const loadedDocIdRef = useRef<string | null>(null);
+  const didInitPadPctRef = useRef(false);
 
   useEffect(() => {
     setIsLoading(true);
@@ -118,7 +119,13 @@ export default function EPUBPage() {
 
   // Nudge EPUB renderer to reflow on horizontal padding changes
   useEffect(() => {
-    // Some EPUB renderers listen to window resize; emit a synthetic event
+    // Some EPUB renderers listen to window resize; emit a synthetic event only
+    // for user-driven pad changes. Skipping initial mount avoids startup races
+    // that can interrupt first-play TTS requests in tests/browsers like Firefox.
+    if (!didInitPadPctRef.current) {
+      didInitPadPctRef.current = true;
+      return;
+    }
     window.dispatchEvent(new Event('resize'));
   }, [padPct]);
 
@@ -235,6 +242,7 @@ export default function EPUBPage() {
         isOpen={activeSidebar === 'segments'}
         setIsOpen={(isOpen) => setActiveSidebar((prev) => isOpen ? 'segments' : (prev === 'segments' ? null : prev))}
         documentId={id as string}
+        epubBookRef={bookRef}
       />
     </>
   );
