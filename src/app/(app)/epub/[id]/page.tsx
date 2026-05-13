@@ -3,7 +3,6 @@
 import { useParams, useRouter } from "next/navigation";
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useEPUB } from '@/contexts/EPUBContext';
 import { DocumentSkeleton } from '@/components/documents/DocumentSkeleton';
 import { EPUBViewer } from '@/components/views/EPUBViewer';
 import { DocumentSettings } from '@/components/documents/DocumentSettings';
@@ -20,12 +19,21 @@ import { resolveDocumentId } from '@/lib/client/dexie';
 import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
+import { useEPUB } from './useEpubDocument';
 
 export default function EPUBPage() {
   const canExportAudiobook = useFeatureFlag('enableAudiobookExport');
   const { id } = useParams();
   const router = useRouter();
-  const { setCurrentDocument, currDocName, clearCurrDoc, createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter, bookRef } = useEPUB();
+  const epubState = useEPUB();
+  const {
+    setCurrentDocument,
+    currDocName,
+    clearCurrDoc,
+    createFullAudioBook: createEPUBAudioBook,
+    regenerateChapter: regenerateEPUBChapter,
+    bookRef,
+  } = epubState;
   const { stop } = useTTS();
   const { isAtLimit } = useAuthRateLimit();
   const [error, setError] = useState<string | null>(null);
@@ -209,7 +217,7 @@ export default function EPUBPage() {
           </div>
         ) : (
           <div className="h-full w-full" style={{ paddingLeft: `${Math.round(maxPadPx * ((100 - padPct) / 100))}px`, paddingRight: `${Math.round(maxPadPx * ((100 - padPct) / 100))}px` }}>
-            <EPUBViewer className="h-full" />
+            <EPUBViewer className="h-full" epubState={epubState} />
           </div>
         )}
       </div>

@@ -1,10 +1,7 @@
 'use client';
 
 import {
-  createContext,
-  useContext,
   useState,
-  ReactNode,
   useCallback,
   useMemo,
   useRef,
@@ -36,7 +33,7 @@ import {
   type EpubCanonicalWordToken,
 } from '@/lib/client/epub/epub-word-highlight';
 import { useParams } from 'next/navigation';
-import { useConfig } from './ConfigContext';
+import { useConfig } from '@/contexts/ConfigContext';
 import type {
   EpubRenderedLocationWalker,
   TTSSentenceAlignment,
@@ -47,7 +44,7 @@ import type { AudiobookGenerationSettings, TTSSegmentLocator } from '@/types/cli
 import { isStableEpubLocator } from '@/types/client';
 import type { CanonicalTtsSegment } from '@/lib/shared/tts-segment-plan';
 
-interface EPUBContextType {
+export interface EPUBState {
   currDocData: ArrayBuffer | undefined;
   currDocName: string | undefined;
   currDocPages: number | undefined;
@@ -89,8 +86,6 @@ interface EPUBContextType {
   ) => void;
   clearWordHighlights: () => void;
 }
-
-const EPUBContext = createContext<EPUBContextType | undefined>(undefined);
 
 const EPUB_CONTINUATION_CHARS = 5000;
 
@@ -526,12 +521,9 @@ const resolveVisibleSegmentRange = (
 
 
 /**
- * Provider component for EPUB functionality
- * Manages the state and operations for EPUB document handling
- * @param {Object} props - Component props
- * @param {ReactNode} props.children - Child components to be wrapped by the provider
+ * Route-local EPUB reader hook.
  */
-export function EPUBProvider({ children }: { children: ReactNode }) {
+export function useEPUB(): EPUBState {
   const { setText: setTTSText, currDocPage, currDocPages, setCurrDocPages, stop, skipToLocation, setIsEPUB } = useTTS();
   const { authEnabled } = useAuthConfig();
   const { id } = useParams();
@@ -1141,8 +1133,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
 
 
 
-  // Context value memoization
-  const contextValue = useMemo(
+  return useMemo(
     () => ({
       setCurrentDocument,
       currDocData,
@@ -1190,23 +1181,4 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       clearWordHighlights,
     ]
   );
-
-  return (
-    <EPUBContext.Provider value={contextValue}>
-      {children}
-    </EPUBContext.Provider>
-  );
-}
-
-/**
- * Custom hook to consume the EPUB context
- * @returns {EPUBContextType} The EPUB context value
- * @throws {Error} When used outside of EPUBProvider
- */
-export function useEPUB() {
-  const context = useContext(EPUBContext);
-  if (context === undefined) {
-    throw new Error('useEPUB must be used within an EPUBProvider');
-  }
-  return context;
 }

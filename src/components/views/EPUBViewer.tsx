@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useEPUB } from '@/contexts/EPUBContext';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { DocumentSkeleton } from '@/components/documents/DocumentSkeleton';
 import { useEPUBTheme, getThemeStyles } from '@/hooks/epub/useEPUBTheme';
 import { useEPUBResize } from '@/hooks/epub/useEPUBResize';
 import { DotsVerticalIcon, ChevronLeftIcon, ChevronRightIcon } from '@/components/icons/Icons';
+import type { EPUBState } from '@/app/(app)/epub/[id]/useEpubDocument';
 
 const ReactReader = dynamic(() => import('react-reader').then(mod => mod.ReactReader), {
   ssr: false,
@@ -17,9 +17,29 @@ const ReactReader = dynamic(() => import('react-reader').then(mod => mod.ReactRe
 
 interface EPUBViewerProps {
   className?: string;
+  epubState: Pick<
+    EPUBState,
+    | 'currDocData'
+    | 'currDocName'
+    | 'currDocPage'
+    | 'currDocPages'
+    | 'locationRef'
+    | 'handleLocationChanged'
+    | 'bookRef'
+    | 'renditionRef'
+    | 'tocRef'
+    | 'setRendition'
+    | 'extractPageText'
+    | 'highlightSegment'
+    | 'clearHighlights'
+    | 'highlightWordIndex'
+    | 'clearWordHighlights'
+    | 'walkUpcomingRenderedLocations'
+    | 'resolveEpubLocator'
+  >;
 }
 
-export function EPUBViewer({ className = '' }: EPUBViewerProps) {
+export function EPUBViewer({ className = '', epubState }: EPUBViewerProps) {
   const [isTocOpen, setIsTocOpen] = useState(false);
   const {
     currDocData,
@@ -39,7 +59,7 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
     clearWordHighlights,
     walkUpcomingRenderedLocations,
     resolveEpubLocator,
-  } = useEPUB();
+  } = epubState;
   const {
     registerLocationChangeHandler,
     registerEpubLocationWalker,
