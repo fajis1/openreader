@@ -2,6 +2,7 @@
 
 import { Fragment, type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverButton, PopoverPanel, Transition } from '@headlessui/react';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Book } from 'epubjs';
 import toast from 'react-hot-toast';
 import { useTTS } from '@/contexts/TTSContext';
@@ -39,19 +40,16 @@ interface SegmentsSidebarProps {
   epubBookRef?: RefObject<Book | null>;
 }
 
-type FetchState =
-  | { kind: 'idle' }
-  | { kind: 'loading' }
-  | {
-    kind: 'ready';
-    data: TTSSegmentRow[];
-    nextCursor: string | null;
-    hasMore: boolean;
-    loadingMore: boolean;
-  }
-  | { kind: 'error'; message: string };
-
 const MANIFEST_PAGE_SIZE = 150;
+const SEGMENTS_MANIFEST_QUERY_KEY = 'tts-segments-manifest';
+
+type ClearSegmentsPayload = {
+  error?: string;
+  deletedSegments?: number;
+  requestedAudioObjects?: number;
+  deletedAudioObjects?: number;
+  warning?: string;
+};
 
 function formatDuration(ms: number | null | undefined): string {
   if (!ms || !Number.isFinite(ms) || ms <= 0) return '—';
@@ -174,6 +172,7 @@ function isElementFullyVisibleWithinContainer(element: HTMLElement, container: H
 }
 
 export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: SegmentsSidebarProps) {
+  const queryClient = useQueryClient();
   const {
     sentences,
     currentSentenceIndex,
@@ -236,11 +235,102 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     return () => { cancelled = true; };
   }, [epubBookRef, currDocPage, sentences, documentId, activeReaderType, ttsSegmentMaxBlockLength]);
 
-  const [state, setState] = useState<FetchState>({ kind: 'idle' });
-  const [isClearing, setIsClearing] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const didAutoScrollOnOpenRef = useRef(false);
+  const segmentsQueryKey = useMemo(
+    () => [SEGMENTS_MANIFEST_QUERY_KEY, documentId] as const,
+    [documentId],
+  );
+
+  const segmentsQuery = useInfiniteQuery({
+    queryKey: segmentsQueryKey,
+    enabled: isOpen && !!documentId,
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam, signal }) => {
+      if (!documentId) {
+        return {
+          documentId: '',
+          segments: [],
+          hasMore: false,
+          nextCursor: null,
+        } satisfies TTSSegmentsManifestResponse;
+      }
+      const cursor = typeof pageParam === 'string' && pageParam.length > 0 ? pageParam : null;
+      const params = new URLSearchParams({
+        documentId,
+        limit: String(MANIFEST_PAGE_SIZE),
+      });
+      if (cursor) params.set('cursor', cursor);
+      const res = await fetch(`/api/tts/segments/manifest?${params.toString()}`, {
+        signal,
+        cache: 'no-store',
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        // If a stale cursor becomes invalid between page fetches, stop
+        // pagination for this query instead of surfacing a hard error.
+        if (cursor && body.toLowerCase().includes('invalid cursor')) {
+          return {
+            documentId,
+            segments: [],
+            hasMore: false,
+            nextCursor: null,
+          } satisfies TTSSegmentsManifestResponse;
+        }
+        throw new Error(body || `Request failed (${res.status})`);
+      }
+      return (await res.json()) as TTSSegmentsManifestResponse;
+    },
+    getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.nextCursor : undefined),
+  });
+  const {
+    data: manifestData,
+    isPending: isManifestPending,
+    isError: hasManifestError,
+    error: manifestError,
+    hasNextPage: hasMoreManifestPages,
+    isFetchingNextPage: isLoadingMoreManifest,
+    fetchNextPage,
+    refetch: refetchManifest,
+  } = segmentsQuery;
+
+  const manifestRows = useMemo(() => {
+    const pages = manifestData?.pages ?? [];
+    if (pages.length === 0) return [] as TTSSegmentRow[];
+    return pages.reduce<TTSSegmentRow[]>((acc, page) => mergeRows(acc, page.segments), []);
+  }, [manifestData]);
+
+  const clearSegmentsMutation = useMutation({
+    mutationFn: async (): Promise<ClearSegmentsPayload | null> => {
+      if (!documentId) throw new Error('Missing document id');
+      const res = await fetch('/api/tts/segments/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId }),
+      });
+      const payload = (await res.json().catch(() => null)) as ClearSegmentsPayload | null;
+      if (!res.ok) {
+        throw new Error(payload?.error || `Request failed (${res.status})`);
+      }
+      return payload;
+    },
+    onSuccess: async (payload) => {
+      if (payload?.warning) {
+        toast.error(`Segments cleared, but audio cleanup was partial: ${payload.warning}`);
+      } else if (payload) {
+        const deletedSegments = Number(payload.deletedSegments ?? 0);
+        const deletedAudioObjects = Number(payload.deletedAudioObjects ?? 0);
+        const requestedAudioObjects = Number(payload.requestedAudioObjects ?? deletedAudioObjects);
+        toast.success(`Cleared ${deletedSegments} segments and ${deletedAudioObjects}/${requestedAudioObjects} audio objects.`);
+      }
+      await queryClient.invalidateQueries({ queryKey: segmentsQueryKey });
+      await queryClient.refetchQueries({ queryKey: segmentsQueryKey, type: 'active' });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Failed to clear segments cache');
+    },
+  });
+  const { mutateAsync: clearSegments, isPending: isClearingSegments } = clearSegmentsMutation;
 
   const activeSettings = useMemo<TTSSegmentSettings>(() => ({
     providerRef,
@@ -251,116 +341,12 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     ttsInstructions: ttsInstructions || '',
   }), [providerRef, providerType, ttsModel, voice, voiceSpeed, ttsInstructions]);
 
-  const loadManifest = useCallback(async (
-    mode: 'reset' | 'append' = 'reset',
-    cursorOverride: string | null = null,
-  ) => {
-    if (!documentId) return;
-    const cursor = mode === 'append' ? cursorOverride : null;
-    if (mode === 'append' && !cursor) return;
-
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    if (mode === 'reset') {
-      setState({ kind: 'loading' });
-    } else {
-      setState((prev) => {
-        if (prev.kind !== 'ready') return prev;
-        return { ...prev, loadingMore: true };
-      });
-    }
-    try {
-      const params = new URLSearchParams({
-        documentId,
-        limit: String(MANIFEST_PAGE_SIZE),
-      });
-      if (cursor) params.set('cursor', cursor);
-      const res = await fetch(
-        `/api/tts/segments/manifest?${params.toString()}`,
-        { signal: controller.signal, cache: 'no-store' },
-      );
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(body || `Request failed (${res.status})`);
-      }
-      const data = (await res.json()) as TTSSegmentsManifestResponse;
-      setState((prev) => {
-        const merged = mode === 'append' && prev.kind === 'ready'
-          ? mergeRows(prev.data, data.segments)
-          : mergeRows([], data.segments);
-        return {
-          kind: 'ready',
-          data: merged,
-          nextCursor: data.nextCursor,
-          hasMore: data.hasMore,
-          loadingMore: false,
-        };
-      });
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      if (mode === 'append' && err instanceof Error && err.message.includes('Invalid cursor')) {
-        setState((prev) => {
-          if (prev.kind !== 'ready') return prev;
-          return {
-            ...prev,
-            loadingMore: false,
-            hasMore: false,
-            nextCursor: null,
-          };
-        });
-        return;
-      }
-      setState({ kind: 'error', message: err instanceof Error ? err.message : 'Failed to load' });
-    }
-  }, [documentId]);
-
   const handleClearCache = useCallback(async () => {
-    if (!documentId || isClearing) return;
+    if (!documentId || isClearingSegments) return;
     const confirmed = window.confirm('Clear cached segments for this document version? This removes stored segment metadata and audio objects.');
     if (!confirmed) return;
-
-    setIsClearing(true);
-    try {
-      const res = await fetch('/api/tts/segments/clear', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId }),
-      });
-      const payload = (await res.json().catch(() => null)) as {
-        error?: string;
-        deletedSegments?: number;
-        requestedAudioObjects?: number;
-        deletedAudioObjects?: number;
-        warning?: string;
-      } | null;
-      if (!res.ok) {
-        throw new Error(payload?.error || `Request failed (${res.status})`);
-      }
-
-      if (payload?.warning) {
-        toast.error(`Segments cleared, but audio cleanup was partial: ${payload.warning}`);
-      } else if (payload) {
-        const deletedSegments = Number(payload.deletedSegments ?? 0);
-        const deletedAudioObjects = Number(payload.deletedAudioObjects ?? 0);
-        const requestedAudioObjects = Number(payload.requestedAudioObjects ?? deletedAudioObjects);
-        toast.success(`Cleared ${deletedSegments} segments and ${deletedAudioObjects}/${requestedAudioObjects} audio objects.`);
-      }
-      await loadManifest('reset');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to clear segments cache');
-    } finally {
-      setIsClearing(false);
-    }
-  }, [documentId, isClearing, loadManifest]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    void loadManifest('reset');
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, [isOpen, loadManifest]);
+    await clearSegments();
+  }, [documentId, isClearingSegments, clearSegments]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -368,18 +354,15 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     if (!node) return;
 
     const onScroll = () => {
-      setState((prev) => {
-        if (prev.kind !== 'ready' || !prev.hasMore || prev.loadingMore) return prev;
-        const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
-        if (distance > 280) return prev;
-        void loadManifest('append', prev.nextCursor);
-        return { ...prev, loadingMore: true };
-      });
+      if (!hasMoreManifestPages || isLoadingMoreManifest) return;
+      const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+      if (distance > 280) return;
+      void fetchNextPage();
     };
 
     node.addEventListener('scroll', onScroll);
     return () => node.removeEventListener('scroll', onScroll);
-  }, [isOpen, loadManifest]);
+  }, [isOpen, hasMoreManifestPages, isLoadingMoreManifest, fetchNextPage]);
 
   const handleSelectVariant = useCallback(async (settings: TTSSegmentSettings | null) => {
     if (!settings) return;
@@ -395,8 +378,9 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
 
   const handleRefresh = useCallback(() => {
     didAutoScrollOnOpenRef.current = false;
-    void loadManifest('reset');
-  }, [loadManifest]);
+    void queryClient.invalidateQueries({ queryKey: segmentsQueryKey });
+    void refetchManifest();
+  }, [queryClient, segmentsQueryKey, refetchManifest]);
 
   const handleJump = useCallback((index: number, locator: TTSSegmentLocator | null) => {
     playFromSegment(index, locator);
@@ -420,7 +404,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
        */
       isSynthesized: boolean;
     };
-    if (state.kind !== 'ready') return [] as Entry[];
+    if (!manifestData) return [] as Entry[];
 
     // Fallback locator for the live viewport. Used when per-sentence
     // canonical resolution hasn't completed yet and for PDF/HTML, which don't
@@ -460,7 +444,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     // collapses the visible duplicates (same content showing up twice — once
     // as a synth row with sentence text, once as a manifest row with audio).
     const manifestBySegmentKey = new Map<string, TTSSegmentRow>();
-    for (const row of state.data) {
+    for (const row of manifestRows) {
       if (row.segmentKey) manifestBySegmentKey.set(row.segmentKey, row);
     }
 
@@ -521,7 +505,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     // screen) render as their own listings. They keep their original locator
     // and group, so they sort into their chapter bucket at their real
     // `charOffset` position.
-    for (const row of state.data) {
+    for (const row of manifestRows) {
       if (row.segmentKey && claimedManifestKeys.has(row.segmentKey)) continue;
       entries.push({
         segmentIndex: row.segmentIndex,
@@ -545,11 +529,13 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     });
 
     return entries;
-  }, [state, currDocPage, currDocPageNumber, sentences, epubBookRef, documentId, activeReaderType, synthRowCanonical]);
+  }, [manifestData, manifestRows, currDocPage, currDocPageNumber, sentences, epubBookRef, documentId, activeReaderType, synthRowCanonical]);
 
-  const totalVariants = state.kind === 'ready'
-    ? rowsToRender.reduce((sum, r) => sum + r.row.variants.length, 0)
-    : 0;
+  const totalVariants = rowsToRender.reduce((sum, r) => sum + r.row.variants.length, 0);
+
+  const hasLoadedManifest = !!manifestData;
+  const isManifestLoading = isManifestPending && !manifestData;
+  const manifestErrorMessage = manifestError instanceof Error ? manifestError.message : 'Failed to load';
 
   useEffect(() => {
     if (!isOpen) {
@@ -557,7 +543,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
       return;
     }
     if (didAutoScrollOnOpenRef.current) return;
-    if (state.kind !== 'ready' || rowsToRender.length === 0) return;
+    if (!hasLoadedManifest || rowsToRender.length === 0) return;
 
     const container = listRef.current;
     if (!container) return;
@@ -568,11 +554,11 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
       activeRow.scrollIntoView({ block: 'center', behavior: 'auto' });
       didAutoScrollOnOpenRef.current = true;
     });
-  }, [isOpen, state.kind, rowsToRender.length, currentSentenceIndex]);
+  }, [isOpen, hasLoadedManifest, rowsToRender.length, currentSentenceIndex]);
 
   useEffect(() => {
     if (!isOpen || !isPlaying) return;
-    if (state.kind !== 'ready' || rowsToRender.length === 0) return;
+    if (!hasLoadedManifest || rowsToRender.length === 0) return;
 
     const root = listRef.current;
     if (!root) return;
@@ -589,7 +575,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
   }, [
     isOpen,
     isPlaying,
-    state.kind,
+    hasLoadedManifest,
     rowsToRender.length,
     currentSentenceIndex,
     currDocPage,
@@ -603,10 +589,10 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
         onClick={() => void handleClearCache()}
         aria-label="Clear segments cache"
         title="Clear cache for listed segments"
-        disabled={isClearing}
+        disabled={isClearingSegments}
         className="inline-flex items-center justify-center h-8 px-2 rounded-lg border border-offbase bg-base text-xs text-muted hover:bg-offbase hover:text-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {isClearing ? 'Clearing…' : 'Clear'}
+        {isClearingSegments ? 'Clearing…' : 'Clear'}
       </button>
       <button
         type="button"
@@ -632,21 +618,21 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     >
       <div className="px-4 py-2 border-b border-offbase">
         <div className="text-xs text-muted">
-          {state.kind === 'ready' ? (
+          {hasLoadedManifest ? (
             <>
               {rowsToRender.length} indexed
               <span> · </span>
               {totalVariants} variants
-              {state.hasMore ? (
+              {hasMoreManifestPages ? (
                 <>
                   <span> · </span>
                   more…
                 </>
               ) : null}
             </>
-          ) : state.kind === 'loading' ? (
+          ) : isManifestLoading ? (
             <span>Loading…</span>
-          ) : state.kind === 'error' ? (
+          ) : hasManifestError ? (
             <span className="text-red-500">error</span>
           ) : (
             <span>—</span>
@@ -655,13 +641,13 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
       </div>
 
       <div ref={listRef} className="flex-1 overflow-y-auto">
-              {state.kind === 'error' && (
-                <div className="px-4 py-6 text-sm text-red-500">{state.message}</div>
+              {hasManifestError && (
+                <div className="px-4 py-6 text-sm text-red-500">{manifestErrorMessage}</div>
               )}
-              {state.kind === 'loading' && (
+              {isManifestLoading && (
                 <div className="px-4 py-6 text-sm text-muted">Loading segments…</div>
               )}
-              {state.kind === 'ready' && rowsToRender.length === 0 && (
+              {hasLoadedManifest && rowsToRender.length === 0 && (
                 <div className="px-4 py-10 flex flex-col items-center text-center gap-2">
                   <div className="text-sm font-medium text-muted">
                     No segments
@@ -671,7 +657,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
                   </p>
                 </div>
               )}
-              {state.kind === 'ready' && rowsToRender.length > 0 && (
+              {hasLoadedManifest && rowsToRender.length > 0 && (
                 <ul className="divide-y divide-offbase">
                   {rowsToRender.map(({ segmentIndex, sentenceText, row, isCurrentLocation, groupKey, groupLabel, isSynthesized }, rowIndex) => {
                     const previousGroupKey = rowIndex > 0 ? rowsToRender[rowIndex - 1]?.groupKey : null;
@@ -800,7 +786,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
                   })}
                 </ul>
               )}
-              {state.kind === 'ready' && state.loadingMore && (
+              {hasLoadedManifest && isLoadingMoreManifest && (
                 <div className="px-4 py-3 text-xs text-muted">Loading more segments…</div>
               )}
       </div>

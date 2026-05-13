@@ -14,6 +14,7 @@ import {
   Button,
   Input,
 } from '@headlessui/react';
+import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -110,8 +111,17 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
 ];
 
 type AdminSubTab = 'providers' | 'features';
+const LIBRARY_DOCUMENTS_QUERY_KEY = ['documents-library', 10000] as const;
+
+async function fetchLibraryDocuments(): Promise<BaseDocument[]> {
+  const res = await fetch('/api/documents/library?limit=10000');
+  if (!res.ok) throw new Error('Failed to list library documents');
+  const data = (await res.json()) as { documents?: BaseDocument[] };
+  return data.documents || [];
+}
 
 export function SettingsModal({ className = '' }: { className?: string }) {
+  const queryClient = useQueryClient();
   const runtimeConfig = useRuntimeConfig();
   const enableDestructiveDelete = runtimeConfig.enableDestructiveDeleteActions;
   const showAllDeepInfra = runtimeConfig.showAllDeepInfraModels;
@@ -157,6 +167,13 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const { data: session } = useAuthSession();
   const router = useRouter();
   const isBusy = isImportingLibrary;
+  const fetchLibraryDocumentsCached = useCallback(async () => {
+    return queryClient.ensureQueryData({
+      queryKey: LIBRARY_DOCUMENTS_QUERY_KEY,
+      queryFn: fetchLibraryDocuments,
+      staleTime: 60 * 1000,
+    });
+  }, [queryClient]);
 
   const { providers: sharedProviders } = useSharedProviders();
   const {
@@ -280,16 +297,19 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   };
 
   const handleImportLibrary = async () => {
+    // Start fetching as soon as the user opens the picker so cached data is
+    // often ready before the modal asks for it.
+    void queryClient.prefetchQuery({
+      queryKey: LIBRARY_DOCUMENTS_QUERY_KEY,
+      queryFn: fetchLibraryDocuments,
+      staleTime: 60 * 1000,
+    });
     setSelectionModalProps({
       title: 'Import from Library',
       confirmLabel: 'Import',
       defaultSelected: false,
-      fetcher: async () => {
-        const res = await fetch('/api/documents/library?limit=10000');
-        if (!res.ok) throw new Error('Failed to list library documents');
-        const data = await res.json();
-        return data.documents || [];
-      }
+      initialFiles: queryClient.getQueryData(LIBRARY_DOCUMENTS_QUERY_KEY),
+      fetcher: fetchLibraryDocumentsCached,
     });
     setIsSelectionModalOpen(true);
   };
