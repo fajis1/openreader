@@ -40,6 +40,23 @@ export function buildSegmentAudioCacheHeaders(kind: 'redirect' | 'fallback'): Re
   };
 }
 
+export function normalizeAudioByteRangeHeader(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const normalized = value.trim();
+  if (!/^bytes=\d*-\d*(,\s*\d*-\d*)*$/.test(normalized)) {
+    return null;
+  }
+  const firstRange = normalized.split(',')[0]?.trim() ?? '';
+  const [, startRaw = '', endRaw = ''] = /^bytes=(\d*)-(\d*)$/.exec(firstRange) ?? [];
+  if (!startRaw && !endRaw) {
+    return null;
+  }
+  if (startRaw && endRaw && Number(startRaw) > Number(endRaw)) {
+    return null;
+  }
+  return firstRange;
+}
+
 export async function resolveCompletedSegmentAudio(
   request: NextRequest,
 ): Promise<ResolvedSegmentAudio | Response> {

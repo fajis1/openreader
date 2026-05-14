@@ -46,6 +46,88 @@ async function bodyToBuffer(body: unknown): Promise<Buffer> {
   throw new Error('Unsupported S3 response body type');
 }
 
+function bodyToReadableStream(body: unknown): ReadableStream<Uint8Array> {
+  if (!body) {
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+  }
+
+  if (typeof body === 'object' && body !== null && 'transformToWebStream' in body) {
+    const maybe = body as { transformToWebStream?: () => ReadableStream<Uint8Array> };
+    if (typeof maybe.transformToWebStream === 'function') {
+      return maybe.transformToWebStream();
+    }
+  }
+
+  if (body instanceof Uint8Array) {
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(body);
+        controller.close();
+      },
+    });
+  }
+  if (ArrayBuffer.isView(body)) {
+    const view = body as ArrayBufferView;
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+        controller.close();
+      },
+    });
+  }
+  if (body instanceof ArrayBuffer) {
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(body));
+        controller.close();
+      },
+    });
+  }
+
+  if (isNodeReadableStream(body)) {
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        body.on('data', (chunk) => {
+          if (Buffer.isBuffer(chunk)) {
+            controller.enqueue(new Uint8Array(chunk));
+            return;
+          }
+          if (typeof chunk === 'string') {
+            controller.enqueue(new Uint8Array(Buffer.from(chunk)));
+            return;
+          }
+          controller.enqueue(new Uint8Array(chunk as Uint8Array));
+        });
+        body.on('end', () => controller.close());
+        body.on('error', (err) => controller.error(err));
+      },
+      cancel() {
+        const nodeBody = body as NodeJS.ReadableStream & { destroy?: () => void };
+        if (typeof nodeBody.destroy === 'function') {
+          nodeBody.destroy();
+        }
+      },
+    });
+  }
+
+  throw new Error('Unsupported S3 response body type');
+}
+
+export type TtsSegmentAudioObjectStream = {
+  stream: ReadableStream<Uint8Array>;
+  contentType: string | null;
+  contentLength: number | null;
+  contentRange: string | null;
+  acceptRanges: string | null;
+  etag: string | null;
+  lastModified: Date | null;
+  statusCode: number;
+};
+
 export async function putTtsSegmentAudioObject(key: string, buffer: Buffer): Promise<void> {
   const cfg = getS3Config();
   const client = getS3ProxyClient();
@@ -63,6 +145,29 @@ export async function getTtsSegmentAudioObject(key: string): Promise<Buffer> {
   const client = getS3ProxyClient();
   const res = await client.send(new GetObjectCommand({ Bucket: cfg.bucket, Key: key }));
   return bodyToBuffer(res.Body);
+}
+
+export async function getTtsSegmentAudioObjectStream(
+  key: string,
+  options?: { range?: string },
+): Promise<TtsSegmentAudioObjectStream> {
+  const cfg = getS3Config();
+  const client = getS3ProxyClient();
+  const res = await client.send(new GetObjectCommand({
+    Bucket: cfg.bucket,
+    Key: key,
+    ...(options?.range ? { Range: options.range } : {}),
+  }));
+  return {
+    stream: bodyToReadableStream(res.Body),
+    contentType: res.ContentType ?? null,
+    contentLength: typeof res.ContentLength === 'number' ? res.ContentLength : null,
+    contentRange: typeof res.ContentRange === 'string' ? res.ContentRange : null,
+    acceptRanges: typeof res.AcceptRanges === 'string' ? res.AcceptRanges : null,
+    etag: typeof res.ETag === 'string' ? res.ETag : null,
+    lastModified: res.LastModified ?? null,
+    statusCode: res.$metadata.httpStatusCode ?? (options?.range ? 206 : 200),
+  };
 }
 
 export async function presignTtsSegmentAudioGet(
