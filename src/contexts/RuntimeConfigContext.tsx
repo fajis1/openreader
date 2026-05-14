@@ -19,7 +19,6 @@ export interface RuntimeConfig {
   enableAudiobookExport: boolean;
   enableDocxConversion: boolean;
   enableDestructiveDeleteActions: boolean;
-  showAllDeepInfraModels: boolean;
   showAllProviderModels: boolean;
 }
 
@@ -31,7 +30,6 @@ const RUNTIME_DEFAULTS: RuntimeConfig = {
   enableAudiobookExport: true,
   enableDocxConversion: true,
   enableDestructiveDeleteActions: true,
-  showAllDeepInfraModels: true,
   showAllProviderModels: true,
 };
 

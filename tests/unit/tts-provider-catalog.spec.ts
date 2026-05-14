@@ -14,7 +14,7 @@ import { applyConfigUpdate, getVoicePreferenceKey } from '../../src/lib/client/c
 import { buildSyncedPreferencePatch } from '../../src/lib/client/config/preferences';
 
 test.describe('tts provider catalog', () => {
-  test('resolves provider models with Deepinfra gating unchanged', () => {
+  test('resolves provider models with fixed Deepinfra catalog', () => {
     expect(resolveProviderModels('openai').map((model) => model.id)).toEqual([
       'tts-1',
       'tts-1-hd',
@@ -22,15 +22,7 @@ test.describe('tts provider catalog', () => {
     ]);
 
     expect(resolveProviderModels('deepinfra', {
-      showAllDeepInfra: false,
       apiKey: '',
-    }).map((model) => model.id)).toEqual([
-      'hexgrad/Kokoro-82M',
-    ]);
-
-    expect(resolveProviderModels('deepinfra', {
-      showAllDeepInfra: false,
-      apiKey: 'token',
     }).map((model) => model.id)).toEqual([
       'hexgrad/Kokoro-82M',
       'canopylabs/orpheus-3b-0.1-ft',

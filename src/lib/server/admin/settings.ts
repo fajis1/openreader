@@ -84,7 +84,6 @@ export const RUNTIME_CONFIG_SCHEMA = {
   enableAudiobookExport: booleanFlag(true, 'NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT'),
   enableDocxConversion: booleanFlag(true, 'NEXT_PUBLIC_ENABLE_DOCX_CONVERSION'),
   enableDestructiveDeleteActions: booleanFlag(true, 'NEXT_PUBLIC_ENABLE_DESTRUCTIVE_DELETE_ACTIONS'),
-  showAllDeepInfraModels: booleanFlag(true, 'NEXT_PUBLIC_SHOW_ALL_DEEPINFRA_MODELS'),
   showAllProviderModels: runtimeBoolean(true),
 } as const satisfies Record<string, RuntimeConfigKeyDef<unknown>>;
 

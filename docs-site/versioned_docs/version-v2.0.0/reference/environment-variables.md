@@ -13,7 +13,6 @@ This is the single reference page for OpenReader environment variables.
 | `NEXT_PUBLIC_ENABLE_DESTRUCTIVE_DELETE_ACTIONS` | Client feature flags | `true` unless set to `false` | Set `false` to hide destructive actions |
 | `NEXT_PUBLIC_DEFAULT_TTS_PROVIDER` | Client feature flags | `custom-openai` | Override default TTS provider |
 | `NEXT_PUBLIC_DEFAULT_TTS_MODEL` | Client feature flags | `kokoro` | Override default TTS model |
-| `NEXT_PUBLIC_SHOW_ALL_DEEPINFRA_MODELS` | Client feature flags | `true` unless set to `false` | Set `false` to restrict DeepInfra models |
 | `NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT` | Client feature flags | `true` unless set to `false` | Set `false` to hide audiobook export UI |
 | `NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT` | Client feature flags | `true` unless set to `false` | Set `false` to disable word highlight + alignment |
 | `API_BASE` | TTS provider | none | Point to your OpenAI-compatible TTS base URL |
@@ -376,13 +375,6 @@ Absolute path or executable name for the ffmpeg binary used by audiobook/process
  
  - Default: `kokoro`
  - Example values: `hexgrad/Kokoro-82M`, `tts-1`
- 
- ### NEXT_PUBLIC_SHOW_ALL_DEEPINFRA_MODELS
- 
- Controls whether the DeepInfra model list shows all models or just the free tier when no API key is set.
- 
- - Default: `true` (show all)
- - Set `false` to restrict to free tier models when no API key is provided
 
 ### NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT
 

@@ -8,7 +8,6 @@ import toast from 'react-hot-toast';
 import { ChevronUpDownIcon, CheckIcon, PlusIcon } from '@/components/icons/Icons';
 import { providerSupportsCustomModel, resolveProviderModels, type TtsModelDefinition, type TtsProviderId } from '@/lib/shared/tts-provider-catalog';
 import { defaultBaseUrlForProviderType, defaultModelForProviderType, resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
-import { useRuntimeConfig } from '@/contexts/RuntimeConfigContext';
 import {
   Badge,
   Field,
@@ -117,7 +116,6 @@ async function deleteAdminProvider(id: string): Promise<void> {
 }
 
 export function AdminProvidersPanel() {
-  const runtimeConfig = useRuntimeConfig();
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(() => createEmptyForm());
@@ -212,9 +210,8 @@ export function AdminProvidersPanel() {
   const modelDefinitions: TtsModelDefinition[] = useMemo(
     () => resolveProviderModels(form.providerType, {
       apiKey: form.apiKey,
-      showAllDeepInfra: runtimeConfig.showAllDeepInfraModels,
     }),
-    [form.providerType, form.apiKey, runtimeConfig.showAllDeepInfraModels],
+    [form.providerType, form.apiKey],
   );
   const supportsCustomModel = providerSupportsCustomModel(form.providerType);
   const modelIsPreset = modelDefinitions.some((model) => model.id === form.defaultModel);

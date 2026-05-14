@@ -56,7 +56,6 @@ After the first successful deploy and admin login, open **Settings → Admin** a
   - `restrictUserApiKeys=true` to block user BYOK through the hosted server.
   - `defaultTtsProvider=replicate` (or your preferred shared slug).
   - `showAllProviderModels=false` if you want users locked to each provider's default model.
-  - `showAllDeepInfraModels=false` if you want a narrower default catalog.
   - `enableAudiobookExport=true`.
   - `enableWordHighlight=false` unless your timestamp stack is configured.
 

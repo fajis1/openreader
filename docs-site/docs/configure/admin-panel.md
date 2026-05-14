@@ -67,7 +67,6 @@ Runtime-editable settings, one row per key:
 | `defaultTtsProvider` | Default provider id new users start with (built-in id or shared slug). |
 | `restrictUserApiKeys` | Restrict user-supplied API keys/base URLs; when `true`, only admin shared providers are allowed. |
 | `enableTtsProvidersTab` | Whether the user-facing TTS Provider tab in Settings is shown. |
-| `showAllDeepInfraModels` | Show the full DeepInfra catalog vs. the Kokoro-only subset. |
 | `showAllProviderModels` | When `false`, users are restricted to each provider's default model (shared provider `defaultModel` or built-in provider default). |
 | `enableWordHighlight` | Enable whisper.cpp word-by-word highlighting during TTS playback. |
 | `enableAudiobookExport` | Show the audiobook export entry points on PDF/EPUB pages. |

@@ -405,12 +405,6 @@ Sets the default TTS provider for new users.
 
 `showAllProviderModels` is a runtime-only admin setting (no env seed). Configure it in **Settings → Admin → Site features**.
 
-### NEXT_PUBLIC_SHOW_ALL_DEEPINFRA_MODELS
-
-Controls whether the DeepInfra model list shows all models or just the free tier when no API key is set.
-
-- Default: `true` (show all)
-- Runtime key: `showAllDeepInfraModels`
 
 ### NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT
 

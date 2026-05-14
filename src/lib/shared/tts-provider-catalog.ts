@@ -26,7 +26,6 @@ export interface TtsProviderDefinition {
 
 export interface ResolveProviderModelsContext {
   apiKey?: string;
-  showAllDeepInfra?: boolean;
 }
 
 export interface ResolveVoicesOptions {
@@ -57,10 +56,6 @@ const DEEPINFRA_MODELS_FULL: TtsModelDefinition[] = [
   { id: 'Zyphra/Zonos-v0.1-hybrid', name: 'Zyphra/Zonos-v0.1-hybrid' },
   { id: 'Zyphra/Zonos-v0.1-transformer', name: 'Zyphra/Zonos-v0.1-transformer' },
   { id: 'custom', name: 'Other' },
-];
-
-const DEEPINFRA_MODELS_LIMITED: TtsModelDefinition[] = [
-  { id: 'hexgrad/Kokoro-82M', name: 'hexgrad/Kokoro-82M' },
 ];
 
 export const REPLICATE_KOKORO_82M_VERSIONED_MODEL =
@@ -148,12 +143,7 @@ export const TTS_PROVIDER_DEFINITIONS: TtsProviderDefinition[] = [
     id: 'deepinfra',
     name: 'Deepinfra',
     supportsCustomModel: true,
-    models: (context) => {
-      if (!context?.showAllDeepInfra && !context?.apiKey) {
-        return DEEPINFRA_MODELS_LIMITED;
-      }
-      return DEEPINFRA_MODELS_FULL;
-    },
+    models: () => DEEPINFRA_MODELS_FULL,
   },
   {
     id: 'openai',

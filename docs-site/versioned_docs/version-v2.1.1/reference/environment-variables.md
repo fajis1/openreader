@@ -14,7 +14,6 @@ This is the single reference page for OpenReader environment variables.
 | `NEXT_PUBLIC_ENABLE_TTS_PROVIDERS_TAB` | Client feature flags | `true` unless set to `false` | Set `false` to hide the TTS Provider settings tab |
 | `NEXT_PUBLIC_DEFAULT_TTS_PROVIDER` | Client feature flags | `custom-openai` | Override default TTS provider |
 | `NEXT_PUBLIC_DEFAULT_TTS_MODEL` | Client feature flags | `kokoro` | Override default TTS model |
-| `NEXT_PUBLIC_SHOW_ALL_DEEPINFRA_MODELS` | Client feature flags | `true` unless set to `false` | Set `false` to restrict DeepInfra models |
 | `NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT` | Client feature flags | `true` unless set to `false` | Set `false` to hide audiobook export UI |
 | `NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT` | Client feature flags | `true` unless set to `false` | Set `false` to disable word highlight + alignment |
 | `API_BASE` | TTS provider | none | Point to your OpenAI-compatible TTS base URL |
@@ -387,13 +386,6 @@ Controls whether the **TTS Provider** section appears in the Settings modal.
  
  - Default: `kokoro`
  - Example values: `hexgrad/Kokoro-82M`, `tts-1`
- 
- ### NEXT_PUBLIC_SHOW_ALL_DEEPINFRA_MODELS
- 
- Controls whether the DeepInfra model list shows all models or just the free tier when no API key is set.
- 
- - Default: `true` (show all)
- - Set `false` to restrict to free tier models when no API key is provided
 
 ### NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT
 

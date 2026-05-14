@@ -34,7 +34,6 @@ NEXT_PUBLIC_ENABLE_DESTRUCTIVE_DELETE_ACTIONS=false
 NEXT_PUBLIC_ENABLE_TTS_PROVIDERS_TAB=false
 NEXT_PUBLIC_DEFAULT_TTS_PROVIDER=replicate
 NEXT_PUBLIC_DEFAULT_TTS_MODEL=alphanumericuser/kokoro-82m:89b6fa84e4fa2dd6bd3a96be3e1f12827a3516c9fda8fddbac7a0be131c9a6f5
-NEXT_PUBLIC_SHOW_ALL_DEEPINFRA_MODELS=false
 NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT=true
 NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT=false
 # Optional (non-AWS S3-compatible providers):
@@ -50,7 +49,6 @@ We recommend setting these defaults for a production-like environment:
 - `NEXT_PUBLIC_ENABLE_TTS_PROVIDERS_TAB=false`: Hides the Settings -> TTS Provider section
 - `NEXT_PUBLIC_DEFAULT_TTS_PROVIDER=replicate`: Points default TTS to a scalable provider
 - `NEXT_PUBLIC_DEFAULT_TTS_MODEL=alphanumericuser/kokoro-82m:89b6fa84e4fa2dd6bd3a96be3e1f12827a3516c9fda8fddbac7a0be131c9a6f5`: Uses a low-cost default model
-- `NEXT_PUBLIC_SHOW_ALL_DEEPINFRA_MODELS=false`: Restricts usage to free models if no key is provided
 - `NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT=true`: (Optional) Controls audiobook export UI
 - `NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT=false`: (Optional) Controls word highlighting UI (requires timestamp backend)
 :::

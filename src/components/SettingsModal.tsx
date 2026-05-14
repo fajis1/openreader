@@ -127,7 +127,6 @@ type AdminSubTab = 'providers' | 'features';
 export function SettingsModal({ className = '' }: { className?: string }) {
   const runtimeConfig = useRuntimeConfig();
   const enableDestructiveDelete = runtimeConfig.enableDestructiveDeleteActions;
-  const showAllDeepInfra = runtimeConfig.showAllDeepInfraModels;
   const showAllProviderModels = runtimeConfig.showAllProviderModels;
   const enableTTSProvidersTab = runtimeConfig.enableTtsProvidersTab;
   const restrictUserApiKeys = runtimeConfig.restrictUserApiKeys;
@@ -191,11 +190,10 @@ export function SettingsModal({ className = '' }: { className?: string }) {
     apiKey: localApiKey,
     modelValue,
     customModelInput,
-    showAllDeepInfra,
     showAllProviderModels,
     sharedProviders,
     allowBuiltInProviders: !restrictUserApiKeys,
-  }), [localProviderRef, localProviderType, localApiKey, modelValue, customModelInput, showAllDeepInfra, showAllProviderModels, sharedProviders, restrictUserApiKeys]);
+  }), [localProviderRef, localProviderType, localApiKey, modelValue, customModelInput, showAllProviderModels, sharedProviders, restrictUserApiKeys]);
   const isSharedSelected = Boolean(selectedSharedProvider);
   const selectedProviderOption = ttsProviders.find((p) => p.id === localProviderRef) ?? ttsProviders[0];
 
@@ -715,7 +713,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                 type="password"
                                 value={localApiKey}
                                 onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                                placeholder={!showAllDeepInfra && providerModelPolicy.providerType === 'deepinfra' ? "Deepinfra free or use your API key" : "Using environment variable"}
+                                placeholder="Using environment variable"
                                 className={inputClass}
                               />
                             </div>

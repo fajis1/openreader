@@ -22,7 +22,6 @@ export interface ResolveTtsSettingsViewModelOptions {
   apiKey?: string;
   modelValue: string;
   customModelInput: string;
-  showAllDeepInfra: boolean;
   showAllProviderModels: boolean;
   sharedProviders?: SharedProviderEntry[];
   allowBuiltInProviders?: boolean;
@@ -59,7 +58,6 @@ export function resolveTtsSettingsViewModel({
   apiKey,
   modelValue,
   customModelInput,
-  showAllDeepInfra,
   showAllProviderModels,
   sharedProviders = [],
   allowBuiltInProviders = true,
@@ -98,7 +96,6 @@ export function resolveTtsSettingsViewModel({
 
   const catalogModels = resolveProviderModels(knownProviderType ?? 'custom-openai', {
     apiKey,
-    showAllDeepInfra,
   });
   const providerDefaults = resolveProviderDefaults({
     providerRef: selectedProviderRef,

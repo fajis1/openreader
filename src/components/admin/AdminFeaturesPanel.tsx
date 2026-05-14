@@ -265,14 +265,6 @@ export function AdminFeaturesPanel() {
           variant="flat"
         />
         <ToggleRow
-          label="Show all Deepinfra models"
-          description="Show full Deepinfra model list."
-          checked={Boolean(draft.showAllDeepInfraModels)}
-          onChange={(checked) => updateDraft('showAllDeepInfraModels', checked)}
-          right={renderSource('showAllDeepInfraModels')}
-          variant="flat"
-        />
-        <ToggleRow
           label="Show all provider models"
           description="Allow model selection beyond defaults."
           checked={Boolean(draft.showAllProviderModels)}
