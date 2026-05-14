@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Dialog,
   DialogPanel,
@@ -33,6 +33,7 @@ import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
 import { useRouter } from 'next/navigation';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { deleteDocuments, mimeTypeForDoc, uploadDocuments } from '@/lib/client/api/documents';
+import { postChangelogVersionCheck } from '@/lib/client/api/user-state';
 import { cacheStoredDocumentFromBytes, clearDocumentCache } from '@/lib/client/cache/documents';
 import { clearAllDocumentPreviewCaches, clearInMemoryDocumentPreviewCache } from '@/lib/client/cache/previews';
 import { resolveTtsSettingsViewModel } from '@/lib/client/settings/tts-settings';
@@ -174,7 +175,9 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
   const { authEnabled, baseUrl: authBaseUrl } = useAuthConfig();
-  const { data: session } = useAuthSession();
+  const { data: session, isPending: isSessionPending } = useAuthSession();
+  const changelogVersionCheckKeyRef = useRef<string | null>(null);
+  const changelogVersionCheckInFlightRef = useRef<string | null>(null);
   const router = useRouter();
   const isBusy = isImportingLibrary;
   const {
@@ -248,6 +251,57 @@ export function SettingsModal({ className = '' }: { className?: string }) {
       window.removeEventListener('openreader:privacyAccepted', onPrivacyAccepted);
     };
   }, [authEnabled, checkFirstVist]);
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const run = async () => {
+      const sessionUserId = session?.user?.id ?? null;
+      if (authEnabled && (isSessionPending || !sessionUserId)) return;
+
+      const currentVersion = normalizeVersion(runtimeConfig.appVersion || '');
+      if (!currentVersion) return;
+
+      const userKey = sessionUserId ?? 'server-unclaimed';
+      const checkKey = `${userKey}:${currentVersion}`;
+      if (changelogVersionCheckKeyRef.current === checkKey) return;
+      if (changelogVersionCheckInFlightRef.current === checkKey) return;
+      changelogVersionCheckInFlightRef.current = checkKey;
+
+      try {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            const result = await postChangelogVersionCheck(currentVersion);
+            changelogVersionCheckKeyRef.current = checkKey;
+            if (result.shouldOpen && active) {
+              setIsOpen(true);
+              setIsChangelogOpen(true);
+            }
+            return;
+          } catch (error) {
+            if (attempt === 1) throw error;
+            await new Promise((resolve) => setTimeout(resolve, 400));
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to check changelog version:', error);
+      } finally {
+        if (changelogVersionCheckInFlightRef.current === checkKey) {
+          changelogVersionCheckInFlightRef.current = null;
+        }
+      }
+    };
+
+    // In React Strict Mode (dev), effects mount/unmount once before the real mount.
+    // Deferring the network mutation avoids writing lastSeenVersion from the throwaway pass.
+    timer = setTimeout(() => {
+      void run();
+    }, 120);
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [authEnabled, isSessionPending, session?.user?.id, runtimeConfig.appVersion]);
 
   useEffect(() => {
     if (!ttsModels.some(m => m.id === modelValue) && modelValue !== '') {

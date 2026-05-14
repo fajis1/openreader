@@ -38,6 +38,16 @@ export function findCurrentVersionIndex(entries: ChangelogManifestEntry[], appVe
   return entries.findIndex((entry) => tagsMatchVersion(entry.tag_name, appVersion));
 }
 
+export function shouldOpenChangelogForVersionChange(
+  lastSeenVersion: string | null | undefined,
+  currentVersion: string | null | undefined,
+): boolean {
+  const normalizedCurrent = normalizeVersion(currentVersion ?? '');
+  if (!normalizedCurrent) return false;
+  const normalizedLastSeen = normalizeVersion(lastSeenVersion ?? '');
+  return normalizedLastSeen !== normalizedCurrent;
+}
+
 export function toSafeTagSlug(tagName: string): string {
   const normalized = tagName.trim().toLowerCase();
   const collapsed = normalized

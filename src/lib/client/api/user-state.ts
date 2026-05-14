@@ -10,6 +10,12 @@ type ProgressResponse = {
   progress: DocumentProgressRecord | null;
 };
 
+type ChangelogVersionCheckResponse = {
+  shouldOpen: boolean;
+  currentVersion: string;
+  lastSeenVersion: string | null;
+};
+
 function sanitizePreferencesPatch(input: SyncedPreferencesPatch): SyncedPreferencesPatch {
   const patch: SyncedPreferencesPatch = {};
   for (const key of SYNCED_PREFERENCE_KEYS) {
@@ -51,6 +57,25 @@ export async function putUserPreferences(
   }
 
   return (await res.json()) as PreferencesResponse & { applied: boolean };
+}
+
+export async function postChangelogVersionCheck(
+  currentVersion: string,
+  options?: { signal?: AbortSignal },
+): Promise<ChangelogVersionCheckResponse> {
+  const res = await fetch('/api/user/state/changelog/version-check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentVersion }),
+    signal: options?.signal,
+  });
+
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(data?.error || 'Failed to check changelog version');
+  }
+
+  return (await res.json()) as ChangelogVersionCheckResponse;
 }
 
 type PendingPreferenceSync = {

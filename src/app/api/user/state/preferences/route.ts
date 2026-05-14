@@ -9,12 +9,18 @@ import { isTtsProviderType, type TtsProviderId } from '@/lib/shared/tts-provider
 import { listAdminProviders } from '@/lib/server/admin/providers';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { normalizeLegacyProviderRef, resolveProviderDefaults } from '@/lib/shared/tts-provider-policy';
+import {
+  deserializeUserPreferencesPayload,
+  extractUserPreferencesMeta,
+  withUserPreferencesMeta,
+  type UserPreferencesMeta,
+} from '@/lib/server/user/preferences-payload';
 
 export const dynamic = 'force-dynamic';
 
-function serializePreferencesForDb(patch: SyncedPreferencesPatch): SyncedPreferencesPatch | string {
-  if (process.env.POSTGRES_URL) return patch;
-  return JSON.stringify(patch);
+function serializePreferencesForDb(payload: Record<string, unknown>): Record<string, unknown> | string {
+  if (process.env.POSTGRES_URL) return payload;
+  return JSON.stringify(payload);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -54,21 +60,11 @@ async function loadPreferenceNormalizationContext(): Promise<PreferenceNormaliza
 function parseStoredPreferences(
   value: unknown,
   context: PreferenceNormalizationContext,
-): { patch: SyncedPreferencesPatch; migrated: boolean } {
-  if (!value) return { patch: {}, migrated: false };
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return isRecord(parsed)
-        ? sanitizePreferencesPatch(parsed, context, { fillMissingProvider: true })
-        : { patch: {}, migrated: false };
-    } catch {
-      return { patch: {}, migrated: false };
-    }
-  }
-  return isRecord(value)
-    ? sanitizePreferencesPatch(value, context, { fillMissingProvider: true })
-    : { patch: {}, migrated: false };
+): { patch: SyncedPreferencesPatch; migrated: boolean; meta: UserPreferencesMeta } {
+  const payload = deserializeUserPreferencesPayload(value);
+  const meta = extractUserPreferencesMeta(payload);
+  const sanitized = sanitizePreferencesPatch(payload, context, { fillMissingProvider: true });
+  return { ...sanitized, meta };
 }
 
 function sanitizeSavedVoices(value: unknown): Record<string, string> {
@@ -216,6 +212,7 @@ export async function GET(req: NextRequest) {
     const row = rows[0];
     const stored = parseStoredPreferences(row?.dataJson, normalizationContext);
     const storedPatch = stored.patch;
+    const storedPayload = withUserPreferencesMeta(storedPatch, stored.meta);
     const clientUpdatedAtMs = Number(row?.clientUpdatedAtMs ?? 0);
 
     if (row && stored.migrated) {
@@ -224,14 +221,14 @@ export async function GET(req: NextRequest) {
         .insert(userPreferences)
         .values({
           userId: scope.ownerUserId,
-          dataJson: serializePreferencesForDb(storedPatch),
+          dataJson: serializePreferencesForDb(storedPayload),
           clientUpdatedAtMs: clientUpdatedAtMs > 0 ? clientUpdatedAtMs : updatedAt,
           updatedAt,
         })
         .onConflictDoUpdate({
           target: [userPreferences.userId],
           set: {
-            dataJson: serializePreferencesForDb(storedPatch),
+            dataJson: serializePreferencesForDb(storedPayload),
             updatedAt,
           },
         });
@@ -278,7 +275,8 @@ export async function PUT(req: NextRequest) {
       .limit(1);
     const existing = existingRows[0];
     const existingUpdated = Number(existing?.clientUpdatedAtMs ?? 0);
-    const existingPatch = parseStoredPreferences(existing?.dataJson, normalizationContext).patch;
+    const existingStored = parseStoredPreferences(existing?.dataJson, normalizationContext);
+    const existingPatch = existingStored.patch;
 
     if (existing && clientUpdatedAtMs < existingUpdated) {
       return NextResponse.json({
@@ -289,7 +287,8 @@ export async function PUT(req: NextRequest) {
     }
 
     const mergedPatch = { ...existingPatch, ...patch };
-    const dataJson = serializePreferencesForDb(mergedPatch);
+    const payloadWithMeta = withUserPreferencesMeta(mergedPatch, existingStored.meta);
+    const dataJson = serializePreferencesForDb(payloadWithMeta);
     const updatedAt = nowTimestampMs();
 
     await db
