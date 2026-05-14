@@ -98,6 +98,29 @@ async function dismissOnboardingModals(page: Page): Promise<void> {
   let settledWithoutDialog = 0;
 
   for (let step = 0; step < maxSteps; step += 1) {
+    if (await settingsDialog.isVisible().catch(() => false)) {
+      const backToSettingsBtn = settingsDialog.getByRole('button', { name: /back to settings/i });
+      if (await backToSettingsBtn.isVisible().catch(() => false)) {
+        await expect(backToSettingsBtn).toBeEnabled({ timeout: 10000 });
+        await backToSettingsBtn.click();
+        await page.waitForTimeout(100);
+        settledWithoutDialog = 0;
+        continue;
+      }
+
+      const saveBtn = page.getByTestId('settings-save-button');
+      if (await saveBtn.isVisible().catch(() => false)) {
+        await expect(saveBtn).toBeEnabled({ timeout: 15000 });
+        await saveBtn.click();
+      } else {
+        await page.keyboard.press('Escape');
+      }
+      await settingsDialog.waitFor({ state: 'hidden', timeout: 15000 });
+      await page.waitForTimeout(100);
+      settledWithoutDialog = 0;
+      continue;
+    }
+
     if (await privacyDialog.isVisible().catch(() => false)) {
       const privacyAgree = page.getByTestId('privacy-agree-checkbox');
       if (await privacyAgree.isVisible().catch(() => false)) {
@@ -119,16 +142,6 @@ async function dismissOnboardingModals(page: Page): Promise<void> {
       await expect(skipBtn).toBeEnabled({ timeout: 10000 });
       await skipBtn.click();
       await migrationDialog.waitFor({ state: 'hidden', timeout: 15000 });
-      await page.waitForTimeout(100);
-      settledWithoutDialog = 0;
-      continue;
-    }
-
-    if (await settingsDialog.isVisible().catch(() => false)) {
-      const saveBtn = page.getByTestId('settings-save-button');
-      await expect(saveBtn).toBeEnabled({ timeout: 15000 });
-      await saveBtn.click();
-      await settingsDialog.waitFor({ state: 'hidden', timeout: 15000 });
       await page.waitForTimeout(100);
       settledWithoutDialog = 0;
       continue;
