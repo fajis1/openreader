@@ -20,13 +20,20 @@ Startup migration phases:
 - DB schema migrations (`pnpm migrate`)
 - Storage/data migration (`pnpm migrate-fs`) for legacy filesystem content into S3 + DB rows
 
-Recent schema addition:
-
-- `0001_tts_segments` (SQLite + Postgres) creates the `tts_segments` table used by server-side TTS segment caching and alignment metadata.
-
 :::info
 In most setups, you do not need to run migration commands manually because startup handles this automatically.
 :::
+
+### Schema history
+
+Migrations are applied in order. All of the following ship in v3.0.0; an instance upgrading from v2.2.0 applies `0001`–`0004` in a single startup pass.
+
+| Migration | Dialects | What it does |
+| --- | --- | --- |
+| `0001_tts_segments` | SQLite + Postgres | Creates the original single-table `tts_segments` used by server-side TTS segment caching. |
+| `0002_add_segment_key_to_tts_segments` | SQLite + Postgres | Adds the `segment_key` column to `tts_segments` for stable locator-independent segment identity. |
+| `0003_tts_segments_v2_split` | SQLite + Postgres | Replaces `tts_segments` with a normalized two-table model: `tts_segment_entries` (one row per document segment + locator identity) and `tts_segment_variants` (one row per settings combination, holding the cached audio key, status, and alignment). Drops the original `tts_segments` table — no released build (v2.2.0 or earlier) ever populated it, so there is no production data to migrate. |
+| `0004_admin_panel` | SQLite + Postgres | Creates `admin_providers` (encrypted shared TTS provider rows) and `admin_settings` (runtime site-feature config), and adds the `is_admin` column to the `user` table. Backs the [Admin Panel](./admin-panel). |
 
 To skip automatic startup migrations:
 

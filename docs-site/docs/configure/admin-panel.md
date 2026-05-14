@@ -58,6 +58,10 @@ On first boot, if `admin_providers` is empty and the legacy `API_KEY` env var is
 
 After this seed runs, the legacy `API_KEY` / `API_BASE` env vars are no longer read by the TTS routes — the DB row is authoritative. You can rename, edit, disable, or delete this row like any other from the admin UI, and remove the env vars from your `.env` when convenient.
 
+:::warning Upgrading from v2.2.0
+In v2.2.0 and earlier, `API_KEY` / `API_BASE` were read live by the TTS routes on every request. As of v3.0.0 they are **one-shot seeds** consumed only on the first boot where `admin_providers` is empty. After upgrading, boot the app once and confirm a `default-openai` row exists in **Settings → Admin → Shared providers** with the correct base URL. If it is missing or wrong (e.g. the env vars were not set on first boot, or the table was already non-empty from a pre-release), create or edit the shared provider manually — TTS will not fall back to the env vars.
+:::
+
 ## Site features
 
 Runtime-editable settings, one row per key:
@@ -100,10 +104,14 @@ You can keep the env vars indefinitely if you prefer; they're only read on the f
 
 ## How keys are protected
 
-- API keys are encrypted in the `admin_providers` table with AES-256-GCM. The encryption key is derived from `AUTH_SECRET` via `scrypt`. This means rotating `AUTH_SECRET` will invalidate all stored admin keys — re-enter them via the admin UI after rotating.
+- API keys are encrypted in the `admin_providers` table with AES-256-GCM. The encryption key is derived from `AUTH_SECRET` via `scrypt`.
 - The masked-list view (`GET /api/admin/providers`, used by the admin UI itself) returns `••••` + last-4 only — never plaintext or ciphertext.
 - The public list endpoint (`GET /api/tts/shared-providers`, called by every user's browser) returns only `{ slug, displayName, providerType, defaultModel }`. Keys and base URLs are never exposed to the client.
 - Non-admin users cannot enumerate admin providers' credentials or base URLs through any API.
+
+:::danger Rotating `AUTH_SECRET` invalidates all stored admin provider keys
+Because the encryption key for `admin_providers` is derived from `AUTH_SECRET`, changing `AUTH_SECRET` makes every stored API key undecryptable. After rotating it, shared providers will fail to authenticate upstream until you re-enter each provider's API key in **Settings → Admin → Shared providers** (edit the row and paste the key again). There is no automated re-encryption path. If you must rotate `AUTH_SECRET`, plan to re-enter admin provider keys immediately afterward.
+:::
 
 ## Related
 
