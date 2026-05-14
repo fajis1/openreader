@@ -1,6 +1,6 @@
 {
   "name": "openreader",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "private": true,
   "scripts": {
     "dev": "node scripts/openreader-entrypoint.mjs -- pnpm dev:raw",
