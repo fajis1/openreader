@@ -2,6 +2,7 @@
   "name": "openreader",
   "version": "3.0.0",
   "private": true,
+  "packageManager": "pnpm@11.1.2",
   "scripts": {
     "dev": "node scripts/openreader-entrypoint.mjs -- pnpm dev:raw",
     "dev:raw": "next dev --turbopack -p 3003",
@@ -14,12 +15,12 @@
     "migrate-fs": "node scripts/migrate-fs-v2.mjs",
     "migrate-fs:dry-run": "node scripts/migrate-fs-v2.mjs --dry-run true",
     "generate": "node drizzle/scripts/generate.mjs",
-    "docs:init": "pnpm --dir docs-site install",
-    "docs:dev": "pnpm --dir docs-site start",
-    "docs:build": "pnpm --dir docs-site build",
-    "docs:serve": "pnpm --dir docs-site serve",
-    "docs:version": "pnpm --dir docs-site docusaurus docs:version",
-    "docs:clear": "pnpm --dir docs-site clear"
+    "docs:init": "pnpm --ignore-workspace --dir docs-site install",
+    "docs:dev": "pnpm --ignore-workspace --dir docs-site start",
+    "docs:build": "pnpm --ignore-workspace --dir docs-site build",
+    "docs:serve": "pnpm --ignore-workspace --dir docs-site serve",
+    "docs:version": "pnpm --ignore-workspace --dir docs-site docusaurus docs:version",
+    "docs:clear": "pnpm --ignore-workspace --dir docs-site clear"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.987.0",
@@ -79,17 +80,5 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@napi-rs/canvas",
-      "better-sqlite3",
-      "ffmpeg-static"
-    ],
-    "overrides": {
-      "lodash": "^4.17.23",
-      "@xmldom/xmldom": "^0.9.8",
-      "@types/localforage": "npm:empty-module@0.0.2"
-    }
   }
 }

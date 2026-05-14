@@ -24,7 +24,7 @@ RUN cp "$(command -v weed)" /tmp/weed && \
 FROM node:lts-alpine AS app-builder
 
 # Install pnpm globally
-RUN npm install -g pnpm
+RUN npm install -g pnpm@11.1.2
 
 # Create app directory
 WORKDIR /app
@@ -60,7 +60,7 @@ FROM node:lts-alpine AS runner
 RUN apk add --no-cache ca-certificates libreoffice-writer
 
 # Install pnpm globally for running the app
-RUN npm install -g pnpm
+RUN npm install -g pnpm@11.1.2
 
 # App runtime directory
 WORKDIR /app
