@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 
 export const metadata: Metadata = {
   title: 'Read and Listen to Documents',
@@ -40,7 +41,10 @@ export const metadata: Metadata = {
   },
 };
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const runtimeConfig = await getResolvedRuntimeConfig();
+  const enableUserSignups = runtimeConfig.enableUserSignups;
+
   return (
     <>
       <style>{`
@@ -342,7 +346,7 @@ export default function LandingPage() {
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h10M9 4l4 4-4 4" /></svg>
           </Link>
           <Link href="/signin" className="landing-btn landing-btn-ghost">Sign In</Link>
-          <Link href="/signup" className="landing-btn landing-btn-ghost">Sign Up</Link>
+          {enableUserSignups && <Link href="/signup" className="landing-btn landing-btn-ghost">Sign Up</Link>}
           <Link href="https://docs.openreader.richardr.dev/" className="landing-btn landing-btn-ghost">Docs</Link>
         </div>
       </section>
@@ -448,7 +452,7 @@ export default function LandingPage() {
           <div className="landing-cta-actions">
             <Link href="/app" className="landing-btn landing-btn-accent">Open App</Link>
             <Link href="/signin" className="landing-btn landing-btn-ghost">Sign In</Link>
-            <Link href="/signup" className="landing-btn landing-btn-ghost">Sign Up</Link>
+            {enableUserSignups && <Link href="/signup" className="landing-btn landing-btn-ghost">Sign Up</Link>}
             <Link href="https://docs.openreader.richardr.dev/" className="landing-btn landing-btn-ghost">Docs</Link>
           </div>
         </div>

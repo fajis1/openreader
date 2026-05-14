@@ -7,6 +7,8 @@ import type { NextRequest } from 'next/server';
 import { db } from "@/db";
 import { isAuthEnabled, isAnonymousAuthSessionsEnabled } from "@/lib/server/auth/config";
 import { isAdminEmail, syncAdminFlag } from "@/lib/server/admin/email-sync";
+import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
+import { assertUserSignupAllowed } from '@/lib/server/auth/signup-policy';
 import * as authSchemaSqlite from "@/db/schema_auth_sqlite";
 import * as authSchemaPostgres from "@/db/schema_auth_postgres";
 
@@ -99,6 +101,11 @@ const createAuth = () => betterAuth({
     user: {
       create: {
         before: async (user) => {
+          const runtimeConfig = await getResolvedRuntimeConfig();
+          assertUserSignupAllowed({
+            enableUserSignups: runtimeConfig.enableUserSignups,
+            isAnonymous: Boolean((user as { isAnonymous?: boolean }).isAnonymous),
+          });
           // Stamp newly-created users with the correct isAdmin value if their
           // email matches ADMIN_EMAILS. This avoids a follow-up UPDATE on
           // first signup. The `input: false` above prevents clients from

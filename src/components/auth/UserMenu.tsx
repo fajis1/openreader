@@ -3,12 +3,14 @@
 import { Button } from '@headlessui/react';
 import Link from 'next/link';
 import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
+import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { getAuthClient } from '@/lib/client/auth-client';
 import { useRouter } from 'next/navigation';
 
 export function UserMenu({ className = '' }: { className?: string }) {
   const { authEnabled, baseUrl } = useAuthConfig();
+  const enableUserSignups = useFeatureFlag('enableUserSignups');
   const { data: session, isPending } = useAuthSession();
   const router = useRouter();
 
@@ -28,11 +30,13 @@ export function UserMenu({ className = '' }: { className?: string }) {
             Connect
           </Button>
         </Link>
-        <Link href="/signup">
-          <Button className="inline-flex items-center rounded-md bg-accent px-2 py-1 text-xs font-medium text-background hover:bg-secondary-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 transform transition-all duration-200 ease-in-out hover:scale-[1.09]">
-            Create account
-          </Button>
-        </Link>
+        {enableUserSignups && (
+          <Link href="/signup">
+            <Button className="inline-flex items-center rounded-md bg-accent px-2 py-1 text-xs font-medium text-background hover:bg-secondary-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 transform transition-all duration-200 ease-in-out hover:scale-[1.09]">
+              Create account
+            </Button>
+          </Link>
+        )}
       </div>
     );
   }

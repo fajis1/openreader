@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getAuthClient } from '@/lib/client/auth-client';
 import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
+import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { LoadingSpinner } from '@/components/Spinner';
 import { buttonClass } from '@/components/formPrimitives';
@@ -20,6 +21,7 @@ export default function SignUpPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { authEnabled, baseUrl } = useAuthConfig();
+  const enableUserSignups = useFeatureFlag('enableUserSignups');
   const { refresh: refreshRateLimit } = useAuthRateLimit();
 
   // Check if auth is enabled, redirect home if not
@@ -47,6 +49,10 @@ export default function SignUpPage() {
 
   const handleSignUp = async () => {
     setError(null);
+    if (!enableUserSignups) {
+      setError('New account sign-ups are currently disabled by the site administrator.');
+      return;
+    }
 
     if (!email.trim() || !validateEmail(email)) {
       setError('Please enter a valid email address');
@@ -105,6 +111,27 @@ export default function SignUpPage() {
 
   if (!authEnabled) {
     return null;
+  }
+
+  if (!enableUserSignups) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-background">
+        <div className="w-full max-w-md bg-base rounded-2xl shadow-xl p-6">
+          <h1 className="text-xl font-semibold text-foreground">Sign-ups unavailable</h1>
+          <p className="text-sm text-muted mt-1">
+            New account sign-ups are currently disabled by the site administrator.
+          </p>
+          <div className="mt-6 pt-4 border-t border-offbase text-center">
+            <p className="text-xs text-muted">
+              Already have an account?{' '}
+              <Link href="/signin" className="underline hover:text-foreground">
+                Sign in
+              </Link>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const { checks, strength } = validatePassword(password);

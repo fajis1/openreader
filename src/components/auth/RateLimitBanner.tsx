@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuthRateLimit, formatCharCount } from '@/contexts/AuthRateLimitContext';
+import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import Link from 'next/link';
 
 interface RateLimitBannerProps {
@@ -9,6 +10,7 @@ interface RateLimitBannerProps {
 
 export function RateLimitBanner({ className = '' }: RateLimitBannerProps) {
   const { status, isAtLimit, timeUntilReset, authEnabled } = useAuthRateLimit();
+  const enableUserSignups = useFeatureFlag('enableUserSignups');
 
   // Don't show banner if auth is not enabled or if not at limit
   if (!authEnabled || !status?.authEnabled || !isAtLimit) {
@@ -30,7 +32,7 @@ export function RateLimitBanner({ className = '' }: RateLimitBannerProps) {
           </span>
         </div>
 
-        {isAnonymous && (
+        {isAnonymous && enableUserSignups && (
           <Link
             href="/signup"
             className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-md

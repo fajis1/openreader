@@ -77,6 +77,7 @@ function stringValue(defaultValue: string, envVar: string): RuntimeConfigKeyDef<
 export const RUNTIME_CONFIG_SCHEMA = {
   defaultTtsProvider: stringValue('custom-openai', 'NEXT_PUBLIC_DEFAULT_TTS_PROVIDER'),
   changelogFeedUrl: stringValue('https://docs.openreader.richardr.dev/changelog/manifest.json', 'NEXT_PUBLIC_CHANGELOG_FEED_URL'),
+  enableUserSignups: booleanFlag(true, 'NEXT_PUBLIC_ENABLE_USER_SIGNUPS'),
   restrictUserApiKeys: booleanFlag(true, 'NEXT_PUBLIC_RESTRICT_USER_API_KEYS'),
   // Historically the env semantics were "true unless explicitly 'false'",
   // i.e. the feature defaults to ON.

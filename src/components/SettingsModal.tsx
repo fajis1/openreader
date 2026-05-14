@@ -422,7 +422,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
 
       const client = getAuthClient(authBaseUrl);
       await client.signOut();
-      window.location.href = '/signup';
+      window.location.href = runtimeConfig.enableUserSignups ? '/signup' : '/signin';
     } catch (error) {
       console.error('Failed to delete account:', error);
     }
@@ -1305,8 +1305,12 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                               <div className="pt-2 border-t border-offbase">
                                 <p className="text-sm text-muted mb-3">
                                   {session?.user?.isAnonymous
-                                    ? 'You are using an anonymous session. Sign up to save your progress permanently, your current data is automatically transferred.'
-                                    : 'No active session. Please sign in or create an account.'}
+                                    ? (runtimeConfig.enableUserSignups
+                                      ? 'You are using an anonymous session. Sign up to save your progress permanently, your current data is automatically transferred.'
+                                      : 'You are using an anonymous session. New account sign-ups are currently disabled by the site administrator.')
+                                    : (runtimeConfig.enableUserSignups
+                                      ? 'No active session. Please sign in or create an account.'
+                                      : 'No active session. Please sign in.')}
                                 </p>
                                 <div className="flex flex-wrap gap-2">
                                   <Link href="/signin">
@@ -1314,11 +1318,13 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                       Connect
                                     </Button>
                                   </Link>
-                                  <Link href="/signup">
-                                    <Button className={buttonClass({ variant: 'primary', size: 'md', className: 'hover:scale-[1.04]' })}>
-                                      Create account
-                                    </Button>
-                                  </Link>
+                                  {runtimeConfig.enableUserSignups && (
+                                    <Link href="/signup">
+                                      <Button className={buttonClass({ variant: 'primary', size: 'md', className: 'hover:scale-[1.04]' })}>
+                                        Create account
+                                      </Button>
+                                    </Link>
+                                  )}
                                   <Link href="/?redirect=false">
                                     <Button className={buttonClass({ variant: 'outline', size: 'md', className: 'hover:scale-[1.04]' })}>
                                       Back to landing page

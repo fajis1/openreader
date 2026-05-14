@@ -15,6 +15,7 @@ export interface RuntimeConfig {
   defaultTtsProvider: string;
   changelogFeedUrl: string;
   appVersion: string;
+  enableUserSignups: boolean;
   restrictUserApiKeys: boolean;
   enableTtsProvidersTab: boolean;
   enableWordHighlight: boolean;
@@ -28,6 +29,7 @@ const RUNTIME_DEFAULTS: RuntimeConfig = {
   defaultTtsProvider: 'custom-openai',
   changelogFeedUrl: 'https://docs.openreader.richardr.dev/changelog/manifest.json',
   appVersion: '0.0.0',
+  enableUserSignups: true,
   restrictUserApiKeys: true,
   enableTtsProvidersTab: true,
   enableWordHighlight: true,

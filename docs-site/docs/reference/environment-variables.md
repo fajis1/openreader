@@ -18,6 +18,7 @@ For auth-enabled deployments, use **Settings → Admin** as the primary source o
 | `API_KEY` | Legacy bootstrap seed | none | Optional first-boot seed into `default-openai`; then manage in Settings → Admin → Shared providers |
 | `NEXT_PUBLIC_*` runtime seeds | Legacy bootstrap seed | varies | Optional first-boot seeds for site features; then manage in Settings → Admin → Site features |
 | `NEXT_PUBLIC_CHANGELOG_FEED_URL` | Legacy bootstrap seed | `https://docs.openreader.richardr.dev/changelog/manifest.json` | Optional first-boot seed for changelog feed URL; then manage in Settings → Admin → Site features |
+| `NEXT_PUBLIC_ENABLE_USER_SIGNUPS` | Legacy bootstrap seed | `true` | Optional first-boot seed for whether new accounts can be created; then manage in Settings → Admin → Site features |
 | `TTS_CACHE_MAX_SIZE_BYTES` | TTS caching | `268435456` (256 MB) | Tune in-memory TTS cache size |
 | `TTS_CACHE_TTL_MS` | TTS caching | `1800000` (30 min) | Tune in-memory TTS cache TTL |
 | `TTS_MAX_RETRIES` | TTS retry | `2` | Tune retry attempts for upstream 429/5xx |
@@ -386,6 +387,15 @@ Controls whether the **TTS Provider** section appears in the user-facing Setting
 - Default: `true` (enabled)
 - Set `false` to hide provider/model/API controls in the per-user Settings modal (the admin panel is unaffected).
 - Runtime key: `enableTtsProvidersTab`
+
+### NEXT_PUBLIC_ENABLE_USER_SIGNUPS
+
+Controls whether new user accounts can be created.
+
+- Default: `true` (enabled)
+- When `false`, new account creation is blocked for email sign-up, first-time OAuth signup, and anonymous-to-account upgrades.
+- Existing users can still sign in.
+- Runtime key: `enableUserSignups`
 
 ### NEXT_PUBLIC_RESTRICT_USER_API_KEYS
 

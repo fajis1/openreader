@@ -296,6 +296,14 @@ export function AdminFeaturesPanel() {
           />
         </div>
         <ToggleRow
+          label="Allow new account sign-ups"
+          description="When off, new accounts cannot be created. Existing accounts can still sign in."
+          checked={Boolean(draft.enableUserSignups)}
+          onChange={(checked) => updateDraft('enableUserSignups', checked)}
+          right={renderSource('enableUserSignups')}
+          variant="flat"
+        />
+        <ToggleRow
           label="Word-level highlighting"
           description="Highlight words during TTS playback."
           checked={Boolean(draft.enableWordHighlight)}

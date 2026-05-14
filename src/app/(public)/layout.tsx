@@ -1,7 +1,11 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
+import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 
-export default function PublicLayout({ children }: { children: ReactNode }) {
+export default async function PublicLayout({ children }: { children: ReactNode }) {
+  const runtimeConfig = await getResolvedRuntimeConfig();
+  const enableUserSignups = runtimeConfig.enableUserSignups;
+
   return (
     <>
       <style>{`
@@ -279,7 +283,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
               <nav className="landing-header-nav">
                 <Link href="/app" className="landing-primary">Open App</Link>
                 <Link href="/signin">Sign In</Link>
-                <Link href="/signup">Sign Up</Link>
+                {enableUserSignups && <Link href="/signup">Sign Up</Link>}
                 <Link href="https://docs.openreader.richardr.dev/">Docs</Link>
               </nav>
             </header>
