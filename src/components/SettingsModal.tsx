@@ -55,10 +55,7 @@ import { AdminFeaturesPanel } from '@/components/admin/AdminFeaturesPanel';
 import { useSharedProviders } from '@/hooks/useSharedProviders';
 import { useLibraryDocumentsQuery } from '@/hooks/useLibraryDocumentsQuery';
 import {
-  btnDanger,
-  btnOutline,
-  btnPrimary,
-  btnSecondary,
+  buttonClass,
   inputClass,
   listboxButtonClass,
   listboxOptionClass,
@@ -509,10 +506,6 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const fieldLabelClass = 'block text-[11px] font-semibold uppercase tracking-wide text-muted';
   const sectionShellClass = 'space-y-2 pb-3 border-b border-offbase px-0.5';
   const sectionHeadingClass = 'text-sm font-semibold text-foreground';
-  const accountBtnBase = 'inline-flex items-center justify-center rounded-lg text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 transform transition-transform duration-200 ease-in-out';
-  const accountBtnPrimary = `${accountBtnBase} bg-accent text-background hover:bg-secondary-accent hover:scale-[1.04]`;
-  const accountBtnOutline = `${accountBtnBase} bg-background border border-offbase text-foreground hover:bg-offbase hover:text-accent hover:scale-[1.04]`;
-  const accountBtnDanger = `${accountBtnBase} bg-red-600 text-white border border-red-700 hover:bg-red-700 hover:scale-[1.02]`;
   const effectiveProviderType = resolveEffectiveProviderType({
     providerRef: selectedProviderRef,
     providerType: localProviderType,
@@ -881,7 +874,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                           <div className="pt-4 flex justify-end gap-2">
                             <Button
                               type="button"
-                              className={`${btnSecondary} px-4 py-2`}
+                              className={buttonClass({ variant: 'secondary', size: 'md' })}
                               onClick={async () => {
                                 const defaults = resolveProviderDefaults({
                                   providerRef: runtimeConfig.defaultTtsProvider,
@@ -901,7 +894,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                             <Button
                               data-testid="settings-save-button"
                               type="button"
-                              className={`${btnPrimary} px-4 py-2`}
+                              className={buttonClass({ variant: 'primary', size: 'md' })}
                               disabled={!canSubmit}
                               onClick={async () => {
                                 const defaults = resolveProviderDefaults({
@@ -1167,7 +1160,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                             <Button
                               onClick={handleImportLibrary}
                               disabled={isBusy}
-                              className={`${btnOutline} px-4 py-2 disabled:opacity-50`}
+                              className={buttonClass({ variant: 'outline', size: 'md' })}
                             >
                               {isImportingLibrary ? `Importing... ${Math.round(progress)}%` : 'Import from library'}
                             </Button>
@@ -1179,14 +1172,14 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                               <Button
                                 onClick={handleRefresh}
                                 disabled={isBusy}
-                                className={`${btnOutline} px-4 py-2 disabled:opacity-50`}
+                                className={buttonClass({ variant: 'outline', size: 'md' })}
                               >
                                 Refresh
                               </Button>
                               <Button
                                 onClick={handleClearCache}
                                 disabled={isBusy}
-                                className={`${btnOutline} px-4 py-2 disabled:opacity-50`}
+                                className={buttonClass({ variant: 'outline', size: 'md' })}
                               >
                                 Clear cache
                               </Button>
@@ -1194,7 +1187,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                 <Button
                                   onClick={() => setShowDeleteDocsConfirm(true)}
                                   disabled={isBusy}
-                                  className={`${btnDanger} px-4 py-2`}
+                                  className={buttonClass({ variant: 'danger', size: 'md' })}
                                 >
                                   Delete all data
                                 </Button>
@@ -1288,7 +1281,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                               <>
                                 <Button
                                   onClick={handleSignOut}
-                                  className={`${accountBtnOutline} px-4 py-2`}
+                                  className={buttonClass({ variant: 'outline', size: 'md', className: 'hover:scale-[1.04]' })}
                                 >
                                   Disconnect account
                                 </Button>
@@ -1297,7 +1290,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                   <label className="block text-sm font-medium text-red-500 mb-2">Danger Zone</label>
                                   <Button
                                     onClick={() => setShowDeleteAccountConfirm(true)}
-                                    className={`${accountBtnDanger} px-4 py-2`}
+                                    className={buttonClass({ variant: 'danger', size: 'md' })}
                                   >
                                     Delete Account
                                   </Button>
@@ -1315,17 +1308,17 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                 </p>
                                 <div className="flex flex-wrap gap-2">
                                   <Link href="/signin">
-                                    <Button className={`${accountBtnOutline} px-4 py-2`}>
+                                    <Button className={buttonClass({ variant: 'outline', size: 'md', className: 'hover:scale-[1.04]' })}>
                                       Connect
                                     </Button>
                                   </Link>
                                   <Link href="/signup">
-                                    <Button className={`${accountBtnPrimary} px-4 py-2`}>
+                                    <Button className={buttonClass({ variant: 'primary', size: 'md', className: 'hover:scale-[1.04]' })}>
                                       Create account
                                     </Button>
                                   </Link>
                                   <Link href="/?redirect=false">
-                                    <Button className={`${accountBtnOutline} px-4 py-2`}>
+                                    <Button className={buttonClass({ variant: 'outline', size: 'md', className: 'hover:scale-[1.04]' })}>
                                       Back to landing page
                                     </Button>
                                   </Link>

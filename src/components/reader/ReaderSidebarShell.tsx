@@ -4,6 +4,7 @@ import { Fragment, type ReactNode } from 'react';
 import { Transition } from '@headlessui/react';
 import { XCircleIcon } from '@/components/icons/Icons';
 import { useReaderSidebarBounds } from '@/hooks/useReaderSidebarBounds';
+import { buttonClass } from '@/components/formPrimitives';
 
 interface ReaderSidebarShellProps {
   isOpen: boolean;
@@ -81,7 +82,11 @@ export function ReaderSidebarShell({
                   onClick={onClose}
                   aria-label="Close"
                   title="Close"
-                  className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-offbase bg-base text-muted hover:bg-offbase hover:text-accent transition-colors"
+                  className={buttonClass({
+                    variant: 'secondary',
+                    size: 'icon',
+                    className: 'h-8 w-8 text-muted',
+                  })}
                 >
                   <XCircleIcon className="w-4 h-4" />
                 </button>

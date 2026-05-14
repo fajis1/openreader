@@ -7,6 +7,7 @@ import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { getAuthClient } from '@/lib/client/auth-client';
 import { LoadingSpinner } from '@/components/Spinner';
+import { buttonClass } from '@/components/formPrimitives';
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -266,7 +267,7 @@ export function AuthLoader({ children }: { children: ReactNode }) {
                 setBootstrapError(null);
                 setRetryNonce((v) => v + 1);
               }}
-              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-background hover:bg-secondary-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2"
+              className={buttonClass({ variant: 'primary', size: 'sm' })}
             >
               Retry
             </button>

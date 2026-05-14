@@ -9,6 +9,7 @@ import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { GithubIcon } from '@/components/icons/Icons';
 import { LoadingSpinner } from '@/components/Spinner';
+import { buttonClass } from '@/components/formPrimitives';
 
 function SessionExpiredLoader({ setSessionExpired }: { setSessionExpired: (v: boolean) => void }) {
   const searchParams = useSearchParams();
@@ -196,10 +197,7 @@ function SignInContent() {
             type="submit"
             disabled={isAnyLoading}
             onClick={handleSignIn}
-            className="w-full rounded-lg bg-accent py-2 text-sm font-medium text-background 
-                     hover:bg-secondary-accent focus:outline-none focus:ring-2 focus:ring-accent 
-                     focus:ring-offset-2 disabled:opacity-50 transform transition-transform 
-                     duration-200 hover:scale-[1.02]"
+            className={buttonClass({ variant: 'primary', size: 'md', className: 'w-full hover:scale-[1.02]' })}
           >
             {loadingEmail ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Connect'}
           </Button>
@@ -210,11 +208,11 @@ function SignInContent() {
             type="button"
             disabled={isAnyLoading}
             onClick={handleGithubSignIn}
-            className="w-full rounded-lg bg-background py-2 text-sm font-medium text-foreground 
-                     hover:bg-offbase focus:outline-none focus:ring-2 focus:ring-accent 
-                     focus:ring-offset-2 disabled:opacity-50 border border-offbase 
-                     transform transition-transform duration-200 hover:scale-[1.02] 
-                     flex items-center justify-center gap-2"
+            className={buttonClass({
+              variant: 'outline',
+              size: 'md',
+              className: 'w-full hover:scale-[1.02] flex items-center justify-center gap-2',
+            })}
           >
             {loadingGithub ? (
               <LoadingSpinner className="w-4 h-4" />
@@ -233,10 +231,7 @@ function SignInContent() {
               type="button"
               disabled={isAnyLoading}
               onClick={handleAnonymousContinue}
-              className="w-full rounded-lg bg-background py-2 text-sm font-medium text-foreground 
-                     hover:bg-offbase focus:outline-none focus:ring-2 focus:ring-accent 
-                     focus:ring-offset-2 disabled:opacity-50 border border-offbase 
-                     transform transition-transform duration-200 hover:scale-[1.02]"
+              className={buttonClass({ variant: 'outline', size: 'md', className: 'w-full hover:scale-[1.02]' })}
             >
               {loadingAnonymous ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Continue anonymously'}
             </Button>

@@ -9,8 +9,7 @@ import {
   Badge,
   Section,
   ToggleRow,
-  btnPrimary,
-  btnSecondary,
+  buttonClass,
   inputClass,
   listboxButtonClass,
   listboxOptionClass,
@@ -340,14 +339,14 @@ export function AdminFeaturesPanel() {
           <Button
             onClick={discardAll}
             disabled={dirty.size === 0 || saving}
-            className={`${btnSecondary} px-4 py-1.5`}
+            className={buttonClass({ variant: 'secondary', size: 'sm' })}
           >
             Discard
           </Button>
           <Button
             onClick={saveAll}
             disabled={dirty.size === 0 || saving}
-            className={`${btnPrimary} px-4 py-1.5`}
+            className={buttonClass({ variant: 'primary', size: 'sm' })}
           >
             {saving ? 'Saving…' : dirty.size > 0 ? `Save (${dirty.size})` : 'Save'}
           </Button>

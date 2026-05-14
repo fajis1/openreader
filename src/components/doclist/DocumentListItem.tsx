@@ -7,6 +7,7 @@ import { DocumentListDocument } from '@/types/documents';
 import { DocumentPreview } from '@/components/doclist/DocumentPreview';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
+import { buttonClass } from '@/components/formPrimitives';
 
 interface DocumentListItemProps {
   doc: DocumentListDocument;
@@ -116,7 +117,11 @@ export function DocumentListItem({
             {showDeleteButton && (
               <Button
                 onClick={() => onDelete(doc)}
-                className="ml-1 p-1.5 text-muted hover:text-accent rounded-md hover:bg-offbase transition-colors"
+                className={buttonClass({
+                  variant: 'ghost',
+                  size: 'icon',
+                  className: 'ml-1 h-7 w-7 text-muted hover:bg-offbase',
+                })}
                 aria-label="Delete document"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -155,7 +160,11 @@ export function DocumentListItem({
           {showDeleteButton && (
             <Button
               onClick={() => onDelete(doc)}
-              className="ml-1 p-1.5 text-muted hover:text-accent rounded-md hover:bg-offbase transition-colors"
+              className={buttonClass({
+                variant: 'ghost',
+                size: 'icon',
+                className: 'ml-1 h-7 w-7 text-muted hover:bg-offbase',
+              })}
               aria-label="Delete document"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

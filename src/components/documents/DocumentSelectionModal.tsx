@@ -3,6 +3,7 @@
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react';
 import { Fragment, useEffect, useState } from 'react';
 import { BaseDocument } from '@/types/documents';
+import { buttonClass } from '@/components/formPrimitives';
 
 interface DocumentSelectionModalProps {
   isOpen: boolean;
@@ -207,14 +208,14 @@ export function DocumentSelectionModal({
                 <div className="mt-4 flex justify-end gap-3 flex-shrink-0">
                   <button
                     type="button"
-                    className="inline-flex justify-center rounded-lg bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-offbase focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+                    className={buttonClass({ variant: 'outline', size: 'md' })}
                     onClick={onClose}
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
-                    className="inline-flex justify-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-background hover:bg-secondary-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={buttonClass({ variant: 'primary', size: 'md' })}
                     onClick={handleConfirmClick}
                     disabled={isLoading || selectedCount === 0 || isProcessing}
                   >

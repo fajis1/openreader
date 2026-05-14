@@ -13,10 +13,7 @@ import {
   Field,
   Section,
   ToggleRow,
-  btnDanger,
-  btnOutline,
-  btnPrimary,
-  btnSecondary,
+  buttonClass,
   inputClass,
   listboxButtonClass,
   listboxOptionClass,
@@ -261,7 +258,7 @@ export function AdminProvidersPanel() {
           {!editingId ? (
             <Button
               onClick={startCreate}
-              className={`${btnPrimary} h-7 w-7 p-0 inline-flex items-center justify-center`}
+              className={buttonClass({ variant: 'primary', size: 'icon', className: 'h-7 w-7' })}
               aria-label="Add provider"
               title="Add provider"
             >
@@ -486,13 +483,13 @@ export function AdminProvidersPanel() {
           />
 
           <div className="pt-1 flex justify-end gap-2">
-            <Button onClick={cancelEdit} className={`${btnSecondary} px-4 py-1.5`}>
+            <Button onClick={cancelEdit} className={buttonClass({ variant: 'secondary', size: 'sm' })}>
               Cancel
             </Button>
             <Button
               onClick={submit}
               disabled={submitDisabled}
-              className={`${btnPrimary} px-4 py-1.5`}
+              className={buttonClass({ variant: 'primary', size: 'sm' })}
             >
               {saveMutation.isPending ? 'Saving…' : isEditingExisting ? 'Save changes' : 'Create'}
             </Button>
@@ -526,14 +523,14 @@ export function AdminProvidersPanel() {
                 <div className="shrink-0 flex gap-1.5">
                   <Button
                     onClick={() => startEdit(p)}
-                    className={`${btnOutline} px-2.5 py-1 text-xs`}
+                    className={buttonClass({ variant: 'outline', size: 'xs', className: 'h-7' })}
                     disabled={!!editingId || deleteMutation.isPending}
                   >
                     Edit
                   </Button>
                   <Button
                     onClick={() => remove(p.id)}
-                    className={`${btnDanger} px-2.5 py-1 text-xs`}
+                    className={buttonClass({ variant: 'danger', size: 'xs', className: 'h-7' })}
                     disabled={!!editingId || deleteMutation.isPending}
                   >
                     Delete

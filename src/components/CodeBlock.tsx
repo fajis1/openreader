@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { CopyIcon, CheckIcon } from '@/components/icons/Icons';
+import { buttonClass } from '@/components/formPrimitives';
 
 export function CodeBlock({ children }: { children: string }) {
   const [copied, setCopied] = useState(false);
@@ -20,9 +21,11 @@ export function CodeBlock({ children }: { children: string }) {
       </pre>
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 p-1.5 rounded-md bg-base hover:bg-offbase hover:text-accent
-                  transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100
-                  hover:scale-[1.05]"
+        className={buttonClass({
+          variant: 'secondary',
+          size: 'icon',
+          className: 'absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:scale-[1.05]',
+        })}
         title="Copy to clipboard"
       >
         {copied ? <CheckIcon className="w-4 h-4" /> : <CopyIcon className="w-4 h-4" />}

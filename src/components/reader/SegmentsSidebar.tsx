@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { RefreshIcon, InfoIcon } from '@/components/icons/Icons';
+import { buttonClass } from '@/components/formPrimitives';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { compareSegmentLocators, locatorGroupKey, locatorIdentityKey } from '@/lib/shared/tts-locator';
 import { buildSegmentKey, buildSegmentKeyPrefix } from '@/lib/shared/tts-segment-plan';
@@ -590,7 +591,11 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
         aria-label="Clear segments cache"
         title="Clear cache for listed segments"
         disabled={isClearingSegments}
-        className="inline-flex items-center justify-center h-8 px-2 rounded-lg border border-offbase bg-base text-xs text-muted hover:bg-offbase hover:text-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className={buttonClass({
+          variant: 'secondary',
+          size: 'xs',
+          className: 'h-8 px-2 text-muted',
+        })}
       >
         {isClearingSegments ? 'Clearing…' : 'Clear'}
       </button>
@@ -599,7 +604,11 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
         onClick={handleRefresh}
         aria-label="Refresh segments"
         title="Refresh"
-        className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-offbase bg-base text-muted hover:bg-offbase hover:text-accent transition-colors"
+        className={buttonClass({
+          variant: 'secondary',
+          size: 'icon',
+          className: 'h-8 w-8 text-muted',
+        })}
       >
         <RefreshIcon className="w-3.5 h-3.5" />
       </button>

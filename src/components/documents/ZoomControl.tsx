@@ -1,3 +1,5 @@
+import { buttonClass } from '@/components/formPrimitives';
+
 export function ZoomControl({
   value,
   onIncrease,
@@ -17,7 +19,11 @@ export function ZoomControl({
         type="button"
         onClick={onDecrease}
         disabled={value <= min}
-        className="px-1 text-sm leading-none text-foreground hover:text-accent disabled:opacity-50 disabled:cursor-not-allowed transform transition-transform duration-200 ease-in-out hover:scale-[1.09]"
+        className={buttonClass({
+          variant: 'ghost',
+          size: 'icon',
+          className: 'h-6 w-6 text-sm leading-none hover:scale-[1.09]',
+        })}
         aria-label="Zoom out"
       >
         −
@@ -27,7 +33,11 @@ export function ZoomControl({
         type="button"
         onClick={onIncrease}
         disabled={value >= max}
-        className="px-1 text-sm leading-none text-foreground hover:text-accent disabled:opacity-50 disabled:cursor-not-allowed transform transition-transform duration-200 ease-in-out hover:scale-[1.09]"
+        className={buttonClass({
+          variant: 'ghost',
+          size: 'icon',
+          className: 'h-6 w-6 text-sm leading-none hover:scale-[1.09]',
+        })}
         aria-label="Zoom in"
       >
         ＋

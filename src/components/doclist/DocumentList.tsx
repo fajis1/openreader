@@ -14,6 +14,7 @@ import { CreateFolderDialog } from '@/components/doclist/CreateFolderDialog';
 import { DocumentListSkeleton } from '@/components/doclist/DocumentListSkeleton';
 import { Button } from '@headlessui/react';
 import { DocumentUploader } from '@/components/documents/DocumentUploader';
+import { buttonClass } from '@/components/formPrimitives';
 
 type DocumentToDelete = {
   id: string;
@@ -331,7 +332,11 @@ export function DocumentList() {
             <p className="text-sm text-foreground">Drag files on top of each other to make folders</p>
             <Button
               onClick={() => setShowHint(false)}
-              className="p-1 rounded-md hover:bg-base hover:text-accent transition-colors"
+              className={buttonClass({
+                variant: 'ghost',
+                size: 'icon',
+                className: 'h-7 w-7 hover:bg-base',
+              })}
               aria-label="Dismiss hint"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

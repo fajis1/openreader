@@ -8,6 +8,7 @@ import { getAuthClient } from '@/lib/client/auth-client';
 import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { LoadingSpinner } from '@/components/Spinner';
+import { buttonClass } from '@/components/formPrimitives';
 import toast from 'react-hot-toast';
 
 export default function SignUpPage() {
@@ -151,7 +152,11 @@ export default function SignUpPage() {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+                className={buttonClass({
+                  variant: 'ghost',
+                  size: 'icon',
+                  className: 'absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 text-muted',
+                })}
               >
                 {showPassword ? '👁️' : '👁️‍🗨️'}
               </button>
@@ -213,10 +218,7 @@ export default function SignUpPage() {
             type="submit"
             disabled={loading}
             onClick={handleSignUp}
-            className="w-full rounded-lg bg-accent py-2 text-sm font-medium text-background 
-                     hover:bg-secondary-accent focus:outline-none focus:ring-2 focus:ring-accent 
-                     focus:ring-offset-2 disabled:opacity-50 transform transition-transform 
-                     duration-200 hover:scale-[1.02]"
+            className={buttonClass({ variant: 'primary', size: 'md', className: 'w-full hover:scale-[1.02]' })}
           >
             {loading ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Create Account'}
           </Button>

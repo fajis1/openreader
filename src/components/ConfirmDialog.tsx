@@ -1,5 +1,6 @@
 import { Fragment, KeyboardEvent } from 'react';
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react';
+import { buttonClass } from '@/components/formPrimitives';
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -75,23 +76,22 @@ export function ConfirmDialog({
                 <div className="mt-6 flex justify-end space-x-3">
                   <button
                     type="button"
-                    className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
-                             font-medium text-foreground hover:bg-offbase focus:outline-none 
-                             focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                             transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
+                    className={buttonClass({
+                      variant: 'outline',
+                      size: 'sm',
+                      className: 'hover:scale-[1.04]',
+                    })}
                     onClick={onClose}
                   >
                     {cancelText}
                   </button>
                   <button
                     type="button"
-                    className={`inline-flex justify-center rounded-lg px-3 py-1.5 text-sm text-wrap
-                             font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
-                             transform transition-transform duration-200 ease-in-out hover:scale-[1.04]
-                             ${isDangerous 
-                               ? 'bg-accent text-background hover:bg-secondary-accent focus-visible:ring-accent' 
-                               : 'bg-accent text-background hover:bg-secondary-accent focus-visible:ring-accent'
-                             }`}
+                    className={buttonClass({
+                      variant: isDangerous ? 'danger' : 'primary',
+                      size: 'sm',
+                      className: 'text-wrap hover:scale-[1.04]',
+                    })}
                     onClick={onConfirm}
                   >
                     {confirmText}
