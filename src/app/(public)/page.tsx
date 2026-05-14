@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
+import { getResolvedRuntimeConfigForRsc } from '@/lib/server/runtime-config-rsc';
 
 export const metadata: Metadata = {
   title: 'Read and Listen to Documents',
@@ -42,7 +42,7 @@ export const metadata: Metadata = {
 };
 
 export default async function LandingPage() {
-  const runtimeConfig = await getResolvedRuntimeConfig();
+  const runtimeConfig = await getResolvedRuntimeConfigForRsc();
   const enableUserSignups = runtimeConfig.enableUserSignups;
 
   return (

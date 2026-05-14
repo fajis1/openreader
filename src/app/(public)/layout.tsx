@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
+import { getResolvedRuntimeConfigForRsc } from '@/lib/server/runtime-config-rsc';
 
 export default async function PublicLayout({ children }: { children: ReactNode }) {
-  const runtimeConfig = await getResolvedRuntimeConfig();
+  const runtimeConfig = await getResolvedRuntimeConfigForRsc();
   const enableUserSignups = runtimeConfig.enableUserSignups;
 
   return (
