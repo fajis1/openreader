@@ -34,6 +34,7 @@ import { useRouter } from 'next/navigation';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { deleteDocuments, mimeTypeForDoc, uploadDocuments } from '@/lib/client/api/documents';
 import { postChangelogVersionCheck } from '@/lib/client/api/user-state';
+import { scheduleChangelogCheck } from '@/lib/client/changelog-check';
 import { cacheStoredDocumentFromBytes, clearDocumentCache } from '@/lib/client/cache/documents';
 import { clearAllDocumentPreviewCaches, clearInMemoryDocumentPreviewCache } from '@/lib/client/cache/previews';
 import { resolveTtsSettingsViewModel } from '@/lib/client/settings/tts-settings';
@@ -253,54 +254,21 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   }, [authEnabled, checkFirstVist]);
 
   useEffect(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const run = async () => {
-      const sessionUserId = session?.user?.id ?? null;
-      if (authEnabled && (isSessionPending || !sessionUserId)) return;
-
-      const currentVersion = normalizeVersion(runtimeConfig.appVersion || '');
-      if (!currentVersion) return;
-
-      const userKey = sessionUserId ?? 'server-unclaimed';
-      const checkKey = `${userKey}:${currentVersion}`;
-      if (changelogVersionCheckKeyRef.current === checkKey) return;
-      if (changelogVersionCheckInFlightRef.current === checkKey) return;
-      changelogVersionCheckInFlightRef.current = checkKey;
-
-      try {
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          try {
-            const result = await postChangelogVersionCheck(currentVersion);
-            changelogVersionCheckKeyRef.current = checkKey;
-            if (result.shouldOpen && active) {
-              setIsOpen(true);
-              setIsChangelogOpen(true);
-            }
-            return;
-          } catch (error) {
-            if (attempt === 1) throw error;
-            await new Promise((resolve) => setTimeout(resolve, 400));
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to check changelog version:', error);
-      } finally {
-        if (changelogVersionCheckInFlightRef.current === checkKey) {
-          changelogVersionCheckInFlightRef.current = null;
-        }
-      }
-    };
-
-    // In React Strict Mode (dev), effects mount/unmount once before the real mount.
-    // Deferring the network mutation avoids writing lastSeenVersion from the throwaway pass.
-    timer = setTimeout(() => {
-      void run();
-    }, 120);
-    return () => {
-      active = false;
-      if (timer) clearTimeout(timer);
-    };
+    return scheduleChangelogCheck({
+      authEnabled,
+      isSessionPending,
+      sessionUserId: session?.user?.id,
+      appVersion: runtimeConfig.appVersion,
+      completedRef: changelogVersionCheckKeyRef,
+      inFlightRef: changelogVersionCheckInFlightRef,
+      postCheck: async (currentVersion) => postChangelogVersionCheck(currentVersion),
+      onShouldOpen: () => {
+        setIsOpen(true);
+        setIsChangelogOpen(true);
+      },
+      delayMs: 120,
+      retryDelayMs: 400,
+    });
   }, [authEnabled, isSessionPending, session?.user?.id, runtimeConfig.appVersion]);
 
   useEffect(() => {
