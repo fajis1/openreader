@@ -65,6 +65,7 @@ Runtime-editable settings, one row per key:
 | Key | What it controls |
 | --- | --- |
 | `defaultTtsProvider` | Default provider id new users start with (built-in id or shared slug). |
+| `changelogFeedUrl` | Public changelog manifest URL used by the Settings modal changelog panel. |
 | `restrictUserApiKeys` | Restrict user-supplied API keys/base URLs; when `true`, only admin shared providers are allowed. |
 | `enableTtsProvidersTab` | Whether the user-facing TTS Provider tab in Settings is shown. |
 | `showAllProviderModels` | When `false`, users are restricted to each provider's default model (shared provider `defaultModel` or built-in provider default). |

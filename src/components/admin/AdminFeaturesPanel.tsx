@@ -11,6 +11,7 @@ import {
   ToggleRow,
   btnPrimary,
   btnSecondary,
+  inputClass,
   listboxButtonClass,
   listboxOptionClass,
   listboxOptionsClass,
@@ -277,6 +278,24 @@ export function AdminFeaturesPanel() {
         subtitle="Feature flags for all users."
         action={<Badge tone="foreground">Feature Flags</Badge>}
       >
+        <div className="space-y-1.5 pb-2 border-b border-offbase">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Changelog feed URL</p>
+              <p className="text-xs text-muted mt-0.5">
+                Public URL to the changelog manifest JSON used by Settings.
+              </p>
+            </div>
+            <div className="shrink-0">{renderSource('changelogFeedUrl')}</div>
+          </div>
+          <input
+            type="text"
+            className={inputClass}
+            value={String(draft.changelogFeedUrl ?? '')}
+            onChange={(event) => updateDraft('changelogFeedUrl', event.target.value)}
+            placeholder="https://docs.openreader.richardr.dev/changelog/manifest.json"
+          />
+        </div>
         <ToggleRow
           label="Word-level highlighting"
           description="Highlight words during TTS playback."

@@ -3,10 +3,18 @@ name: Docs Deploy
 on:
   push:
     branches: [main]
+  release:
+    types: [published, edited, deleted]
   workflow_run:
     workflows: ["Version Docs on Tag"]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      full_reconcile:
+        description: 'Run full changelog reconcile from GitHub Releases'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -42,6 +50,13 @@ jobs:
 
       - name: Install docs dependencies
         run: pnpm --dir docs-site install --frozen-lockfile
+
+      - name: Build changelog feed
+        env:
+          CHANGELOG_PUBLIC_BASE_URL: https://docs.openreader.richardr.dev
+          CHANGELOG_FORCE_FULL: ${{ github.event_name == 'workflow_dispatch' && inputs.full_reconcile && '1' || '0' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/build-changelog-feed.mjs
 
       - name: Build docs
         run: pnpm --dir docs-site build

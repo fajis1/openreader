@@ -17,6 +17,7 @@ For auth-enabled deployments, use **Settings → Admin** as the primary source o
 | `API_BASE` | Legacy bootstrap seed | none | Optional first-boot seed into `default-openai`; then manage in Settings → Admin → Shared providers |
 | `API_KEY` | Legacy bootstrap seed | none | Optional first-boot seed into `default-openai`; then manage in Settings → Admin → Shared providers |
 | `NEXT_PUBLIC_*` runtime seeds | Legacy bootstrap seed | varies | Optional first-boot seeds for site features; then manage in Settings → Admin → Site features |
+| `NEXT_PUBLIC_CHANGELOG_FEED_URL` | Legacy bootstrap seed | `https://docs.openreader.richardr.dev/changelog/manifest.json` | Optional first-boot seed for changelog feed URL; then manage in Settings → Admin → Site features |
 | `TTS_CACHE_MAX_SIZE_BYTES` | TTS caching | `268435456` (256 MB) | Tune in-memory TTS cache size |
 | `TTS_CACHE_TTL_MS` | TTS caching | `1800000` (30 min) | Tune in-memory TTS cache TTL |
 | `TTS_MAX_RETRIES` | TTS retry | `2` | Tune retry attempts for upstream 429/5xx |
@@ -404,6 +405,14 @@ Sets the default TTS provider for new users.
 - Runtime key: `defaultTtsProvider`
 
 `showAllProviderModels` is a runtime-only admin setting (no env seed). Configure it in **Settings → Admin → Site features**.
+
+### NEXT_PUBLIC_CHANGELOG_FEED_URL
+
+Sets the changelog manifest URL used by the Settings modal changelog viewer.
+
+- Default: `https://docs.openreader.richardr.dev/changelog/manifest.json`
+- Use this in self-hosted deployments when you publish changelog feeds to a custom docs domain/path.
+- Runtime key: `changelogFeedUrl`
 
 
 ### NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT

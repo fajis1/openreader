@@ -64,6 +64,15 @@ import {
   segmentedButtonClass,
   segmentedGroupClass,
 } from '@/components/formPrimitives';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { fetchChangelogManifest, fetchChangelogReleaseBody } from '@/lib/client/changelog';
+import {
+  findCurrentVersionIndex,
+  normalizeVersion,
+  type ChangelogManifestEntry,
+  type ChangelogReleaseBody,
+} from '@/lib/shared/changelog';
 
 // Hard-coded theme color palettes for the visual theme selector
 type ThemeColorSet = { background: string; base: string; offbase: string; accent: string; secondaryAccent: string; foreground: string; muted: string };
@@ -131,6 +140,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const enableTTSProvidersTab = runtimeConfig.enableTtsProvidersTab;
   const restrictUserApiKeys = runtimeConfig.restrictUserApiKeys;
   const [isOpen, setIsOpen] = useState(false);
+  const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>(enableTTSProvidersTab ? 'api' : 'theme');
 
   const { theme, setTheme, applyCustomColors } = useTheme();
@@ -410,6 +420,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
 
   const resetToCurrent = useCallback(() => {
     setIsOpen(false);
+    setIsChangelogOpen(false);
     setLocalApiKey(apiKey);
     setLocalBaseUrl(baseUrl);
     setLocalProviderRef(providerRef);
@@ -501,6 +512,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const selectedModelVersion = selectedModel?.id?.includes(':')
     ? selectedModel.id.slice(selectedModel.id.indexOf(':'))
     : '';
+  const displayVersion = normalizeVersion(runtimeConfig.appVersion || '');
 
   return (
     <>
@@ -538,21 +550,37 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <DialogPanel data-testid="settings-modal" className="w-full max-w-4xl transform rounded-xl bg-base text-left align-middle shadow-xl transition-all overflow-hidden border border-offbase">
+                <DialogPanel data-testid="settings-modal" className="relative w-full max-w-4xl transform rounded-xl bg-base text-left align-middle shadow-xl transition-all overflow-hidden border border-offbase">
                   {/* Header */}
                   <div className="flex items-center justify-between px-6 py-4 border-b border-offbase">
                     <DialogTitle as="h3" className="text-lg font-semibold leading-6 text-foreground">
                       Settings
                     </DialogTitle>
-                    {authEnabled && (
+                    <div className="flex items-center gap-4">
                       <Button
-                        onClick={() => showPrivacyModal({ authEnabled })}
+                        onClick={() => setIsChangelogOpen(true)}
                         className="text-sm font-medium text-muted hover:text-accent transition-colors"
                       >
-                        Privacy
+                        {displayVersion ? `v${displayVersion} · Changelog` : 'Changelog'}
                       </Button>
-                    )}
+                      {authEnabled && (
+                        <Button
+                          onClick={() => showPrivacyModal({ authEnabled })}
+                          className="text-sm font-medium text-muted hover:text-accent transition-colors"
+                        >
+                          Privacy
+                        </Button>
+                      )}
+                    </div>
                   </div>
+
+                  {isChangelogOpen && (
+                    <SettingsChangelogPanel
+                      appVersion={runtimeConfig.appVersion}
+                      manifestUrl={runtimeConfig.changelogFeedUrl}
+                      onClose={() => setIsChangelogOpen(false)}
+                    />
+                  )}
 
                   {/* Mobile: 2x2 grid nav */}
                   <div className="grid grid-cols-2 gap-1 sm:hidden border-b border-offbase bg-background p-2">
@@ -1345,5 +1373,181 @@ export function SettingsModal({ className = '' }: { className?: string }) {
         errorMessage={libraryDocumentsErrorMessage}
       />
     </>
+  );
+}
+
+function SettingsChangelogPanel({
+  appVersion,
+  manifestUrl,
+  onClose,
+}: {
+  appVersion: string;
+  manifestUrl: string;
+  onClose: () => void;
+}) {
+  const [manifest, setManifest] = useState<ChangelogManifestEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [bodies, setBodies] = useState<Record<string, ChangelogReleaseBody>>({});
+  const normalizedAppVersion = normalizeVersion(appVersion || '');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadManifest() {
+      setLoading(true);
+      setError(null);
+      try {
+        const entries = await fetchChangelogManifest(manifestUrl, controller.signal);
+        setManifest(entries);
+        const initialIndex = findCurrentVersionIndex(entries, normalizedAppVersion);
+        if (initialIndex >= 0) {
+          const entry = entries[initialIndex];
+          setExpanded((prev) => ({ ...prev, [entry.tag_name]: true }));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load changelog');
+      } finally {
+        setLoading(false);
+      }
+    }
+    void loadManifest();
+    return () => controller.abort();
+  }, [manifestUrl, normalizedAppVersion]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const tagsToLoad = manifest
+      .filter((entry) => expanded[entry.tag_name] && !bodies[entry.tag_name])
+      .map((entry) => entry.tag_name);
+    if (tagsToLoad.length === 0) return () => controller.abort();
+
+    async function loadBodies() {
+      await Promise.all(tagsToLoad.map(async (tag) => {
+        const entry = manifest.find((item) => item.tag_name === tag);
+        if (!entry) return;
+        try {
+          const body = await fetchChangelogReleaseBody(manifestUrl, entry.body_path, controller.signal);
+          setBodies((prev) => ({ ...prev, [tag]: body }));
+        } catch {
+          // Keep entry expanded; inline fallback appears below.
+        }
+      }));
+    }
+    void loadBodies();
+    return () => controller.abort();
+  }, [expanded, manifest, manifestUrl, bodies]);
+
+  return (
+    <div className="absolute inset-x-0 top-[65px] bottom-0 z-20 bg-base border-t border-offbase">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-offbase bg-background">
+        <div className="min-w-0">
+          <h4 className="text-sm font-semibold text-foreground">Changelog</h4>
+          <p className="text-xs text-muted truncate">
+            {normalizedAppVersion
+              ? `Current version: v${normalizedAppVersion}`
+              : 'Release history from GitHub'}
+          </p>
+        </div>
+        <Button
+          onClick={onClose}
+          className="text-sm font-medium text-muted hover:text-accent transition-colors"
+        >
+          Back to settings
+        </Button>
+      </div>
+
+      <div className="h-[calc(100%-57px)] overflow-y-auto p-3 space-y-2">
+        {loading && (
+          <div className="rounded-lg border border-offbase bg-background p-3 text-sm text-muted">
+            Loading changelog…
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="rounded-lg border border-offbase bg-background p-3 space-y-2">
+            <p className="text-sm text-foreground">Could not load changelog right now.</p>
+            <p className="text-xs text-muted break-words">{error}</p>
+            <a
+              href="https://github.com/richardr1126/openreader/releases"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium text-accent hover:underline"
+            >
+              Open GitHub Releases
+            </a>
+          </div>
+        )}
+
+        {!loading && !error && manifest.length === 0 && (
+          <div className="rounded-lg border border-offbase bg-background p-3 text-sm text-muted">
+            No releases found.
+          </div>
+        )}
+
+        {!loading && !error && manifest.map((entry) => {
+          const isCurrent = normalizedAppVersion && normalizeVersion(entry.tag_name) === normalizedAppVersion;
+          const body = bodies[entry.tag_name];
+          const isExpanded = !!expanded[entry.tag_name];
+          return (
+            <div
+              key={entry.tag_name}
+              className={`rounded-lg border bg-background overflow-hidden ${
+                isCurrent ? 'border-accent' : 'border-offbase'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setExpanded((prev) => ({ ...prev, [entry.tag_name]: !isExpanded }))}
+                className="w-full text-left px-3 py-2 flex items-center justify-between gap-3 hover:bg-base transition-colors"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-foreground truncate">{entry.tag_name}</span>
+                    {entry.prerelease && (
+                      <span className="text-[10px] uppercase tracking-wide font-semibold rounded px-1.5 py-0.5 bg-offbase text-muted">
+                        prerelease
+                      </span>
+                    )}
+                    {isCurrent && (
+                      <span className="text-[10px] uppercase tracking-wide font-semibold rounded px-1.5 py-0.5 bg-offbase text-accent">
+                        current
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted truncate">{entry.name}</p>
+                  <p className="text-[11px] text-muted">
+                    {new Date(entry.published_at).toLocaleDateString()}
+                  </p>
+                </div>
+                <span className="text-xs text-muted">{isExpanded ? 'Hide' : 'Show'}</span>
+              </button>
+
+              {isExpanded && (
+                <div className="px-3 pb-3 pt-1 border-t border-offbase space-y-2">
+                  {body ? (
+                    <div className="text-sm text-foreground leading-6 space-y-2 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_ul]:pl-5 [&_ol]:pl-5 [&_code]:bg-offbase [&_code]:rounded [&_code]:px-1 [&_pre]:bg-offbase [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {body.body || '_No release notes provided._'}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted">Loading release notes…</p>
+                  )}
+                  <a
+                    href={entry.html_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-medium text-accent hover:underline"
+                  >
+                    View on GitHub
+                  </a>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

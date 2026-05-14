@@ -13,6 +13,8 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
  */
 export interface RuntimeConfig {
   defaultTtsProvider: string;
+  changelogFeedUrl: string;
+  appVersion: string;
   restrictUserApiKeys: boolean;
   enableTtsProvidersTab: boolean;
   enableWordHighlight: boolean;
@@ -24,6 +26,8 @@ export interface RuntimeConfig {
 
 const RUNTIME_DEFAULTS: RuntimeConfig = {
   defaultTtsProvider: 'custom-openai',
+  changelogFeedUrl: 'https://docs.openreader.richardr.dev/changelog/manifest.json',
+  appVersion: '0.0.0',
   restrictUserApiKeys: true,
   enableTtsProvidersTab: true,
   enableWordHighlight: true,

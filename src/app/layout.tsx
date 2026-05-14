@@ -5,6 +5,7 @@ import { Figtree } from "next/font/google";
 import { ConsentAwareAnalytics } from "@/components/ConsentAwareAnalytics";
 import { CookieConsentBanner } from "@/components/CookieConsentBanner";
 import { getResolvedRuntimeConfig } from "@/lib/server/runtime-config";
+import pkg from "../../package.json";
 
 const figtree = Figtree({
   subsets: ["latin"],
@@ -51,7 +52,11 @@ function jsonEmbedSafe(value: unknown): string {
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const runtimeConfig = await getResolvedRuntimeConfig();
-  const runtimeConfigInit = `window.__OPENREADER_RUNTIME_CONFIG__=${jsonEmbedSafe(runtimeConfig)};`;
+  const runtimeConfigWithAppVersion = {
+    ...runtimeConfig,
+    appVersion: pkg.version,
+  };
+  const runtimeConfigInit = `window.__OPENREADER_RUNTIME_CONFIG__=${jsonEmbedSafe(runtimeConfigWithAppVersion)};`;
 
   return (
     <html lang="en" className={figtree.variable} suppressHydrationWarning>
