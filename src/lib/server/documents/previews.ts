@@ -306,6 +306,9 @@ async function generateAndStorePreview(doc: PreviewSourceDocument, namespace: st
       throw new Error(`Unsupported preview type: ${doc.type}`);
     }
 
+    // Replace-in-place semantics: clear old preview objects for this document
+    // prefix before writing the current variant so stale files don't linger.
+    await deleteDocumentPreviewArtifacts(doc.id, namespace).catch(() => undefined);
     await putDocumentPreviewBuffer(doc.id, rendered.bytes, namespace);
   } finally {
     if (workDir) {

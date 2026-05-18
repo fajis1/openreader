@@ -61,6 +61,7 @@ export interface DocumentPreviewCacheRow {
   data: ArrayBuffer;
   cachedAt: number;
   byteSize?: number;
+  previewVersion?: number;
 }
 
 export interface ConfigRow {

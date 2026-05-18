@@ -7,7 +7,7 @@ interface RunLayoutInput {
   pageWidth: number;
   pageHeight: number;
   textItems: PdfTextItem[];
-  pagePng: Buffer;
+  pageImage: Buffer;
 }
 
 const DEFAULT_INPUT_SIZE = 800;
@@ -255,9 +255,9 @@ function normalizeModelLabel(rawLabel: string): string {
 }
 
 export async function runLayoutModel(input: RunLayoutInput): Promise<LayoutRegion[]> {
-  const { pageWidth, pageHeight, textItems, pagePng } = input;
+  const { pageWidth, pageHeight, textItems, pageImage } = input;
   if (!textItems.length) return [];
-  if (!pagePng || pagePng.byteLength === 0) {
+  if (!pageImage || pageImage.byteLength === 0) {
     throw new Error('layout-render-missing-page-image');
   }
 
@@ -269,8 +269,8 @@ export async function runLayoutModel(input: RunLayoutInput): Promise<LayoutRegio
       getCanvasFns(),
     ]);
 
-    const pageImage = await canvasFns.loadImageFn(pagePng);
-    const pixelValues = preprocessResized(pageImage, preprocessor, canvasFns.createCanvasFn);
+    const decodedPageImage = await canvasFns.loadImageFn(pageImage);
+    const pixelValues = preprocessResized(decodedPageImage, preprocessor, canvasFns.createCanvasFn);
     const output = await session.run({ pixel_values: pixelValues });
 
     const logits = output.logits?.data as Float32Array | undefined;

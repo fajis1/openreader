@@ -99,7 +99,7 @@ export async function parsePdf(input: ParsePdfInput): Promise<ParsedPdfDocument>
         pageWidth: rendered.width,
         pageHeight: rendered.height,
         textItems: layoutTextItems,
-        pagePng: rendered.png,
+        pageImage: rendered.image,
       });
       const merged = mergeTextWithRegions(regions, layoutTextItems);
       if (textItems.length > 0 && merged.length === 0) {

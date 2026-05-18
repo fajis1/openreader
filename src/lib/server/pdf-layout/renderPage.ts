@@ -53,6 +53,9 @@ interface RenderInput {
   pdfBytes: ArrayBuffer;
   pageNumber: number;
   scale?: number;
+  targetWidth?: number;
+  format?: 'png' | 'jpeg';
+  jpegQuality?: number;
 }
 
 function createPdfjsCanvasFactory(runtime: CanvasRuntime) {
@@ -81,10 +84,18 @@ function createPdfjsCanvasFactory(runtime: CanvasRuntime) {
   };
 }
 
-export async function renderPage({ pdfBytes, pageNumber, scale = 1.5 }: RenderInput): Promise<{
+export async function renderPage({
+  pdfBytes,
+  pageNumber,
+  scale = 1.5,
+  targetWidth,
+  format = 'png',
+  jpegQuality = 82,
+}: RenderInput): Promise<{
   width: number;
   height: number;
-  png: Buffer;
+  image: Buffer;
+  contentType: 'image/png' | 'image/jpeg';
 }> {
   // pdf.js may detach the provided ArrayBuffer. Work with an isolated copy so
   // callers can safely reuse their original bytes across pages/calls.
@@ -116,7 +127,11 @@ export async function renderPage({ pdfBytes, pageNumber, scale = 1.5 }: RenderIn
   const pdf = await loadingTask.promise;
   try {
     const page = await pdf.getPage(pageNumber);
-    const viewport = page.getViewport({ scale });
+    const baseViewport = page.getViewport({ scale: 1.0 });
+    const effectiveScale = typeof targetWidth === 'number' && Number.isFinite(targetWidth) && targetWidth > 0
+      ? (Math.max(1, Math.round(targetWidth)) / Math.max(1, baseViewport.width))
+      : scale;
+    const viewport = page.getViewport({ scale: effectiveScale });
     const width = Math.max(1, Math.floor(viewport.width));
     const height = Math.max(1, Math.floor(viewport.height));
     const canvas = canvasRuntime.createCanvasFn(width, height);
@@ -130,10 +145,15 @@ export async function renderPage({ pdfBytes, pageNumber, scale = 1.5 }: RenderIn
       intent: 'display',
     });
     await renderTask.promise;
+    const contentType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+    const image = format === 'jpeg'
+      ? canvas.toBuffer('image/jpeg', jpegQuality)
+      : canvas.toBuffer('image/png');
     return {
       width,
       height,
-      png: canvas.toBuffer('image/png'),
+      image,
+      contentType,
     };
   } finally {
     await pdf.destroy().catch(() => undefined);
