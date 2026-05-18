@@ -8,7 +8,7 @@ import { documentPreviewFallbackUrl, documentPreviewPresignUrl } from '@/lib/cli
 
 const inMemoryPreviewUrlCache = new Map<string, string>();
 const inFlightPreviewPrime = new Map<string, Promise<string | null>>();
-const PREVIEW_CACHE_SCHEMA_VERSION = 3;
+const PREVIEW_CACHE_SCHEMA_VERSION = 4;
 
 function revokeIfBlobUrl(url: string | null | undefined): void {
   if (!url) return;
