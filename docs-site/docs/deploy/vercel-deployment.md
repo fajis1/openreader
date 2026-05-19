@@ -8,6 +8,8 @@ This guide covers deploying OpenReader to Vercel with external Postgres and S3-c
 
 - Documents (PDF/EPUB/TXT/MD) work with `POSTGRES_URL` + external S3 storage.
 - Audiobook routes work on Node.js serverless functions using `ffmpeg-static`.
+- Heavy compute features (Whisper alignment + PDF layout parsing) work through `COMPUTE_MODE=worker` with an external compute worker service.
+- For worker setup details and worker-specific env vars, see [Compute Worker (Redis + BullMQ)](./compute-worker).
 
 :::warning DOCX Conversion Limitation
 `docx` conversion requires `soffice` (LibreOffice), which is not available in a standard Vercel runtime.
@@ -36,12 +38,15 @@ AUTH_SECRET=...
 ADMIN_EMAILS=you@example.com  # comma-separated; admins manage TTS + features in-app
 
 # Heavy compute (recommended on Vercel in v1)
-# local  = requires native binaries/models in-process
+# local  = requires native binaries/models in-process (not recommended on Vercel)
+# worker = external durable compute worker (recommended)
 # none   = disable ONNX whisper alignment + PDF layout parsing
-COMPUTE_MODE=none
+COMPUTE_MODE=worker
+COMPUTE_WORKER_URL=https://your-compute-worker.example.com
+COMPUTE_WORKER_TOKEN=...
 
 # First-boot seed for the TTS shared provider (optional; manage in-app afterwards)
-API_KEY=your_replicate_key
+# API_KEY=your_replicate_key
 # API_BASE only needed for OpenAI-compatible self-hosted providers
 ```
 
@@ -129,4 +134,4 @@ Adjust memory per route if your files are larger or your plan differs.
 1. Upload and read a PDF/EPUB document.
 2. Confirm sync/blob fetch works across refreshes/devices.
 3. Generate at least one audiobook chapter and play/download it.
-4. If you run with local compute (`COMPUTE_MODE=local`) outside Vercel, verify word highlighting timestamps on a TTS run.
+4. Verify worker-backed word highlighting and PDF parsing in `COMPUTE_MODE=worker`.

@@ -1,5 +1,6 @@
 packages:
   - .
+  - compute/*
 
 allowBuilds:
   '@napi-rs/canvas': true

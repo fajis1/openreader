@@ -372,10 +372,8 @@ export async function POST(request: NextRequest) {
         // previously unavailable, retry alignment using the current segment text.
         if (!alignment) {
           try {
-            const audioBuffer = await getTtsSegmentAudioObject(existing.audioKey);
-            const whisperBytes = Uint8Array.from(audioBuffer);
             const aligned = (await getCompute().alignWords({
-              audioBuffer: whisperBytes.buffer,
+              audioObjectKey: existing.audioKey,
               text: segment.text,
             })).alignments;
             alignment = aligned[0] ? { ...aligned[0], sentenceIndex: segment.original.segmentIndex } : null;
@@ -527,6 +525,7 @@ export async function POST(request: NextRequest) {
           const whisperBytes = Uint8Array.from(persistedBuffer);
           const aligned = (await getCompute().alignWords({
             audioBuffer: whisperBytes.buffer,
+            audioObjectKey: audioKey,
             text: segment.text,
           })).alignments;
           alignment = aligned[0] ? { ...aligned[0], sentenceIndex: segment.original.segmentIndex } : null;

@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { UnsupportedComputeError } from '@/lib/server/compute/types';
-import { getDocumentBlob, putParsedDocumentBlob } from '@/lib/server/documents/blobstore';
+import { documentKey, putParsedDocumentBlob } from '@/lib/server/documents/blobstore';
 import { getCompute } from '@/lib/server/compute';
 import { clearTtsSegmentCache } from '@/lib/server/tts/segments-cache';
 
@@ -29,10 +29,10 @@ export async function parsePdfJob(input: ParsePdfJobInput): Promise<void> {
       .set({ parseStatus: 'running' })
       .where(and(eq(documents.id, input.documentId), eq(documents.userId, input.userId)));
 
-    const pdfBytes = await getDocumentBlob(input.documentId, input.namespace);
     const parsed = await getCompute().parsePdfLayout({
       documentId: input.documentId,
-      pdfBytes: new Uint8Array(pdfBytes).buffer,
+      namespace: input.namespace,
+      documentObjectKey: documentKey(input.documentId, input.namespace),
     });
 
     const parsedJson = Buffer.from(JSON.stringify(parsed));

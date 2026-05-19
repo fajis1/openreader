@@ -7,10 +7,5 @@ export function readComputeMode(): ComputeMode {
 }
 
 export function isComputeModeAvailable(mode: ComputeMode): boolean {
-  if (mode === 'worker') {
-    throw new Error(
-      'COMPUTE_MODE=worker is not implemented yet in v1. Switch to local/none or implement WorkerComputeBackend (v2).',
-    );
-  }
   return mode !== 'none';
 }

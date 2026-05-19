@@ -1,10 +1,10 @@
-import type { TTSAudioBuffer, TTSSentenceAlignment } from '@/types/tts';
-import type { ParsedPdfDocument } from '@/types/parsed-pdf';
+import type { TTSAudioBuffer, TTSSentenceAlignment, ParsedPdfDocument } from '@openreader/compute-core';
 
 export type ComputeMode = 'local' | 'worker' | 'none';
 
 export interface WhisperAlignInput {
-  audioBuffer: TTSAudioBuffer;
+  audioBuffer?: TTSAudioBuffer;
+  audioObjectKey?: string;
   text: string;
   cacheKey?: string;
   lang?: string;
@@ -16,7 +16,9 @@ export interface WhisperAlignResult {
 
 export interface PdfLayoutInput {
   documentId: string;
-  pdfBytes: ArrayBuffer;
+  namespace?: string | null;
+  documentObjectKey?: string;
+  pdfBytes?: ArrayBuffer;
 }
 
 export interface ComputeBackend {

@@ -54,8 +54,8 @@ For auth-enabled deployments, use **Settings → Admin** as the primary source o
 | `IMPORT_LIBRARY_DIR` | Library import | `docstore/library` fallback | Set a single server library root |
 | `IMPORT_LIBRARY_DIRS` | Library import | unset | Set multiple roots (comma/colon/semicolon separated) |
 | `COMPUTE_MODE` | Heavy compute backend | `local` | Set to `none` to disable ONNX word alignment + PDF layout parsing |
-| `COMPUTE_WORKER_URL` | Heavy compute backend | unset | Reserved for future worker backend mode (`worker`) |
-| `COMPUTE_WORKER_TOKEN` | Heavy compute backend | unset | Reserved for future worker backend mode (`worker`) |
+| `COMPUTE_WORKER_URL` | Heavy compute backend | unset | Required when `COMPUTE_MODE=worker`; base URL for external compute worker |
+| `COMPUTE_WORKER_TOKEN` | Heavy compute backend | unset | Required bearer token for external compute worker auth |
 | `PDF_LAYOUT_MODEL_BASE_URL` | PDF layout model | PP-DocLayoutV3 ONNX base URL | Optional base URL override for `ensureModel()` |
 | `WHISPER_MODEL_BASE_URL` | Whisper ONNX model | onnx-community defaults | Optional base URL override for ONNX whisper-base_timestamped int8 downloads |
 | `FFMPEG_BIN` | Audio runtime | auto-detected (`ffmpeg-static`) | Override ffmpeg binary path |
@@ -357,22 +357,26 @@ Selects the backend for heavy compute features (ONNX word alignment + PDF layout
 - Default: `local`
 - Supported in v1:
   - `local`: run compute in-process on the app server
+  - `worker`: enqueue async jobs in an external durable compute worker (Redis + BullMQ)
   - `none`: disable these features cleanly
-- `worker` is reserved for a future external worker backend and currently fails fast at startup if selected
+- `worker` requires `COMPUTE_WORKER_URL` and `COMPUTE_WORKER_TOKEN`
+- `worker` assumes the external worker can directly reach shared object storage (S3-compatible endpoint)
+- `worker` is not compatible with non-exposed embedded `weed mini` storage topologies
+- Worker service env vars are documented in [Compute Worker (Redis + BullMQ)](../deploy/compute-worker)
 
 ### COMPUTE_WORKER_URL
 
-Reserved for future external compute worker mode.
+Base URL for external compute worker mode.
 
-- Used only when `COMPUTE_MODE=worker` (not implemented in v1)
-- Leave unset in v1
+- Used only when `COMPUTE_MODE=worker`
+- Example: `http://localhost:8081`
 
 ### COMPUTE_WORKER_TOKEN
 
-Reserved bearer token for future external compute worker mode.
+Bearer token for external compute worker auth.
 
-- Used only when `COMPUTE_MODE=worker` (not implemented in v1)
-- Leave unset in v1
+- Used only when `COMPUTE_MODE=worker`
+- Must match worker service `COMPUTE_WORKER_TOKEN`
 
 ### PDF_LAYOUT_MODEL_BASE_URL
 

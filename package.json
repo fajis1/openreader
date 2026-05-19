@@ -20,7 +20,11 @@
     "docs:build": "pnpm --dir docs-site build",
     "docs:serve": "pnpm --dir docs-site serve",
     "docs:version": "pnpm --dir docs-site docusaurus docs:version",
-    "docs:clear": "pnpm --dir docs-site clear"
+    "docs:clear": "pnpm --dir docs-site clear",
+    "compute:worker:dev": "pnpm --filter @openreader/compute-worker dev",
+    "compute:worker:start": "pnpm --filter @openreader/compute-worker start",
+    "compute:dev:compose": "docker compose --env-file compute/worker/.env -f compute/worker/docker-compose.yml up --build",
+    "compute:dev:watch": "docker compose --env-file compute/worker/.env -f compute/worker/docker-compose.yml up --watch"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1045.0",

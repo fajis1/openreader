@@ -124,6 +124,40 @@ If you need mirrors or pinned artifact locations, set `WHISPER_MODEL_BASE_URL` i
 
 </details>
 
+<details>
+<summary><strong>External compute worker dev stack (optional)</strong></summary>
+
+Use this when you want durable compute with Redis/BullMQ while keeping Next.js on native host `pnpm dev`.
+Full worker deployment details are in [Compute Worker (Redis + BullMQ)](./compute-worker).
+
+Start only Redis + compute-worker via compose watch:
+
+```bash
+docker compose --env-file compute/worker/.env -f compute/worker/docker-compose.yml up --watch
+# or: pnpm compute:dev:watch
+```
+
+`compute/worker/.env.example` contains a starter config. Copy it to `compute/worker/.env` and adjust values for your environment.
+
+Run the main app separately on the host:
+
+```bash
+pnpm dev
+```
+
+For app server worker mode, set:
+
+```env
+COMPUTE_MODE=worker
+COMPUTE_WORKER_URL=http://localhost:8081
+COMPUTE_WORKER_TOKEN=<same-token-used-by-worker>
+```
+
+Worker mode requires worker-reachable shared object storage (S3-compatible endpoint).
+Non-exposed embedded `weed mini` is not a supported topology for external worker mode.
+
+</details>
+
 ## Steps
 
 ### Required flow
@@ -198,6 +232,25 @@ ADMIN_EMAILS=you@example.com
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
 COMPUTE_MODE=local
+USE_EMBEDDED_WEED_MINI=false
+S3_BUCKET=your-bucket
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=your-access-key
+S3_SECRET_ACCESS_KEY=your-secret-key
+# Optional for non-AWS providers:
+# S3_ENDPOINT=https://your-s3-compatible-endpoint
+# S3_FORCE_PATH_STYLE=true
+```
+
+  </TabItem>
+  <TabItem value="worker-mode" label="External Worker + Redis">
+
+```env
+API_BASE=http://host.docker.internal:8880/v1
+API_KEY=none
+COMPUTE_MODE=worker
+COMPUTE_WORKER_URL=http://localhost:8081
+COMPUTE_WORKER_TOKEN=<same-token-used-by-worker>
 USE_EMBEDDED_WEED_MINI=false
 S3_BUCKET=your-bucket
 S3_REGION=us-east-1

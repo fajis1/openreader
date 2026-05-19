@@ -22,6 +22,12 @@ OpenReader currently pins embedded SeaweedFS to `4.18` in CI and Docker builds.
 `4.19` introduced intermittent `InternalError` responses on S3 `PutObject` in our upload flow.
 :::
 
+## Published images
+
+- App server: `ghcr.io/richardr1126/openreader:latest`
+- Compute worker (Optional): `ghcr.io/richardr1126/openreader-compute-worker:latest`
+- Legacy app alias: `ghcr.io/richardr1126/openreader-webui:latest`
+
 ## 1. Start the Docker container
 
 <Tabs groupId="docker-start-mode">
@@ -135,6 +141,7 @@ Visit [http://localhost:3003](http://localhost:3003) after startup.
 ## 3. Update Docker image
 
 Legacy image compatibility: `ghcr.io/richardr1126/openreader-webui:latest` remains available as an alias.
+For external compute mode image details, see [Compute Worker (Redis + BullMQ)](./deploy/compute-worker).
 
 ```bash
 docker stop openreader || true && \

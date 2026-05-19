@@ -15,13 +15,16 @@ const securityHeaders = [
   },
 ];
 
-const computeMode = (process.env.COMPUTE_MODE || 'local').trim().toLowerCase();
-const computeDisabled = computeMode === 'none';
+const computeModeRaw = (process.env.COMPUTE_MODE || 'local').trim().toLowerCase();
+const computeMode = computeModeRaw === 'none' || computeModeRaw === 'worker' || computeModeRaw === 'local'
+  ? computeModeRaw
+  : 'local';
+const computeLocal = computeMode === 'local';
 const serverExternalPackages = [
   '@napi-rs/canvas',
   'ffmpeg-static',
   'better-sqlite3',
-  ...(computeDisabled ? [] : ['onnxruntime-node', '@huggingface/tokenizers']),
+  ...(computeLocal ? ['onnxruntime-node', '@huggingface/tokenizers'] : []),
 ];
 
 const nextConfig: NextConfig = {
@@ -39,6 +42,7 @@ const nextConfig: NextConfig = {
       canvas: '@napi-rs/canvas',
     },
   },
+  transpilePackages: ['@openreader/compute-core'],
   serverExternalPackages,
   outputFileTracingIncludes: {
     '/api/audiobook': [
@@ -60,7 +64,7 @@ const nextConfig: NextConfig = {
       './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
     ],
   },
-  ...(computeDisabled
+  ...(!computeLocal
     ? {
         outputFileTracingExcludes: {
           '/*': [
