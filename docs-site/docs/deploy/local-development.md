@@ -118,9 +118,9 @@ sudo apt install -y libreoffice
 
 No extra native Whisper CLI build step is required.
 
-Set `OPENREADER_COMPUTE_MODE=local` to enable built-in ONNX word alignment in-process.
+Set `COMPUTE_MODE=local` to enable built-in ONNX word alignment in-process.
 
-If you need mirrors or pinned artifact locations, set `OPENREADER_WHISPER_MODEL_*_URL` overrides in `.env`.
+If you need mirrors or pinned artifact locations, set `WHISPER_MODEL_BASE_URL` in `.env`.
 
 </details>
 
@@ -157,7 +157,7 @@ Use one of these `.env` mode templates:
 ```env
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
-OPENREADER_COMPUTE_MODE=local
+COMPUTE_MODE=local
 # Leave BASE_URL and AUTH_SECRET unset to keep auth disabled.
 # (Admin panel is unavailable without auth.)
 # API_BASE/API_KEY seed a shared default provider if you want shared mode.
@@ -169,7 +169,7 @@ OPENREADER_COMPUTE_MODE=local
 ```env
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
-OPENREADER_COMPUTE_MODE=local
+COMPUTE_MODE=local
 BASE_URL=http://localhost:3003
 AUTH_SECRET=<generate-with-openssl-rand-hex-32>
 # Optional when you need multiple local origins:
@@ -184,7 +184,7 @@ AUTH_SECRET=<generate-with-openssl-rand-hex-32>
 # on first boot, then no longer read. Manage them in Settings → Admin afterwards.
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
-OPENREADER_COMPUTE_MODE=local
+COMPUTE_MODE=local
 BASE_URL=http://localhost:3003
 AUTH_SECRET=<generate-with-openssl-rand-hex-32>
 # Comma-separated emails to auto-promote to admin on signin.
@@ -197,7 +197,7 @@ ADMIN_EMAILS=you@example.com
 ```env
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
-OPENREADER_COMPUTE_MODE=local
+COMPUTE_MODE=local
 USE_EMBEDDED_WEED_MINI=false
 S3_BUCKET=your-bucket
 S3_REGION=us-east-1
@@ -212,19 +212,15 @@ S3_SECRET_ACCESS_KEY=your-secret-key
 </Tabs>
 
 :::note Env vars vs. admin panel
-On first boot, `API_KEY` / `API_BASE` and any `NEXT_PUBLIC_*` flags you've set get auto-seeded into the admin-managed runtime config (DB-backed, keys encrypted at rest). After that, the admin UI is authoritative and editing those env vars no longer changes app behavior. See [Admin Panel](../configure/admin-panel).
+On first boot, `API_KEY` / `API_BASE` and any `RUNTIME_SEED_*` flags you've set get auto-seeded into the admin-managed runtime config (DB-backed, keys encrypted at rest). After that, the admin UI is authoritative and editing those env vars no longer changes app behavior. See [Admin Panel](../configure/admin-panel).
 :::
 
 :::note User BYOK restriction default
-If you want each user to enter personal provider credentials, set `restrictUserApiKeys=false` (from **Settings → Admin** when auth/admin is enabled, or via legacy first-boot seed `NEXT_PUBLIC_RESTRICT_USER_API_KEYS=false` for no-admin bootstrap flows).
+If you want each user to enter personal provider credentials, set `restrictUserApiKeys=false` (from **Settings → Admin** when auth/admin is enabled, or via legacy first-boot seed `RUNTIME_SEED_RESTRICT_USER_API_KEYS=false` for no-admin bootstrap flows).
 :::
 
 :::info
 For all environment variables, see [Environment Variables](../reference/environment-variables).
-:::
-
-:::tip Optional model prefetch
-To pre-populate the PDF layout ONNX model cache before first PDF parse, run `pnpm fetch-models`.
 :::
 
 See [Auth](../configure/auth) for app/auth behavior.

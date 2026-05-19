@@ -16,6 +16,23 @@ export const WHISPER_DECODER_MERGED_MODEL_PATH = path.join(MODEL_DIR, 'onnx', 'd
 export const WHISPER_DECODER_WITH_PAST_MODEL_PATH = path.join(MODEL_DIR, 'onnx', 'decoder_with_past_model_int8.onnx');
 
 const BASE_MODEL_URL = 'https://huggingface.co/onnx-community/whisper-base_timestamped/resolve/main';
+const WHISPER_MODEL_BASE_URL_ENV = 'WHISPER_MODEL_BASE_URL';
+
+const MODEL_RELATIVE_PATHS: string[] = [
+  'config.json',
+  'generation_config.json',
+  'tokenizer.json',
+  'tokenizer_config.json',
+  'merges.txt',
+  'vocab.json',
+  'normalizer.json',
+  'added_tokens.json',
+  'preprocessor_config.json',
+  'special_tokens_map.json',
+  'onnx/encoder_model_int8.onnx',
+  'onnx/decoder_model_merged_int8.onnx',
+  'onnx/decoder_with_past_model_int8.onnx',
+];
 
 const DEFAULT_URLS: Record<string, string> = {
   'config.json': `${BASE_MODEL_URL}/config.json`,
@@ -31,22 +48,6 @@ const DEFAULT_URLS: Record<string, string> = {
   'onnx/encoder_model_int8.onnx': `${BASE_MODEL_URL}/onnx/encoder_model_int8.onnx`,
   'onnx/decoder_model_merged_int8.onnx': `${BASE_MODEL_URL}/onnx/decoder_model_merged_int8.onnx`,
   'onnx/decoder_with_past_model_int8.onnx': `${BASE_MODEL_URL}/onnx/decoder_with_past_model_int8.onnx`,
-};
-
-const ENV_URL_OVERRIDES: Record<string, string> = {
-  'config.json': 'OPENREADER_WHISPER_MODEL_CONFIG_URL',
-  'generation_config.json': 'OPENREADER_WHISPER_MODEL_GENERATION_CONFIG_URL',
-  'tokenizer.json': 'OPENREADER_WHISPER_MODEL_TOKENIZER_URL',
-  'tokenizer_config.json': 'OPENREADER_WHISPER_MODEL_TOKENIZER_CONFIG_URL',
-  'merges.txt': 'OPENREADER_WHISPER_MODEL_MERGES_URL',
-  'vocab.json': 'OPENREADER_WHISPER_MODEL_VOCAB_URL',
-  'normalizer.json': 'OPENREADER_WHISPER_MODEL_NORMALIZER_URL',
-  'added_tokens.json': 'OPENREADER_WHISPER_MODEL_ADDED_TOKENS_URL',
-  'preprocessor_config.json': 'OPENREADER_WHISPER_MODEL_PREPROCESSOR_URL',
-  'special_tokens_map.json': 'OPENREADER_WHISPER_MODEL_SPECIAL_TOKENS_MAP_URL',
-  'onnx/encoder_model_int8.onnx': 'OPENREADER_WHISPER_MODEL_ENCODER_URL',
-  'onnx/decoder_model_merged_int8.onnx': 'OPENREADER_WHISPER_MODEL_DECODER_MERGED_URL',
-  'onnx/decoder_with_past_model_int8.onnx': 'OPENREADER_WHISPER_MODEL_DECODER_WITH_PAST_URL',
 };
 
 type ManifestEntry = { path: string; sha256?: string; size?: number };
@@ -82,10 +83,15 @@ function resolvePath(relativePath: string, modelDir: string): string {
   return path.join(modelDir, relativePath);
 }
 
+function joinModelUrl(baseUrl: string, relativePath: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/${relativePath}`;
+}
+
 function resolveUrl(relativePath: string): string {
-  const envKey = ENV_URL_OVERRIDES[relativePath];
-  const override = envKey ? process.env[envKey]?.trim() : '';
-  if (override) return override;
+  const overrideBase = process.env[WHISPER_MODEL_BASE_URL_ENV]?.trim();
+  if (overrideBase) {
+    return joinModelUrl(overrideBase, relativePath);
+  }
   const fallback = DEFAULT_URLS[relativePath];
   if (!fallback) {
     throw new Error(`No default URL configured for Whisper model artifact: ${relativePath}`);
@@ -194,6 +200,14 @@ export function createSingleflightRunner<T>(work: () => Promise<T>): () => Promi
 }
 
 async function ensureModelInternal(): Promise<string> {
+  if (process.env[WHISPER_MODEL_BASE_URL_ENV]?.trim()) {
+    for (const relativePath of MODEL_RELATIVE_PATHS) {
+      if (!(relativePath in DEFAULT_URLS)) {
+        throw new Error(`Missing default URL path mapping for Whisper artifact: ${relativePath}`);
+      }
+    }
+  }
+
   const artifacts: WhisperArtifactSpec[] = MODEL_FILES.map((entry) => ({
     path: entry.path,
     sha256: entry.sha256,

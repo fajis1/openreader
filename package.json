@@ -15,7 +15,6 @@
     "migrate-fs": "node scripts/migrate-fs-v2.mjs",
     "migrate-fs:dry-run": "node scripts/migrate-fs-v2.mjs --dry-run true",
     "generate": "node drizzle/scripts/generate.mjs",
-    "fetch-models": "node scripts/fetch-models.mjs",
     "docs:init": "pnpm --dir docs-site install",
     "docs:dev": "pnpm --dir docs-site start",
     "docs:build": "pnpm --dir docs-site build",

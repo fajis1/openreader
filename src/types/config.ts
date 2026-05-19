@@ -5,13 +5,13 @@ import { defaultModelForProviderType } from '@/lib/shared/tts-provider-policy';
 // Runtime config (admin-controlled) is layered on top of the static defaults
 // below. We resolve it lazily so this module stays importable from non-React
 // contexts (Dexie, server routes). The actual values come from
-// `window.__OPENREADER_RUNTIME_CONFIG__` (SSR-injected) on the client, and
+// `window.__RUNTIME_CONFIG__` (SSR-injected) on the client, and
 // from the built-in defaults during SSR.
 
 function readRuntimeString(key: string, defaultValue: string): string {
   if (typeof window === 'undefined') return defaultValue;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const injected = (window as any).__OPENREADER_RUNTIME_CONFIG__;
+  const injected = (window as any).__RUNTIME_CONFIG__;
   if (!injected || typeof injected !== 'object') return defaultValue;
   const value = injected[key];
   return typeof value === 'string' && value ? value : defaultValue;
@@ -80,7 +80,7 @@ export interface AppConfigValues {
 
 /**
  * Build defaults lazily so we can read SSR-injected admin overrides
- * (`window.__OPENREADER_RUNTIME_CONFIG__`). Modules that need the defaults
+ * (`window.__RUNTIME_CONFIG__`). Modules that need the defaults
  * statically should call `getAppConfigDefaults()` at use time. The exported
  * `APP_CONFIG_DEFAULTS` is a Proxy that re-resolves on each access so
  * mutations to the runtime config (admin edits) are picked up by anything

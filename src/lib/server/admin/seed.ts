@@ -12,7 +12,7 @@ import {
  * Idempotent boot-time seeding for the admin layer. Safe to call multiple
  * times. Runs:
  *
- *   1. `seedRuntimeConfigFromEnv()` — for each `NEXT_PUBLIC_*` env var that
+ *   1. `seedRuntimeConfigFromEnv()` — for each `RUNTIME_SEED_*` env var that
  *      maps to a runtime config key, write the value as `source='env-seed'`.
  *
  *   2. Default admin provider seed — if `admin_providers` is empty AND

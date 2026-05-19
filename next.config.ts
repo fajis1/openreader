@@ -14,6 +14,16 @@ const securityHeaders = [
     value: 'max-age=63072000; includeSubDomains; preload',
   },
 ];
+
+const computeMode = (process.env.COMPUTE_MODE || 'local').trim().toLowerCase();
+const computeDisabled = computeMode === 'none';
+const serverExternalPackages = [
+  '@napi-rs/canvas',
+  'ffmpeg-static',
+  'better-sqlite3',
+  ...(computeDisabled ? [] : ['onnxruntime-node', '@huggingface/tokenizers']),
+];
+
 const nextConfig: NextConfig = {
   async headers() {
     return [
@@ -29,13 +39,7 @@ const nextConfig: NextConfig = {
       canvas: '@napi-rs/canvas',
     },
   },
-  serverExternalPackages: [
-    "@napi-rs/canvas",
-    "ffmpeg-static",
-    "better-sqlite3",
-    "onnxruntime-node",
-    "@huggingface/tokenizers",
-  ],
+  serverExternalPackages,
   outputFileTracingIncludes: {
     '/api/audiobook': [
       './node_modules/ffmpeg-static/ffmpeg',
@@ -56,6 +60,16 @@ const nextConfig: NextConfig = {
       './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
     ],
   },
+  ...(computeDisabled
+    ? {
+        outputFileTracingExcludes: {
+          '/*': [
+            './node_modules/onnxruntime-node/**/*',
+            './node_modules/@huggingface/tokenizers/**/*',
+          ],
+        },
+      }
+    : {}),
 };
 
 export default nextConfig;

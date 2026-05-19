@@ -7,11 +7,11 @@ export class NoneComputeBackend implements ComputeBackend {
 
   async alignWords(input: WhisperAlignInput): Promise<WhisperAlignResult> {
     void input;
-    throw new UnsupportedComputeError('Word alignment is unavailable: OPENREADER_COMPUTE_MODE=none');
+    throw new UnsupportedComputeError('Word alignment is unavailable: COMPUTE_MODE=none');
   }
 
   async parsePdfLayout(input: PdfLayoutInput): Promise<ParsedPdfDocument> {
     void input;
-    throw new UnsupportedComputeError('PDF layout parsing is unavailable: OPENREADER_COMPUTE_MODE=none');
+    throw new UnsupportedComputeError('PDF layout parsing is unavailable: COMPUTE_MODE=none');
   }
 }

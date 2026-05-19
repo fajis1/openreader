@@ -4,10 +4,8 @@ import { access, mkdir, rename, writeFile, readFile, unlink, copyFile } from 'fs
 import { DOCSTORE_DIR } from '@/lib/server/storage/library-mount';
 import manifest from '@/lib/server/pdf-layout/model/manifest.json';
 
-const DEFAULT_MODEL_URL = 'https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main/PP-DocLayoutV3.onnx';
-const DEFAULT_MODEL_DATA_URL = 'https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main/PP-DocLayoutV3.onnx.data';
-const DEFAULT_CONFIG_URL = 'https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main/config.json';
-const DEFAULT_PREPROCESSOR_URL = 'https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main/preprocessor_config.json';
+const DEFAULT_MODEL_BASE_URL = 'https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main';
+const PDF_LAYOUT_MODEL_BASE_URL_ENV = 'PDF_LAYOUT_MODEL_BASE_URL';
 const MODEL_DIR = path.join(DOCSTORE_DIR, 'model');
 export const MODEL_PATH = path.join(MODEL_DIR, 'PP-DocLayoutV3.onnx');
 export const MODEL_DATA_PATH = path.join(MODEL_DIR, 'PP-DocLayoutV3.onnx.data');
@@ -30,6 +28,10 @@ async function downloadToFile(url: string, outPath: string): Promise<void> {
   }
   const bytes = new Uint8Array(await res.arrayBuffer());
   await writeFile(outPath, bytes);
+}
+
+function joinModelUrl(baseUrl: string, relativePath: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/${relativePath}`;
 }
 
 function manifestEntry(filePath: string): { sha256: string; size: number } | null {
@@ -83,14 +85,12 @@ async function ensureModelInternal(): Promise<string> {
   const modelDataTmpPath = `${MODEL_DATA_PATH}.tmp`;
   const configTmpPath = `${MODEL_CONFIG_PATH}.tmp`;
   const preprocessorTmpPath = `${MODEL_PREPROCESSOR_PATH}.tmp`;
-  const modelUrl = process.env.OPENREADER_PDF_LAYOUT_MODEL_URL?.trim()
-    || DEFAULT_MODEL_URL;
-  const modelDataUrl = process.env.OPENREADER_PDF_LAYOUT_MODEL_DATA_URL?.trim()
-    || DEFAULT_MODEL_DATA_URL;
-  const configUrl = process.env.OPENREADER_PDF_LAYOUT_CONFIG_URL?.trim()
-    || DEFAULT_CONFIG_URL;
-  const preprocessorUrl = process.env.OPENREADER_PDF_LAYOUT_PREPROCESSOR_URL?.trim()
-    || DEFAULT_PREPROCESSOR_URL;
+  const modelBaseUrl = process.env[PDF_LAYOUT_MODEL_BASE_URL_ENV]?.trim()
+    || DEFAULT_MODEL_BASE_URL;
+  const modelUrl = joinModelUrl(modelBaseUrl, 'PP-DocLayoutV3.onnx');
+  const modelDataUrl = joinModelUrl(modelBaseUrl, 'PP-DocLayoutV3.onnx.data');
+  const configUrl = joinModelUrl(modelBaseUrl, 'config.json');
+  const preprocessorUrl = joinModelUrl(modelBaseUrl, 'preprocessor_config.json');
 
   await downloadToFile(modelUrl, modelTmpPath);
   if (!(await verifyFile(modelTmpPath, 'model.onnx'))) {

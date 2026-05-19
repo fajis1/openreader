@@ -4,7 +4,7 @@ import { adminProviders, adminSettings } from '@/db/schema';
 import { isAuthEnabled } from '@/lib/server/auth/config';
 
 /**
- * Runtime config: site-wide settings that used to live in `NEXT_PUBLIC_*`
+ * Runtime config: site-wide settings that used to live in build-time env vars.
  * env vars. Each key has:
  *   - a TypeScript value type
  *   - an env var name used for the first-run seed
@@ -75,16 +75,16 @@ function stringValue(defaultValue: string, envVar: string): RuntimeConfigKeyDef<
 }
 
 export const RUNTIME_CONFIG_SCHEMA = {
-  defaultTtsProvider: stringValue('custom-openai', 'NEXT_PUBLIC_DEFAULT_TTS_PROVIDER'),
-  changelogFeedUrl: stringValue('https://docs.openreader.richardr.dev/changelog/manifest.json', 'NEXT_PUBLIC_CHANGELOG_FEED_URL'),
-  enableUserSignups: booleanFlag(true, 'NEXT_PUBLIC_ENABLE_USER_SIGNUPS'),
-  restrictUserApiKeys: booleanFlag(true, 'NEXT_PUBLIC_RESTRICT_USER_API_KEYS'),
+  defaultTtsProvider: stringValue('custom-openai', 'RUNTIME_SEED_DEFAULT_TTS_PROVIDER'),
+  changelogFeedUrl: stringValue('https://docs.openreader.richardr.dev/changelog/manifest.json', 'RUNTIME_SEED_CHANGELOG_FEED_URL'),
+  enableUserSignups: booleanFlag(true, 'RUNTIME_SEED_ENABLE_USER_SIGNUPS'),
+  restrictUserApiKeys: booleanFlag(true, 'RUNTIME_SEED_RESTRICT_USER_API_KEYS'),
   // Historically the env semantics were "true unless explicitly 'false'",
   // i.e. the feature defaults to ON.
-  enableTtsProvidersTab: booleanFlag(true, 'NEXT_PUBLIC_ENABLE_TTS_PROVIDERS_TAB'),
-  enableAudiobookExport: booleanFlag(true, 'NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT'),
-  enableDocxConversion: booleanFlag(true, 'NEXT_PUBLIC_ENABLE_DOCX_CONVERSION'),
-  enableDestructiveDeleteActions: booleanFlag(true, 'NEXT_PUBLIC_ENABLE_DESTRUCTIVE_DELETE_ACTIONS'),
+  enableTtsProvidersTab: booleanFlag(true, 'RUNTIME_SEED_ENABLE_TTS_PROVIDERS_TAB'),
+  enableAudiobookExport: booleanFlag(true, 'RUNTIME_SEED_ENABLE_AUDIOBOOK_EXPORT'),
+  enableDocxConversion: booleanFlag(true, 'RUNTIME_SEED_ENABLE_DOCX_CONVERSION'),
+  enableDestructiveDeleteActions: booleanFlag(true, 'RUNTIME_SEED_ENABLE_DESTRUCTIVE_DELETE_ACTIONS'),
   showAllProviderModels: runtimeBoolean(true),
 } as const satisfies Record<string, RuntimeConfigKeyDef<unknown>>;
 

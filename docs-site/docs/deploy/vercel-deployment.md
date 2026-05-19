@@ -38,7 +38,7 @@ ADMIN_EMAILS=you@example.com  # comma-separated; admins manage TTS + features in
 # Heavy compute (recommended on Vercel in v1)
 # local  = requires native binaries/models in-process
 # none   = disable ONNX whisper alignment + PDF layout parsing
-OPENREADER_COMPUTE_MODE=none
+COMPUTE_MODE=none
 
 # First-boot seed for the TTS shared provider (optional; manage in-app afterwards)
 API_KEY=your_replicate_key
@@ -66,7 +66,7 @@ After the first successful deploy and admin login, open **Settings → Admin** a
 
 ## 3. Legacy first-boot seed (optional)
 
-If you must pre-seed site features via environment variables, the legacy `NEXT_PUBLIC_*` seeds are still supported on first boot only. Prefer the admin panel for ongoing management.
+If you must pre-seed site features via environment variables, the legacy `RUNTIME_SEED_*` seeds are still supported on first boot only. Prefer the admin panel for ongoing management.
 
 See [Environment Variables](../reference/environment-variables#legacy-first-boot-runtime-seeds-optional) for the complete legacy seed list.
 
@@ -129,4 +129,4 @@ Adjust memory per route if your files are larger or your plan differs.
 1. Upload and read a PDF/EPUB document.
 2. Confirm sync/blob fetch works across refreshes/devices.
 3. Generate at least one audiobook chapter and play/download it.
-4. If you run with local compute (`OPENREADER_COMPUTE_MODE=local`) outside Vercel, verify word highlighting timestamps on a TTS run.
+4. If you run with local compute (`COMPUTE_MODE=local`) outside Vercel, verify word highlighting timestamps on a TTS run.

@@ -21,7 +21,7 @@ On every session resolution the server compares the user's email against this li
 When the logged-in user is an admin, an **Admin** tab appears in **Settings → sidebar** with two sub-tabs:
 
 - **Shared providers** — server-side TTS provider instances visible to all users.
-- **Site features** — runtime-editable replacements for what were previously `NEXT_PUBLIC_*` build-time flags.
+- **Site features** — runtime-editable replacements for what were previously build-time public env flags.
 
 ## Shared TTS providers
 
@@ -78,11 +78,11 @@ Runtime-editable settings, one row per key:
 | `enableDocxConversion` | Accept .docx uploads (converted to PDF server-side). |
 | `enableDestructiveDeleteActions` | Show "Delete all data" buttons in the Documents tab (auth-disabled mode). |
 
-Word-by-word highlighting and PDF layout parsing capability are controlled by `OPENREADER_COMPUTE_MODE` (server env), not an admin runtime flag.
+Word-by-word highlighting and PDF layout parsing capability are controlled by `COMPUTE_MODE` (server env), not an admin runtime flag.
 
 Each row shows a source badge:
 
-- **from env** — the value was migrated from the corresponding `NEXT_PUBLIC_*` env var on first boot. Editing it in the UI flips the source to **admin**.
+- **from env** — the value was migrated from the corresponding `RUNTIME_SEED_*` env var on first boot. Editing it in the UI flips the source to **admin**.
 - **admin** — explicit admin override. Use **Reset** on the row to clear it back to the env-default state.
 - **default** — neither env nor admin set; uses the built-in default.
 
@@ -92,11 +92,11 @@ Turning `restrictUserApiKeys` off allows user-supplied API keys to flow through 
 
 ## Migrating off env vars
 
-The future-direction goal is to remove `NEXT_PUBLIC_*` / `API_KEY` / `API_BASE` from your `.env` entirely. To do that safely:
+The future-direction goal is to remove `RUNTIME_SEED_*` / `API_KEY` / `API_BASE` from your `.env` entirely. To do that safely:
 
 1. Deploy this version with your existing env values in place.
 2. Boot the app once. Open Settings → Admin and verify:
-   - Each `NEXT_PUBLIC_*` setting appears as **from env**.
+   - Each `RUNTIME_SEED_*` setting appears as **from env**.
    - A `default-openai` row exists in **Shared providers** (if you had `API_KEY` set).
 3. Remove the env vars from your `.env`.
 4. Redeploy. Behavior is unchanged — the DB is now the source of truth.

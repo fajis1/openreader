@@ -217,7 +217,7 @@ const WARM_AUDIO_CACHE_MAX_ITEMS = 6;
 const wordHighlightFeatureEnabled = (() => {
   if (typeof window === 'undefined') return true;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const injected = (window as any).__OPENREADER_RUNTIME_CONFIG__;
+  const injected = (window as any).__RUNTIME_CONFIG__;
   if (!injected || typeof injected !== 'object') return true;
   return typeof injected.computeAvailable === 'boolean'
     ? injected.computeAvailable

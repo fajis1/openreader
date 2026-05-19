@@ -6,7 +6,7 @@ toc_max_heading_level: 3
 This is the single reference page for OpenReader environment variables.
 
 :::note Recommended configuration path
-For auth-enabled deployments, use **Settings → Admin** as the primary source of truth for shared TTS providers and site features. Legacy env vars (`API_KEY`, `API_BASE`, and `NEXT_PUBLIC_*`) are optional first-boot seeds only.
+For auth-enabled deployments, use **Settings → Admin** as the primary source of truth for shared TTS providers and site features. Legacy env vars (`API_KEY`, `API_BASE`, and `RUNTIME_SEED_*`) are optional first-boot seeds only.
 :::
 
 ## Quick Reference Table
@@ -16,9 +16,9 @@ For auth-enabled deployments, use **Settings → Admin** as the primary source o
 | `ADMIN_EMAILS` | Auth/Admin | empty | Comma-separated emails auto-promoted to admin (requires auth enabled) |
 | `API_BASE` | Legacy bootstrap seed | none | Optional first-boot seed into `default-openai`; then manage in Settings → Admin → Shared providers |
 | `API_KEY` | Legacy bootstrap seed | none | Optional first-boot seed into `default-openai`; then manage in Settings → Admin → Shared providers |
-| `NEXT_PUBLIC_*` runtime seeds | Legacy bootstrap seed | varies | Optional first-boot seeds for site features; then manage in Settings → Admin → Site features |
-| `NEXT_PUBLIC_CHANGELOG_FEED_URL` | Legacy bootstrap seed | `https://docs.openreader.richardr.dev/changelog/manifest.json` | Optional first-boot seed for changelog feed URL; then manage in Settings → Admin → Site features |
-| `NEXT_PUBLIC_ENABLE_USER_SIGNUPS` | Legacy bootstrap seed | `true` | Optional first-boot seed for whether new accounts can be created; then manage in Settings → Admin → Site features |
+| `RUNTIME_SEED_*` runtime seeds | Legacy bootstrap seed | varies | Optional first-boot seeds for site features; then manage in Settings → Admin → Site features |
+| `RUNTIME_SEED_CHANGELOG_FEED_URL` | Legacy bootstrap seed | `https://docs.openreader.richardr.dev/changelog/manifest.json` | Optional first-boot seed for changelog feed URL; then manage in Settings → Admin → Site features |
+| `RUNTIME_SEED_ENABLE_USER_SIGNUPS` | Legacy bootstrap seed | `true` | Optional first-boot seed for whether new accounts can be created; then manage in Settings → Admin → Site features |
 | `TTS_CACHE_MAX_SIZE_BYTES` | TTS caching | `268435456` (256 MB) | Tune in-memory TTS cache size |
 | `TTS_CACHE_TTL_MS` | TTS caching | `1800000` (30 min) | Tune in-memory TTS cache TTL |
 | `TTS_MAX_RETRIES` | TTS retry | `2` | Tune retry attempts for upstream 429/5xx |
@@ -53,14 +53,11 @@ For auth-enabled deployments, use **Settings → Admin** as the primary source o
 | `RUN_FS_MIGRATIONS` | Storage migrations | `true` | Set `false` to skip startup filesystem -> S3/DB migration pass |
 | `IMPORT_LIBRARY_DIR` | Library import | `docstore/library` fallback | Set a single server library root |
 | `IMPORT_LIBRARY_DIRS` | Library import | unset | Set multiple roots (comma/colon/semicolon separated) |
-| `OPENREADER_COMPUTE_MODE` | Heavy compute backend | `local` | Set to `none` to disable ONNX word alignment + PDF layout parsing |
-| `OPENREADER_COMPUTE_WORKER_URL` | Heavy compute backend | unset | Reserved for future worker backend mode (`worker`) |
-| `OPENREADER_COMPUTE_WORKER_TOKEN` | Heavy compute backend | unset | Reserved for future worker backend mode (`worker`) |
-| `OPENREADER_PDF_LAYOUT_MODEL_URL` | PDF layout model | PP-DocLayoutV3 ONNX URL | Override ONNX model URL for `ensureModel()` |
-| `OPENREADER_PDF_LAYOUT_MODEL_DATA_URL` | PDF layout model | PP-DocLayoutV3 ONNX data URL | Override ONNX external data URL for `ensureModel()` |
-| `OPENREADER_PDF_LAYOUT_CONFIG_URL` | PDF layout model | PP-DocLayoutV3 config URL | Override model config URL for `ensureModel()` |
-| `OPENREADER_PDF_LAYOUT_PREPROCESSOR_URL` | PDF layout model | PP-DocLayoutV3 preprocessor URL | Override model preprocessor URL for `ensureModel()` |
-| `OPENREADER_WHISPER_MODEL_*_URL` | Whisper ONNX model | onnx-community defaults | Optional per-artifact URL overrides for ONNX whisper-base_timestamped int8 downloads |
+| `COMPUTE_MODE` | Heavy compute backend | `local` | Set to `none` to disable ONNX word alignment + PDF layout parsing |
+| `COMPUTE_WORKER_URL` | Heavy compute backend | unset | Reserved for future worker backend mode (`worker`) |
+| `COMPUTE_WORKER_TOKEN` | Heavy compute backend | unset | Reserved for future worker backend mode (`worker`) |
+| `PDF_LAYOUT_MODEL_BASE_URL` | PDF layout model | PP-DocLayoutV3 ONNX base URL | Optional base URL override for `ensureModel()` |
+| `WHISPER_MODEL_BASE_URL` | Whisper ONNX model | onnx-community defaults | Optional base URL override for ONNX whisper-base_timestamped int8 downloads |
 | `FFMPEG_BIN` | Audio runtime | auto-detected (`ffmpeg-static`) | Override ffmpeg binary path |
 
 
@@ -353,7 +350,7 @@ Multiple library roots for server library import.
 
 ## Audio Tooling and Alignment
 
-### OPENREADER_COMPUTE_MODE
+### COMPUTE_MODE
 
 Selects the backend for heavy compute features (ONNX word alignment + PDF layout parsing).
 
@@ -363,69 +360,38 @@ Selects the backend for heavy compute features (ONNX word alignment + PDF layout
   - `none`: disable these features cleanly
 - `worker` is reserved for a future external worker backend and currently fails fast at startup if selected
 
-### OPENREADER_COMPUTE_WORKER_URL
+### COMPUTE_WORKER_URL
 
 Reserved for future external compute worker mode.
 
-- Used only when `OPENREADER_COMPUTE_MODE=worker` (not implemented in v1)
+- Used only when `COMPUTE_MODE=worker` (not implemented in v1)
 - Leave unset in v1
 
-### OPENREADER_COMPUTE_WORKER_TOKEN
+### COMPUTE_WORKER_TOKEN
 
 Reserved bearer token for future external compute worker mode.
 
-- Used only when `OPENREADER_COMPUTE_MODE=worker` (not implemented in v1)
+- Used only when `COMPUTE_MODE=worker` (not implemented in v1)
 - Leave unset in v1
 
-### OPENREADER_PDF_LAYOUT_MODEL_URL
+### PDF_LAYOUT_MODEL_BASE_URL
 
-Override URL for the PP-DocLayoutV3 ONNX model downloaded by `ensureModel()`.
+Optional base URL override for PP-DocLayoutV3 artifacts downloaded by `ensureModel()`.
 
-- Default: `https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main/PP-DocLayoutV3.onnx`
-- Optional for custom mirrors/air-gapped workflows
+- Default: `https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main`
+- Required files at that base:
+  - `PP-DocLayoutV3.onnx`
+  - `PP-DocLayoutV3.onnx.data`
+  - `config.json`
+  - `preprocessor_config.json`
 
-### OPENREADER_PDF_LAYOUT_MODEL_DATA_URL
+### WHISPER_MODEL_BASE_URL
 
-Override URL for the PP-DocLayoutV3 ONNX external data file downloaded by `ensureModel()`.
+Optional base URL override for the built-in ONNX Whisper alignment model downloader.
 
-- Default: `https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main/PP-DocLayoutV3.onnx.data`
-
-### OPENREADER_PDF_LAYOUT_CONFIG_URL
-
-Override URL for the PP-DocLayoutV3 `config.json` downloaded by `ensureModel()`.
-
-- Default: `https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main/config.json`
-
-### OPENREADER_PDF_LAYOUT_PREPROCESSOR_URL
-
-Override URL for the PP-DocLayoutV3 `preprocessor_config.json` downloaded by `ensureModel()`.
-
-- Default: `https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main/preprocessor_config.json`
-- You can pre-populate the model cache via `pnpm fetch-models`
-
-### OPENREADER_WHISPER_MODEL_*_URL
-
-Optional per-artifact override URLs for the built-in ONNX Whisper alignment model downloader.
-
-- Default base: `https://huggingface.co/onnx-community/whisper-base_timestamped/resolve/main`
+- Default: `https://huggingface.co/onnx-community/whisper-base_timestamped/resolve/main`
 - Default model variant: int8 (`encoder_model_int8.onnx`, `decoder_model_merged_int8.onnx`, `decoder_with_past_model_int8.onnx`)
-- Use these when you need mirrors, pinned snapshots, or air-gapped fetch routing.
-
-Supported override vars:
-
-- `OPENREADER_WHISPER_MODEL_CONFIG_URL`
-- `OPENREADER_WHISPER_MODEL_GENERATION_CONFIG_URL`
-- `OPENREADER_WHISPER_MODEL_TOKENIZER_URL`
-- `OPENREADER_WHISPER_MODEL_TOKENIZER_CONFIG_URL`
-- `OPENREADER_WHISPER_MODEL_MERGES_URL`
-- `OPENREADER_WHISPER_MODEL_VOCAB_URL`
-- `OPENREADER_WHISPER_MODEL_NORMALIZER_URL`
-- `OPENREADER_WHISPER_MODEL_ADDED_TOKENS_URL`
-- `OPENREADER_WHISPER_MODEL_PREPROCESSOR_URL`
-- `OPENREADER_WHISPER_MODEL_SPECIAL_TOKENS_MAP_URL`
-- `OPENREADER_WHISPER_MODEL_ENCODER_URL`
-- `OPENREADER_WHISPER_MODEL_DECODER_MERGED_URL`
-- `OPENREADER_WHISPER_MODEL_DECODER_WITH_PAST_URL`
+- The base URL must host all expected manifest files under the same relative paths.
 
 ### FFMPEG_BIN
 
@@ -438,23 +404,23 @@ Absolute path or executable name for the ffmpeg binary used by audiobook/process
 
 These variables exist only as **first-boot seeds** for the admin-managed runtime config. Prefer changing site features from **Settings → Admin → Site features**. Keep these only when you need bootstrap defaults before the first admin login. See [Admin Panel](../configure/admin-panel) for migration behavior.
 
-The values are SSR-injected via `window.__OPENREADER_RUNTIME_CONFIG__`, so admin edits take effect for all users on the next page load — no rebuild required (unlike the old `NEXT_PUBLIC_*` build-time pattern).
+The values are SSR-injected via `window.__RUNTIME_CONFIG__`, so admin edits take effect for all users on the next page load — no rebuild required (unlike the old build-time public env pattern).
 
-### NEXT_PUBLIC_ENABLE_DOCX_CONVERSION
+### RUNTIME_SEED_ENABLE_DOCX_CONVERSION
 
 Controls whether the experimental DOCX-to-PDF conversion and upload feature is enabled.
 
 - Default: `true` (enabled)
 - Runtime key: `enableDocxConversion`
 
-### NEXT_PUBLIC_ENABLE_DESTRUCTIVE_DELETE_ACTIONS
+### RUNTIME_SEED_ENABLE_DESTRUCTIVE_DELETE_ACTIONS
 
 Controls whether the "Delete all user docs" and other bulk-delete buttons are shown in Settings.
 
 - Default: `true` (enabled)
 - Runtime key: `enableDestructiveDeleteActions`
 
-### NEXT_PUBLIC_ENABLE_TTS_PROVIDERS_TAB
+### RUNTIME_SEED_ENABLE_TTS_PROVIDERS_TAB
 
 Controls whether the **TTS Provider** section appears in the user-facing Settings modal.
 
@@ -462,7 +428,7 @@ Controls whether the **TTS Provider** section appears in the user-facing Setting
 - Set `false` to hide provider/model/API controls in the per-user Settings modal (the admin panel is unaffected).
 - Runtime key: `enableTtsProvidersTab`
 
-### NEXT_PUBLIC_ENABLE_USER_SIGNUPS
+### RUNTIME_SEED_ENABLE_USER_SIGNUPS
 
 Controls whether new user accounts can be created.
 
@@ -471,7 +437,7 @@ Controls whether new user accounts can be created.
 - Existing users can still sign in.
 - Runtime key: `enableUserSignups`
 
-### NEXT_PUBLIC_RESTRICT_USER_API_KEYS
+### RUNTIME_SEED_RESTRICT_USER_API_KEYS
 
 Controls whether users can supply personal API keys/base URLs for built-in providers.
 
@@ -480,7 +446,7 @@ Controls whether users can supply personal API keys/base URLs for built-in provi
 - When `false`, users can use per-user BYOK credentials for built-in providers.
 - Runtime key: `restrictUserApiKeys`
 
-### NEXT_PUBLIC_DEFAULT_TTS_PROVIDER
+### RUNTIME_SEED_DEFAULT_TTS_PROVIDER
 
 Sets the default TTS provider for new users.
 
@@ -490,7 +456,7 @@ Sets the default TTS provider for new users.
 
 `showAllProviderModels` is a runtime-only admin setting (no env seed). Configure it in **Settings → Admin → Site features**.
 
-### NEXT_PUBLIC_CHANGELOG_FEED_URL
+### RUNTIME_SEED_CHANGELOG_FEED_URL
 
 Sets the changelog manifest URL used by the Settings modal changelog viewer.
 
@@ -499,7 +465,7 @@ Sets the changelog manifest URL used by the Settings modal changelog viewer.
 - Runtime key: `changelogFeedUrl`
 
 
-### NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT
+### RUNTIME_SEED_ENABLE_AUDIOBOOK_EXPORT
 
 Controls whether audiobook export UI/actions are shown in the client.
 
