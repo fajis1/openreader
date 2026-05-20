@@ -20,7 +20,9 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "@openreader/compute-core": ["./compute/core/src/index.ts"]
+      "@openreader/compute-core": ["./compute/core/src/index.ts"],
+      "@openreader/compute-core/contracts": ["./compute/core/src/contracts.ts"],
+      "@openreader/compute-core/local-runtime": ["./compute/core/src/local-runtime.ts"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

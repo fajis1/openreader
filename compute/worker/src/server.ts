@@ -24,13 +24,15 @@ import {
   ensureComputeModels,
   runPdfLayoutFromPdfBuffer,
   runWhisperAlignmentFromAudioBuffer,
+} from '@openreader/compute-core/local-runtime';
+import {
   type PdfLayoutJobRequest,
   type PdfLayoutJobResult,
   type WhisperAlignJobRequest,
   type WhisperAlignJobResult,
   type WorkerJobStatusResponse,
   type WorkerJobTiming,
-} from '@openreader/compute-core';
+} from '@openreader/compute-core/contracts';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 const JOBS_STREAM_NAME = 'compute_jobs';

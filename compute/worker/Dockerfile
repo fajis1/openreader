@@ -26,4 +26,4 @@ ENV COMPUTE_WORKER_PORT=8081
 
 EXPOSE 8081
 
-CMD ["pnpm", "dev"]
+CMD ["node", "--import", "tsx", "src/server.ts"]

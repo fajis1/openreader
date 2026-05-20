@@ -12,6 +12,8 @@
     "pdfjs-dist": "4.8.69"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./contracts": "./src/contracts.ts",
+    "./local-runtime": "./src/local-runtime.ts"
   }
 }

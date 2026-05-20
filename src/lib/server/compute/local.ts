@@ -4,7 +4,7 @@ import { getTtsSegmentAudioObject } from '@/lib/server/tts/segments-blobstore';
 import {
   runPdfLayoutFromPdfBuffer,
   runWhisperAlignmentFromAudioBuffer,
-} from '@openreader/compute-core';
+} from '@openreader/compute-core/local-runtime';
 
 export class LocalComputeBackend implements ComputeBackend {
   readonly mode = 'local' as const;

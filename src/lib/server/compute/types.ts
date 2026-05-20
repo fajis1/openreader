@@ -1,4 +1,4 @@
-import type { TTSAudioBuffer, TTSSentenceAlignment, ParsedPdfDocument } from '@openreader/compute-core';
+import type { TTSAudioBuffer, TTSSentenceAlignment, ParsedPdfDocument } from '@openreader/compute-core/contracts';
 
 export type ComputeMode = 'local' | 'worker';
 

@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 
 const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -43,7 +44,7 @@ const nextConfig: NextConfig = {
       canvas: '@napi-rs/canvas',
     },
   },
-  transpilePackages: ['@openreader/compute-core'],
+  transpilePackages: computeLocal ? ['@openreader/compute-core'] : [],
   serverExternalPackages,
   outputFileTracingIncludes: {
     '/api/audiobook': [
@@ -75,6 +76,36 @@ const nextConfig: NextConfig = {
         },
       }
     : {}),
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      // Use runtime require to avoid adding an explicit webpack TS dependency.
+      const { DefinePlugin } = require('webpack') as { DefinePlugin: new (defs: Record<string, string>) => unknown };
+      config.plugins = config.plugins || [];
+      config.plugins.push(
+        new DefinePlugin({
+          __OPENREADER_COMPUTE_MODE__: JSON.stringify(computeMode),
+        }),
+      );
+    }
+    if (isServer && !computeLocal) {
+      const workerComputeEntry = path.resolve(__dirname, 'src/lib/server/compute/index.worker.ts');
+      const computeIndexTs = path.resolve(__dirname, 'src/lib/server/compute/index.ts');
+      const computeIndexNoExt = path.resolve(__dirname, 'src/lib/server/compute/index');
+      const computeDir = path.resolve(__dirname, 'src/lib/server/compute');
+      config.resolve.alias = {
+        ...(config.resolve.alias || {}),
+        '@/lib/server/compute$': workerComputeEntry,
+        '@/lib/server/compute/index$': workerComputeEntry,
+        [`${computeIndexTs}$`]: workerComputeEntry,
+        [`${computeIndexNoExt}$`]: workerComputeEntry,
+        [`${computeDir}$`]: workerComputeEntry,
+        '@openreader/compute-core/local-runtime$': false,
+        'onnxruntime-node$': false,
+        '@huggingface/tokenizers$': false,
+      };
+    }
+    return config;
+  },
 };
 
 export default nextConfig;
