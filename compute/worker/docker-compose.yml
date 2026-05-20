@@ -21,7 +21,7 @@ services:
     environment:
       NATS_URL: ${NATS_URL:-nats://nats:4222}
       COMPUTE_WORKER_HOST: ${COMPUTE_WORKER_HOST:-0.0.0.0}
-      COMPUTE_WORKER_PORT: ${COMPUTE_WORKER_PORT:-8081}
+      PORT: ${PORT:-8081}
       COMPUTE_WORKER_TOKEN: ${COMPUTE_WORKER_TOKEN:-local-compute-token}
       S3_PREFIX: ${S3_PREFIX:-openreader}
       COMPUTE_PREWARM_MODELS: ${COMPUTE_PREWARM_MODELS:-true}

@@ -22,7 +22,7 @@ WORKDIR /workspace
 COPY --from=deploy-stage /opt/compute-worker ./
 
 ENV COMPUTE_WORKER_HOST=0.0.0.0
-ENV COMPUTE_WORKER_PORT=8081
+ENV PORT=8081
 
 EXPOSE 8081
 

@@ -42,7 +42,7 @@ Common optional:
 - `S3_FORCE_PATH_STYLE=true` (for many S3-compatible providers)
 - `S3_PREFIX=openreader`
 - `COMPUTE_WORKER_HOST=0.0.0.0`
-- `COMPUTE_WORKER_PORT=8081`
+- `PORT=8081` (local/manual; on Railway platform injects this)
 - `COMPUTE_LOG_FORMAT=pretty` (default) or `json`
 - `COMPUTE_PREWARM_MODELS=true`
 - `COMPUTE_JOBS_STREAM_MAX_BYTES=268435456` (256MB JetStream jobs stream cap)
@@ -54,7 +54,10 @@ Set on the Next.js app server:
 
 ```env
 COMPUTE_MODE=worker
-COMPUTE_WORKER_URL=http://<worker-host>:8081
+# Local worker example:
+# COMPUTE_WORKER_URL=http://localhost:8081
+# Cloud worker example (Railway):
+COMPUTE_WORKER_URL=https://<railway-worker-domain>
 COMPUTE_WORKER_TOKEN=<same-token-as-worker>
 ```
 
@@ -94,7 +97,8 @@ Create a Railway service from:
 ghcr.io/richardr1126/openreader-compute-worker:refactor-ppdoclayoutv3-onnx-layout-parsing
 ```
 
-Set the container port to `8081`, then enable public networking to get a worker URL.
+Railway injects a dynamic `PORT` env var and routes traffic there.
+Do not hardcode Railway ingress to `8081`; keep service networking enabled and use the public Railway URL.
 
 ### 3. Configure Railway worker environment variables
 
@@ -102,7 +106,9 @@ Set these in the Railway worker service:
 
 ```env
 COMPUTE_WORKER_HOST=0.0.0.0
-COMPUTE_WORKER_PORT=8081
+# Local/manual only:
+# PORT=8081
+# Railway: rely on injected PORT
 COMPUTE_WORKER_TOKEN=<long-random-shared-token>
 COMPUTE_JOBS_STREAM_MAX_BYTES=268435456
 COMPUTE_JOB_STATES_MAX_BYTES=67108864
@@ -125,6 +131,7 @@ Notes:
 
 - `NATS_CREDS` should be the full Synadia `.creds` file content, including begin/end markers.
 - Keep `COMPUTE_WORKER_TOKEN` identical between app server and worker.
+- On Railway, leave `PORT` managed by the platform.
 - If your platform supports mounted files, you can use `NATS_CREDS_FILE` instead of `NATS_CREDS`.
 - `COMPUTE_JOBS_STREAM_MAX_BYTES` and `COMPUTE_JOB_STATES_MAX_BYTES` are optional; defaults are `268435456` (256MiB) and `67108864` (64MiB).
 
