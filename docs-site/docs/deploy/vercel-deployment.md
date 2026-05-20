@@ -41,7 +41,7 @@ ADMIN_EMAILS=you@example.com  # comma-separated; admins manage TTS + features in
 # local  = requires native binaries/models in-process (not recommended on Vercel)
 # worker = external durable compute worker (recommended)
 COMPUTE_MODE=worker
-COMPUTE_WORKER_URL=https://your-compute-worker.example.com
+COMPUTE_WORKER_URL=https://<railway-worker-domain>
 COMPUTE_WORKER_TOKEN=...
 
 # First-boot seed for the TTS shared provider (optional; manage in-app afterwards)
@@ -52,6 +52,18 @@ COMPUTE_WORKER_TOKEN=...
 :::note Env vars vs. admin panel (important for Vercel)
 `API_KEY` / `API_BASE` are one-shot bootstrap seeds on first deploy. After boot, manage providers and site features in **Settings → Admin**. Changes there apply on refresh without a redeploy. See [Admin Panel](../configure/admin-panel).
 :::
+
+## 1a. Railway + Synadia quick start (worker mode)
+
+If your Vercel app uses an external compute worker on Railway with Synadia Cloud (NGS):
+
+1. Deploy a Railway service from:
+   - `ghcr.io/richardr1126/openreader-compute-worker:refactor-ppdoclayoutv3-onnx-layout-parsing`
+2. Enable public networking on that Railway service and set:
+   - `COMPUTE_WORKER_URL=https://<railway-worker-domain>` (in Vercel)
+3. Use the same `COMPUTE_WORKER_TOKEN` value in both Vercel and Railway worker env vars.
+
+For complete Railway worker env vars (`NATS_*`, `S3_*`, health checks, and Synadia `.creds` guidance), see [Compute Worker (NATS JetStream)](./compute-worker).
 
 ## 2. First-run admin configuration (recommended)
 

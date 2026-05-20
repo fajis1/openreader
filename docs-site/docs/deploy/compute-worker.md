@@ -16,6 +16,7 @@ The app server enqueues jobs and polls status. Queue durability and retries are 
 
 - App server image: `ghcr.io/richardr1126/openreader`
 - Compute worker image: `ghcr.io/richardr1126/openreader-compute-worker`
+- Compute worker image (example pinned tag): `ghcr.io/richardr1126/openreader-compute-worker:refactor-ppdoclayoutv3-onnx-layout-parsing`
 
 ## Worker environment variables
 
@@ -68,20 +69,73 @@ COMPUTE_WORKER_TOKEN=<same-token-as-worker>
 - `GET /health/live`
 - `GET /health/ready`
 
-## Authenticating with Synadia Cloud (NGS)
+## Synadia Cloud + Railway Setup (Complete Guide)
 
-If you are using a free Synadia Cloud account to back your compute queue in production:
+Use this end-to-end guide when your queue backend is Synadia Cloud (NGS) and your worker runs on Railway.
 
-1. **Obtain your credentials file**: When creating a user or a service account on Synadia Cloud, download your credentials file (usually named `<something>.creds`).
-2. **Configure NATS URL**: Synadia Cloud's server address is `tls://connect.ngs.global:4222`. Set this as your `NATS_URL`.
-3. **Configure Authentication**:
-   - **Using a local file path**: Set `NATS_CREDS_FILE` to the path of your `.creds` file:
-     ```env
-     NATS_URL=tls://connect.ngs.global:4222
-     NATS_CREDS_FILE=/app/secrets/NGS-Default-compute-worker.creds
-     ```
-   - **Using raw content (Recommended for Railway, Fly.io, etc.)**: Set `NATS_CREDS` to the exact content of your `.creds` file (including the begin/end banners for JWT and NKEY seed). Since `.creds` contains newlines, wrap the entire value in quotes or paste it directly into your cloud provider's Secrets/Environment settings:
-     ```env
-     NATS_URL=tls://connect.ngs.global:4222
-     NATS_CREDS="-----BEGIN NATS USER JWT-----\neyJ0...------END USER NKEY SEED------"
-     ```
+### 1. Create Synadia account and credentials
+
+1. Create a Synadia Cloud account and create/select your NGS environment.
+2. Create a user or service account for OpenReader compute worker access.
+3. Download the generated credentials file (usually `<name>.creds`) and keep it secure.
+
+You will use:
+
+- `NATS_URL=tls://connect.ngs.global:4222`
+- The full `.creds` file content
+
+### 2. Deploy compute worker on Railway
+
+Create a Railway service from:
+
+```text
+ghcr.io/richardr1126/openreader-compute-worker:refactor-ppdoclayoutv3-onnx-layout-parsing
+```
+
+Set the container port to `8081`, then enable public networking to get a worker URL.
+
+### 3. Configure Railway worker environment variables
+
+Set these in the Railway worker service:
+
+```env
+COMPUTE_WORKER_HOST=0.0.0.0
+COMPUTE_WORKER_PORT=8081
+COMPUTE_WORKER_TOKEN=<long-random-shared-token>
+
+NATS_URL=tls://connect.ngs.global:4222
+NATS_CREDS="-----BEGIN NATS USER JWT-----
+...
+------END USER NKEY SEED------"
+
+S3_BUCKET=<bucket>
+S3_REGION=<region>
+S3_ACCESS_KEY_ID=<key>
+S3_SECRET_ACCESS_KEY=<secret>
+S3_ENDPOINT=<optional-for-s3-compatible-providers>
+S3_FORCE_PATH_STYLE=true
+S3_PREFIX=openreader
+```
+
+Notes:
+
+- `NATS_CREDS` should be the full Synadia `.creds` file content, including begin/end markers.
+- Keep `COMPUTE_WORKER_TOKEN` identical between app server and worker.
+- If your platform supports mounted files, you can use `NATS_CREDS_FILE` instead of `NATS_CREDS`.
+
+### 4. Configure the OpenReader app server (worker mode)
+
+Set these env vars on the app server:
+
+```env
+COMPUTE_MODE=worker
+COMPUTE_WORKER_URL=https://<railway-worker-domain>
+COMPUTE_WORKER_TOKEN=<same-token-as-worker>
+```
+
+### 5. Verify health
+
+After deploy, check:
+
+- `GET https://<railway-worker-domain>/health/live`
+- `GET https://<railway-worker-domain>/health/ready`
