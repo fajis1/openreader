@@ -62,7 +62,6 @@ export interface AppConfigValues {
   ttsModel: string;
   ttsInstructions: string;
   savedVoices: SavedVoices;
-  smartSentenceSplitting: boolean;
   segmentPreloadDepthPages: number;
   segmentPreloadSentenceLookahead: number;
   ttsSegmentMaxBlockLength: number;
@@ -111,7 +110,6 @@ export function getAppConfigDefaults(): AppConfigValues {
     ttsModel: defaultModel,
     ttsInstructions: '',
     savedVoices: {},
-    smartSentenceSplitting: true,
     segmentPreloadDepthPages: 1,
     segmentPreloadSentenceLookahead: 3,
     ttsSegmentMaxBlockLength: 450,

@@ -113,7 +113,6 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, pdf }: {
     viewType,
     skipBlank,
     epubTheme,
-    smartSentenceSplitting,
     segmentPreloadDepthPages,
     segmentPreloadSentenceLookahead,
     ttsSegmentMaxBlockLength,
@@ -272,13 +271,6 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, pdf }: {
             />
           )}
 
-          <ToggleRow
-            label="Smart sentence splitting"
-            description="Merge fragments across pages/sections."
-            checked={smartSentenceSplitting}
-            onChange={(checked) => updateConfigKey('smartSentenceSplitting', checked)}
-            variant="flat"
-          />
 
           <div className="space-y-3 pt-1">
             <RangeSetting

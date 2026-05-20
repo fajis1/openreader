@@ -7,13 +7,11 @@ import { DEFAULT_DOCUMENT_SETTINGS } from '@/types/document-settings';
 interface PdfAudiobookAdapterOptions {
   parsed?: ParsedPdfDocument;
   settings?: DocumentSettings;
-  smartSentenceSplitting: boolean;
   maxBlockLength?: number;
 }
 
 function chapterTextFromBlocks(
   blocks: ParsedPdfBlock[],
-  smartSentenceSplitting: boolean,
   maxBlockLength?: number,
 ): string {
   const text = blocks
@@ -21,18 +19,16 @@ function chapterTextFromBlocks(
     .filter(Boolean)
     .join('\n\n');
   if (!text) return '';
-  return smartSentenceSplitting ? normalizeTextForTts(text, { maxBlockLength }) : text;
+  return normalizeTextForTts(text, { maxBlockLength });
 }
 
 function prepareParsedChapters({
   parsed,
   settings,
-  smartSentenceSplitting,
   maxBlockLength,
 }: {
   parsed: ParsedPdfDocument;
   settings: DocumentSettings;
-  smartSentenceSplitting: boolean;
   maxBlockLength?: number;
 }): PreparedAudiobookChapter[] {
   const skip = new Set(settings.pdf?.skipBlockKinds ?? DEFAULT_DOCUMENT_SETTINGS.pdf?.skipBlockKinds ?? []);
@@ -49,7 +45,7 @@ function prepareParsedChapters({
 
   const flush = () => {
     if (!currentBlocks.length) return;
-    const text = chapterTextFromBlocks(currentBlocks, smartSentenceSplitting, maxBlockLength);
+    const text = chapterTextFromBlocks(currentBlocks, maxBlockLength);
     if (text) {
       chapters.push({
         index: chapters.length,
@@ -77,7 +73,6 @@ function prepareParsedChapters({
 async function extractPreparedPdfChapters({
   parsed,
   settings = DEFAULT_DOCUMENT_SETTINGS,
-  smartSentenceSplitting,
   maxBlockLength,
 }: PdfAudiobookAdapterOptions): Promise<PreparedAudiobookChapter[]> {
   if (!parsed) {
@@ -87,7 +82,6 @@ async function extractPreparedPdfChapters({
   return prepareParsedChapters({
     parsed,
     settings,
-    smartSentenceSplitting,
     maxBlockLength,
   });
 }

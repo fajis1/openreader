@@ -61,7 +61,6 @@ test.describe('pdf audiobook adapter', () => {
     const adapter = createPdfAudiobookSourceAdapter({
       parsed,
       settings,
-      smartSentenceSplitting: false,
     });
 
     const chapters = await adapter.prepareChapters();
@@ -125,7 +124,6 @@ test.describe('pdf audiobook adapter', () => {
     const adapter = createPdfAudiobookSourceAdapter({
       parsed,
       settings,
-      smartSentenceSplitting: false,
     });
 
     const chapters = await adapter.prepareChapters();

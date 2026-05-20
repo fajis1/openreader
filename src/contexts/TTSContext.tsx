@@ -386,7 +386,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     ttsInstructions: configTTSInstructions,
     updateConfigKey,
     skipBlank,
-    smartSentenceSplitting,
     segmentPreloadDepthPages,
     segmentPreloadSentenceLookahead,
     ttsSegmentMaxBlockLength,
@@ -1164,7 +1163,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     const currentSourceKeySet = new Set(effectiveCurrentUnits.map((unit) => unit.sourceKey));
 
     const contextSourceUnits: CanonicalTtsSourceUnit[] = [];
-    if (smartSentenceSplitting && normalizedOptions.previousText?.trim()) {
+    if (normalizedOptions.previousText?.trim()) {
       const previousLocation = normalizedOptions.previousLocation;
       contextSourceUnits.push({
         sourceKey: previousLocation !== undefined
@@ -1221,9 +1220,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       }
     }
     for (const item of pendingPrefetches) {
-      if (smartSentenceSplitting) {
-        sourceUnits.push(...item.sourceUnits);
-      }
+      sourceUnits.push(...item.sourceUnits);
     }
 
     const plan = planCanonicalTtsSegments(sourceUnits, {
@@ -1232,27 +1229,12 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       keyPrefix: buildSegmentKeyPrefix(documentId, activeReaderType),
       enforceSourceBoundaries: activeReaderType === 'pdf' && currentUnits !== null && currentUnits.length > 0,
     });
-    const currentSegments = smartSentenceSplitting
-      ? plan.segments.filter((segment) => currentSourceKeySet.has(segment.ownerSourceKey))
-      : effectiveCurrentUnits.flatMap((unit) =>
-        planCanonicalTtsSegments([unit], {
-          readerType: activeReaderType,
-          maxBlockLength: ttsSegmentMaxBlockLength,
-          keyPrefix: buildSegmentKeyPrefix(documentId, activeReaderType),
-          enforceSourceBoundaries: activeReaderType === 'pdf' && currentUnits !== null && currentUnits.length > 0,
-        }).segments);
+    const currentSegments = plan.segments.filter((segment) => currentSourceKeySet.has(segment.ownerSourceKey));
     const newSentences = currentSegments.map((segment) => segment.text);
 
     for (const item of pendingPrefetches) {
       const sourceKeys = new Set(item.sourceUnits.map((unit) => unit.sourceKey));
-      const planned = smartSentenceSplitting
-        ? plan.segments.filter((segment) => sourceKeys.has(segment.ownerSourceKey))
-        : planCanonicalTtsSegments(item.sourceUnits, {
-          readerType: activeReaderType,
-          maxBlockLength: ttsSegmentMaxBlockLength,
-          keyPrefix: buildSegmentKeyPrefix(documentId, activeReaderType),
-          enforceSourceBoundaries: activeReaderType === 'pdf' && currentUnits !== null && currentUnits.length > 0,
-        }).segments;
+      const planned = plan.segments.filter((segment) => sourceKeys.has(segment.ownerSourceKey));
       if (planned.length > 0) {
         plannedSegmentsByLocationRef.current.set(normalizeLocationKey(item.location), planned);
       }
@@ -1333,8 +1315,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       setCurrentWordIndex(null);
 
       if (
-        smartSentenceSplitting
-        && !isEPUB
+        !isEPUB
         && normalizedOptions.nextLocation !== undefined
         && effectiveCurrentUnits.length === 1
       ) {
@@ -1384,7 +1365,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     abortAudio,
     isEPUB,
     activeReaderType,
-    smartSentenceSplitting,
     invalidatePlaybackRun,
     currDocPage,
     documentId,
@@ -2483,7 +2463,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
             ? currentSourceContextUnitsRef.current
             : (currentSourceUnitRef.current ? [currentSourceUnitRef.current] : []);
           const sourceUnits: CanonicalTtsSourceUnit[] = buildWalkerPlanningSourceUnits(
-            smartSentenceSplitting,
             liveContextUnits,
             upcomingUnits,
           );
@@ -2835,7 +2814,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     openApiBaseUrl,
     providerModelPolicy.supportsInstructions,
     ttsInstructions,
-    smartSentenceSplitting,
     onTTSStart,
     onTTSComplete,
     processSentence,

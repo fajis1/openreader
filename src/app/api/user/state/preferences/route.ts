@@ -137,7 +137,6 @@ function sanitizePreferencesPatch(
         break;
       case 'skipBlank':
       case 'epubTheme':
-      case 'smartSentenceSplitting':
       case 'pdfHighlightEnabled':
       case 'pdfWordHighlightEnabled':
       case 'epubHighlightEnabled':

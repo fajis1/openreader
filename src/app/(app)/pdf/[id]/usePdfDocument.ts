@@ -37,6 +37,7 @@ import {
   highlightWordIndex,
 } from '@/lib/client/pdf';
 import { buildPageTextFromBlocks } from '@/lib/client/pdf-block-text';
+import { buildPdfPageSourceUnits, buildPdfPrefetchPayload } from '@/lib/client/pdf-tts-planning';
 import type { CanonicalTtsSourceUnit } from '@/lib/shared/tts-segment-plan';
 import {
   DEFAULT_DOCUMENT_SETTINGS,
@@ -130,7 +131,6 @@ export function usePdfDocument(): PdfDocumentState {
     apiKey,
     baseUrl,
     providerRef,
-    smartSentenceSplitting,
     segmentPreloadDepthPages,
     ttsSegmentMaxBlockLength,
   } = useConfig();
@@ -149,9 +149,8 @@ export function usePdfDocument(): PdfDocumentState {
   const audiobookAdapter = useMemo(() => createPdfAudiobookSourceAdapter({
     parsed: parsedDocument ?? undefined,
     settings: documentSettings,
-    smartSentenceSplitting,
     maxBlockLength: ttsSegmentMaxBlockLength,
-  }), [parsedDocument, documentSettings, smartSentenceSplitting, ttsSegmentMaxBlockLength]);
+  }), [parsedDocument, documentSettings, ttsSegmentMaxBlockLength]);
   const pageTextCacheRef = useRef<Map<number, string>>(new Map());
   const [currDocPage, setCurrDocPage] = useState<number>(currDocPageNumber);
 
@@ -266,20 +265,7 @@ export function usePdfDocument(): PdfDocumentState {
 
       const sourceUnitsFromParsedPage = (pageNum: number): CanonicalTtsSourceUnit[] => {
         const page = pageFromParsed(pageNum);
-        if (!page) return [];
-        const skipKinds = new Set(documentSettings.pdf?.skipBlockKinds ?? []);
-        return page.blocks
-          .filter((block) => !skipKinds.has(block.kind))
-          .map((block) => ({
-            sourceKey: `pdf:${pageNum}:${block.id}`,
-            text: block.text,
-            locator: {
-              readerType: 'pdf',
-              page: pageNum,
-              blockId: block.id,
-            } as TTSSegmentLocator,
-          }))
-          .filter((unit) => unit.text.trim().length > 0);
+        return buildPdfPageSourceUnits(page, pageNum, documentSettings.pdf?.skipBlockKinds ?? []);
       };
 
       const getPageText = async (pageNumber: number, shouldCache = false): Promise<string> => {
@@ -327,16 +313,15 @@ export function usePdfDocument(): PdfDocumentState {
         prevPageNumber ? getPageText(prevPageNumber) : Promise.resolve<string | undefined>(undefined),
         ...upcomingPageNumbers.map((pageNum) => getPageText(pageNum, true)),
       ]);
-      const nextText = upcomingTexts[0];
-      const nextSourceUnits = nextPageNumber ? sourceUnitsFromParsedPage(nextPageNumber) : [];
-      const additionalUpcoming = upcomingPageNumbers
-        .slice(1)
-        .map((pageNum, idx) => ({
-          location: pageNum,
-          text: upcomingTexts[idx + 1] || '',
-          sourceUnits: sourceUnitsFromParsedPage(pageNum),
-        }))
-        .filter((item) => item.text.trim().length > 0);
+      const {
+        nextText,
+        nextSourceUnits,
+        additionalUpcoming,
+      } = buildPdfPrefetchPayload(
+        upcomingPageNumbers,
+        upcomingTexts,
+        sourceUnitsFromParsedPage,
+      );
 
       if (generation !== pdfDocGenerationRef.current || pdfDocumentRef.current !== currentPdf) {
         return;
