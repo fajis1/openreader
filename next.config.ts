@@ -24,7 +24,6 @@ const computeLocal = computeMode === 'local';
 const isVercel = process.env.VERCEL === '1';
 const serverExternalPackages = [
   '@napi-rs/canvas',
-  'ffmpeg-static',
   'better-sqlite3',
   ...(computeLocal ? ['onnxruntime-node', '@huggingface/tokenizers'] : []),
 ];
