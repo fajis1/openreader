@@ -163,8 +163,9 @@ interface SetTextOptions {
   previousLocation?: TTSLocation;
   nextLocation?: TTSLocation;
   nextText?: string;
+  nextSourceUnits?: CanonicalTtsSourceUnit[];
   previousText?: string;
-  upcomingLocations?: Array<{ location: TTSLocation; text: string }>;
+  upcomingLocations?: Array<{ location: TTSLocation; text: string; sourceUnits?: CanonicalTtsSourceUnit[] }>;
 }
 
 type TTSSegmentPlaybackSource = {
@@ -245,12 +246,16 @@ const buildCacheKey = (
   speed: number,
   provider: string,
   model: string,
+  providerType: string,
+  instructions: string,
 ) => {
   return [
     `provider=${provider || ''}`,
+    `providerType=${providerType || ''}`,
     `model=${model || ''}`,
     `voice=${voice || ''}`,
     `speed=${Number.isFinite(speed) ? speed : ''}`,
+    `instructions=${instructions || ''}`,
     `text=${sentence}`,
   ].join('|');
 };
@@ -263,10 +268,12 @@ const buildScopedSegmentCacheKey = (
   speed: number,
   provider: string,
   model: string,
+  providerType: string,
+  instructions: string,
   segmentKey?: string | null,
 ) => {
   return [
-    buildCacheKey(sentence, voice, speed, provider, model),
+    buildCacheKey(sentence, voice, speed, provider, model, providerType, instructions),
     `segmentKey=${segmentKey || ''}`,
     `locator=${segmentKey ? '' : buildLocatorRequestKey(locator)}`,
     `segmentIndex=${segmentKey ? '' : segmentIndex}`,
@@ -306,9 +313,11 @@ const buildSegmentRequestKey = (
   segmentIndex: number,
   sentence: string,
   segmentKey?: string | null,
-): string => segmentKey
-  ? `${segmentKey}::${sentence}`
-  : `${buildLocatorRequestKey(locator)}::${segmentIndex}::${sentence}`;
+): string => {
+  return segmentKey
+    ? `${segmentKey}::${sentence}`
+    : `${buildLocatorRequestKey(locator)}::${segmentIndex}::${sentence}`;
+};
 
 const resolveJumpIndex = (input: JumpResolutionInput): JumpResolution => {
   if (input.newSentenceCount <= 0) {
@@ -1172,29 +1181,48 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
     plannedSegmentsByLocationRef.current.clear();
     pendingNextLocationRef.current = normalizedOptions.nextLocation;
-    const pendingPrefetches: Array<CanonicalTtsSourceUnit & { location: TTSLocation }> = [];
+    const pendingPrefetches: Array<{
+      location: TTSLocation;
+      sourceUnits: CanonicalTtsSourceUnit[];
+    }> = [];
     if (normalizedOptions.nextLocation !== undefined && normalizedOptions.nextText?.trim()) {
-      pendingPrefetches.push({
-        sourceKey: sourceKeyForLocation(normalizedOptions.nextLocation, currDocPage),
-        location: normalizedOptions.nextLocation,
-        text: normalizedOptions.nextText,
-        locator: locatorForLocation(normalizedOptions.nextLocation, activeReaderType),
-      });
+      const provided = normalizedOptions.nextSourceUnits?.filter((unit) => unit.text.trim().length > 0) ?? [];
+      pendingPrefetches.push(provided.length > 0
+        ? {
+            location: normalizedOptions.nextLocation,
+            sourceUnits: provided,
+          }
+        : {
+            location: normalizedOptions.nextLocation,
+            sourceUnits: [{
+              sourceKey: sourceKeyForLocation(normalizedOptions.nextLocation, currDocPage),
+              text: normalizedOptions.nextText,
+              locator: locatorForLocation(normalizedOptions.nextLocation, activeReaderType),
+            }],
+          });
     }
     if (Array.isArray(normalizedOptions.upcomingLocations)) {
       for (const item of normalizedOptions.upcomingLocations) {
         if (item.location === undefined || !item.text?.trim()) continue;
-        pendingPrefetches.push({
-          sourceKey: sourceKeyForLocation(item.location, currDocPage),
-          location: item.location,
-          text: item.text,
-          locator: locatorForLocation(item.location, activeReaderType),
-        });
+        const provided = item.sourceUnits?.filter((unit) => unit.text.trim().length > 0) ?? [];
+        pendingPrefetches.push(provided.length > 0
+          ? {
+              location: item.location,
+              sourceUnits: provided,
+            }
+          : {
+              location: item.location,
+              sourceUnits: [{
+                sourceKey: sourceKeyForLocation(item.location, currDocPage),
+                text: item.text,
+                locator: locatorForLocation(item.location, activeReaderType),
+              }],
+            });
       }
     }
     for (const item of pendingPrefetches) {
       if (smartSentenceSplitting) {
-        sourceUnits.push(item);
+        sourceUnits.push(...item.sourceUnits);
       }
     }
 
@@ -1216,9 +1244,10 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     const newSentences = currentSegments.map((segment) => segment.text);
 
     for (const item of pendingPrefetches) {
+      const sourceKeys = new Set(item.sourceUnits.map((unit) => unit.sourceKey));
       const planned = smartSentenceSplitting
-        ? plan.segments.filter((segment) => segment.ownerSourceKey === item.sourceKey)
-        : planCanonicalTtsSegments([item], {
+        ? plan.segments.filter((segment) => sourceKeys.has(segment.ownerSourceKey))
+        : planCanonicalTtsSegments(item.sourceUnits, {
           readerType: activeReaderType,
           maxBlockLength: ttsSegmentMaxBlockLength,
           keyPrefix: buildSegmentKeyPrefix(documentId, activeReaderType),
@@ -1554,6 +1583,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       effectiveNativeSpeed,
       configProviderRef,
       ttsModel,
+      configProviderType,
+      providerModelPolicy.supportsInstructions ? ttsInstructions : '',
       segmentKey,
     );
 
@@ -2216,6 +2247,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       effectiveNativeSpeed,
       configProviderRef,
       ttsModel,
+      configProviderType,
+      providerModelPolicy.supportsInstructions ? ttsInstructions : '',
       playbackSegment?.key,
     );
     const cachedAlignment = sentenceAlignmentCacheRef.current.get(alignmentKey);
@@ -2346,6 +2379,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           effectiveNativeSpeed,
           configProviderRef,
           ttsModel,
+          configProviderType,
+          providerModelPolicy.supportsInstructions ? ttsInstructions : '',
           nextSegment?.key,
         );
         if (segmentManifestCacheRef.current.has(cacheKey)) {
@@ -2477,6 +2512,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
                 effectiveNativeSpeed,
                 configProviderRef,
                 ttsModel,
+                configProviderType,
+                providerModelPolicy.supportsInstructions ? ttsInstructions : '',
                 segment.key,
               );
               if (seenCandidates.has(requestKey)) continue;
@@ -2615,6 +2652,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         effectiveNativeSpeed,
         configProviderRef,
         ttsModel,
+        configProviderType,
+        providerModelPolicy.supportsInstructions ? ttsInstructions : '',
         plannedSegment?.key,
       );
       const requestKey = buildSegmentRequestKey(locator, sentenceIndex, sentence, plannedSegment?.key);
@@ -2644,6 +2683,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           effectiveNativeSpeed,
           configProviderRef,
           ttsModel,
+          configProviderType,
+          providerModelPolicy.supportsInstructions ? ttsInstructions : '',
           segment.key,
         );
         const requestKey = buildSegmentRequestKey(segmentLocator, index, sentence, segment.key);

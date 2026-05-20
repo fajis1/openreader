@@ -55,7 +55,6 @@ test.describe('pdf audiobook adapter', () => {
       schemaVersion: 1,
       pdf: {
         skipBlockKinds: ['header'],
-        chaptersFromSections: true,
       },
     };
 
@@ -120,7 +119,6 @@ test.describe('pdf audiobook adapter', () => {
       schemaVersion: 1,
       pdf: {
         skipBlockKinds: [],
-        chaptersFromSections: true,
       },
     };
 

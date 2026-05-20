@@ -337,7 +337,6 @@ export default function PDFViewerPage() {
           parseStatus,
           parsedOverlayEnabled,
           skipBlockKinds: documentSettings.pdf?.skipBlockKinds ?? [],
-          chaptersFromSections: documentSettings.pdf?.chaptersFromSections ?? true,
           onToggleOverlay: (enabled) => setParsedOverlayEnabled(enabled),
           onToggleSkipKind: (kind, enabled) => {
             const current = new Set(documentSettings.pdf?.skipBlockKinds ?? []);
@@ -347,20 +346,8 @@ export default function PDFViewerPage() {
               ...documentSettings,
               schemaVersion: 1,
               pdf: {
-                ...(documentSettings.pdf ?? { chaptersFromSections: true }),
+                ...(documentSettings.pdf ?? {}),
                 skipBlockKinds: Array.from(current),
-                chaptersFromSections: documentSettings.pdf?.chaptersFromSections ?? true,
-              },
-            });
-          },
-          onToggleChaptersFromSections: (enabled) => {
-            void updateDocumentSettings({
-              ...documentSettings,
-              schemaVersion: 1,
-              pdf: {
-                ...(documentSettings.pdf ?? { skipBlockKinds: [] }),
-                skipBlockKinds: documentSettings.pdf?.skipBlockKinds ?? [],
-                chaptersFromSections: enabled,
               },
             });
           },

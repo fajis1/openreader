@@ -41,12 +41,6 @@ function prepareParsedChapters({
     .filter((block) => !skip.has(block.kind));
   if (!allBlocks.length) return [];
 
-  const chaptersFromSections = settings.pdf?.chaptersFromSections ?? true;
-  if (!chaptersFromSections) {
-    const text = chapterTextFromBlocks(allBlocks, smartSentenceSplitting, maxBlockLength);
-    return text ? [{ index: 0, title: 'Document', text }] : [];
-  }
-
   const chapters: PreparedAudiobookChapter[] = [];
   let currentTitle = 'Introduction';
   let currentBlocks: ParsedPdfBlock[] = [];

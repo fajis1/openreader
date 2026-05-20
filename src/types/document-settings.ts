@@ -4,7 +4,6 @@ export interface DocumentSettings {
   schemaVersion: 1;
   pdf?: {
     skipBlockKinds: ParsedPdfBlockKind[];
-    chaptersFromSections: boolean;
   };
 }
 
@@ -12,6 +11,5 @@ export const DEFAULT_DOCUMENT_SETTINGS: DocumentSettings = {
   schemaVersion: 1,
   pdf: {
     skipBlockKinds: ['header', 'footer', 'footnote', 'vision_footnote'],
-    chaptersFromSections: true,
   },
 };

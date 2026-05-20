@@ -24,7 +24,6 @@ export function mergeDocumentSettings(
     schemaVersion: 1,
     pdf: {
       skipBlockKinds: [...(defaults.pdf?.skipBlockKinds ?? [])],
-      chaptersFromSections: defaults.pdf?.chaptersFromSections ?? true,
     },
   };
 
@@ -38,10 +37,6 @@ export function mergeDocumentSettings(
     schemaVersion: 1,
     pdf: {
       skipBlockKinds: normalizeSkipKinds(pdfRec.skipBlockKinds),
-      chaptersFromSections:
-        typeof pdfRec.chaptersFromSections === 'boolean'
-          ? pdfRec.chaptersFromSections
-          : (base.pdf?.chaptersFromSections ?? true),
     },
   };
 }

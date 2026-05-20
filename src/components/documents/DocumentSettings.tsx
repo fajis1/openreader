@@ -103,10 +103,8 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, pdf }: {
     parseStatus: PdfParseStatus | null;
     parsedOverlayEnabled: boolean;
     skipBlockKinds: ParsedPdfBlockKind[];
-    chaptersFromSections: boolean;
     onToggleOverlay: (enabled: boolean) => void;
     onToggleSkipKind: (kind: ParsedPdfBlockKind, enabled: boolean) => void;
-    onToggleChaptersFromSections: (enabled: boolean) => void;
     onForceReparse: () => void;
   }
 }) {
@@ -202,13 +200,6 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, pdf }: {
               checked={pdfWordHighlightEnabled && pdfHighlightEnabled}
               disabled={!pdfHighlightEnabled || !canWordHighlight}
               onChange={(checked) => updateConfigKey('pdfWordHighlightEnabled', checked)}
-              variant="flat"
-            />
-            <ToggleRow
-              label="Use detected sections as chapters"
-              description="Build audiobook chapters from section headers."
-              checked={pdf.chaptersFromSections}
-              onChange={pdf.onToggleChaptersFromSections}
               variant="flat"
             />
           </Section>

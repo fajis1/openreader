@@ -249,6 +249,8 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
   const segmentsQuery = useInfiniteQuery({
     queryKey: segmentsQueryKey,
     enabled: isOpen && !!documentId,
+    refetchInterval: isOpen ? 2500 : false,
+    refetchIntervalInBackground: false,
     initialPageParam: null as string | null,
     queryFn: async ({ pageParam, signal }) => {
       if (!documentId) {

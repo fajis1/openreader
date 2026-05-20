@@ -275,7 +275,7 @@ export function usePdfDocument(): PdfDocumentState {
             text: block.text,
             locator: {
               readerType: 'pdf',
-              page: block.fragments[0]?.page ?? pageNum,
+              page: pageNum,
               blockId: block.id,
             } as TTSSegmentLocator,
           }))
@@ -328,11 +328,13 @@ export function usePdfDocument(): PdfDocumentState {
         ...upcomingPageNumbers.map((pageNum) => getPageText(pageNum, true)),
       ]);
       const nextText = upcomingTexts[0];
+      const nextSourceUnits = nextPageNumber ? sourceUnitsFromParsedPage(nextPageNumber) : [];
       const additionalUpcoming = upcomingPageNumbers
         .slice(1)
         .map((pageNum, idx) => ({
           location: pageNum,
           text: upcomingTexts[idx + 1] || '',
+          sourceUnits: sourceUnitsFromParsedPage(pageNum),
         }))
         .filter((item) => item.text.trim().length > 0);
 
@@ -351,6 +353,7 @@ export function usePdfDocument(): PdfDocumentState {
           previousText: prevText,
           nextLocation: nextPageNumber,
           nextText: nextText,
+          nextSourceUnits,
           upcomingLocations: additionalUpcoming,
           ...(sourceUnits.length > 0 ? { sourceUnits } : {}),
         });
