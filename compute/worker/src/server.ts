@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   connect,
   nanos,
+  credsAuthenticator,
   type NatsConnection,
 } from '@nats-io/transport-node';
 import {
@@ -412,7 +413,21 @@ async function main(): Promise<void> {
   const attempts = readIntEnv('COMPUTE_JOB_ATTEMPTS', 2);
   const prewarmModels = parseBoolEnv('COMPUTE_PREWARM_MODELS', true);
 
-  const nc: NatsConnection = await connect({ servers: natsUrl });
+  const connectOpts: any = { servers: natsUrl };
+  const natsCreds = process.env.NATS_CREDS?.trim();
+  const natsCredsFile = process.env.NATS_CREDS_FILE?.trim();
+
+  if (natsCreds) {
+    console.log('[compute-worker] Connecting to NATS using credentials string from NATS_CREDS');
+    connectOpts.authenticator = credsAuthenticator(new TextEncoder().encode(natsCreds));
+  } else if (natsCredsFile) {
+    console.log(`[compute-worker] Connecting to NATS using credentials file: ${natsCredsFile}`);
+    const { readFileSync } = require('fs');
+    const credsData = readFileSync(natsCredsFile);
+    connectOpts.authenticator = credsAuthenticator(credsData);
+  }
+
+  const nc: NatsConnection = await connect(connectOpts);
   const js: JetStreamClient = jetstream(nc);
   const jsm: JetStreamManager = await jetstreamManager(nc);
 
