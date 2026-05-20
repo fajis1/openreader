@@ -150,6 +150,11 @@ async function deleteEntryIfUnused(userId: string, segmentEntryId: string): Prom
 export async function POST(request: NextRequest) {
   let didCreateDeviceIdCookie = false;
   let deviceIdToSet: string | null = null;
+  let computeBackendPromise: ReturnType<typeof getCompute> | null = null;
+  const getComputeBackend = async () => {
+    if (!computeBackendPromise) computeBackendPromise = getCompute();
+    return computeBackendPromise;
+  };
   try {
     if (!isS3Configured()) return s3NotConfiguredResponse();
 
@@ -372,7 +377,8 @@ export async function POST(request: NextRequest) {
         // previously unavailable, retry alignment using the current segment text.
         if (!alignment) {
           try {
-            const aligned = (await getCompute().alignWords({
+            const computeBackend = await getComputeBackend();
+            const aligned = (await computeBackend.alignWords({
               audioObjectKey: existing.audioKey,
               text: segment.text,
             })).alignments;
@@ -523,7 +529,8 @@ export async function POST(request: NextRequest) {
         let alignment: TTSSegmentManifestItem['alignment'] = null;
         try {
           const whisperBytes = Uint8Array.from(persistedBuffer);
-          const aligned = (await getCompute().alignWords({
+          const computeBackend = await getComputeBackend();
+          const aligned = (await computeBackend.alignWords({
             audioBuffer: whisperBytes.buffer,
             audioObjectKey: audioKey,
             text: segment.text,

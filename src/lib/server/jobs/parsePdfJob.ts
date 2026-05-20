@@ -28,7 +28,8 @@ export async function parsePdfJob(input: ParsePdfJobInput): Promise<void> {
       .set({ parseStatus: 'running' })
       .where(and(eq(documents.id, input.documentId), eq(documents.userId, input.userId)));
 
-    const parsed = await getCompute().parsePdfLayout({
+    const compute = await getCompute();
+    const parsed = await compute.parsePdfLayout({
       documentId: input.documentId,
       namespace: input.namespace,
       documentObjectKey: documentKey(input.documentId, input.namespace),

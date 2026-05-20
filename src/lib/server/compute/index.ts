@@ -2,21 +2,23 @@ import type { ComputeBackend, ComputeMode } from '@/lib/server/compute/types';
 import { isComputeModeAvailable, readComputeMode } from '@/lib/server/compute/mode';
 import { WorkerComputeBackend } from '@/lib/server/compute/worker';
 
-let backend: ComputeBackend | null = null;
+let backendPromise: Promise<ComputeBackend> | null = null;
 
-function createBackend(): ComputeBackend {
+async function createBackend(): Promise<ComputeBackend> {
   const mode: ComputeMode = readComputeMode();
   if (mode === 'worker') return new WorkerComputeBackend();
-  // Intentionally lazy-load local compute to avoid tracing heavy ONNX
-  // dependencies unless the backend is actually local.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { LocalComputeBackend } = require('@/lib/server/compute/local') as typeof import('@/lib/server/compute/local');
+  const { LocalComputeBackend } = await import('@/lib/server/compute/local');
   return new LocalComputeBackend();
 }
 
-export function getCompute(): ComputeBackend {
-  if (!backend) backend = createBackend();
-  return backend;
+export async function getCompute(): Promise<ComputeBackend> {
+  if (!backendPromise) {
+    backendPromise = createBackend().catch((error) => {
+      backendPromise = null;
+      throw error;
+    });
+  }
+  return backendPromise;
 }
 
 export function isComputeAvailable(): boolean {
