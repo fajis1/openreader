@@ -7,10 +7,10 @@ Use this guide for `COMPUTE_MODE=worker` deployments where heavy compute runs ou
 
 The compute worker handles:
 
-- Whisper word alignment (`/align/whisper/jobs`)
-- PDF layout parsing (`/layout/pdf/jobs`)
+- Whisper word alignment operations
+- PDF layout parsing operations
 
-The app server enqueues jobs and polls status. Queue durability and retries are backed by NATS JetStream WorkQueue consumers and NATS KV.
+The app server submits operations to `POST /ops`, reuses in-flight work via required `opKey`, and consumes status updates via `GET /ops/:opId/events` (SSE). Queue durability and retries are backed by NATS JetStream WorkQueue consumers and NATS KV.
 
 ## Published image
 

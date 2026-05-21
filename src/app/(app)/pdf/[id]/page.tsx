@@ -4,7 +4,6 @@ import dynamic from 'next/dynamic';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
-import { DocumentSkeleton } from '@/components/documents/DocumentSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 import { DocumentSettings } from '@/components/documents/DocumentSettings';
 import { DocumentHeaderMenu } from '@/components/documents/DocumentHeaderMenu';
@@ -27,7 +26,7 @@ const PDFViewer = dynamic(
   () => import('@/components/views/PDFViewer').then((module) => module.PDFViewer),
   {
     ssr: false,
-    loading: () => <DocumentSkeleton />
+    loading: () => null
   }
 );
 
@@ -55,6 +54,7 @@ export default function PDFViewerPage() {
   const { isAtLimit } = useAuthRateLimit();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isPdfViewerReady, setIsPdfViewerReady] = useState(false);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'audiobook' | 'segments'>(null);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
@@ -68,6 +68,7 @@ export default function PDFViewerPage() {
 
   useEffect(() => {
     setIsLoading(true);
+    setIsPdfViewerReady(false);
     setError(null);
     setActiveSidebar(null);
     inFlightDocIdRef.current = null;
@@ -303,12 +304,21 @@ export default function PDFViewerPage() {
           </div>
         }
       />
-      <div className="overflow-hidden" style={{ height: containerHeight }}>
-        {isLoading || !isParseReady ? (
-          renderPdfStatusLoader()
-        ) : (
-          <PDFViewer zoomLevel={zoomLevel} pdfState={pdfState} />
-        )}
+      <div className="relative overflow-hidden" style={{ height: containerHeight }}>
+        {isParseReady ? (
+          <div className={isPdfViewerReady ? 'h-full' : 'h-full opacity-0 pointer-events-none'}>
+            <PDFViewer
+              zoomLevel={zoomLevel}
+              onDocumentReady={() => setIsPdfViewerReady(true)}
+              pdfState={pdfState}
+            />
+          </div>
+        ) : null}
+        {isLoading || !isParseReady || !isPdfViewerReady ? (
+          <div className="absolute inset-0 z-10">
+            {renderPdfStatusLoader()}
+          </div>
+        ) : null}
       </div>
       {canExportAudiobook && (
         <AudiobookExportModal

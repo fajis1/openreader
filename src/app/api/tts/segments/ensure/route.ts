@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { ttsSegmentEntries, ttsSegmentVariants } from '@/db/schema';
@@ -43,6 +44,7 @@ import type {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+const GENERATING_STALE_MS = 45_000;
 
 function attachDeviceIdCookie(response: NextResponse, deviceId: string | null, didCreate: boolean) {
   if (didCreate && deviceId) {
@@ -150,6 +152,8 @@ async function deleteEntryIfUnused(userId: string, segmentEntryId: string): Prom
 export async function POST(request: NextRequest) {
   let didCreateDeviceIdCookie = false;
   let deviceIdToSet: string | null = null;
+  const requestId = randomUUID();
+  const requestStartedAt = Date.now();
   let computeBackendPromise: ReturnType<typeof getCompute> | null = null;
   const getComputeBackend = async () => {
     if (!computeBackendPromise) computeBackendPromise = getCompute();
@@ -325,6 +329,9 @@ export async function POST(request: NextRequest) {
     };
 
     for (const segment of normalized) {
+      const segmentStartedAt = Date.now();
+      const stageTimings: Record<string, number> = {};
+      let failedStage = 'unknown';
       const locatorProjection = projectSegmentLocator(segment.locator);
       const segmentKeyForRow = typeof segment.original.segmentKey === 'string' && segment.original.segmentKey.trim()
         ? segment.original.segmentKey.trim()
@@ -377,11 +384,13 @@ export async function POST(request: NextRequest) {
         // previously unavailable, retry alignment using the current segment text.
         if (!alignment) {
           try {
+            const alignStartedAt = Date.now();
             const computeBackend = await getComputeBackend();
             const aligned = (await computeBackend.alignWords({
               audioObjectKey: existing.audioKey,
               text: segment.text,
             })).alignments;
+            stageTimings.selfHealAlignMs = Date.now() - alignStartedAt;
             alignment = aligned[0] ? { ...aligned[0], sentenceIndex: segment.original.segmentIndex } : null;
 
             if (alignment) {
@@ -398,6 +407,7 @@ export async function POST(request: NextRequest) {
             }
           } catch (alignError) {
             console.warn('Whisper alignment still unavailable for completed segment; continuing without word highlights.', {
+              requestId,
               segmentId: segment.segmentId,
               error: alignError instanceof Error ? alignError.message : String(alignError),
             });
@@ -504,7 +514,92 @@ export async function POST(request: NextRequest) {
         await deleteEntryIfUnused(scope.storageUserId, movedFromEntryId);
       }
 
+      const [currentVariant] = await db
+        .select({
+          status: ttsSegmentVariants.status,
+          updatedAt: ttsSegmentVariants.updatedAt,
+          error: ttsSegmentVariants.error,
+          audioKey: ttsSegmentVariants.audioKey,
+        })
+        .from(ttsSegmentVariants)
+        .where(and(
+          eq(ttsSegmentVariants.segmentId, segment.segmentId),
+          eq(ttsSegmentVariants.userId, scope.storageUserId),
+        ))
+        .limit(1);
+
+      if (!currentVariant) {
+        manifest.push({
+          segmentId: segment.segmentId,
+          segmentIndex: segment.original.segmentIndex,
+          segmentKey: segmentKeyForRow,
+          audioPresignUrl: null,
+          audioFallbackUrl: null,
+          durationMs: 0,
+          alignment: null,
+          locator: segment.locator,
+          status: 'pending',
+        });
+        continue;
+      }
+
+      if (currentVariant.status === 'generating') {
+        const lastUpdatedAt = Number(currentVariant.updatedAt ?? 0);
+        const isFresh = lastUpdatedAt > 0 && (Date.now() - lastUpdatedAt) < GENERATING_STALE_MS;
+        if (isFresh) {
+          manifest.push({
+            segmentId: segment.segmentId,
+            segmentIndex: segment.original.segmentIndex,
+            segmentKey: segmentKeyForRow,
+            audioPresignUrl: null,
+            audioFallbackUrl: null,
+            durationMs: 0,
+            alignment: null,
+            locator: segment.locator,
+            status: 'pending',
+          });
+          continue;
+        }
+      }
+
+      if (currentVariant.status === 'pending' || currentVariant.status === 'error' || currentVariant.status === 'generating') {
+        const expectedUpdatedAt = Number(currentVariant.updatedAt ?? 0);
+        const [claim] = await db
+          .update(ttsSegmentVariants)
+          .set({
+            status: 'generating',
+            error: null,
+            updatedAt: Date.now(),
+          })
+          .where(and(
+            eq(ttsSegmentVariants.segmentId, segment.segmentId),
+            eq(ttsSegmentVariants.userId, scope.storageUserId),
+            eq(ttsSegmentVariants.status, currentVariant.status),
+            eq(ttsSegmentVariants.updatedAt, expectedUpdatedAt),
+          ))
+          .returning({
+            status: ttsSegmentVariants.status,
+          });
+
+        if (!claim) {
+          manifest.push({
+            segmentId: segment.segmentId,
+            segmentIndex: segment.original.segmentIndex,
+            segmentKey: segmentKeyForRow,
+            audioPresignUrl: null,
+            audioFallbackUrl: null,
+            durationMs: 0,
+            alignment: null,
+            locator: segment.locator,
+            status: 'pending',
+          });
+          continue;
+        }
+      }
+
       try {
+        failedStage = 'tts.generate';
+        const ttsStartedAt = Date.now();
         const ttsBuffer = await generateTTSBuffer({
           text: segment.text,
           voice: effectiveSettings.voice,
@@ -517,33 +612,47 @@ export async function POST(request: NextRequest) {
           baseUrl: requestCreds.baseUrl,
           testNamespace: scope.testNamespace,
         }, request.signal);
+        stageTimings.generateTtsMs = Date.now() - ttsStartedAt;
 
+        failedStage = 's3.put_audio';
+        const putStartedAt = Date.now();
         await putTtsSegmentAudioObject(audioKey, ttsBuffer);
+        stageTimings.putAudioMs = Date.now() - putStartedAt;
 
         let persistedBuffer = ttsBuffer;
         if (persistedBuffer.byteLength === 0) {
+          failedStage = 's3.get_audio_after_empty_put';
+          const getStartedAt = Date.now();
           persistedBuffer = await getTtsSegmentAudioObject(audioKey);
+          stageTimings.getAudioAfterEmptyPutMs = Date.now() - getStartedAt;
         }
 
+        failedStage = 'audio.probe_duration';
+        const probeStartedAt = Date.now();
         const durationMs = await probeAudioDurationMsFromBuffer(persistedBuffer, request.signal);
+        stageTimings.probeDurationMs = Date.now() - probeStartedAt;
         let alignment: TTSSegmentManifestItem['alignment'] = null;
         try {
-          const whisperBytes = Uint8Array.from(persistedBuffer);
+          failedStage = 'whisper.align';
+          const alignStartedAt = Date.now();
           const computeBackend = await getComputeBackend();
           const aligned = (await computeBackend.alignWords({
-            audioBuffer: whisperBytes.buffer,
             audioObjectKey: audioKey,
             text: segment.text,
           })).alignments;
+          stageTimings.whisperAlignMs = Date.now() - alignStartedAt;
           alignment = aligned[0] ? { ...aligned[0], sentenceIndex: segment.original.segmentIndex } : null;
         } catch (alignError) {
           console.warn('Whisper alignment unavailable for segment; continuing without word highlights.', {
+            requestId,
             segmentId: segment.segmentId,
             error: alignError instanceof Error ? alignError.message : String(alignError),
           });
           alignment = null;
         }
 
+        failedStage = 'db.mark_completed';
+        const markCompletedStartedAt = Date.now();
         await db
           .update(ttsSegmentVariants)
           .set({
@@ -557,12 +666,16 @@ export async function POST(request: NextRequest) {
             eq(ttsSegmentVariants.segmentId, segment.segmentId),
             eq(ttsSegmentVariants.userId, scope.storageUserId),
           ));
+        stageTimings.markCompletedMs = Date.now() - markCompletedStartedAt;
 
+        failedStage = 'resolve.audio_urls';
+        const resolveUrlsStartedAt = Date.now();
         const audioUrls = await resolveSegmentAudioUrls({
           documentId: parsed.documentId,
           segmentId: segment.segmentId,
           audioKey,
         });
+        stageTimings.resolveAudioUrlsMs = Date.now() - resolveUrlsStartedAt;
 
         manifest.push({
           segmentId: segment.segmentId,
@@ -586,6 +699,19 @@ export async function POST(request: NextRequest) {
           : upstreamStatus && upstreamStatus >= 500
             ? 'UPSTREAM_TTS_ERROR'
             : 'TTS_SEGMENT_GENERATION_FAILED';
+        console.error('[tts-segments/ensure] segment failed', {
+          requestId,
+          documentId: parsed.documentId,
+          segmentId: segment.segmentId,
+          failedStage,
+          elapsedMs: Date.now() - segmentStartedAt,
+          stageTimings,
+          aborted,
+          upstreamStatus,
+          retryAfterSeconds,
+          errorCode,
+          message,
+        });
         await db
           .update(ttsSegmentVariants)
           .set({
@@ -619,9 +745,31 @@ export async function POST(request: NextRequest) {
               detail: message,
               ...(typeof upstreamStatus === 'number' ? { upstreamStatus } : {}),
               ...(typeof retryAfterSeconds === 'number' ? { retryAfterSeconds } : {}),
-            },
+          },
         });
       }
+    }
+
+    const completedCount = manifest.filter((s) => s.status === 'completed').length;
+    const pendingCount = manifest.filter((s) => s.status === 'pending').length;
+    const errorItems = manifest.filter((s) => s.status === 'error');
+    if (errorItems.length > 0) {
+      console.error('[tts-segments/ensure] partial result', {
+        requestId,
+        documentId: parsed.documentId,
+        total: manifest.length,
+        completedCount,
+        pendingCount,
+        errorCount: errorItems.length,
+        elapsedMs: Date.now() - requestStartedAt,
+        errors: errorItems.slice(0, 5).map((item) => ({
+          segmentId: item.segmentId,
+          code: item.error?.code ?? null,
+          detail: item.error?.detail ?? null,
+          upstreamStatus: item.error?.upstreamStatus ?? null,
+          retryAfterSeconds: item.error?.retryAfterSeconds ?? null,
+        })),
+      });
     }
 
     const response = NextResponse.json({

@@ -67,3 +67,33 @@ export interface WorkerJobStatusResponse<Result> {
   error?: WorkerJobErrorShape;
   timing?: WorkerJobTiming;
 }
+
+export type WorkerOperationKind = 'whisper_align' | 'pdf_layout';
+
+export interface WhisperAlignOperationRequest {
+  kind: 'whisper_align';
+  opKey: string;
+  payload: WhisperAlignJobRequest;
+}
+
+export interface PdfLayoutOperationRequest {
+  kind: 'pdf_layout';
+  opKey: string;
+  payload: PdfLayoutJobRequest;
+}
+
+export type WorkerOperationRequest = WhisperAlignOperationRequest | PdfLayoutOperationRequest;
+
+export interface WorkerOperationState<Result = unknown> {
+  opId: string;
+  opKey: string;
+  kind: WorkerOperationKind;
+  jobId: string;
+  status: WorkerJobState;
+  queuedAt: number;
+  updatedAt: number;
+  startedAt?: number;
+  result?: Result;
+  error?: WorkerJobErrorShape;
+  timing?: WorkerJobTiming;
+}

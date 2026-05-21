@@ -5,7 +5,6 @@ import { Document, Page } from 'react-pdf';
 import type { Dest } from 'react-pdf/src/shared/types.js';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
-import { DocumentSkeleton } from '@/components/documents/DocumentSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { usePDFResize } from '@/hooks/pdf/usePDFResize';
@@ -14,6 +13,7 @@ import type { ParsedPdfBlock, ParsedPdfPage } from '@/types/parsed-pdf';
 
 interface PDFViewerProps {
   zoomLevel: number;
+  onDocumentReady?: () => void;
   pdfState: Pick<
     PdfDocumentState,
     | 'highlightPattern'
@@ -36,7 +36,7 @@ interface PDFOnLinkClickArgs {
   dest?: Dest;
 }
 
-export function PDFViewer({ zoomLevel, pdfState }: PDFViewerProps) {
+export function PDFViewer({ zoomLevel, onDocumentReady, pdfState }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isPageRendering, setIsPageRendering] = useState(false);
   const scaleRef = useRef<number>(1);
@@ -495,11 +495,12 @@ export function PDFViewer({ zoomLevel, pdfState }: PDFViewerProps) {
     >
       <Document
         key={currDocId || 'pdf'}
-        loading={<DocumentSkeleton />}
-        noData={<DocumentSkeleton />}
+        loading={null}
+        noData={null}
         file={documentFile}
         onLoadSuccess={(pdf) => {
           onDocumentLoadSuccess(pdf);
+          onDocumentReady?.();
         }}
         onItemClick={(args: PDFOnLinkClickArgs) => {
           if (args?.pageNumber) {

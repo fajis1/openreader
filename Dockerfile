@@ -45,19 +45,21 @@ FROM node:lts-alpine AS runner
 # ffmpeg is provided by ffmpeg-static from node_modules.
 RUN apk add --no-cache ca-certificates libreoffice-writer
 
-# drizzle-kit is used by scripts/openreader-entrypoint.mjs for startup migrations.
-RUN npm install -g drizzle-kit@0.31.10
+# Install pnpm and production deps from the repository lockfile.
+RUN npm install -g pnpm@10.33.4
 
 # App runtime directory
 WORKDIR /app
-
-# Entry-point and migration scripts import dotenv directly.
-RUN npm install --no-save dotenv@17.4.2
 
 # Copy standalone Next.js server and required static assets.
 COPY --from=app-builder /app/.next/standalone ./
 COPY --from=app-builder /app/.next/static ./.next/static
 COPY --from=app-builder /app/public ./public
+# Install runtime dependencies from lockfile (no Dockerfile version pin drift).
+COPY --from=app-builder /app/package.json ./package.json
+COPY --from=app-builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY --from=app-builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+RUN CI=true pnpm install --prod --frozen-lockfile --config.confirmModulesPurge=false
 # Copy startup/migration scripts and migration files used by openreader-entrypoint.
 COPY --from=app-builder /app/scripts/openreader-entrypoint.mjs ./scripts/openreader-entrypoint.mjs
 COPY --from=app-builder /app/scripts/migrate-fs-v2.mjs ./scripts/migrate-fs-v2.mjs

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import Fastify, { type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
@@ -30,8 +31,12 @@ import {
   type PdfLayoutJobResult,
   type WhisperAlignJobRequest,
   type WhisperAlignJobResult,
-  type WorkerJobStatusResponse,
+  type WorkerJobErrorShape,
+  type WorkerJobState,
   type WorkerJobTiming,
+  type WorkerOperationKind,
+  type WorkerOperationRequest,
+  type WorkerOperationState,
 } from '@openreader/compute-core/contracts';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
@@ -40,23 +45,40 @@ const WHISPER_JOBS_SUBJECT = 'jobs.whisper';
 const LAYOUT_JOBS_SUBJECT = 'jobs.layout';
 const WHISPER_CONSUMER_NAME = 'compute_whisper';
 const LAYOUT_CONSUMER_NAME = 'compute_layout';
-const JOB_STATES_BUCKET = 'job_states';
-const JOB_STATES_TTL_MS = 24 * 60 * 60 * 1000;
+const COMPUTE_STATE_BUCKET = 'compute_state';
+const COMPUTE_STATE_TTL_MS = 24 * 60 * 60 * 1000;
 const PULL_EXPIRES_MS = 1000;
 const LOOP_ERROR_BACKOFF_MS = 500;
+const SSE_POLL_INTERVAL_MS = 400;
+const RUNNING_HEARTBEAT_MS = 5000;
 const DOCUMENT_ID_REGEX = /^[a-f0-9]{64}$/i;
 const SAFE_NAMESPACE_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
 
 interface QueuedJob<TPayload> {
   jobId: string;
+  opId: string;
+  opKey: string;
+  kind: WorkerOperationKind;
   queuedAt: number;
   payload: TPayload;
 }
 
-interface StoredJobState<Result> extends WorkerJobStatusResponse<Result> {
+interface StoredJobState<Result> {
+  jobId: string;
+  opId: string;
+  opKey: string;
+  kind: WorkerOperationKind;
+  status: WorkerJobState;
   timestamp: number;
   startedAt?: number;
   updatedAt: number;
+  result?: Result;
+  error?: WorkerJobErrorShape;
+  timing?: WorkerJobTiming;
+}
+
+interface OpIndexEntry {
+  opId: string;
 }
 
 type JsonCodec<T> = {
@@ -209,6 +231,11 @@ function isAlreadyExistsError(error: unknown): boolean {
   return message.includes('already in use') || message.includes('already exists');
 }
 
+function isCasConflictError(error: unknown): boolean {
+  const message = toErrorMessage(error).toLowerCase();
+  return message.includes('wrong last sequence') || message.includes('key exists') || message.includes('wrong last');
+}
+
 function createJsonCodec<T>(): JsonCodec<T> {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -220,6 +247,36 @@ function createJsonCodec<T>(): JsonCodec<T> {
       return JSON.parse(decoder.decode(data)) as T;
     },
   };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTerminalStatus(status: WorkerJobState): boolean {
+  return status === 'succeeded' || status === 'failed';
+}
+
+function hashOpKey(opKey: string): string {
+  return createHash('sha256').update(opKey).digest('hex');
+}
+
+function opIndexKvKey(opKey: string): string {
+  return `op_index.${hashOpKey(opKey)}`;
+}
+
+function opStateKvKey(opId: string): string {
+  return `op_state.${opId}`;
+}
+
+function jobStateKvKey(jobId: string): string {
+  return `job_state.${jobId}`;
+}
+
+function extractResultRef(kind: WorkerOperationKind, result: unknown): string | undefined {
+  if (kind !== 'pdf_layout' || !result || typeof result !== 'object') return undefined;
+  const maybe = result as { parsedObjectKey?: unknown };
+  return typeof maybe.parsedObjectKey === 'string' ? maybe.parsedObjectKey : undefined;
 }
 
 const alignSchema = z.object({
@@ -235,24 +292,18 @@ const layoutSchema = z.object({
   documentObjectKey: z.string().trim().min(1).max(2048),
 });
 
-async function putState<Result>(
-  kv: KV,
-  codec: JsonCodec<StoredJobState<Result>>,
-  jobId: string,
-  state: StoredJobState<Result>,
-): Promise<void> {
-  await kv.put(jobId, codec.encode(state));
-}
-
-async function getState<Result>(
-  kv: KV,
-  codec: JsonCodec<StoredJobState<Result>>,
-  jobId: string,
-): Promise<StoredJobState<Result> | null> {
-  const entry = await kv.get(jobId);
-  if (!entry || entry.operation !== 'PUT') return null;
-  return codec.decode(entry.value);
-}
+const operationCreateSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('whisper_align'),
+    opKey: z.string().trim().min(1).max(1024),
+    payload: alignSchema,
+  }),
+  z.object({
+    kind: z.literal('pdf_layout'),
+    opKey: z.string().trim().min(1).max(1024),
+    payload: layoutSchema,
+  }),
+]);
 
 async function ensureJetStreamResources(
   jsm: JetStreamManager,
@@ -308,119 +359,6 @@ async function ensureJetStreamResources(
   ]);
 }
 
-async function createWorkerLoop<TPayload, TResult>(input: {
-  consumer: Consumer;
-  kv: KV;
-  stateCodec: JsonCodec<StoredJobState<TResult>>;
-  jobCodec: JsonCodec<QueuedJob<TPayload>>;
-  run: (payload: TPayload, queueWaitMs: number) => Promise<TResult>;
-  maxAttempts: number;
-  logLabel: string;
-  shouldStop: () => boolean;
-  log: {
-    error: (obj: Record<string, unknown>, msg: string) => void;
-    info: (obj: Record<string, unknown>, msg: string) => void;
-  };
-}): Promise<void> {
-  while (!input.shouldStop()) {
-    let msg: JsMsg | null = null;
-    try {
-      msg = await input.consumer.next({ expires: PULL_EXPIRES_MS });
-    } catch (error) {
-      if (input.shouldStop()) return;
-      input.log.error({ error: toErrorMessage(error), worker: input.logLabel }, 'worker pull failed');
-      await new Promise((resolve) => setTimeout(resolve, LOOP_ERROR_BACKOFF_MS));
-      continue;
-    }
-
-    if (!msg) continue;
-
-    let decoded: QueuedJob<TPayload> | null = null;
-    try {
-      const job = input.jobCodec.decode(msg.data);
-      decoded = job;
-      const startedAt = Date.now();
-      const queueWaitMs = safeDurationMs(job.queuedAt, startedAt);
-
-      await putState(input.kv, input.stateCodec, job.jobId, {
-        status: 'running',
-        timestamp: job.queuedAt,
-        startedAt,
-        updatedAt: startedAt,
-        ...(typeof queueWaitMs === 'number' ? { timing: { queueWaitMs } } : {}),
-      });
-
-      const result = await input.run(job.payload, queueWaitMs ?? 0);
-      const resultTiming = result && typeof result === 'object' && 'timing' in result
-        ? (result as { timing?: WorkerJobTiming }).timing
-        : undefined;
-
-      await putState(input.kv, input.stateCodec, job.jobId, {
-        status: 'succeeded',
-        timestamp: job.queuedAt,
-        startedAt,
-        updatedAt: Date.now(),
-        result,
-        ...(resultTiming ? { timing: resultTiming } : {}),
-      });
-
-      msg.ack();
-      input.log.info({ worker: input.logLabel, jobId: job.jobId, timing: resultTiming }, 'job succeeded');
-    } catch (error) {
-      const message = toErrorMessage(error);
-      const deliveryCount = msg.info.deliveryCount;
-      const hasRetriesLeft = deliveryCount < input.maxAttempts;
-
-      if (decoded?.jobId) {
-        const now = Date.now();
-        const queueWaitMs = safeDurationMs(decoded.queuedAt, now);
-        const state: StoredJobState<TResult> = hasRetriesLeft
-          ? {
-            status: 'running',
-            timestamp: decoded.queuedAt,
-            updatedAt: now,
-            ...(typeof queueWaitMs === 'number' ? { timing: { queueWaitMs } } : {}),
-          }
-          : {
-            status: 'failed',
-            timestamp: decoded.queuedAt,
-            updatedAt: now,
-            error: { message },
-            ...(typeof queueWaitMs === 'number' ? { timing: { queueWaitMs } } : {}),
-          };
-
-        await putState(input.kv, input.stateCodec, decoded.jobId, state).catch((stateError) => {
-          input.log.error({
-            worker: input.logLabel,
-            jobId: decoded?.jobId,
-            error: toErrorMessage(stateError),
-          }, 'failed to persist failed state');
-        });
-      }
-
-      if (hasRetriesLeft) {
-        msg.nak();
-        input.log.error({
-          worker: input.logLabel,
-          jobId: decoded?.jobId,
-          error: message,
-          deliveryCount,
-          maxAttempts: input.maxAttempts,
-        }, 'job failed, nacked for retry');
-      } else {
-        msg.term(message);
-        input.log.error({
-          worker: input.logLabel,
-          jobId: decoded?.jobId,
-          error: message,
-          deliveryCount,
-          maxAttempts: input.maxAttempts,
-        }, 'job failed, max attempts reached');
-      }
-    }
-  }
-}
-
 async function main(): Promise<void> {
   const port = readIntEnv('PORT', 8081);
   const host = process.env.COMPUTE_WORKER_HOST?.trim() || '0.0.0.0';
@@ -435,6 +373,10 @@ async function main(): Promise<void> {
   const prewarmModels = parseBoolEnv('COMPUTE_PREWARM_MODELS', true);
   const jobsStreamMaxBytes = readIntEnv('COMPUTE_JOBS_STREAM_MAX_BYTES', 256 * 1024 * 1024);
   const jobStatesMaxBytes = readIntEnv('COMPUTE_JOB_STATES_MAX_BYTES', 64 * 1024 * 1024);
+  const opStaleMs = readIntEnv(
+    'COMPUTE_OP_STALE_MS',
+    Math.max(30 * 60_000, Math.max(whisperTimeoutMs, pdfTimeoutMs) * 4),
+  );
 
   const connectOpts: any = { servers: natsUrl };
   const natsCreds = process.env.NATS_CREDS?.trim();
@@ -445,7 +387,7 @@ async function main(): Promise<void> {
     connectOpts.authenticator = credsAuthenticator(new TextEncoder().encode(natsCreds));
   } else if (natsCredsFile) {
     console.log(`[compute-worker] Connecting to NATS using credentials file: ${natsCredsFile}`);
-    const { readFileSync } = require('fs');
+    const { readFileSync } = await import('node:fs');
     const credsData = readFileSync(natsCredsFile);
     connectOpts.authenticator = credsAuthenticator(credsData);
   }
@@ -456,9 +398,9 @@ async function main(): Promise<void> {
 
   await ensureJetStreamResources(jsm, whisperTimeoutMs, pdfTimeoutMs, attempts, jobsStreamMaxBytes);
 
-  const kv = await new Kvm(js).create(JOB_STATES_BUCKET, {
+  const kv = await new Kvm(js).create(COMPUTE_STATE_BUCKET, {
     history: 1,
-    ttl: JOB_STATES_TTL_MS,
+    ttl: COMPUTE_STATE_TTL_MS,
     max_bytes: jobStatesMaxBytes,
   });
 
@@ -503,10 +445,187 @@ async function main(): Promise<void> {
 
   const app = Fastify({ logger: buildLoggerConfig() });
 
-  const whisperStateCodec = createJsonCodec<StoredJobState<WhisperAlignJobResult>>();
-  const layoutStateCodec = createJsonCodec<StoredJobState<PdfLayoutJobResult>>();
+  const opIndexCodec = createJsonCodec<OpIndexEntry>();
+  const opStateCodec = createJsonCodec<WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>>();
   const whisperJobCodec = createJsonCodec<QueuedJob<WhisperAlignJobRequest>>();
   const layoutJobCodec = createJsonCodec<QueuedJob<PdfLayoutJobRequest>>();
+  const jobStateCodec = createJsonCodec<StoredJobState<WhisperAlignJobResult | PdfLayoutJobResult>>();
+
+  const putOpState = async (state: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>): Promise<void> => {
+    await kv.put(opStateKvKey(state.opId), opStateCodec.encode(state));
+  };
+
+  const getOpState = async (opId: string): Promise<WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> | null> => {
+    const entry = await kv.get(opStateKvKey(opId));
+    if (!entry || entry.operation !== 'PUT') return null;
+    return opStateCodec.decode(entry.value);
+  };
+
+  const putJobState = async (state: StoredJobState<WhisperAlignJobResult | PdfLayoutJobResult>): Promise<void> => {
+    await kv.put(jobStateKvKey(state.jobId), jobStateCodec.encode(state));
+  };
+
+  const publishQueuedJob = async (
+    op: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>,
+    payload: WhisperAlignJobRequest | PdfLayoutJobRequest,
+  ): Promise<void> => {
+    if (op.kind === 'whisper_align') {
+      await js.publish(WHISPER_JOBS_SUBJECT, whisperJobCodec.encode({
+        jobId: op.jobId,
+        opId: op.opId,
+        opKey: op.opKey,
+        kind: 'whisper_align',
+        queuedAt: op.queuedAt,
+        payload: payload as WhisperAlignJobRequest,
+      }));
+      return;
+    }
+
+    await js.publish(LAYOUT_JOBS_SUBJECT, layoutJobCodec.encode({
+      jobId: op.jobId,
+      opId: op.opId,
+      opKey: op.opKey,
+      kind: 'pdf_layout',
+      queuedAt: op.queuedAt,
+      payload: payload as PdfLayoutJobRequest,
+    }));
+  };
+
+  const enqueueOrReuseOperation = async (
+    req: WorkerOperationRequest,
+  ): Promise<WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>> => {
+    const opKey = req.opKey.trim();
+    const indexKey = opIndexKvKey(opKey);
+
+    for (let attemptNo = 0; attemptNo < 10; attemptNo += 1) {
+      const indexEntry = await kv.get(indexKey);
+      if (indexEntry && indexEntry.operation === 'PUT') {
+        const pointer = opIndexCodec.decode(indexEntry.value);
+        const current = await getOpState(pointer.opId);
+
+        if (!current) {
+          await sleep(25);
+          continue;
+        }
+
+        if (current && current.kind === req.kind) {
+          const ageMs = Date.now() - current.updatedAt;
+          if (current.status === 'succeeded') return current;
+          if ((current.status === 'queued' || current.status === 'running') && ageMs <= opStaleMs) {
+            return current;
+          }
+        }
+
+        const now = Date.now();
+        const replacement: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
+          opId: crypto.randomUUID(),
+          opKey,
+          kind: req.kind,
+          jobId: crypto.randomUUID(),
+          status: 'queued',
+          queuedAt: now,
+          updatedAt: now,
+        };
+
+        try {
+          await kv.update(indexKey, opIndexCodec.encode({ opId: replacement.opId }), indexEntry.revision);
+        } catch (error) {
+          if (isCasConflictError(error)) continue;
+          throw error;
+        }
+
+        await putOpState(replacement);
+        await putJobState({
+          jobId: replacement.jobId,
+          opId: replacement.opId,
+          opKey: replacement.opKey,
+          kind: replacement.kind,
+          status: 'queued',
+          timestamp: now,
+          updatedAt: now,
+        });
+
+        try {
+          await publishQueuedJob(replacement, req.payload);
+          return replacement;
+        } catch (error) {
+          const failed: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
+            ...replacement,
+            status: 'failed',
+            updatedAt: Date.now(),
+            error: { message: toErrorMessage(error) },
+          };
+          await putOpState(failed);
+          await putJobState({
+            jobId: replacement.jobId,
+            opId: replacement.opId,
+            opKey: replacement.opKey,
+            kind: replacement.kind,
+            status: 'failed',
+            timestamp: replacement.queuedAt,
+            updatedAt: failed.updatedAt,
+            error: failed.error,
+          });
+          return failed;
+        }
+      }
+
+      const now = Date.now();
+      const created: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
+        opId: crypto.randomUUID(),
+        opKey,
+        kind: req.kind,
+        jobId: crypto.randomUUID(),
+        status: 'queued',
+        queuedAt: now,
+        updatedAt: now,
+      };
+
+      try {
+        await kv.create(indexKey, opIndexCodec.encode({ opId: created.opId }));
+      } catch (error) {
+        if (isCasConflictError(error)) continue;
+        throw error;
+      }
+
+      await putOpState(created);
+      await putJobState({
+        jobId: created.jobId,
+        opId: created.opId,
+        opKey: created.opKey,
+        kind: created.kind,
+        status: 'queued',
+        timestamp: now,
+        updatedAt: now,
+      });
+
+      try {
+        await publishQueuedJob(created, req.payload);
+        return created;
+      } catch (error) {
+        const failed: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
+          ...created,
+          status: 'failed',
+          updatedAt: Date.now(),
+          error: { message: toErrorMessage(error) },
+        };
+        await putOpState(failed);
+        await putJobState({
+          jobId: created.jobId,
+          opId: created.opId,
+          opKey: created.opKey,
+          kind: created.kind,
+          status: 'failed',
+          timestamp: created.queuedAt,
+          updatedAt: failed.updatedAt,
+          error: failed.error,
+        });
+        return failed;
+      }
+    }
+
+    throw new Error('Unable to reserve operation after repeated CAS conflicts');
+  };
 
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?')[0] ?? request.url;
@@ -532,8 +651,8 @@ async function main(): Promise<void> {
     }
   });
 
-  app.post('/align/whisper/jobs', async (request, reply) => {
-    const parsed = alignSchema.safeParse(request.body);
+  app.post('/ops', async (request, reply) => {
+    const parsed = operationCreateSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.code(400);
       return {
@@ -542,98 +661,74 @@ async function main(): Promise<void> {
       };
     }
 
-    const jobId = crypto.randomUUID();
-    const queuedAt = Date.now();
-
-    await putState(kv, whisperStateCodec, jobId, {
-      status: 'queued',
-      timestamp: queuedAt,
-      updatedAt: queuedAt,
-    });
-
-    await js.publish(WHISPER_JOBS_SUBJECT, whisperJobCodec.encode({
-      jobId,
-      queuedAt,
-      payload: parsed.data,
-    }));
-
+    const op = await enqueueOrReuseOperation(parsed.data as WorkerOperationRequest);
     reply.code(202);
-    return { jobId };
+    return op;
   });
 
-  app.get('/align/whisper/jobs/:jobId', async (request, reply) => {
-    const params = z.object({ jobId: z.string().trim().min(1) }).safeParse(request.params);
+  app.get('/ops/:opId', async (request, reply) => {
+    const params = z.object({ opId: z.string().trim().min(1) }).safeParse(request.params);
     if (!params.success) {
       reply.code(400);
-      return { error: 'Invalid job id' };
+      return { error: 'Invalid op id' };
     }
 
-    const state = await getState(kv, whisperStateCodec, params.data.jobId);
+    const state = await getOpState(params.data.opId);
     if (!state) {
       reply.code(404);
-      return { error: 'Job not found' };
+      return { error: 'Operation not found' };
     }
 
-    const response: WorkerJobStatusResponse<WhisperAlignJobResult> = {
-      status: state.status,
-      ...(state.result ? { result: state.result } : {}),
-      ...(state.error ? { error: state.error } : {}),
-      ...(state.timing ? { timing: state.timing } : {}),
-    };
-
-    return response;
+    return state;
   });
 
-  app.post('/layout/pdf/jobs', async (request, reply) => {
-    const parsed = layoutSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.code(400);
-      return {
-        error: 'Invalid request body',
-        issues: parsed.error.issues,
-      };
-    }
-
-    const jobId = crypto.randomUUID();
-    const queuedAt = Date.now();
-
-    await putState(kv, layoutStateCodec, jobId, {
-      status: 'queued',
-      timestamp: queuedAt,
-      updatedAt: queuedAt,
-    });
-
-    await js.publish(LAYOUT_JOBS_SUBJECT, layoutJobCodec.encode({
-      jobId,
-      queuedAt,
-      payload: parsed.data,
-    }));
-
-    reply.code(202);
-    return { jobId };
-  });
-
-  app.get('/layout/pdf/jobs/:jobId', async (request, reply) => {
-    const params = z.object({ jobId: z.string().trim().min(1) }).safeParse(request.params);
+  app.get('/ops/:opId/events', async (request, reply) => {
+    const params = z.object({ opId: z.string().trim().min(1) }).safeParse(request.params);
     if (!params.success) {
       reply.code(400);
-      return { error: 'Invalid job id' };
+      return { error: 'Invalid op id' };
     }
 
-    const state = await getState(kv, layoutStateCodec, params.data.jobId);
-    if (!state) {
+    const initial = await getOpState(params.data.opId);
+    if (!initial) {
       reply.code(404);
-      return { error: 'Job not found' };
+      return { error: 'Operation not found' };
     }
 
-    const response: WorkerJobStatusResponse<PdfLayoutJobResult> = {
-      status: state.status,
-      ...(state.result ? { result: state.result } : {}),
-      ...(state.error ? { error: state.error } : {}),
-      ...(state.timing ? { timing: state.timing } : {}),
+    reply.hijack();
+    reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
+    reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.setHeader('X-Accel-Buffering', 'no');
+
+    const writeSnapshot = (snapshot: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>): void => {
+      reply.raw.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
     };
 
-    return response;
+    let closed = false;
+    request.raw.on('close', () => {
+      closed = true;
+    });
+
+    let current = initial;
+    writeSnapshot(current);
+    let signature = JSON.stringify(current);
+
+    while (!closed && !isTerminalStatus(current.status)) {
+      await sleep(SSE_POLL_INTERVAL_MS);
+      const next = await getOpState(params.data.opId);
+      if (!next) break;
+      const nextSignature = JSON.stringify(next);
+      if (nextSignature !== signature) {
+        current = next;
+        signature = nextSignature;
+        writeSnapshot(current);
+      }
+    }
+
+    if (!reply.raw.writableEnded) {
+      reply.raw.end();
+    }
   });
 
   const whisperConsumer = await js.consumers.get(JOBS_STREAM_NAME, WHISPER_CONSUMER_NAME);
@@ -706,33 +801,247 @@ async function main(): Promise<void> {
     };
   };
 
+  async function processMessage<TPayload, TResult>(input: {
+    msg: JsMsg;
+    codec: JsonCodec<QueuedJob<TPayload>>;
+    run: (payload: TPayload, queueWaitMs: number) => Promise<TResult>;
+    workerLabel: string;
+  }): Promise<void> {
+    let decoded: QueuedJob<TPayload> | null = null;
+    let heartbeat: NodeJS.Timeout | null = null;
+    try {
+      decoded = input.codec.decode(input.msg.data);
+      const startedAt = Date.now();
+      const queueWaitMs = safeDurationMs(decoded.queuedAt, startedAt);
+
+      const runningState: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
+        opId: decoded.opId,
+        opKey: decoded.opKey,
+        kind: decoded.kind,
+        jobId: decoded.jobId,
+        status: 'running',
+        queuedAt: decoded.queuedAt,
+        startedAt,
+        updatedAt: startedAt,
+        ...(typeof queueWaitMs === 'number' ? { timing: { queueWaitMs } } : {}),
+      };
+
+      await putOpState(runningState);
+      await putJobState({
+        jobId: decoded.jobId,
+        opId: decoded.opId,
+        opKey: decoded.opKey,
+        kind: decoded.kind,
+        status: 'running',
+        timestamp: decoded.queuedAt,
+        startedAt,
+        updatedAt: startedAt,
+        ...(typeof queueWaitMs === 'number' ? { timing: { queueWaitMs } } : {}),
+      });
+
+      heartbeat = setInterval(() => {
+        const now = Date.now();
+        const heartbeatState: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
+          opId: decoded!.opId,
+          opKey: decoded!.opKey,
+          kind: decoded!.kind,
+          jobId: decoded!.jobId,
+          status: 'running',
+          queuedAt: decoded!.queuedAt,
+          startedAt,
+          updatedAt: now,
+          ...(typeof queueWaitMs === 'number' ? { timing: { queueWaitMs } } : {}),
+        };
+        void putOpState(heartbeatState).catch((stateError) => {
+          app.log.error({
+            worker: input.workerLabel,
+            opId: decoded?.opId,
+            jobId: decoded?.jobId,
+            error: toErrorMessage(stateError),
+          }, 'failed to persist running heartbeat op state');
+        });
+        void putJobState({
+          jobId: decoded!.jobId,
+          opId: decoded!.opId,
+          opKey: decoded!.opKey,
+          kind: decoded!.kind,
+          status: 'running',
+          timestamp: decoded!.queuedAt,
+          startedAt,
+          updatedAt: now,
+          ...(typeof queueWaitMs === 'number' ? { timing: { queueWaitMs } } : {}),
+        }).catch((stateError) => {
+          app.log.error({
+            worker: input.workerLabel,
+            opId: decoded?.opId,
+            jobId: decoded?.jobId,
+            error: toErrorMessage(stateError),
+          }, 'failed to persist running heartbeat job state');
+        });
+      }, RUNNING_HEARTBEAT_MS);
+
+      const result = await input.run(decoded.payload, queueWaitMs ?? 0);
+      const resultTiming = result && typeof result === 'object' && 'timing' in result
+        ? (result as { timing?: WorkerJobTiming }).timing
+        : undefined;
+      const now = Date.now();
+
+      const succeededState: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
+        opId: decoded.opId,
+        opKey: decoded.opKey,
+        kind: decoded.kind,
+        jobId: decoded.jobId,
+        status: 'succeeded',
+        queuedAt: decoded.queuedAt,
+        startedAt,
+        updatedAt: now,
+        result: result as WhisperAlignJobResult | PdfLayoutJobResult,
+        ...(resultTiming ? { timing: resultTiming } : {}),
+      };
+
+      await putOpState(succeededState);
+      await putJobState({
+        jobId: decoded.jobId,
+        opId: decoded.opId,
+        opKey: decoded.opKey,
+        kind: decoded.kind,
+        status: 'succeeded',
+        timestamp: decoded.queuedAt,
+        startedAt,
+        updatedAt: now,
+        result: result as WhisperAlignJobResult | PdfLayoutJobResult,
+        ...(resultTiming ? { timing: resultTiming } : {}),
+      });
+
+      input.msg.ack();
+      app.log.info({
+        worker: input.workerLabel,
+        opId: decoded.opId,
+        jobId: decoded.jobId,
+        resultRef: extractResultRef(decoded.kind, result),
+        timing: resultTiming,
+      }, 'job succeeded');
+    } catch (error) {
+      const message = toErrorMessage(error);
+      const deliveryCount = input.msg.info.deliveryCount;
+      const hasRetriesLeft = deliveryCount < attempts;
+
+      if (decoded) {
+        const now = Date.now();
+        const queueWaitMs = safeDurationMs(decoded.queuedAt, now);
+
+        const status: WorkerJobState = hasRetriesLeft ? 'running' : 'failed';
+        const opState: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
+          opId: decoded.opId,
+          opKey: decoded.opKey,
+          kind: decoded.kind,
+          jobId: decoded.jobId,
+          status,
+          queuedAt: decoded.queuedAt,
+          updatedAt: now,
+          ...(status === 'failed' ? { error: { message } } : {}),
+          ...(typeof queueWaitMs === 'number' ? { timing: { queueWaitMs } } : {}),
+        };
+
+        await putOpState(opState).catch((stateError) => {
+          app.log.error({
+            worker: input.workerLabel,
+            opId: decoded?.opId,
+            jobId: decoded?.jobId,
+            error: toErrorMessage(stateError),
+          }, 'failed to persist operation state');
+        });
+
+        await putJobState({
+          jobId: decoded.jobId,
+          opId: decoded.opId,
+          opKey: decoded.opKey,
+          kind: decoded.kind,
+          status,
+          timestamp: decoded.queuedAt,
+          updatedAt: now,
+          ...(status === 'failed' ? { error: { message } } : {}),
+          ...(typeof queueWaitMs === 'number' ? { timing: { queueWaitMs } } : {}),
+        }).catch((stateError) => {
+          app.log.error({
+            worker: input.workerLabel,
+            opId: decoded?.opId,
+            jobId: decoded?.jobId,
+            error: toErrorMessage(stateError),
+          }, 'failed to persist job state');
+        });
+      }
+
+      if (hasRetriesLeft) {
+        input.msg.nak();
+        app.log.error({
+          worker: input.workerLabel,
+          opId: decoded?.opId,
+          jobId: decoded?.jobId,
+          error: message,
+          deliveryCount,
+          maxAttempts: attempts,
+        }, 'job failed, nacked for retry');
+      } else {
+        input.msg.term(message);
+        app.log.error({
+          worker: input.workerLabel,
+          opId: decoded?.opId,
+          jobId: decoded?.jobId,
+          error: message,
+          deliveryCount,
+          maxAttempts: attempts,
+        }, 'job failed, max attempts reached');
+      }
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
+    }
+  }
+
+  async function createWorkerLoop<TPayload, TResult>(input: {
+    consumer: Consumer;
+    codec: JsonCodec<QueuedJob<TPayload>>;
+    run: (payload: TPayload, queueWaitMs: number) => Promise<TResult>;
+    workerLabel: string;
+  }): Promise<void> {
+    while (!stopping) {
+      let msg: JsMsg | null = null;
+      try {
+        msg = await input.consumer.next({ expires: PULL_EXPIRES_MS });
+      } catch (error) {
+        if (stopping) return;
+        app.log.error({ error: toErrorMessage(error), worker: input.workerLabel }, 'worker pull failed');
+        await sleep(LOOP_ERROR_BACKOFF_MS);
+        continue;
+      }
+
+      if (!msg) continue;
+      await processMessage({
+        msg,
+        codec: input.codec,
+        run: input.run,
+        workerLabel: input.workerLabel,
+      });
+    }
+  }
+
   const workerLoops: Promise<void>[] = [];
 
   for (let i = 0; i < whisperConcurrency; i += 1) {
     workerLoops.push(createWorkerLoop({
       consumer: whisperConsumer,
-      kv,
-      stateCodec: whisperStateCodec,
-      jobCodec: whisperJobCodec,
+      codec: whisperJobCodec,
       run: runWhisper,
-      maxAttempts: attempts,
-      logLabel: `whisper-${i + 1}`,
-      shouldStop: () => stopping,
-      log: app.log,
+      workerLabel: `whisper-${i + 1}`,
     }));
   }
 
   for (let i = 0; i < pdfConcurrency; i += 1) {
     workerLoops.push(createWorkerLoop({
       consumer: layoutConsumer,
-      kv,
-      stateCodec: layoutStateCodec,
-      jobCodec: layoutJobCodec,
+      codec: layoutJobCodec,
       run: runLayout,
-      maxAttempts: attempts,
-      logLabel: `layout-${i + 1}`,
-      shouldStop: () => stopping,
-      log: app.log,
+      workerLabel: `layout-${i + 1}`,
     }));
   }
 
