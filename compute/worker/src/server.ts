@@ -476,7 +476,7 @@ async function main(): Promise<void> {
   const jobConcurrency = readIntEnv('COMPUTE_JOB_CONCURRENCY', 1);
   const whisperTimeoutMs = readIntEnv('COMPUTE_WHISPER_TIMEOUT_MS', 30_000);
   const pdfTimeoutMs = readIntEnv('COMPUTE_PDF_TIMEOUT_MS', 5 * 60_000);
-  const pdfAttempts = readIntEnv('COMPUTE_PDF_JOB_ATTEMPTS', 2);
+  const pdfAttempts = readIntEnv('COMPUTE_PDF_JOB_ATTEMPTS', 1);
   const prewarmModels = parseBoolEnv('COMPUTE_PREWARM_MODELS', true);
   const jobsStreamMaxBytes = readIntEnv('COMPUTE_JOBS_STREAM_MAX_BYTES', 256 * 1024 * 1024);
   const jobStatesMaxBytes = readIntEnv('COMPUTE_JOB_STATES_MAX_BYTES', 64 * 1024 * 1024);
