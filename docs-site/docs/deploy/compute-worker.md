@@ -67,6 +67,9 @@ COMPUTE_MODE=worker
 # Cloud worker example (Railway):
 COMPUTE_WORKER_URL=https://<railway-worker-domain>
 COMPUTE_WORKER_TOKEN=<same-token-as-worker>
+# Optional shared timeout overrides (keep equal to worker service values):
+# COMPUTE_WHISPER_TIMEOUT_MS=30000
+# COMPUTE_PDF_TIMEOUT_MS=300000
 ```
 
 `COMPUTE_MODE=worker` has no local fallback. If worker is unavailable, affected requests fail.

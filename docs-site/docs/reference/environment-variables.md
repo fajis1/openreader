@@ -56,6 +56,8 @@ For auth-enabled deployments, use **Settings → Admin** as the primary source o
 | `COMPUTE_MODE` | Heavy compute backend | `local` | Select `local` (in-process) or `worker` (external worker service) |
 | `COMPUTE_WORKER_URL` | Heavy compute backend | unset | Required when `COMPUTE_MODE=worker`; base URL for external compute worker |
 | `COMPUTE_WORKER_TOKEN` | Heavy compute backend | unset | Required bearer token for external compute worker auth |
+| `COMPUTE_WHISPER_TIMEOUT_MS` | Heavy compute backend | `30000` | Shared whisper alignment timeout budget (local + worker + worker client wait budget) |
+| `COMPUTE_PDF_TIMEOUT_MS` | Heavy compute backend | `300000` | Shared PDF idle-timeout budget (local + worker + worker client wait budget) |
 | `PDF_LAYOUT_MODEL_BASE_URL` | PDF layout model | PP-DocLayoutV3 ONNX base URL | Optional base URL override for `ensureModel()` |
 | `WHISPER_MODEL_BASE_URL` | Whisper ONNX model | onnx-community defaults | Optional base URL override for ONNX whisper-base_timestamped int8 downloads |
 | `FFMPEG_BIN` | Audio runtime | auto-detected (`ffmpeg-static`) | Override ffmpeg binary path |
@@ -376,6 +378,26 @@ Bearer token for external compute worker auth.
 
 - Used only when `COMPUTE_MODE=worker`
 - Must match worker service `COMPUTE_WORKER_TOKEN`
+
+### COMPUTE_WHISPER_TIMEOUT_MS
+
+Shared whisper alignment timeout budget in milliseconds.
+
+- Default: `30000`
+- Used by:
+  - Local compute whisper runtime (`COMPUTE_MODE=local`)
+  - Worker compute whisper runtime (`COMPUTE_MODE=worker`)
+  - App server worker-client wait budget (SSE wait timeout)
+
+### COMPUTE_PDF_TIMEOUT_MS
+
+Shared PDF idle-timeout budget in milliseconds.
+
+- Default: `300000` (5 minutes)
+- Used by:
+  - Local compute PDF runtime (idle timeout)
+  - Worker compute PDF runtime (idle timeout)
+  - App server worker-client wait budget (SSE wait timeout)
 
 ### PDF_LAYOUT_MODEL_BASE_URL
 
