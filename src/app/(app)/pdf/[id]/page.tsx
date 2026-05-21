@@ -37,6 +37,8 @@ const PDFViewer = dynamic(
   }
 );
 
+const PARSE_LOADER_EXPAND_DELAY_MS = 320;
+
 export default function PDFViewerPage() {
   const canExportAudiobook = useFeatureFlag('enableAudiobookExport');
   const { id } = useParams();
@@ -66,6 +68,7 @@ export default function PDFViewerPage() {
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'audiobook' | 'segments'>(null);
   const [showForceReparseConfirm, setShowForceReparseConfirm] = useState(false);
+  const [showDetailedParseLoader, setShowDetailedParseLoader] = useState(false);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const inFlightDocIdRef = useRef<string | null>(null);
   const loadedDocIdRef = useRef<string | null>(null);
@@ -75,6 +78,8 @@ export default function PDFViewerPage() {
   const parseState = parseStatus ?? 'pending';
   const isParseReady = parseState === 'ready';
   const forceReparseDisabled = isForceReparseDisabled(parseStatus);
+  const shouldShowExpandedParseLoader = !isLoading
+    && (parseState === 'pending' || parseState === 'running' || parseState === 'failed');
 
   useEffect(() => {
     setIsLoading(true);
@@ -162,6 +167,22 @@ export default function PDFViewerPage() {
     if (isParseReady) return;
     stop();
   }, [isLoading, isParseReady, stop]);
+
+  useEffect(() => {
+    if (!shouldShowExpandedParseLoader) {
+      // Keep the current loader variant stable during the final
+      // parse-ready -> first-frame handoff to avoid a visual flash.
+      if (!isLoading && isParseReady && !isPdfViewerReady) {
+        return;
+      }
+      setShowDetailedParseLoader(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setShowDetailedParseLoader(true);
+    }, PARSE_LOADER_EXPAND_DELAY_MS);
+    return () => window.clearTimeout(timeout);
+  }, [shouldShowExpandedParseLoader, id, isLoading, isParseReady, isPdfViewerReady]);
 
   // Compute available height = viewport - (header height + tts bar height)
   useEffect(() => {
@@ -260,6 +281,13 @@ export default function PDFViewerPage() {
   }
 
   const renderPdfStatusLoader = () => {
+    const compactLabel = isLoading
+      ? 'Opening PDF...'
+      : (parseState === 'ready' ? 'Rendering pages...' : 'Checking parse state...');
+    const compactSubLabel = isLoading
+      ? 'Loading document data'
+      : (parseState === 'ready' ? 'Preparing first frame' : 'Preparing layout parser');
+
     const totalPages = parseProgress?.totalPages ?? 0;
     const pagesParsed = parseProgress?.pagesParsed ?? 0;
     const progressPercent = totalPages > 0
@@ -272,16 +300,12 @@ export default function PDFViewerPage() {
     let statusSubText = 'Initializing document renderer';
     if (!isLoading) {
       if (parseState === 'pending') {
-        statusText = parseProgress
-          ? `Page ${Math.max(0, parseProgress.pagesParsed)} / ${parseProgress.totalPages} parsed`
-          : 'Preparing PDF layout...';
+        statusText = 'Preparing PDF layout...';
         statusSubText = parseProgress?.phase === 'merge'
           ? 'Finalizing stitched block structure'
           : 'Queueing parser and preparing page extraction';
       } else if (parseState === 'running') {
-        statusText = parseProgress
-          ? `Page ${Math.max(0, parseProgress.pagesParsed)} / ${parseProgress.totalPages} parsed`
-          : 'Parsing PDF layout blocks...';
+        statusText = 'Parsing PDF layout blocks...';
         statusSubText = parseProgress?.phase === 'merge'
           ? 'Merging cross-page sections'
           : 'Inferring reading order and text regions';
@@ -291,81 +315,77 @@ export default function PDFViewerPage() {
       }
     }
 
-    const stageOneComplete = !isLoading;
-    const stageTwoActive = parseState === 'running' && !isMerging;
-    const stageTwoComplete = (parseState === 'running' && isMerging) || parseState === 'ready';
-    const stageThreeActive = parseState === 'running' && isMerging;
-    const stageThreeComplete = parseState === 'ready';
+    const stageLabel = parseState === 'failed'
+      ? 'Stage: blocked'
+      : (parseState === 'pending'
+        ? 'Stage: prepare'
+        : (isMerging ? 'Stage: merge' : 'Stage: infer'));
 
     return (
       <div className="h-full w-full bg-base">
-        <div className="mx-auto flex h-full max-w-2xl items-center px-4 py-8">
-          <div className="w-full space-y-3">
-            <div className="rounded-lg border border-offbase bg-offbase p-4 sm:p-5">
+        <div className={`mx-auto flex h-full items-center px-4 py-6 transition-all duration-300 ease-out ${showDetailedParseLoader ? 'max-w-lg' : 'max-w-md'}`}>
+          {showDetailedParseLoader ? (
+            <div className="w-full rounded-xl border border-offbase bg-offbase/95 shadow-sm overflow-hidden">
+              <div className="h-1 bg-[linear-gradient(90deg,var(--accent),transparent_80%)]" />
+              <div className="p-3.5 sm:p-4">
+                <div className="space-y-1.5">
+                  <div className="inline-flex items-center gap-2 rounded-md border border-offbase bg-base/70 px-2.5 py-1">
+                    <LoadingSpinner className="h-3.5 w-3.5 text-accent" />
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">PDF Layout Parse</span>
+                  </div>
+                  <p className="text-sm font-semibold text-foreground">{statusText}</p>
+                </div>
+
+                <div className="mt-3 rounded-lg border border-offbase bg-base/75 p-2.5">
+                  <div className="mb-1.5 flex items-end justify-between gap-2">
+                    <p className="text-[11px] font-semibold text-foreground">
+                      {hasMeasuredProgress ? `Page ${pagesParsed} / ${totalPages}` : 'Awaiting first page'}
+                    </p>
+                    <p className="text-[10px] text-muted">{stageLabel}</p>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-offbase overflow-hidden">
+                    <div
+                      className="h-full bg-accent transition-all duration-300 ease-out"
+                      style={{ width: `${hasMeasuredProgress ? progressPercent : 6}%` }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-muted">
+                    {hasMeasuredProgress ? `${Math.round(progressPercent)}% complete` : statusSubText}
+                  </p>
+                </div>
+
+                {!isLoading && parseState === 'failed' ? (
+                  <div className="mt-3 flex justify-start">
+                    <button
+                      type="button"
+                      onClick={requestForceReparse}
+                      className="inline-flex items-center rounded-md border border-offbase bg-base px-3 py-1.5 text-xs font-medium text-foreground hover:text-accent transition-colors"
+                    >
+                      Retry Parse
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="w-full rounded-xl border border-offbase bg-offbase/95 p-4 shadow-sm transition-all duration-300 ease-out overflow-hidden">
+              <div className="h-0.5 -mx-4 -mt-4 mb-3 bg-[linear-gradient(90deg,var(--accent),transparent_75%)]" />
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-accent font-semibold text-[11px] uppercase tracking-wide">PDF Layout Parse</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{statusText}</p>
-                  <p className="mt-0.5 text-xs text-muted">{statusSubText}</p>
+                  <p className="text-sm font-semibold text-foreground">{compactLabel}</p>
+                  <p className="mt-1 text-xs text-muted">{compactSubLabel}</p>
                 </div>
-                <div className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-offbase bg-base px-2 py-1">
+                <span className="inline-flex items-center justify-center rounded-md border border-offbase bg-base p-1.5">
                   <LoadingSpinner className="h-3.5 w-3.5 text-accent" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                    {parseState === 'failed' ? 'blocked' : (isMerging ? 'merge' : 'infer')}
-                  </span>
-                </div>
+                </span>
               </div>
-
-              <div className="mt-3">
-                <div className="mb-1.5 flex items-center justify-between text-xs">
-                  <span className="text-muted">Progress</span>
-                  <span className="font-medium text-foreground">
-                    {hasMeasuredProgress ? `${Math.round(progressPercent)}%` : 'Starting'}
-                  </span>
-                </div>
-                <div className="w-full bg-background rounded-full overflow-hidden h-1.5">
-                  <div
-                    className="h-full bg-accent transition-all duration-300 ease-out"
-                    style={{ width: `${hasMeasuredProgress ? progressPercent : 7}%` }}
-                  />
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
-                  <span className="font-medium">{hasMeasuredProgress ? `Page ${pagesParsed}/${totalPages}` : 'Awaiting first page'}</span>
-                  <span>•</span>
-                  <span>{isMerging ? 'Cross-page merge' : 'Page inference'}</span>
-                </div>
+              <div className="mt-3 grid grid-cols-3 gap-1.5">
+                <span className="h-1.5 rounded-full bg-accent/30 animate-pulse" />
+                <span className="h-1.5 rounded-full bg-accent/20 animate-pulse [animation-delay:120ms]" />
+                <span className="h-1.5 rounded-full bg-accent/15 animate-pulse [animation-delay:220ms]" />
               </div>
             </div>
-
-            <div className="rounded-lg border border-offbase bg-offbase px-4 py-3">
-              <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${stageOneComplete ? 'bg-accent/15 text-foreground' : 'bg-background text-muted'}`}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${stageOneComplete ? 'bg-accent' : 'bg-muted'}`} />
-                  Prepare
-                </span>
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${stageTwoActive || stageTwoComplete ? 'bg-accent/15 text-foreground' : 'bg-background text-muted'}`}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${(stageTwoActive || stageTwoComplete) ? 'bg-accent' : 'bg-muted'} ${stageTwoActive ? 'animate-pulse' : ''}`} />
-                  Infer
-                </span>
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${stageThreeActive || stageThreeComplete ? 'bg-accent/15 text-foreground' : 'bg-background text-muted'}`}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${(stageThreeActive || stageThreeComplete) ? 'bg-accent' : 'bg-muted'} ${stageThreeActive ? 'animate-pulse' : ''}`} />
-                  Merge
-                </span>
-              </div>
-            </div>
-
-            {!isLoading && parseState === 'failed' ? (
-              <div className="flex justify-start">
-                <button
-                  type="button"
-                  onClick={requestForceReparse}
-                  className="inline-flex items-center rounded-md border border-offbase bg-offbase px-2.5 py-1 text-xs text-foreground hover:text-accent transition-colors"
-                >
-                  Retry Parse
-                </button>
-              </div>
-            ) : null}
-          </div>
+          )}
         </div>
       </div>
     );

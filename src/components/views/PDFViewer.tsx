@@ -39,6 +39,7 @@ interface PDFOnLinkClickArgs {
 export function PDFViewer({ zoomLevel, onDocumentReady, pdfState }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isPageRendering, setIsPageRendering] = useState(false);
+  const hasSignaledReadyRef = useRef(false);
   const scaleRef = useRef<number>(1);
   const { containerWidth, containerHeight } = usePDFResize(containerRef);
   const sentenceHighlightSeqRef = useRef(0);
@@ -98,6 +99,16 @@ export function PDFViewer({ zoomLevel, onDocumentReady, pdfState }: PDFViewerPro
       setIsPageRendering(true);
     }
   }, [layoutKey]);
+
+  const markViewerReady = useCallback(() => {
+    if (hasSignaledReadyRef.current) return;
+    hasSignaledReadyRef.current = true;
+    onDocumentReady?.();
+  }, [onDocumentReady]);
+
+  useEffect(() => {
+    hasSignaledReadyRef.current = false;
+  }, [currDocId, currDocData]);
 
   const clearSentenceHighlightTimeouts = useCallback(() => {
     for (const t of sentenceHighlightTimeoutsRef.current) clearTimeout(t);
@@ -500,7 +511,6 @@ export function PDFViewer({ zoomLevel, onDocumentReady, pdfState }: PDFViewerPro
         file={documentFile}
         onLoadSuccess={(pdf) => {
           onDocumentLoadSuccess(pdf);
-          onDocumentReady?.();
         }}
         onItemClick={(args: PDFOnLinkClickArgs) => {
           if (args?.pageNumber) {
@@ -531,6 +541,7 @@ export function PDFViewer({ zoomLevel, onDocumentReady, pdfState }: PDFViewerPro
                     onRenderSuccess={() => {
                       lastRenderedLayoutKeyRef.current = layoutKey;
                       setIsPageRendering(false);
+                      markViewerReady();
                     }}
                     onLoadSuccess={(page) => {
                       setPageWidth(page.originalWidth);
@@ -556,6 +567,7 @@ export function PDFViewer({ zoomLevel, onDocumentReady, pdfState }: PDFViewerPro
                     onRenderSuccess={() => {
                       lastRenderedLayoutKeyRef.current = layoutKey;
                       setIsPageRendering(false);
+                      markViewerReady();
                     }}
                     onLoadSuccess={(page) => {
                       setPageWidth(page.originalWidth);
@@ -577,6 +589,7 @@ export function PDFViewer({ zoomLevel, onDocumentReady, pdfState }: PDFViewerPro
                     onRenderSuccess={() => {
                       lastRenderedLayoutKeyRef.current = layoutKey;
                       setIsPageRendering(false);
+                      markViewerReady();
                     }}
                     onLoadSuccess={(page) => {
                       setPageWidth(page.originalWidth);
