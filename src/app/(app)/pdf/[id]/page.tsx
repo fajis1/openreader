@@ -75,11 +75,14 @@ export default function PDFViewerPage() {
   const backNavTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearCurrDocRef = useRef(clearCurrDoc);
   const [isNavigatingBack, setIsNavigatingBack] = useState(false);
-  const parseState = parseStatus ?? 'pending';
-  const isParseReady = parseState === 'ready';
+  const parseUiState: 'unknown' | NonNullable<typeof parseStatus> = parseStatus ?? 'unknown';
+  const isParseReady = parseUiState === 'ready';
   const forceReparseDisabled = isForceReparseDisabled(parseStatus);
+  const hasRealParseProgress = !!parseProgress
+    && parseProgress.totalPages > 0
+    && parseProgress.pagesParsed >= 0;
   const shouldShowExpandedParseLoader = !isLoading
-    && (parseState === 'pending' || parseState === 'running' || parseState === 'failed');
+    && (parseUiState === 'failed' || hasRealParseProgress);
 
   useEffect(() => {
     setIsLoading(true);
@@ -283,10 +286,10 @@ export default function PDFViewerPage() {
   const renderPdfStatusLoader = () => {
     const compactLabel = isLoading
       ? 'Opening PDF...'
-      : (parseState === 'ready' ? 'Rendering pages...' : 'Checking parse state...');
+      : (parseUiState === 'ready' ? 'Rendering pages...' : 'Checking parse state...');
     const compactSubLabel = isLoading
       ? 'Loading document data'
-      : (parseState === 'ready' ? 'Preparing first frame' : 'Preparing layout parser');
+      : (parseUiState === 'ready' ? 'Preparing first frame' : 'Waiting for parse status');
 
     const totalPages = parseProgress?.totalPages ?? 0;
     const pagesParsed = parseProgress?.pagesParsed ?? 0;
@@ -299,25 +302,30 @@ export default function PDFViewerPage() {
     let statusText = 'Loading PDF...';
     let statusSubText = 'Initializing document renderer';
     if (!isLoading) {
-      if (parseState === 'pending') {
+      if (parseUiState === 'unknown') {
+        statusText = 'Checking parse state...';
+        statusSubText = 'Waiting for server status snapshot';
+      } else if (parseUiState === 'pending') {
         statusText = 'Preparing PDF layout...';
         statusSubText = parseProgress?.phase === 'merge'
           ? 'Finalizing stitched block structure'
           : 'Queueing parser and preparing page extraction';
-      } else if (parseState === 'running') {
+      } else if (parseUiState === 'running') {
         statusText = 'Parsing PDF layout blocks...';
         statusSubText = parseProgress?.phase === 'merge'
           ? 'Merging cross-page sections'
           : 'Inferring reading order and text regions';
-      } else if (parseState === 'failed') {
+      } else if (parseUiState === 'failed') {
         statusText = 'PDF parsing failed. Retry to continue.';
         statusSubText = 'The parser could not build a usable layout map';
       }
     }
 
-    const stageLabel = parseState === 'failed'
+    const stageLabel = parseUiState === 'unknown'
+      ? 'Stage: checking'
+      : parseUiState === 'failed'
       ? 'Stage: blocked'
-      : (parseState === 'pending'
+      : (parseUiState === 'pending'
         ? 'Stage: prepare'
         : (isMerging ? 'Stage: merge' : 'Stage: infer'));
 
@@ -354,7 +362,7 @@ export default function PDFViewerPage() {
                   </p>
                 </div>
 
-                {!isLoading && parseState === 'failed' ? (
+                {!isLoading && parseUiState === 'failed' ? (
                   <div className="mt-3 flex justify-start">
                     <button
                       type="button"
