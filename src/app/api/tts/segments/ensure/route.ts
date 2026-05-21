@@ -329,6 +329,16 @@ export async function POST(request: NextRequest) {
     };
 
     for (const segment of normalized) {
+      if (request.signal.aborted) {
+        console.info('[tts-segments/ensure] request aborted; stopping remaining segment processing', {
+          requestId,
+          documentId: parsed.documentId,
+          completedSoFar: manifest.length,
+          totalRequested: normalized.length,
+        });
+        break;
+      }
+
       const segmentStartedAt = Date.now();
       const stageTimings: Record<string, number> = {};
       let failedStage = 'unknown';
@@ -382,7 +392,7 @@ export async function POST(request: NextRequest) {
 
         // Self-heal transient Whisper failures: if audio exists but alignment was
         // previously unavailable, retry alignment using the current segment text.
-        if (!alignment) {
+        if (!alignment && !request.signal.aborted) {
           try {
             const alignStartedAt = Date.now();
             const computeBackend = await getComputeBackend();
@@ -406,9 +416,12 @@ export async function POST(request: NextRequest) {
                 ));
             }
           } catch (alignError) {
-            console.warn('Whisper alignment still unavailable for completed segment; continuing without word highlights.', {
+            const aborted = isAbortLikeError(alignError) || request.signal.aborted;
+            const log = aborted ? console.info : console.warn;
+            log('Whisper alignment still unavailable for completed segment; continuing without word highlights.', {
               requestId,
               segmentId: segment.segmentId,
+              aborted,
               error: alignError instanceof Error ? alignError.message : String(alignError),
             });
             alignment = null;
@@ -632,23 +645,28 @@ export async function POST(request: NextRequest) {
         const durationMs = await probeAudioDurationMsFromBuffer(persistedBuffer, request.signal);
         stageTimings.probeDurationMs = Date.now() - probeStartedAt;
         let alignment: TTSSegmentManifestItem['alignment'] = null;
-        try {
-          failedStage = 'whisper.align';
-          const alignStartedAt = Date.now();
-          const computeBackend = await getComputeBackend();
-          const aligned = (await computeBackend.alignWords({
-            audioObjectKey: audioKey,
-            text: segment.text,
-          })).alignments;
-          stageTimings.whisperAlignMs = Date.now() - alignStartedAt;
-          alignment = aligned[0] ? { ...aligned[0], sentenceIndex: segment.original.segmentIndex } : null;
-        } catch (alignError) {
-          console.warn('Whisper alignment unavailable for segment; continuing without word highlights.', {
-            requestId,
-            segmentId: segment.segmentId,
-            error: alignError instanceof Error ? alignError.message : String(alignError),
-          });
-          alignment = null;
+        if (!request.signal.aborted) {
+          try {
+            failedStage = 'whisper.align';
+            const alignStartedAt = Date.now();
+            const computeBackend = await getComputeBackend();
+            const aligned = (await computeBackend.alignWords({
+              audioObjectKey: audioKey,
+              text: segment.text,
+            })).alignments;
+            stageTimings.whisperAlignMs = Date.now() - alignStartedAt;
+            alignment = aligned[0] ? { ...aligned[0], sentenceIndex: segment.original.segmentIndex } : null;
+          } catch (alignError) {
+            const aborted = isAbortLikeError(alignError) || request.signal.aborted;
+            const log = aborted ? console.info : console.warn;
+            log('Whisper alignment unavailable for segment; continuing without word highlights.', {
+              requestId,
+              segmentId: segment.segmentId,
+              aborted,
+              error: alignError instanceof Error ? alignError.message : String(alignError),
+            });
+            alignment = null;
+          }
         }
 
         failedStage = 'db.mark_completed';
@@ -699,7 +717,8 @@ export async function POST(request: NextRequest) {
           : upstreamStatus && upstreamStatus >= 500
             ? 'UPSTREAM_TTS_ERROR'
             : 'TTS_SEGMENT_GENERATION_FAILED';
-        console.error('[tts-segments/ensure] segment failed', {
+        const segmentFailureLog = aborted ? console.info : console.error;
+        segmentFailureLog('[tts-segments/ensure] segment failed', {
           requestId,
           documentId: parsed.documentId,
           segmentId: segment.segmentId,
@@ -747,6 +766,17 @@ export async function POST(request: NextRequest) {
               ...(typeof retryAfterSeconds === 'number' ? { retryAfterSeconds } : {}),
           },
         });
+
+        if (aborted || request.signal.aborted) {
+          console.info('[tts-segments/ensure] stopping remaining segments after abort', {
+            requestId,
+            documentId: parsed.documentId,
+            segmentId: segment.segmentId,
+            completedSoFar: manifest.length,
+            totalRequested: normalized.length,
+          });
+          break;
+        }
       }
     }
 
