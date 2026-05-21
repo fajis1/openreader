@@ -3,7 +3,12 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
-import { getParsedDocumentBlob, isMissingBlobError, isValidDocumentId } from '@/lib/server/documents/blobstore';
+import {
+  getParsedDocumentBlob,
+  getParsedDocumentBlobByKey,
+  isMissingBlobError,
+  isValidDocumentId,
+} from '@/lib/server/documents/blobstore';
 import { enqueueParsePdfJob } from '@/lib/server/jobs/parsePdfJob';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
@@ -56,12 +61,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         id: documents.id,
         userId: documents.userId,
         parseStatus: documents.parseStatus,
+        parsedJsonKey: documents.parsedJsonKey,
       })
       .from(documents)
       .where(and(eq(documents.id, id), inArray(documents.userId, allowedUserIds)))) as Array<{
       id: string;
       userId: string;
       parseStatus: string | null;
+      parsedJsonKey: string | null;
     }>;
 
     const row = rows.find((candidate) => candidate.userId === storageUserId) ?? rows[0];
@@ -97,7 +104,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
 
     if (effectiveStatus !== 'ready') {
-      if (effectiveStatus === 'pending' || effectiveStatus === 'running') {
+      if (effectiveStatus === 'pending') {
         enqueueParsePdfJob({
           documentId: id,
           userId: row.userId,
@@ -108,7 +115,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
 
     try {
-      const json = await getParsedDocumentBlob(id, testNamespace);
+      const json = row.parsedJsonKey?.trim()
+        ? await getParsedDocumentBlobByKey(row.parsedJsonKey)
+        : await getParsedDocumentBlob(id, testNamespace);
       let parsedDoc: ParsedPdfDocument | null = null;
       try {
         parsedDoc = JSON.parse(Buffer.from(json).toString('utf8')) as ParsedPdfDocument;
@@ -117,16 +126,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       }
 
       if (!hasAnyParsedBlocks(parsedDoc)) {
-        await db
-          .update(documents)
-          .set({ parseStatus: 'pending' })
-          .where(and(eq(documents.id, id), eq(documents.userId, row.userId)));
-        enqueueParsePdfJob({
+        console.warn('[documents/parsed] parsed doc has no blocks', {
           documentId: id,
           userId: row.userId,
-          namespace: testNamespace,
+          parsedJsonKey: row.parsedJsonKey,
         });
-        return NextResponse.json({ parseStatus: 'pending' }, { status: 202 });
       }
 
       return new NextResponse(new Uint8Array(json), {
@@ -171,12 +175,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         id: documents.id,
         userId: documents.userId,
         parseStatus: documents.parseStatus,
+        parsedJsonKey: documents.parsedJsonKey,
       })
       .from(documents)
       .where(and(eq(documents.id, id), inArray(documents.userId, allowedUserIds)))) as Array<{
       id: string;
       userId: string;
       parseStatus: string | null;
+      parsedJsonKey: string | null;
     }>;
 
     const row = rows.find((candidate) => candidate.userId === storageUserId) ?? rows[0];

@@ -224,6 +224,20 @@ export async function getParsedDocumentBlob(id: string, namespace: string | null
   return bodyToBuffer(res.Body);
 }
 
+export async function getParsedDocumentBlobByKey(key: string): Promise<Buffer> {
+  const cfg = getS3Config();
+  const client = getS3ProxyClient();
+  const trimmed = key.trim();
+  if (!trimmed) throw new Error('Parsed document key is empty');
+  const res = await client.send(
+    new GetObjectCommand({
+      Bucket: cfg.bucket,
+      Key: trimmed,
+    }),
+  );
+  return bodyToBuffer(res.Body);
+}
+
 export async function putParsedDocumentBlob(id: string, body: Buffer, namespace: string | null): Promise<string> {
   const cfg = getS3Config();
   const client = getS3ProxyClient();

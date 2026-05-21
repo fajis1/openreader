@@ -19,7 +19,7 @@ class WorkerHttpError extends Error {
   }
 }
 
-const DEFAULT_WAIT_TIMEOUT_MS = 45_000;
+const DEFAULT_WAIT_TIMEOUT_MS = 120_000;
 const DEFAULT_RETRIES = 2;
 const POLL_INTERVAL_MS = 400;
 const POLL_MAX_INTERVAL_MS = 1_500;
