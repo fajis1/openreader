@@ -6,6 +6,7 @@ import 'dotenv/config';
  */
 export default defineConfig({
   testDir: './tests',
+  tsconfig: './tsconfig.json',
   timeout: 30 * 1000,
   outputDir: './tests/results',
   globalTeardown: './tests/global-teardown.ts',

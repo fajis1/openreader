@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'fs/promises';
 import path from 'path';
-import { alignAudioWithText } from '../../compute/core/src/whisper/align';
 
 test.describe('whisper alignment smoke', () => {
   test('runs ONNX alignment end-to-end without decoder reshape errors', async () => {
@@ -11,12 +10,12 @@ test.describe('whisper alignment smoke', () => {
     const audioBytes = await readFile(audioPath);
     const buffer = audioBytes.buffer.slice(audioBytes.byteOffset, audioBytes.byteOffset + audioBytes.byteLength);
 
-    const alignments = await alignAudioWithText(
-      buffer,
-      'This is a sample sentence used to validate whisper alignment execution.',
-      undefined,
-      { lang: 'en' },
-    );
+    const { runWhisperAlignmentFromAudioBuffer } = await import('@openreader/compute-core/local-runtime');
+    const { alignments } = await runWhisperAlignmentFromAudioBuffer({
+      audioBuffer: buffer,
+      text: 'This is a sample sentence used to validate whisper alignment execution.',
+      lang: 'en',
+    });
 
     expect(alignments.length).toBe(1);
     expect(Array.isArray(alignments[0].words)).toBe(true);
