@@ -8,7 +8,7 @@ import { Tokenizer } from '@huggingface/tokenizers';
 import JSZip from 'jszip';
 import type { TTSAudioBuffer, TTSAudioBytes, TTSSentenceAlignment } from '@/types/tts';
 import { getFFmpegPath } from '@/lib/server/audiobooks/ffmpeg-bin';
-import { getOnnxThreadsPerJob } from '@/lib/server/compute/cpu-budget';
+import { getOnnxThreadsPerJob } from '@openreader/compute-core/runtime';
 import {
   mapWordsToSentenceOffsets,
   type WhisperWord,
