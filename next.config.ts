@@ -25,12 +25,12 @@ const computeModeRaw = (process.env.COMPUTE_MODE || 'local').trim().toLowerCase(
 const computeMode = computeModeRaw === 'none' || computeModeRaw === 'worker' || computeModeRaw === 'local'
   ? computeModeRaw
   : 'local';
-const computeLocal = computeMode === 'local';
+const bundleWorkerCompute = computeMode === 'worker';
 const serverExternalPackages = [
   '@napi-rs/canvas',
   'better-sqlite3',
   'ffmpeg-static',
-  ...(computeLocal ? ['onnxruntime-node', '@huggingface/tokenizers'] : []),
+  ...(!bundleWorkerCompute ? ['onnxruntime-node', '@huggingface/tokenizers'] : []),
 ];
 
 const nextConfig: NextConfig = {
@@ -48,7 +48,7 @@ const nextConfig: NextConfig = {
       canvas: '@napi-rs/canvas',
     },
   },
-  transpilePackages: computeLocal ? ['@openreader/compute-core'] : [],
+  transpilePackages: !bundleWorkerCompute ? ['@openreader/compute-core'] : [],
   serverExternalPackages,
   outputFileTracingIncludes: {
     '/api/audiobook': [
@@ -73,7 +73,7 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     '/*': [
       './docstore/**/*',
-      ...(!computeLocal
+      ...(bundleWorkerCompute
         ? [
             './node_modules/onnxruntime-node/**/*',
             './node_modules/@huggingface/tokenizers/**/*',
@@ -82,15 +82,15 @@ const nextConfig: NextConfig = {
     ],
   },
   webpack: (config, { isServer }) => {
-    if (isServer) {
+    if (isServer && bundleWorkerCompute) {
       config.plugins = config.plugins || [];
       config.plugins.push(
         new DefinePlugin({
-          __OPENREADER_COMPUTE_MODE__: JSON.stringify(computeMode),
+          __OPENREADER_COMPUTE_MODE__: JSON.stringify('worker'),
         }),
       );
     }
-    if (isServer && !computeLocal) {
+    if (isServer && bundleWorkerCompute) {
       const workerComputeEntry = path.resolve(__dirname, 'src/lib/server/compute/index.worker.ts');
       const computeIndexTs = path.resolve(__dirname, 'src/lib/server/compute/index.ts');
       const computeIndexNoExt = path.resolve(__dirname, 'src/lib/server/compute/index');

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { buildGoertzelCoefficients, goertzelPower } from '../../compute/core/src/whisper/spectral';
+import { buildGoertzelCoefficients, goertzelPower } from '@openreader/compute-core';
 
 function dftPower(samples: Float32Array, k: number): number {
   const n = samples.length;

@@ -17,3 +17,6 @@ export { renderPage } from './pdf/render';
 export { mergeTextWithRegions } from './pdf/merge';
 export { stitchCrossPageBlocks } from './pdf/stitch';
 export { normalizeTextItemsForLayout } from './pdf/normalize-text';
+export { mapWordsToSentenceOffsets, type WhisperWord } from './whisper/alignment-map';
+export { buildGoertzelCoefficients, goertzelPower } from './whisper/spectral';
+export { buildWordsFromTimestampedTokens, extractTokenStartTimestamps } from './whisper/token-timestamps';

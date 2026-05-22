@@ -1,13 +1,14 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
+import { readFileSync } from 'fs';
 import { access, copyFile, mkdir, readFile, rename, unlink, writeFile } from 'fs/promises';
 import { DOCSTORE_DIR } from '../platform/docstore';
-import manifest from './assets/manifest.json';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const MODEL_DIR = path.join(DOCSTORE_DIR, 'model', 'whisper-base_timestamped');
 const STATIC_LICENSE_PATH = path.join(MODULE_DIR, 'assets', 'LICENSE.txt');
+const MANIFEST_PATH = path.join(MODULE_DIR, 'assets', 'manifest.json');
 
 export const WHISPER_CONFIG_PATH = path.join(MODEL_DIR, 'config.json');
 export const WHISPER_GENERATION_CONFIG_PATH = path.join(MODEL_DIR, 'generation_config.json');
@@ -70,7 +71,13 @@ export interface WhisperStaticArtifactSpec {
 
 export type WhisperFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-const MANIFEST_FILES = manifest.files as ManifestEntry[];
+function loadManifestFiles(): ManifestEntry[] {
+  const manifestText = readFileSync(MANIFEST_PATH, 'utf8');
+  const parsed = JSON.parse(manifestText) as { files?: ManifestEntry[] };
+  return Array.isArray(parsed.files) ? parsed.files : [];
+}
+
+const MANIFEST_FILES = loadManifestFiles();
 const MODEL_FILES = MANIFEST_FILES.filter((entry) => entry.path !== 'LICENSE.txt');
 const LICENSE_FILE = MANIFEST_FILES.find((entry) => entry.path === 'LICENSE.txt');
 
