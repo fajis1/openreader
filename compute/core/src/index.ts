@@ -6,6 +6,7 @@ export {
 } from './config/cpu-budget';
 export {
   getComputeTimeoutConfig,
+  getComputeOpStaleMs,
   getWorkerClientWaitTimeoutMs,
   withTimeout,
   withIdleTimeoutAndHardCap,

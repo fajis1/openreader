@@ -12,6 +12,7 @@ import {
 } from '@/lib/server/documents/blobstore';
 import { enqueueParsePdfJob } from '@/lib/server/jobs/parsePdfJob';
 import {
+  isDocumentParseStateStale,
   normalizeParseStatus,
   parseDocumentParseState,
   stringifyDocumentParseState,
@@ -19,6 +20,7 @@ import {
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
 import type { ParsedPdfDocument } from '@/types/parsed-pdf';
+import { getComputeOpStaleMs } from '@openreader/compute-core';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +34,29 @@ function s3NotConfiguredResponse(): NextResponse {
 function hasAnyParsedBlocks(doc: ParsedPdfDocument | null): boolean {
   if (!doc || !Array.isArray(doc.pages)) return false;
   return doc.pages.some((page) => Array.isArray(page.blocks) && page.blocks.length > 0);
+}
+
+async function healStaleInProgressParseState(input: {
+  documentId: string;
+  userId: string;
+  state: ReturnType<typeof parseDocumentParseState>;
+}): Promise<ReturnType<typeof parseDocumentParseState>> {
+  const staleMs = getComputeOpStaleMs();
+  if (!isDocumentParseStateStale(input.state, staleMs)) return input.state;
+
+  const nextState = parseDocumentParseState(stringifyDocumentParseState({
+    status: 'failed',
+    progress: null,
+    updatedAt: Date.now(),
+    error: `Parse state stale for more than ${staleMs}ms; marked failed for retry`,
+  }));
+
+  await db
+    .update(documents)
+    .set({ parseState: stringifyDocumentParseState(nextState) })
+    .where(and(eq(documents.id, input.documentId), eq(documents.userId, input.userId)));
+
+  return nextState;
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -73,7 +98,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    const state = parseDocumentParseState(row.parseState);
+    let state = parseDocumentParseState(row.parseState);
+    state = await healStaleInProgressParseState({
+      documentId: id,
+      userId: row.userId,
+      state,
+    });
     const effectiveStatus = normalizeParseStatus(state.status);
 
     if (effectiveStatus === 'failed' && retryFailed) {
@@ -185,7 +215,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    const state = parseDocumentParseState(row.parseState);
+    let state = parseDocumentParseState(row.parseState);
+    state = await healStaleInProgressParseState({
+      documentId: id,
+      userId: row.userId,
+      state,
+    });
     const effectiveStatus = normalizeParseStatus(state.status);
 
     if (effectiveStatus !== 'running') {

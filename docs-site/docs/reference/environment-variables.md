@@ -59,6 +59,7 @@ For auth-enabled deployments, use **Settings → Admin** as the primary source o
 | `COMPUTE_JOB_CONCURRENCY` | Heavy compute backend | `1` | Local in-process compute concurrency cap; set worker service concurrency in compute-worker env/docs |
 | `COMPUTE_WHISPER_TIMEOUT_MS` | Heavy compute backend | `30000` | Shared whisper alignment timeout budget (local + worker + worker client wait budget) |
 | `COMPUTE_PDF_TIMEOUT_MS` | Heavy compute backend | `300000` | Shared PDF idle-timeout budget (local + worker + worker client wait budget) |
+| `COMPUTE_OP_STALE_MS` | Heavy compute backend | `max(30m, 4x max compute timeout)` | Shared stale window for worker op replacement and app-side stale PDF parse-state healing |
 | `PDF_LAYOUT_MODEL_BASE_URL` | PDF layout model | PP-DocLayoutV3 ONNX base URL | Optional base URL override for `ensureModel()` |
 | `WHISPER_MODEL_BASE_URL` | Whisper ONNX model | onnx-community defaults | Optional base URL override for ONNX whisper-base_timestamped int8 downloads |
 | `FFMPEG_BIN` | Audio runtime | auto-detected (`ffmpeg-static`) | Override ffmpeg binary path |
@@ -407,6 +408,17 @@ Shared PDF idle-timeout budget in milliseconds.
   - Local compute PDF runtime (idle timeout)
   - Worker compute PDF runtime (idle timeout)
   - App server worker-client wait budget (SSE wait timeout)
+
+### COMPUTE_OP_STALE_MS
+
+Shared stale window in milliseconds.
+
+- Default: `max(30m, 4x max(COMPUTE_WHISPER_TIMEOUT_MS, COMPUTE_PDF_TIMEOUT_MS))`
+- Used by:
+  - Worker op reuse/replacement guard (`/ops` opKey stale detection)
+  - App-server PDF parse-state stale healing in `/api/documents/[id]/parsed*`
+- If a parse row is stuck in `pending`/`running` past this window, app routes mark it failed so retries/reparse can proceed.
+- In `COMPUTE_MODE=worker`, keep this value aligned on both app-server and worker service envs.
 
 ### PDF_LAYOUT_MODEL_BASE_URL
 

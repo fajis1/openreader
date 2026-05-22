@@ -72,9 +72,17 @@ COMPUTE_WORKER_TOKEN=<same-token-as-worker>
 # Optional shared timeout overrides (keep equal to worker service values):
 # COMPUTE_WHISPER_TIMEOUT_MS=30000
 # COMPUTE_PDF_TIMEOUT_MS=300000
+# COMPUTE_OP_STALE_MS=1800000
 ```
 
 Model artifact overrides (`WHISPER_MODEL_BASE_URL`, `PDF_LAYOUT_MODEL_BASE_URL`) are worker runtime variables and should be set on the compute worker service environment.
+
+`COMPUTE_OP_STALE_MS` is shared by both services in worker mode:
+
+- Worker: opKey stale replacement window in compute op state.
+- App server: stale PDF parse-state healing window (`/api/documents/[id]/parsed*`).
+
+Set the same value on app + worker envs.
 
 `COMPUTE_MODE=worker` has no local fallback. If worker is unavailable, affected requests fail.
 

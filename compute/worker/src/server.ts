@@ -28,6 +28,7 @@ import {
 } from '@openreader/compute-core/local-runtime';
 import {
   getComputeTimeoutConfig,
+  getComputeOpStaleMs,
   getAvailableCpuCores,
   getOnnxThreadsPerJob,
   withIdleTimeoutAndHardCap,
@@ -432,10 +433,7 @@ async function main(): Promise<void> {
   const prewarmModels = parseBoolEnv('COMPUTE_PREWARM_MODELS', true);
   const jobsStreamMaxBytes = readIntEnv('COMPUTE_JOBS_STREAM_MAX_BYTES', 256 * 1024 * 1024);
   const jobStatesMaxBytes = readIntEnv('COMPUTE_JOB_STATES_MAX_BYTES', 64 * 1024 * 1024);
-  const opStaleMs = readIntEnv(
-    'COMPUTE_OP_STALE_MS',
-    Math.max(30 * 60_000, Math.max(whisperTimeoutMs, pdfTimeoutMs) * 4),
-  );
+  const opStaleMs = getComputeOpStaleMs();
 
   const connectOpts: Parameters<typeof connect>[0] = { servers: natsUrl };
   const natsCreds = process.env.NATS_CREDS?.trim();

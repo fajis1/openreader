@@ -9,6 +9,22 @@ export interface DocumentParseState {
   jobId?: string;
 }
 
+export function isInProgressParseStatus(status: PdfParseStatus): status is 'pending' | 'running' {
+  return status === 'pending' || status === 'running';
+}
+
+export function isDocumentParseStateStale(
+  state: DocumentParseState,
+  staleMs: number,
+  nowMs = Date.now(),
+): boolean {
+  if (!isInProgressParseStatus(state.status)) return false;
+  if (!Number.isFinite(staleMs) || staleMs <= 0) return false;
+  const updatedAt = Number(state.updatedAt ?? 0);
+  if (!Number.isFinite(updatedAt) || updatedAt <= 0) return false;
+  return (nowMs - updatedAt) > staleMs;
+}
+
 export function normalizeParseStatus(status: string | null | undefined): PdfParseStatus {
   if (status === 'pending' || status === 'running' || status === 'ready' || status === 'failed') {
     return status;

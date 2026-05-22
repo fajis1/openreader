@@ -1,6 +1,7 @@
 const DEFAULT_COMPUTE_WHISPER_TIMEOUT_MS = 30_000;
 const DEFAULT_COMPUTE_PDF_TIMEOUT_MS = 300_000;
 const DEFAULT_COMPUTE_PDF_HARD_CAP_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_COMPUTE_OP_STALE_MIN_MS = 30 * 60_000;
 const DEFAULT_WORKER_WAIT_BUFFER_MS = 15_000;
 const DEFAULT_WORKER_WAIT_MIN_MS = 60_000;
 
@@ -27,6 +28,7 @@ function readPositiveIntEnv(name: string, fallback: number): number {
 }
 
 let timeoutConfigCache: ComputeTimeoutConfig | null = null;
+let opStaleMsCache: number | null = null;
 
 export function getComputeTimeoutConfig(): ComputeTimeoutConfig {
   if (timeoutConfigCache) return timeoutConfigCache;
@@ -36,6 +38,16 @@ export function getComputeTimeoutConfig(): ComputeTimeoutConfig {
     pdfHardCapMs: DEFAULT_COMPUTE_PDF_HARD_CAP_MS,
   };
   return timeoutConfigCache;
+}
+
+export function getComputeOpStaleMs(): number {
+  if (typeof opStaleMsCache === 'number') return opStaleMsCache;
+  const config = getComputeTimeoutConfig();
+  opStaleMsCache = readPositiveIntEnv(
+    'COMPUTE_OP_STALE_MS',
+    Math.max(DEFAULT_COMPUTE_OP_STALE_MIN_MS, Math.max(config.whisperTimeoutMs, config.pdfTimeoutMs) * 4),
+  );
+  return opStaleMsCache;
 }
 
 export function getWorkerClientWaitTimeoutMs(kind: ComputeOperationKind): number {
