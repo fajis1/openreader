@@ -54,7 +54,6 @@ const WHISPER_CONSUMER_NAME = 'compute_whisper';
 const LAYOUT_CONSUMER_NAME = 'compute_layout';
 const COMPUTE_STATE_BUCKET = 'compute_state';
 const COMPUTE_STATE_TTL_MS = 24 * 60 * 60 * 1000;
-const PULL_EXPIRES_MS = 1000;
 const LOOP_ERROR_BACKOFF_MS = 500;
 const SSE_POLL_INTERVAL_MS = 400;
 const RUNNING_HEARTBEAT_MS = 5000;
@@ -1129,7 +1128,7 @@ async function main(): Promise<void> {
       let msg: JsMsg | null = null;
       try {
         try {
-          msg = await input.consumer.next({ expires: PULL_EXPIRES_MS });
+          msg = await input.consumer.next();
         } catch (error) {
           if (stopping) return;
           app.log.error({ error: toErrorMessage(error), worker: input.workerLabel }, 'worker pull failed');
