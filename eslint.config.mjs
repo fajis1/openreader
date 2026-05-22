@@ -21,9 +21,10 @@ const eslintConfig = [
               group: [
                 "@openreader/compute-core/*",
                 "!@openreader/compute-core/local-runtime",
+                "!@openreader/compute-core/types",
               ],
               message:
-                "Use '@openreader/compute-core' root imports for light APIs. The only allowed subpath is '@openreader/compute-core/local-runtime'.",
+                "Use '@openreader/compute-core' root imports for light APIs. Allowed subpaths are '@openreader/compute-core/local-runtime' and '@openreader/compute-core/types'.",
             },
           ],
         },
