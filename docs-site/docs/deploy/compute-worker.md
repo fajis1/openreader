@@ -74,6 +74,8 @@ COMPUTE_WORKER_TOKEN=<same-token-as-worker>
 # COMPUTE_PDF_TIMEOUT_MS=300000
 ```
 
+Model artifact overrides (`WHISPER_MODEL_BASE_URL`, `PDF_LAYOUT_MODEL_BASE_URL`) are worker runtime variables and should be set on the compute worker service environment.
+
 `COMPUTE_MODE=worker` has no local fallback. If worker is unavailable, affected requests fail.
 
 ## Production notes

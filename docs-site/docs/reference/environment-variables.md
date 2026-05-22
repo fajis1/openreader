@@ -56,6 +56,7 @@ For auth-enabled deployments, use **Settings → Admin** as the primary source o
 | `COMPUTE_MODE` | Heavy compute backend | `local` | Select `local` (in-process) or `worker` (external worker service) |
 | `COMPUTE_WORKER_URL` | Heavy compute backend | unset | Required when `COMPUTE_MODE=worker`; base URL for external compute worker |
 | `COMPUTE_WORKER_TOKEN` | Heavy compute backend | unset | Required bearer token for external compute worker auth |
+| `COMPUTE_JOB_CONCURRENCY` | Heavy compute backend | `1` | Local in-process compute concurrency cap; set worker service concurrency in compute-worker env/docs |
 | `COMPUTE_WHISPER_TIMEOUT_MS` | Heavy compute backend | `30000` | Shared whisper alignment timeout budget (local + worker + worker client wait budget) |
 | `COMPUTE_PDF_TIMEOUT_MS` | Heavy compute backend | `300000` | Shared PDF idle-timeout budget (local + worker + worker client wait budget) |
 | `PDF_LAYOUT_MODEL_BASE_URL` | PDF layout model | PP-DocLayoutV3 ONNX base URL | Optional base URL override for `ensureModel()` |
@@ -379,6 +380,14 @@ Bearer token for external compute worker auth.
 - Used only when `COMPUTE_MODE=worker`
 - Must match worker service `COMPUTE_WORKER_TOKEN`
 
+### COMPUTE_JOB_CONCURRENCY
+
+In-process compute concurrency cap for app-server local compute mode.
+
+- Default: `1`
+- Applies when `COMPUTE_MODE=local`
+- For `COMPUTE_MODE=worker`, set worker-side `COMPUTE_JOB_CONCURRENCY` in [Compute Worker (NATS JetStream)](../deploy/compute-worker)
+
 ### COMPUTE_WHISPER_TIMEOUT_MS
 
 Shared whisper alignment timeout budget in milliseconds.
@@ -409,6 +418,7 @@ Optional base URL override for PP-DocLayoutV3 artifacts downloaded by `ensureMod
   - `PP-DocLayoutV3.onnx.data`
   - `config.json`
   - `preprocessor_config.json`
+- In `COMPUTE_MODE=worker`, configure this on the worker service env (not only the app server env)
 
 ### WHISPER_MODEL_BASE_URL
 
@@ -417,6 +427,7 @@ Optional base URL override for the built-in ONNX Whisper alignment model downloa
 - Default: `https://huggingface.co/onnx-community/whisper-base_timestamped/resolve/main`
 - Default model variant: int8 (`encoder_model_int8.onnx`, `decoder_model_merged_int8.onnx`, `decoder_with_past_model_int8.onnx`)
 - The base URL must host all expected manifest files under the same relative paths.
+- In `COMPUTE_MODE=worker`, configure this on the worker service env (not only the app server env)
 
 ### FFMPEG_BIN
 
