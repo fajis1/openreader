@@ -3,11 +3,11 @@ import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { access, copyFile, mkdir, readFile, rename, unlink, writeFile } from 'fs/promises';
 import { DOCSTORE_DIR } from '../platform/docstore';
-import manifest from './model/manifest.json';
+import manifest from './assets/manifest.json';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const MODEL_DIR = path.join(DOCSTORE_DIR, 'model', 'whisper-base_timestamped');
-const STATIC_LICENSE_PATH = path.join(MODULE_DIR, 'model', 'LICENSE.txt');
+const STATIC_LICENSE_PATH = path.join(MODULE_DIR, 'assets', 'LICENSE.txt');
 
 export const WHISPER_CONFIG_PATH = path.join(MODEL_DIR, 'config.json');
 export const WHISPER_GENERATION_CONFIG_PATH = path.join(MODEL_DIR, 'generation_config.json');

@@ -1,12 +1,12 @@
 import path from 'path';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import type { ParsedPdfDocument, ParsedPdfPage } from '../types/parsed-pdf';
-import { ensureModel } from './ensureModel';
+import { ensureModel } from './model';
 import { runLayoutModel } from './runLayoutModel';
-import { mergeTextWithRegions } from './mergeTextWithRegions';
-import { stitchCrossPageBlocks } from './stitchCrossPageBlocks';
-import { renderPage } from './renderPage';
-import { normalizeTextItemsForLayout } from './normalizeTextItemsForLayout';
+import { mergeTextWithRegions } from './merge';
+import { stitchCrossPageBlocks } from './stitch';
+import { renderPage } from './render';
+import { normalizeTextItemsForLayout } from './normalize-text';
 
 interface ParsePdfInput {
   documentId: string;

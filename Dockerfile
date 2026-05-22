@@ -58,14 +58,14 @@ COPY --from=app-builder /app/THIRD_PARTY_LICENSES /licenses
 # Include SeaweedFS license text for the copied weed binary.
 COPY --from=seaweedfs-builder /tmp/SeaweedFS-LICENSE.txt /licenses/SeaweedFS-LICENSE.txt
 # Include static model notices for runtime-downloaded assets.
-COPY --from=app-builder /app/compute/core/src/pdf-layout/model/LICENSE.txt /licenses/pp-doclayoutv3-LICENSE.txt
+COPY --from=app-builder /app/compute/core/src/pdf/assets/LICENSE.txt /licenses/pp-doclayoutv3-LICENSE.txt
 
 # Copy seaweedfs weed binary for optional embedded local S3.
 COPY --from=seaweedfs-builder /tmp/weed /usr/local/bin/weed
 RUN chmod +x /usr/local/bin/weed
 
 # Include OpenAI Whisper license text for runtime-downloaded ONNX artifacts.
-COPY --from=app-builder /app/compute/core/src/whisper/model/LICENSE.txt /licenses/openai-whisper-LICENSE.txt
+COPY --from=app-builder /app/compute/core/src/whisper/assets/LICENSE.txt /licenses/openai-whisper-LICENSE.txt
 
 # Expose the port the app runs on
 EXPOSE 3003

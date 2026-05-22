@@ -14,7 +14,7 @@ import { getComputeTimeoutConfig } from '../config/timeout';
 import {
   mapWordsToSentenceOffsets,
   type WhisperWord,
-} from './alignment-mapping';
+} from './alignment-map';
 import { buildGoertzelCoefficients, goertzelPower } from './spectral';
 import {
   buildWordsFromTimestampedTokens,
@@ -29,7 +29,7 @@ import {
   WHISPER_ENCODER_MODEL_PATH,
   WHISPER_DECODER_MERGED_MODEL_PATH,
   WHISPER_DECODER_WITH_PAST_MODEL_PATH,
-} from './ensureModel';
+} from './model';
 
 interface WhisperAlignmentOptions {
   lang?: string;
@@ -114,7 +114,7 @@ const hannWindow = buildHannWindow(N_FFT);
 const goertzelCoefficients = buildGoertzelCoefficients(MEL_FILTER_BINS, N_FFT);
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
-const MEL_FILTERS_NPZ_PATH = join(MODULE_DIR, 'model', 'mel_filters.npz');
+const MEL_FILTERS_NPZ_PATH = join(MODULE_DIR, 'assets', 'mel_filters.npz');
 
 function buildHannWindow(length: number): Float32Array {
   const window = new Float32Array(length);

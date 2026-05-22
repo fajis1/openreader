@@ -6,7 +6,7 @@ import path from 'path';
 import {
   createSingleflightRunner,
   ensureWhisperArtifacts,
-} from '../../compute/core/src/whisper/ensureModel';
+} from '../../compute/core/src/whisper/model';
 
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');

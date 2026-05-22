@@ -2,7 +2,7 @@ export {
   alignAudioWithText,
   makeWhisperCacheKey,
   type WhisperRequestBody,
-} from './alignment';
+} from './align';
 
 export {
   ensureWhisperModel,
@@ -11,8 +11,8 @@ export {
   type WhisperArtifactSpec,
   type WhisperStaticArtifactSpec,
   type WhisperFetch,
-} from './ensureModel';
+} from './model';
 
-export { mapWordsToSentenceOffsets, type WhisperWord } from './alignment-mapping';
+export { mapWordsToSentenceOffsets, type WhisperWord } from './alignment-map';
 export { buildGoertzelCoefficients, goertzelPower } from './spectral';
 export { buildWordsFromTimestampedTokens, extractTokenStartTimestamps } from './token-timestamps';

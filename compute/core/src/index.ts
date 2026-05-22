@@ -13,7 +13,7 @@ export {
   type ComputeOperationKind,
   type IdleTimeoutAndHardCapInput,
 } from './config/timeout';
-export { renderPage } from './pdf-layout/renderPage';
-export { mergeTextWithRegions } from './pdf-layout/mergeTextWithRegions';
-export { stitchCrossPageBlocks } from './pdf-layout/stitchCrossPageBlocks';
-export { normalizeTextItemsForLayout } from './pdf-layout/normalizeTextItemsForLayout';
+export { renderPage } from './pdf/render';
+export { mergeTextWithRegions } from './pdf/merge';
+export { stitchCrossPageBlocks } from './pdf/stitch';
+export { normalizeTextItemsForLayout } from './pdf/normalize-text';

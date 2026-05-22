@@ -1,7 +1,7 @@
-import { ensureWhisperModel } from './whisper/ensureModel';
-import { alignAudioWithText } from './whisper/alignment';
-import { ensureModel as ensurePdfLayoutModel } from './pdf-layout/ensureModel';
-import { parsePdf } from './pdf-layout/parsePdf';
+import { ensureWhisperModel } from './whisper/model';
+import { alignAudioWithText } from './whisper/align';
+import { ensureModel as ensurePdfLayoutModel } from './pdf/model';
+import { parsePdf } from './pdf/parse';
 
 export async function ensureComputeModels(): Promise<void> {
   await Promise.all([ensureWhisperModel(), ensurePdfLayoutModel()]);

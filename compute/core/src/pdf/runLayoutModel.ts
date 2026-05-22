@@ -1,7 +1,7 @@
 import * as ort from 'onnxruntime-node';
 import { readFile } from 'fs/promises';
 import type { LayoutRegion, PdfTextItem } from './types';
-import { ensureModel, MODEL_CONFIG_PATH, MODEL_PREPROCESSOR_PATH } from './ensureModel';
+import { ensureModel, MODEL_CONFIG_PATH, MODEL_PREPROCESSOR_PATH } from './model';
 import { getOnnxThreadsPerJob } from '../config/cpu-budget';
 
 interface RunLayoutInput {
