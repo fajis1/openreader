@@ -450,7 +450,7 @@ export function usePdfDocument(): PdfDocumentState {
       setCurrDocName(undefined);
       setCurrDocData(undefined);
       setParsedDocument(null);
-      setParseStatus('pending');
+      setParseStatus(null);
       setParseProgress(null);
       setDocumentSettings(DEFAULT_DOCUMENT_SETTINGS);
 
@@ -461,7 +461,10 @@ export function usePdfDocument(): PdfDocumentState {
         return false;
       }
       if (meta.type === 'pdf') {
-        startParsedPolling(id, (meta.parseStatus ?? null) as PdfParseStatus | null);
+        const initialParseStatus = (meta.parseStatus ?? null) as PdfParseStatus | null;
+        setParseStatus(initialParseStatus);
+        setParseProgress(null);
+        startParsedPolling(id, initialParseStatus);
         void fetchDocumentSettings(id, controller.signal);
       }
 

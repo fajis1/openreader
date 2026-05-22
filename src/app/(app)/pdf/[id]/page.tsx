@@ -76,12 +76,14 @@ export default function PDFViewerPage() {
   const clearCurrDocRef = useRef(clearCurrDoc);
   const [isNavigatingBack, setIsNavigatingBack] = useState(false);
   const parseUiState: NonNullable<typeof parseStatus> = parseStatus ?? 'pending';
+  const hasResolvedParseStatus = parseStatus !== null;
   const isParseReady = parseUiState === 'ready';
   const forceReparseDisabled = isForceReparseDisabled(parseStatus);
   const hasRealParseProgress = !!parseProgress
     && parseProgress.totalPages > 0
     && parseProgress.pagesParsed >= 0;
   const shouldShowExpandedParseLoader = !isLoading
+    && hasResolvedParseStatus
     && (parseUiState === 'pending' || parseUiState === 'running' || parseUiState === 'failed' || hasRealParseProgress);
 
   useEffect(() => {
