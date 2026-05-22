@@ -56,6 +56,7 @@ Advanced tuning (usually leave unset unless you need overrides):
 - `COMPUTE_PDF_JOB_ATTEMPTS=1` (PDF layout retry attempts)
 - `COMPUTE_JOBS_STREAM_MAX_BYTES=268435456` (256MB JetStream jobs stream cap)
 - `COMPUTE_JOB_STATES_MAX_BYTES=67108864` (64MB JetStream KV bucket cap)
+- `COMPUTE_NATS_REPLICAS=1` (JetStream stream + KV replicas; valid: `1`, `3`, `5`)
 - `COMPUTE_OP_STALE_MS=1800000` (stale op replacement window)
 
 ## App server environment variables (worker mode)
@@ -158,6 +159,7 @@ COMPUTE_WORKER_TOKEN=<long-random-shared-token>
 # COMPUTE_PDF_JOB_ATTEMPTS=1
 # COMPUTE_JOBS_STREAM_MAX_BYTES=268435456
 # COMPUTE_JOB_STATES_MAX_BYTES=67108864
+# COMPUTE_NATS_REPLICAS=1
 
 NATS_URL=tls://connect.ngs.global:4222
 NATS_CREDS="-----BEGIN NATS USER JWT-----
@@ -180,6 +182,7 @@ Notes:
 - On Railway, leave `PORT` managed by the platform.
 - If your platform supports mounted files, you can use `NATS_CREDS_FILE` instead of `NATS_CREDS`.
 - `COMPUTE_JOBS_STREAM_MAX_BYTES` and `COMPUTE_JOB_STATES_MAX_BYTES` are optional; defaults are `268435456` (256MiB) and `67108864` (64MiB).
+- `COMPUTE_NATS_REPLICAS` is optional; default is `1`. Valid values are `1`, `3`, `5`.
 
 ### 4. Configure the OpenReader app server (worker mode)
 

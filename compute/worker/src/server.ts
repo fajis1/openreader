@@ -128,6 +128,11 @@ function readIntEnv(name: string, fallback: number): number {
   return Math.floor(parsed);
 }
 
+function normalizeNatsReplicas(value: number): number {
+  if (value === 3 || value === 5) return value;
+  return 1;
+}
+
 function parseBoolEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name]?.trim();
   if (!raw) return fallback;
@@ -383,6 +388,7 @@ async function ensureJetStreamResources(
   pdfTimeoutMs: number,
   pdfAttempts: number,
   maxBytes: number,
+  natsReplicas: number,
 ): Promise<void> {
   const streamConfig = {
     name: JOBS_STREAM_NAME,
@@ -390,6 +396,7 @@ async function ensureJetStreamResources(
     retention: RetentionPolicy.Workqueue,
     storage: StorageType.File,
     max_bytes: maxBytes,
+    num_replicas: natsReplicas,
   };
 
   try {
@@ -399,6 +406,7 @@ async function ensureJetStreamResources(
     await jsm.streams.update(JOBS_STREAM_NAME, {
       subjects: [WHISPER_JOBS_SUBJECT, LAYOUT_JOBS_SUBJECT],
       max_bytes: maxBytes,
+      num_replicas: natsReplicas,
     });
   }
 
@@ -451,6 +459,7 @@ async function main(): Promise<void> {
   const prewarmModels = parseBoolEnv('COMPUTE_PREWARM_MODELS', true);
   const jobsStreamMaxBytes = readIntEnv('COMPUTE_JOBS_STREAM_MAX_BYTES', 256 * 1024 * 1024);
   const jobStatesMaxBytes = readIntEnv('COMPUTE_JOB_STATES_MAX_BYTES', 64 * 1024 * 1024);
+  const natsReplicas = normalizeNatsReplicas(readIntEnv('COMPUTE_NATS_REPLICAS', 1));
   const opStaleMs = getComputeOpStaleMs();
 
   const connectOpts: Parameters<typeof connect>[0] = { servers: natsUrl };
@@ -533,8 +542,9 @@ async function main(): Promise<void> {
       const nc: NatsConnection = await connect(connectOpts);
       const js: JetStreamClient = jetstream(nc, { timeout: NATS_API_TIMEOUT_MS });
       const jsm: JetStreamManager = await jetstreamManager(nc, { timeout: NATS_API_TIMEOUT_MS });
-      await ensureJetStreamResources(jsm, whisperTimeoutMs, pdfTimeoutMs, pdfAttempts, jobsStreamMaxBytes);
+      await ensureJetStreamResources(jsm, whisperTimeoutMs, pdfTimeoutMs, pdfAttempts, jobsStreamMaxBytes, natsReplicas);
       const kv = await new Kvm(js).create(COMPUTE_STATE_BUCKET, {
+        replicas: natsReplicas,
         history: 1,
         ttl: COMPUTE_STATE_TTL_MS,
         max_bytes: jobStatesMaxBytes,
@@ -614,6 +624,7 @@ async function main(): Promise<void> {
     availableCpuCores: getAvailableCpuCores(),
     onnxThreadsPerJob: getOnnxThreadsPerJob(),
     natsApiTimeoutMs: NATS_API_TIMEOUT_MS,
+    natsReplicas,
     pdfLayoutHardCapMs: pdfHardCapMs,
   }, 'compute runtime config');
 
