@@ -146,9 +146,16 @@ function parseBoolEnv(name: string, fallback: boolean): boolean {
 
 function buildLoggerConfig(): boolean | Record<string, unknown> {
   const format = (process.env.COMPUTE_LOG_FORMAT?.trim().toLowerCase() || 'pretty');
-  if (format === 'json') return true;
+  const level = process.env.COMPUTE_LOG_LEVEL?.trim() || 'info';
+  if (format === 'json') {
+    return {
+      level,
+      base: null,
+    };
+  }
   return {
-    level: process.env.COMPUTE_LOG_LEVEL?.trim() || 'info',
+    level,
+    base: null,
     transport: {
       target: 'pino-pretty',
       options: {
@@ -705,7 +712,6 @@ async function main(): Promise<void> {
           const ageMs = Date.now() - current.updatedAt;
           if (current.status === 'succeeded') {
             app.log.info({
-              event: 'op.accepted',
               kind: req.kind,
               opId: current.opId,
               jobId: current.jobId,
@@ -713,12 +719,11 @@ async function main(): Promise<void> {
               action: 'reused_terminal',
               status: current.status,
               ageMs,
-            });
+            }, 'op.accepted');
             return current;
           }
           if ((current.status === 'queued' || current.status === 'running') && ageMs <= opStaleMs) {
             app.log.info({
-              event: 'op.accepted',
               kind: req.kind,
               opId: current.opId,
               jobId: current.jobId,
@@ -726,12 +731,11 @@ async function main(): Promise<void> {
               action: 'reused_inflight',
               status: current.status,
               ageMs,
-            });
+            }, 'op.accepted');
             return current;
           }
           if ((current.status === 'queued' || current.status === 'running') && ageMs > opStaleMs) {
             app.log.warn({
-              event: 'op.stuck_detected',
               kind: req.kind,
               opId: current.opId,
               jobId: current.jobId,
@@ -739,7 +743,7 @@ async function main(): Promise<void> {
               status: current.status,
               ageMs,
               opStaleMs,
-            });
+            }, 'op.stuck_detected');
           }
         }
 
@@ -783,16 +787,14 @@ async function main(): Promise<void> {
         try {
           await publishQueuedJob(replacement, req.payload);
           app.log.info({
-            event: 'op.replaced',
             kind: req.kind,
             opId: replacement.opId,
             jobId: replacement.jobId,
             opKeyHash,
             reason: replacementReason,
             status: replacement.status,
-          });
+          }, 'op.replaced');
           app.log.info({
-            event: 'op.accepted',
             kind: req.kind,
             opId: replacement.opId,
             jobId: replacement.jobId,
@@ -800,7 +802,7 @@ async function main(): Promise<void> {
             action: 'replaced',
             status: replacement.status,
             reason: replacementReason,
-          });
+          }, 'op.accepted');
           return replacement;
         } catch (error) {
           const failed: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
@@ -821,7 +823,6 @@ async function main(): Promise<void> {
             error: failed.error,
           });
           app.log.error({
-            event: 'op.accepted',
             kind: req.kind,
             opId: failed.opId,
             jobId: failed.jobId,
@@ -830,7 +831,7 @@ async function main(): Promise<void> {
             status: failed.status,
             reason: replacementReason,
             error: failed.error?.message ?? null,
-          });
+          }, 'op.accepted');
           return failed;
         }
       }
@@ -867,14 +868,13 @@ async function main(): Promise<void> {
       try {
         await publishQueuedJob(created, req.payload);
         app.log.info({
-          event: 'op.accepted',
           kind: req.kind,
           opId: created.opId,
           jobId: created.jobId,
           opKeyHash,
           action: 'created',
           status: created.status,
-        });
+        }, 'op.accepted');
         return created;
       } catch (error) {
         const failed: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
@@ -895,7 +895,6 @@ async function main(): Promise<void> {
           error: failed.error,
         });
         app.log.error({
-          event: 'op.accepted',
           kind: req.kind,
           opId: failed.opId,
           jobId: failed.jobId,
@@ -903,7 +902,7 @@ async function main(): Promise<void> {
           action: 'created',
           status: failed.status,
           error: failed.error?.message ?? null,
-        });
+        }, 'op.accepted');
         return failed;
       }
     }
@@ -943,7 +942,6 @@ async function main(): Promise<void> {
       const startedAt = (request as FastifyRequest & { [REQUEST_STARTED_AT_MS_KEY]?: number })[REQUEST_STARTED_AT_MS_KEY];
       const durationMs = Number.isFinite(startedAt) ? Math.max(0, Date.now() - (startedAt as number)) : -1;
       app.log.error({
-        event: 'http.error',
         reqId: request.id,
         method: request.method,
         path,
@@ -951,7 +949,7 @@ async function main(): Promise<void> {
         durationMs,
         traceId: extractTraceId(request) ?? null,
         opId: extractOpId(request, path),
-      });
+      }, 'http.error');
     }
   });
 
@@ -1194,14 +1192,13 @@ async function main(): Promise<void> {
         ...(latestProgress ? { progress: latestProgress } : {}),
       });
       app.log.info({
-        event: 'job.started',
         worker: input.workerLabel,
         kind: decoded.kind,
         opId: decoded.opId,
         jobId: decoded.jobId,
         queueWaitMs: queueWaitMs ?? null,
         deliveryCount: input.msg.info.deliveryCount,
-      });
+      }, 'job.started');
 
       const persistRunningState = async (updatedAt: number): Promise<void> => {
         const runningOpState: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
@@ -1289,17 +1286,15 @@ async function main(): Promise<void> {
       const slowJobLogThresholdMs = SLOW_JOB_LOG_THRESHOLD_MS_BY_KIND[decoded.kind];
       if ((terminalDurationMs ?? 0) >= slowJobLogThresholdMs) {
         app.log.info({
-          event: 'job.stage',
           worker: input.workerLabel,
           kind: decoded.kind,
           opId: decoded.opId,
           jobId: decoded.jobId,
           durationMs: terminalDurationMs ?? null,
           timing: resultTiming ?? null,
-        });
+        }, 'job.stage');
       }
       app.log.info({
-        event: 'job.terminal',
         worker: input.workerLabel,
         kind: decoded.kind,
         opId: decoded.opId,
@@ -1308,7 +1303,7 @@ async function main(): Promise<void> {
         durationMs: terminalDurationMs ?? null,
         resultRef: extractResultRef(decoded.kind, result),
         timing: resultTiming ?? null,
-      });
+      }, 'job.terminal');
     } catch (error) {
       const message = toErrorMessage(error);
       const deliveryCount = input.msg.info.deliveryCount;
@@ -1367,7 +1362,6 @@ async function main(): Promise<void> {
       if (hasRetriesLeft) {
         input.msg.nak();
         app.log.error({
-          event: 'job.terminal',
           worker: input.workerLabel,
           kind: decoded?.kind,
           opId: decoded?.opId,
@@ -1377,11 +1371,10 @@ async function main(): Promise<void> {
           deliveryCount,
           maxAttempts,
           retryAction: 'nack_retry',
-        });
+        }, 'job.terminal');
       } else {
         input.msg.term(message);
         app.log.error({
-          event: 'job.terminal',
           worker: input.workerLabel,
           kind: decoded?.kind,
           opId: decoded?.opId,
@@ -1392,7 +1385,7 @@ async function main(): Promise<void> {
           maxAttempts,
           retrySuppressed: isWhisperAlign ? 'whisper_align' : undefined,
           retryAction: 'term',
-        });
+        }, 'job.terminal');
       }
     } finally {
       if (heartbeat) clearInterval(heartbeat);
