@@ -2,7 +2,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { access, copyFile, mkdir, readFile, rename, unlink, writeFile } from 'fs/promises';
-import { DOCSTORE_DIR } from '../runtime/docstore';
+import { DOCSTORE_DIR } from '../platform/docstore';
 import manifest from './model/manifest.json';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));

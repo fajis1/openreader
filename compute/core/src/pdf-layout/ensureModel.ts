@@ -2,7 +2,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { access, mkdir, rename, writeFile, readFile, unlink, copyFile } from 'fs/promises';
-import { DOCSTORE_DIR } from '../runtime/docstore';
+import { DOCSTORE_DIR } from '../platform/docstore';
 import manifest from './model/manifest.json';
 
 const DEFAULT_MODEL_BASE_URL = 'https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main';

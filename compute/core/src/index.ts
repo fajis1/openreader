@@ -3,7 +3,7 @@ export {
   getComputeJobConcurrency,
   getAvailableCpuCores,
   getOnnxThreadsPerJob,
-} from './runtime/cpu-budget';
+} from './config/cpu-budget';
 export {
   getComputeTimeoutConfig,
   getWorkerClientWaitTimeoutMs,
@@ -12,7 +12,7 @@ export {
   type ComputeTimeoutConfig,
   type ComputeOperationKind,
   type IdleTimeoutAndHardCapInput,
-} from './runtime/timeout-config';
+} from './config/timeout';
 export { renderPage } from './pdf-layout/renderPage';
 export { mergeTextWithRegions } from './pdf-layout/mergeTextWithRegions';
 export { stitchCrossPageBlocks } from './pdf-layout/stitchCrossPageBlocks';

@@ -1,19 +1,19 @@
-import type { TTSSentenceAlignment } from './types/tts';
-import type { ParsedPdfDocument } from './types/parsed-pdf';
+import type { TTSSentenceAlignment } from '../types/tts';
+import type { ParsedPdfDocument } from '../types/parsed-pdf';
 
 export type {
   TTSAudioBuffer,
   TTSAudioBytes,
   TTSSentenceAlignment,
   TTSSentenceWord,
-} from './types/tts';
+} from '../types/tts';
 export type {
   ParsedPdfBlockKind,
   ParsedPdfBlockFragment,
   ParsedPdfBlock,
   ParsedPdfPage,
   ParsedPdfDocument,
-} from './types/parsed-pdf';
+} from '../types/parsed-pdf';
 
 export const ALIGN_QUEUE_NAME = 'whisper-align';
 export const PDF_LAYOUT_QUEUE_NAME = 'pdf-layout';

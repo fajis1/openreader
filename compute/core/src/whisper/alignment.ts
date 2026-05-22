@@ -8,9 +8,9 @@ import * as ort from 'onnxruntime-node';
 import { Tokenizer } from '@huggingface/tokenizers';
 import JSZip from 'jszip';
 import type { TTSAudioBuffer, TTSAudioBytes, TTSSentenceAlignment } from '../types/tts';
-import { getFFmpegPath } from '../runtime/ffmpeg';
-import { getOnnxThreadsPerJob } from '../runtime/cpu-budget';
-import { getComputeTimeoutConfig } from '../runtime/timeout-config';
+import { getFFmpegPath } from '../platform/ffmpeg';
+import { getOnnxThreadsPerJob } from '../config/cpu-budget';
+import { getComputeTimeoutConfig } from '../config/timeout';
 import {
   mapWordsToSentenceOffsets,
   type WhisperWord,
