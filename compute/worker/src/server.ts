@@ -71,6 +71,10 @@ const IDLE_CHECK_INTERVAL_MS = 5_000;
 const PULL_EXPIRES_MS = 5_000;
 const REQUEST_STARTED_AT_MS_KEY = Symbol('request-started-at-ms');
 const REQUEST_COUNTED_KEY = Symbol('request-activity-counted');
+const SLOW_JOB_LOG_THRESHOLD_MS_BY_KIND: Record<WorkerOperationKind, number> = {
+  whisper_align: 15_000,
+  pdf_layout: 120_000,
+};
 
 interface QueuedJob<TPayload> {
   jobId: string;
@@ -683,6 +687,7 @@ async function main(): Promise<void> {
   ): Promise<WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>> => {
     const opKey = req.opKey.trim();
     const indexKey = opIndexKvKey(opKey);
+    const opKeyHash = hashOpKey(opKey).slice(0, 16);
     const { kv } = await ensureConnected();
 
     for (let attemptNo = 0; attemptNo < 10; attemptNo += 1) {
@@ -698,11 +703,53 @@ async function main(): Promise<void> {
 
         if (current && current.kind === req.kind) {
           const ageMs = Date.now() - current.updatedAt;
-          if (current.status === 'succeeded') return current;
-          if ((current.status === 'queued' || current.status === 'running') && ageMs <= opStaleMs) {
+          if (current.status === 'succeeded') {
+            app.log.info({
+              event: 'op.accepted',
+              kind: req.kind,
+              opId: current.opId,
+              jobId: current.jobId,
+              opKeyHash,
+              action: 'reused_terminal',
+              status: current.status,
+              ageMs,
+            });
             return current;
           }
+          if ((current.status === 'queued' || current.status === 'running') && ageMs <= opStaleMs) {
+            app.log.info({
+              event: 'op.accepted',
+              kind: req.kind,
+              opId: current.opId,
+              jobId: current.jobId,
+              opKeyHash,
+              action: 'reused_inflight',
+              status: current.status,
+              ageMs,
+            });
+            return current;
+          }
+          if ((current.status === 'queued' || current.status === 'running') && ageMs > opStaleMs) {
+            app.log.warn({
+              event: 'op.stuck_detected',
+              kind: req.kind,
+              opId: current.opId,
+              jobId: current.jobId,
+              opKeyHash,
+              status: current.status,
+              ageMs,
+              opStaleMs,
+            });
+          }
         }
+
+        const replacementReason = (() => {
+          if (current.kind !== req.kind) return 'kind_mismatch';
+          const ageMs = Date.now() - current.updatedAt;
+          if ((current.status === 'queued' || current.status === 'running') && ageMs > opStaleMs) return 'stale_running';
+          if (current.status === 'failed') return 'failed_prior';
+          return `status_${current.status}`;
+        })();
 
         const now = Date.now();
         const replacement: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
@@ -735,6 +782,25 @@ async function main(): Promise<void> {
 
         try {
           await publishQueuedJob(replacement, req.payload);
+          app.log.info({
+            event: 'op.replaced',
+            kind: req.kind,
+            opId: replacement.opId,
+            jobId: replacement.jobId,
+            opKeyHash,
+            reason: replacementReason,
+            status: replacement.status,
+          });
+          app.log.info({
+            event: 'op.accepted',
+            kind: req.kind,
+            opId: replacement.opId,
+            jobId: replacement.jobId,
+            opKeyHash,
+            action: 'replaced',
+            status: replacement.status,
+            reason: replacementReason,
+          });
           return replacement;
         } catch (error) {
           const failed: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
@@ -753,6 +819,17 @@ async function main(): Promise<void> {
             timestamp: replacement.queuedAt,
             updatedAt: failed.updatedAt,
             error: failed.error,
+          });
+          app.log.error({
+            event: 'op.accepted',
+            kind: req.kind,
+            opId: failed.opId,
+            jobId: failed.jobId,
+            opKeyHash,
+            action: 'replaced',
+            status: failed.status,
+            reason: replacementReason,
+            error: failed.error?.message ?? null,
           });
           return failed;
         }
@@ -789,6 +866,15 @@ async function main(): Promise<void> {
 
       try {
         await publishQueuedJob(created, req.payload);
+        app.log.info({
+          event: 'op.accepted',
+          kind: req.kind,
+          opId: created.opId,
+          jobId: created.jobId,
+          opKeyHash,
+          action: 'created',
+          status: created.status,
+        });
         return created;
       } catch (error) {
         const failed: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
@@ -807,6 +893,16 @@ async function main(): Promise<void> {
           timestamp: created.queuedAt,
           updatedAt: failed.updatedAt,
           error: failed.error,
+        });
+        app.log.error({
+          event: 'op.accepted',
+          kind: req.kind,
+          opId: failed.opId,
+          jobId: failed.jobId,
+          opKeyHash,
+          action: 'created',
+          status: failed.status,
+          error: failed.error?.message ?? null,
         });
         return failed;
       }
@@ -843,16 +939,20 @@ async function main(): Promise<void> {
     releaseHttp(request);
     const path = requestPath(request);
     if (isHealthPath(path)) return;
-
-    const startedAt = (request as FastifyRequest & { [REQUEST_STARTED_AT_MS_KEY]?: number })[REQUEST_STARTED_AT_MS_KEY];
-    const durationMs = Number.isFinite(startedAt) ? Math.max(0, Date.now() - (startedAt as number)) : -1;
-    const traceId = extractTraceId(request) ?? '-';
-    const opId = extractOpId(request, path) ?? '-';
-    const remoteIp = request.ip || request.raw.socket.remoteAddress || '-';
-
-    app.log.info(
-      `request reqId=${request.id} method=${request.method} path=${path} status=${reply.statusCode} durationMs=${durationMs} traceId=${traceId} opId=${opId} remoteIp=${remoteIp}`,
-    );
+    if (reply.statusCode >= 500) {
+      const startedAt = (request as FastifyRequest & { [REQUEST_STARTED_AT_MS_KEY]?: number })[REQUEST_STARTED_AT_MS_KEY];
+      const durationMs = Number.isFinite(startedAt) ? Math.max(0, Date.now() - (startedAt as number)) : -1;
+      app.log.error({
+        event: 'http.error',
+        reqId: request.id,
+        method: request.method,
+        path,
+        statusCode: reply.statusCode,
+        durationMs,
+        traceId: extractTraceId(request) ?? null,
+        opId: extractOpId(request, path),
+      });
+    }
   });
 
   app.get('/health/live', async () => ({ ok: true }));
@@ -1093,6 +1193,15 @@ async function main(): Promise<void> {
         ...(typeof queueWaitMs === 'number' ? { timing: { queueWaitMs } } : {}),
         ...(latestProgress ? { progress: latestProgress } : {}),
       });
+      app.log.info({
+        event: 'job.started',
+        worker: input.workerLabel,
+        kind: decoded.kind,
+        opId: decoded.opId,
+        jobId: decoded.jobId,
+        queueWaitMs: queueWaitMs ?? null,
+        deliveryCount: input.msg.info.deliveryCount,
+      });
 
       const persistRunningState = async (updatedAt: number): Promise<void> => {
         const runningOpState: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
@@ -1176,13 +1285,30 @@ async function main(): Promise<void> {
       });
 
       input.msg.ack();
+      const terminalDurationMs = safeDurationMs(startedAt, now);
+      const slowJobLogThresholdMs = SLOW_JOB_LOG_THRESHOLD_MS_BY_KIND[decoded.kind];
+      if ((terminalDurationMs ?? 0) >= slowJobLogThresholdMs) {
+        app.log.info({
+          event: 'job.stage',
+          worker: input.workerLabel,
+          kind: decoded.kind,
+          opId: decoded.opId,
+          jobId: decoded.jobId,
+          durationMs: terminalDurationMs ?? null,
+          timing: resultTiming ?? null,
+        });
+      }
       app.log.info({
+        event: 'job.terminal',
         worker: input.workerLabel,
+        kind: decoded.kind,
         opId: decoded.opId,
         jobId: decoded.jobId,
+        status: 'succeeded',
+        durationMs: terminalDurationMs ?? null,
         resultRef: extractResultRef(decoded.kind, result),
-        timing: resultTiming,
-      }, 'job succeeded');
+        timing: resultTiming ?? null,
+      });
     } catch (error) {
       const message = toErrorMessage(error);
       const deliveryCount = input.msg.info.deliveryCount;
@@ -1241,24 +1367,32 @@ async function main(): Promise<void> {
       if (hasRetriesLeft) {
         input.msg.nak();
         app.log.error({
+          event: 'job.terminal',
           worker: input.workerLabel,
+          kind: decoded?.kind,
           opId: decoded?.opId,
           jobId: decoded?.jobId,
+          status: 'running',
           error: message,
           deliveryCount,
           maxAttempts,
-        }, 'job failed, nacked for retry');
+          retryAction: 'nack_retry',
+        });
       } else {
         input.msg.term(message);
         app.log.error({
+          event: 'job.terminal',
           worker: input.workerLabel,
+          kind: decoded?.kind,
           opId: decoded?.opId,
           jobId: decoded?.jobId,
+          status: 'failed',
           error: message,
           deliveryCount,
           maxAttempts,
           retrySuppressed: isWhisperAlign ? 'whisper_align' : undefined,
-        }, 'job failed, max attempts reached');
+          retryAction: 'term',
+        });
       }
     } finally {
       if (heartbeat) clearInterval(heartbeat);

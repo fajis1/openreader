@@ -66,7 +66,6 @@ type WhisperAlignmentState = {
   alignmentCache: Map<string, TTSSentenceAlignment[]>;
   alignmentInFlight: Map<string, Promise<TTSSentenceAlignment[]>>;
   runtimePromise: Promise<WhisperRuntime> | null;
-  alignMutex: Promise<void>;
   pendingAlignments: number;
   officialMelFilters: Float32Array[] | null;
   emptyPastFeedsTemplate: Record<string, ort.Tensor> | null;
@@ -81,7 +80,6 @@ const state = (() => {
     alignmentCache: new Map<string, TTSSentenceAlignment[]>(),
     alignmentInFlight: new Map<string, Promise<TTSSentenceAlignment[]>>(),
     runtimePromise: null,
-    alignMutex: Promise.resolve(),
     pendingAlignments: 0,
     officialMelFilters: null,
     emptyPastFeedsTemplate: null,
@@ -597,12 +595,12 @@ async function getRuntime(): Promise<WhisperRuntime> {
     const onnxThreadsPerJob = getOnnxThreadsPerJob();
     const stableSessionOptions: ort.InferenceSession.SessionOptions = {
       executionProviders: ['cpu'],
+      // Keep Whisper graph opts disabled: this quantized timestamped model can
+      // fail session init under ORT QDQ transform passes (missing *_scale).
       graphOptimizationLevel: 'disabled',
       intraOpNumThreads: onnxThreadsPerJob,
       interOpNumThreads: 1,
       executionMode: 'sequential',
-      enableCpuMemArena: false,
-      enableMemPattern: false,
     };
 
     const encoder = await ort.InferenceSession.create(WHISPER_ENCODER_MODEL_PATH, stableSessionOptions);
@@ -945,24 +943,6 @@ export async function alignAudioWithText(
   const run = (async (): Promise<TTSSentenceAlignment[]> => {
     const alignmentTimeoutMs = getAlignmentTimeoutMs();
     const deadlineMs = Date.now() + alignmentTimeoutMs;
-    const previous = state.alignMutex;
-    let release!: () => void;
-    state.alignMutex = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-
-    await previous;
-
-    // Another request with the same cache key may have completed while this one
-    // was waiting on the mutex.
-    if (cacheKey && alignmentCache.has(cacheKey)) {
-      const cached = alignmentCache.get(cacheKey)!;
-      alignmentCache.delete(cacheKey);
-      alignmentCache.set(cacheKey, cached);
-      release();
-      return cached;
-    }
-
     let tmpBase = '';
     let inputPath = '';
     let pcmPath = '';
@@ -1008,7 +988,6 @@ export async function alignAudioWithText(
       if (tmpBase) {
         await rm(tmpBase, { recursive: true, force: true }).catch(() => {});
       }
-      release();
       state.pendingAlignments = Math.max(0, state.pendingAlignments - 1);
     }
   })();
