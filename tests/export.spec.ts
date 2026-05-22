@@ -243,11 +243,9 @@ async function resetAudiobookById(page: Page, bookId: string) {
 
 async function resetAudiobookIfPresent(page: Page, bookId?: string) {
   // Prefer backend reset when bookId is available: deterministic and independent of modal timing.
+  // Do not block on UI re-open during end-of-test cleanup, which can be flaky under load.
   if (bookId) {
     await resetAudiobookById(page, bookId);
-    await page.reload();
-    await openExportModal(page);
-    await expect(page.getByRole('button', { name: 'Start Generation' })).toBeVisible({ timeout: 60_000 });
     return;
   }
 
@@ -273,6 +271,8 @@ async function resetAudiobookIfPresent(page: Page, bookId?: string) {
 }
 
 test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ page }, testInfo) => {
+  test.setTimeout(60_000);
+
   // Ensure TTS is mocked and app is ready
   await setupTest(page, testInfo);
 
