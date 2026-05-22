@@ -3,7 +3,7 @@ import type {
   TTSSentenceAlignment,
   ParsedPdfDocument,
   PdfLayoutProgress,
-} from '@openreader/compute-core';
+} from '@openreader/compute-core/types';
 
 export type ComputeMode = 'local' | 'worker';
 

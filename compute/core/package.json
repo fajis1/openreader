@@ -13,6 +13,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./local-runtime": "./src/local-runtime.ts"
+    "./local-runtime": "./src/local-runtime.ts",
+    "./types": "./src/types/index.ts"
   }
 }

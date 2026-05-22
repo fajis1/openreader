@@ -51,3 +51,13 @@ export interface ParsedPdfDocument {
   parsedAt: number;
   pages: ParsedPdfPage[];
 }
+
+export type PdfParseStatus = 'pending' | 'running' | 'ready' | 'failed';
+export type PdfParsePhase = 'infer' | 'merge';
+
+export interface PdfParseProgress {
+  totalPages: number;
+  pagesParsed: number;
+  currentPage?: number;
+  phase: PdfParsePhase;
+}

@@ -8,13 +8,8 @@ import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/li
 import { isS3Configured } from '@/lib/server/storage/s3';
 import type { PdfParseProgress, PdfParseStatus } from '@/types/parsed-pdf';
 import { isValidDocumentId } from '@/lib/server/documents/blobstore';
-import {
-  isDocumentParseStateStale,
-  normalizeParseStatus,
-  parseDocumentParseState,
-  stringifyDocumentParseState,
-} from '@/lib/server/documents/parse-state';
-import { getComputeOpStaleMs } from '@openreader/compute-core';
+import { normalizeParseStatus, parseDocumentParseState } from '@/lib/server/documents/parse-state';
+import { healStaleDocumentParseState } from '@/lib/server/documents/parse-state-healing';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,32 +37,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function maybeHealStaleParseState(row: ParseRow): Promise<ParseRow> {
-  const state = parseDocumentParseState(row.parseState);
-  const staleMs = getComputeOpStaleMs();
-  if (!isDocumentParseStateStale(state, staleMs)) return row;
-
-  const nextState = stringifyDocumentParseState({
-    status: 'failed',
-    progress: null,
-    updatedAt: Date.now(),
-    error: `Parse state stale for more than ${staleMs}ms; marked failed for retry`,
-  });
-
-  await db
-    .update(documents)
-    .set({ parseState: nextState })
-    .where(and(eq(documents.id, row.id), eq(documents.userId, row.userId)));
-
-  return {
-    ...row,
-    parseState: nextState,
-  };
-}
-
 async function toSnapshot(row: ParseRow): Promise<ParsedSnapshot> {
-  const healed = await maybeHealStaleParseState(row);
-  const state = parseDocumentParseState(healed.parseState);
+  const state = await healStaleDocumentParseState({
+    documentId: row.id,
+    userId: row.userId,
+    state: parseDocumentParseState(row.parseState),
+  });
   const parseStatus = normalizeParseStatus(state.status);
   return {
     parseStatus,
