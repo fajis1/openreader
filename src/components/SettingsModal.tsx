@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Dialog,
   DialogPanel,
@@ -34,7 +34,6 @@ import { useRouter } from 'next/navigation';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { deleteDocuments, mimeTypeForDoc, uploadDocuments } from '@/lib/client/api/documents';
 import { postChangelogVersionCheck } from '@/lib/client/api/user-state';
-import { scheduleChangelogCheck } from '@/lib/client/changelog-check';
 import { cacheStoredDocumentFromBytes, clearDocumentCache } from '@/lib/client/cache/documents';
 import { clearAllDocumentPreviewCaches, clearInMemoryDocumentPreviewCache } from '@/lib/client/cache/previews';
 import { resolveTtsSettingsViewModel } from '@/lib/client/settings/tts-settings';
@@ -72,6 +71,8 @@ import {
   type ChangelogManifestEntry,
   type ChangelogReleaseBody,
 } from '@/lib/shared/changelog';
+import { useOnboardingCoordinator } from '@/hooks/useOnboardingCoordinator';
+import { ONBOARDING_STATE_REGISTRY } from '@/lib/shared/onboarding-state';
 
 // Hard-coded theme color palettes for the visual theme selector
 type ThemeColorSet = { background: string; base: string; offbase: string; accent: string; secondaryAccent: string; foreground: string; muted: string };
@@ -174,8 +175,6 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
   const { authEnabled, baseUrl: authBaseUrl } = useAuthConfig();
   const { data: session, isPending: isSessionPending } = useAuthSession();
-  const changelogVersionCheckKeyRef = useRef<string | null>(null);
-  const changelogVersionCheckInFlightRef = useRef<string | null>(null);
   const router = useRouter();
   const isBusy = isImportingLibrary;
   const {
@@ -208,46 +207,44 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const isSharedSelected = Boolean(selectedSharedProvider);
   const selectedProviderOption = ttsProviders.find((p) => p.id === localProviderRef) ?? ttsProviders[0];
 
-  const closeSettingsForPrivacyGate = useCallback(() => {
+  const closeSettings = useCallback(() => {
     setIsOpen(false);
     setIsChangelogOpen(false);
   }, []);
 
-  const canOpenSettings = useCallback(async () => {
-    if (!authEnabled) {
-      return true;
-    }
-    const appConfig = await getAppConfig();
-    return Boolean(appConfig?.privacyAccepted);
-  }, [authEnabled]);
-
-  const openSettings = useCallback(async (options?: { changelog?: boolean }) => {
-    const allowed = await canOpenSettings();
-    if (!allowed) {
-      closeSettingsForPrivacyGate();
-      return;
-    }
+  const openSettings = useCallback((options?: { changelog?: boolean }) => {
     setIsOpen(true);
     setIsChangelogOpen(Boolean(options?.changelog));
-  }, [canOpenSettings, closeSettingsForPrivacyGate]);
+  }, []);
 
-  const checkFirstVist = useCallback(async () => {
-    const allowed = await canOpenSettings();
-    if (!allowed) {
-      return;
-    }
-    const firstVisit = await getFirstVisit();
-    if (!firstVisit) {
-      await setFirstVisit(true);
-      setIsOpen(true);
-    }
-  }, [canOpenSettings, setIsOpen]);
+  const readLocalOnboardingSnapshot = useCallback(async () => {
+    const appConfig = await getAppConfig();
+    const row = appConfig as Record<string, unknown> | null;
+    const privacyKey = ONBOARDING_STATE_REGISTRY.privacyAccepted.localKey;
+    const firstVisitKey = ONBOARDING_STATE_REGISTRY.firstVisitSettingsOpened.localKey;
 
-  useEffect(() => {
-    checkFirstVist().catch((err) => {
-      console.error('First visit check failed:', err);
-    });
-  }, [checkFirstVist]);
+    return {
+      privacyAccepted: privacyKey ? Boolean(row?.[privacyKey]) : false,
+      firstVisitSettingsOpened: firstVisitKey ? Boolean(row?.[firstVisitKey]) : await getFirstVisit(),
+    };
+  }, []);
+
+  const markFirstVisitSettingsOpened = useCallback(async () => {
+    await setFirstVisit(true);
+  }, []);
+
+  const { requestOpenSettings } = useOnboardingCoordinator({
+    authEnabled,
+    isSessionPending,
+    sessionUserId: session?.user?.id,
+    appVersion: runtimeConfig.appVersion,
+    isSettingsOpen: isOpen,
+    readLocalSnapshot: readLocalOnboardingSnapshot,
+    markFirstVisitSettingsOpened,
+    postChangelogVersionCheck: async (currentVersion) => postChangelogVersionCheck(currentVersion),
+    openSettings,
+    closeSettings,
+  });
 
   useEffect(() => {
     setLocalApiKey(apiKey);
@@ -257,54 +254,6 @@ export function SettingsModal({ className = '' }: { className?: string }) {
     setModelValue(ttsModel);
     setLocalTTSInstructions(ttsInstructions);
   }, [apiKey, baseUrl, providerRef, providerType, ttsModel, ttsInstructions]);
-
-  useEffect(() => {
-    if (!authEnabled) {
-      return;
-    }
-    const onPrivacyAccepted = () => {
-      checkFirstVist().catch((err) => {
-        console.error('First visit check after privacy acceptance failed:', err);
-      });
-    };
-    window.addEventListener('openreader:privacyAccepted', onPrivacyAccepted);
-    return () => {
-      window.removeEventListener('openreader:privacyAccepted', onPrivacyAccepted);
-    };
-  }, [authEnabled, checkFirstVist]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      const allowed = await canOpenSettings();
-      if (!allowed && !cancelled) {
-        closeSettingsForPrivacyGate();
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, canOpenSettings, closeSettingsForPrivacyGate]);
-
-  useEffect(() => {
-    return scheduleChangelogCheck({
-      authEnabled,
-      isSessionPending,
-      sessionUserId: session?.user?.id,
-      appVersion: runtimeConfig.appVersion,
-      completedRef: changelogVersionCheckKeyRef,
-      inFlightRef: changelogVersionCheckInFlightRef,
-      postCheck: async (currentVersion) => postChangelogVersionCheck(currentVersion),
-      onShouldOpen: () => {
-        void openSettings({ changelog: true });
-      },
-      delayMs: 120,
-      retryDelayMs: 400,
-    });
-  }, [authEnabled, isSessionPending, session?.user?.id, runtimeConfig.appVersion, openSettings]);
 
   useEffect(() => {
     if (!ttsModels.some(m => m.id === modelValue) && modelValue !== '') {
@@ -571,7 +520,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
     <>
       <Button
         onClick={() => {
-          void openSettings();
+          void requestOpenSettings();
         }}
         className={`inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase hover:text-accent transition-transform transition-colors duration-200 ease-out hover:scale-[1.08] ${className}`}
         aria-label="Settings"
