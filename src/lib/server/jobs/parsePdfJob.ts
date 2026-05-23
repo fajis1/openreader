@@ -71,18 +71,6 @@ export async function parsePdfJob(input: ParsePdfJobInput): Promise<void> {
       parsedJsonKey = await putParsedDocumentBlob(input.documentId, parsedJson, input.namespace);
     }
 
-    const cleared = await clearTtsSegmentCache({
-      userId: input.userId,
-      documentId: input.documentId,
-      readerType: 'pdf',
-    });
-    if (cleared.warning) {
-      console.warn('[parsePdfJob] cache invalidation warning', {
-        documentId: input.documentId,
-        warning: cleared.warning,
-      });
-    }
-
     await db
       .update(documents)
       .set({
@@ -94,6 +82,25 @@ export async function parsePdfJob(input: ParsePdfJobInput): Promise<void> {
         parsedJsonKey,
       })
       .where(and(eq(documents.id, input.documentId), eq(documents.userId, input.userId)));
+
+    // Best-effort cache invalidation should not block parse readiness.
+    void clearTtsSegmentCache({
+      userId: input.userId,
+      documentId: input.documentId,
+      readerType: 'pdf',
+    }).then((cleared) => {
+      if (cleared.warning) {
+        console.warn('[parsePdfJob] cache invalidation warning', {
+          documentId: input.documentId,
+          warning: cleared.warning,
+        });
+      }
+    }).catch((cacheError) => {
+      console.warn('[parsePdfJob] cache invalidation failed', {
+        documentId: input.documentId,
+        error: cacheError instanceof Error ? cacheError.message : String(cacheError),
+      });
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const stack = error instanceof Error ? error.stack : undefined;
