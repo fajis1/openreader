@@ -208,9 +208,32 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const isSharedSelected = Boolean(selectedSharedProvider);
   const selectedProviderOption = ttsProviders.find((p) => p.id === localProviderRef) ?? ttsProviders[0];
 
-  const checkFirstVist = useCallback(async () => {
+  const closeSettingsForPrivacyGate = useCallback(() => {
+    setIsOpen(false);
+    setIsChangelogOpen(false);
+  }, []);
+
+  const canOpenSettings = useCallback(async () => {
+    if (!authEnabled) {
+      return true;
+    }
     const appConfig = await getAppConfig();
-    if (authEnabled && !appConfig?.privacyAccepted) {
+    return Boolean(appConfig?.privacyAccepted);
+  }, [authEnabled]);
+
+  const openSettings = useCallback(async (options?: { changelog?: boolean }) => {
+    const allowed = await canOpenSettings();
+    if (!allowed) {
+      closeSettingsForPrivacyGate();
+      return;
+    }
+    setIsOpen(true);
+    setIsChangelogOpen(Boolean(options?.changelog));
+  }, [canOpenSettings, closeSettingsForPrivacyGate]);
+
+  const checkFirstVist = useCallback(async () => {
+    const allowed = await canOpenSettings();
+    if (!allowed) {
       return;
     }
     const firstVisit = await getFirstVisit();
@@ -218,7 +241,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
       await setFirstVisit(true);
       setIsOpen(true);
     }
-  }, [authEnabled, setIsOpen]);
+  }, [canOpenSettings, setIsOpen]);
 
   useEffect(() => {
     checkFirstVist().catch((err) => {
@@ -251,6 +274,22 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   }, [authEnabled, checkFirstVist]);
 
   useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const allowed = await canOpenSettings();
+      if (!allowed && !cancelled) {
+        closeSettingsForPrivacyGate();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, canOpenSettings, closeSettingsForPrivacyGate]);
+
+  useEffect(() => {
     return scheduleChangelogCheck({
       authEnabled,
       isSessionPending,
@@ -260,13 +299,12 @@ export function SettingsModal({ className = '' }: { className?: string }) {
       inFlightRef: changelogVersionCheckInFlightRef,
       postCheck: async (currentVersion) => postChangelogVersionCheck(currentVersion),
       onShouldOpen: () => {
-        setIsOpen(true);
-        setIsChangelogOpen(true);
+        void openSettings({ changelog: true });
       },
       delayMs: 120,
       retryDelayMs: 400,
     });
-  }, [authEnabled, isSessionPending, session?.user?.id, runtimeConfig.appVersion]);
+  }, [authEnabled, isSessionPending, session?.user?.id, runtimeConfig.appVersion, openSettings]);
 
   useEffect(() => {
     if (!ttsModels.some(m => m.id === modelValue) && modelValue !== '') {
@@ -532,7 +570,9 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   return (
     <>
       <Button
-        onClick={() => setIsOpen(true)}
+        onClick={() => {
+          void openSettings();
+        }}
         className={`inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase hover:text-accent transition-transform transition-colors duration-200 ease-out hover:scale-[1.08] ${className}`}
         aria-label="Settings"
         tabIndex={0}
