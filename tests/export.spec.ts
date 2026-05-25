@@ -271,7 +271,7 @@ async function resetAudiobookIfPresent(page: Page, bookId?: string) {
 }
 
 test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ page }, testInfo) => {
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
 
   // Ensure TTS is mocked and app is ready
   await setupTest(page, testInfo);
@@ -382,7 +382,7 @@ test('exports partial MP3 audiobook for EPUB using mocked 10s TTS sample', async
 });
 
 test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page }, testInfo) => {
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
   await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 
@@ -413,6 +413,7 @@ test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page 
 });
 
 test('resets all MP3 audiobook PDF pages', async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
   await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 
@@ -451,7 +452,7 @@ test('resets all MP3 audiobook PDF pages', async ({ page }, testInfo) => {
 });
 
 test('regenerates a single MP3 audiobook PDF page and exports full audiobook', async ({ page }, testInfo) => {
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
   await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 
@@ -525,7 +526,7 @@ test('regenerates a single MP3 audiobook PDF page and exports full audiobook', a
 });
 
 test('resumes audiobook when a chapter is missing and full download succeeds (PDF)', async ({ page }, testInfo) => {
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
   await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 

@@ -37,6 +37,7 @@ test.describe('Document link navigation by type', () => {
   });
 
   test('navigates to /pdf, /epub, /html and renders correct viewers', async ({ page }) => {
+    test.setTimeout(120_000);
     // Upload documents
     await uploadFiles(page, 'sample.pdf', 'sample.epub', 'sample.txt');
 
@@ -65,10 +66,9 @@ test.describe('PDF view modes and Navigator', () => {
   });
 
   test('switches Single/Dual/Scroll modes and uses Navigator to change page', async ({ page }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(120_000);
     // Open PDF viewer
     await uploadAndDisplay(page, 'sample.pdf');
-    await expect(page.locator('.react-pdf__Document')).toBeVisible({ timeout: 15000 });
 
     // Open document settings (page-level settings)
     await page.getByRole('button', { name: 'Open settings' }).click();

@@ -24,17 +24,23 @@ function sha256HexOfFile(filePath: string) {
 
 async function waitForPdfViewerReady(page: Page, timeout = 60000) {
   await expect(page).toHaveURL(/\/pdf\/[A-Za-z0-9._%-]+$/, { timeout: Math.min(timeout, 20000) });
+  const loader = page.getByTestId('pdf-status-loader').first();
+  const parseFailedBanner = page.getByText('PDF parsing failed. Retry to continue.').first();
   await expect
     .poll(async () => {
+      const parseFailed = await parseFailedBanner.isVisible().catch(() => false);
+      if (parseFailed) return 'failed';
+
       const documentVisible = await page.locator('.react-pdf__Document').first().isVisible().catch(() => false);
-      if (documentVisible) return true;
       const pageVisible = await page.locator('.react-pdf__Page').first().isVisible().catch(() => false);
-      if (pageVisible) return true;
       const canvasVisible = await page.locator('.react-pdf__Page canvas').first().isVisible().catch(() => false);
-      if (canvasVisible) return true;
-      return false;
+
+      const hasRenderedPdf = documentVisible || pageVisible || canvasVisible;
+      const loaderVisible = await loader.isVisible().catch(() => false);
+      if (hasRenderedPdf && !loaderVisible) return 'ready';
+      return 'loading';
     }, { timeout })
-    .toBe(true);
+    .toBe('ready');
 }
 
 /**
@@ -396,7 +402,7 @@ export async function expectViewerForFile(page: Page, fileName: string) {
   if (lower.endsWith('.pdf') || lower.endsWith('.docx')) {
     // DOCX converts to PDF, so viewer expectations are PDF
     await expect(page).toHaveURL(/\/pdf\/[A-Za-z0-9._%-]+$/);
-    await expect(page.locator('.react-pdf__Document')).toBeVisible({ timeout: 15000 });
+    await waitForPdfViewerReady(page, 60000);
     return;
   }
   if (lower.endsWith('.epub')) {

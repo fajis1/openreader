@@ -443,7 +443,7 @@ export default function PDFViewerPage() {
           </div>
         ) : null}
         {isLoading || !isParseReady || !isPdfViewerReady ? (
-          <div className="absolute inset-0 z-10">
+          <div className="absolute inset-0 z-10" data-testid="pdf-status-loader">
             {renderPdfStatusLoader()}
           </div>
         ) : null}

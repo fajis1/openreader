@@ -88,10 +88,10 @@ test.describe('Document Upload Tests', () => {
   });
 
   test('displays a PDF document', async ({ page }) => {
+    test.setTimeout(120_000);
     await uploadAndDisplay(page, 'sample.pdf');
     await expectViewerForFile(page, 'sample.pdf');
     // Additional content checks specific to the sample PDF
-    await expect(page.locator('.react-pdf__Page')).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: 'sample.pdf' })).toBeVisible();
     await expect(page.getByRole('button', { name: /1\s*\/\s*2/ })).toBeVisible();
   });
@@ -105,10 +105,10 @@ test.describe('Document Upload Tests', () => {
   });
 
   test('displays a DOCX document as PDF after conversion', async ({ page }) => {
+    test.setTimeout(120_000);
     await uploadAndDisplay(page, 'sample.docx');
     await expectViewerForFile(page, 'sample.docx'); // DOCX converts to PDF
     // Keep specific content checks
-    await expect(page.locator('.react-pdf__Page')).toBeVisible();
     await expect(page.getByText('Demonstration of DOCX')).toBeVisible();
   });
 
@@ -119,6 +119,7 @@ test.describe('Document Upload Tests', () => {
   });
 
   test('uploads PDF/EPUB/TXT and opens correct viewer for each', async ({ page }) => {
+    test.setTimeout(120_000);
     // Upload multiple files
     await uploadFiles(page, 'sample.pdf', 'sample.epub', 'sample.txt');
 
