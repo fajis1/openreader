@@ -216,6 +216,7 @@ export async function POST(request: NextRequest) {
     const nowMs = Date.now();
     const storagePrefix = getS3Config().prefix;
     const secret = textHmacSecret();
+    const shouldRunWhisperAlignment = !scope.testNamespace;
 
     let invalidLocatorIndex = -1;
     const normalized = parsed.segments
@@ -387,7 +388,7 @@ export async function POST(request: NextRequest) {
 
         // Self-heal transient Whisper failures: if audio exists but alignment was
         // previously unavailable, retry alignment using the current segment text.
-        if (!alignment && !request.signal.aborted) {
+        if (shouldRunWhisperAlignment && !alignment && !request.signal.aborted) {
           try {
             const alignStartedAt = Date.now();
             alignment = await userWhisperAlignJob({
@@ -639,7 +640,7 @@ export async function POST(request: NextRequest) {
         const durationMs = await probeAudioDurationMsFromBuffer(persistedBuffer, request.signal);
         stageTimings.probeDurationMs = Date.now() - probeStartedAt;
         let alignment: TTSSegmentManifestItem['alignment'] = null;
-        if (!request.signal.aborted) {
+        if (shouldRunWhisperAlignment && !request.signal.aborted) {
           try {
             failedStage = 'whisper.align';
             const alignStartedAt = Date.now();
