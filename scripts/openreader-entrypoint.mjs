@@ -445,17 +445,21 @@ async function main() {
     const embeddedWorkerPort = Number.parseInt(withDefault(runtimeEnv.EMBEDDED_COMPUTE_WORKER_PORT, '8081'), 10);
     const embeddedNatsPort = Number.parseInt(withDefault(runtimeEnv.EMBEDDED_NATS_PORT, '4222'), 10);
     const embeddedNatsMonitorPort = Number.parseInt(withDefault(runtimeEnv.EMBEDDED_NATS_MONITOR_PORT, '8222'), 10);
-    const shouldStartEmbeddedWorker = resolveBooleanEnv(
-      runtimeEnv,
-      'START_EMBEDDED_COMPUTE_WORKER',
-      isRunningInDocker() && !Boolean(runtimeEnv.COMPUTE_WORKER_URL?.trim()),
+    const embeddedWorkerEnvRaw = runtimeEnv.START_EMBEDDED_COMPUTE_WORKER;
+    let shouldStartEmbeddedWorker = isTrue(
+      embeddedWorkerEnvRaw,
+      !Boolean(runtimeEnv.COMPUTE_WORKER_URL?.trim()),
     );
 
-    if (shouldStartEmbeddedWorker) {
-      if (!hasNatsBinary()) {
+    if (shouldStartEmbeddedWorker && !hasNatsBinary()) {
+      if (embeddedWorkerEnvRaw && isTrue(embeddedWorkerEnvRaw, true)) {
         throw new Error('START_EMBEDDED_COMPUTE_WORKER=true but `nats-server` binary is not available in PATH.');
       }
+      shouldStartEmbeddedWorker = false;
+      console.warn('`nats-server` binary not found; skipping embedded compute worker startup.');
+    }
 
+    if (shouldStartEmbeddedWorker) {
       runtimeEnv.NATS_URL = withDefault(runtimeEnv.NATS_URL, `nats://127.0.0.1:${embeddedNatsPort}`);
       runtimeEnv.COMPUTE_WORKER_URL = withDefault(runtimeEnv.COMPUTE_WORKER_URL, `http://127.0.0.1:${embeddedWorkerPort}`);
       runtimeEnv.COMPUTE_WORKER_TOKEN = withDefault(
