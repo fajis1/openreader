@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import Fastify, { type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
@@ -34,6 +33,7 @@ import {
   withIdleTimeoutAndHardCap,
   withTimeout,
 } from '@openreader/compute-core';
+import { OperationOrchestrator } from '@openreader/compute-core/control-plane';
 import type {
   PdfLayoutJobRequest,
   PdfLayoutJobResult,
@@ -49,6 +49,13 @@ import type {
   PdfLayoutProgress,
 } from '@openreader/compute-core/api-contracts';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  JetStreamOperationEventStream,
+  JetStreamOperationQueue,
+  JetStreamOperationStateStore,
+  hashOpKey,
+  opEventsSubject,
+} from './control-plane-jetstream';
 
 const JOBS_STREAM_NAME = 'compute_jobs';
 const WHISPER_JOBS_SUBJECT = 'jobs.whisper';
@@ -102,10 +109,6 @@ interface StoredJobState<Result> {
   error?: WorkerJobErrorShape;
   timing?: WorkerJobTiming;
   progress?: PdfLayoutProgress;
-}
-
-interface OpIndexEntry {
-  opId: string;
 }
 
 interface NatsSession {
@@ -295,11 +298,6 @@ function isAlreadyExistsError(error: unknown): boolean {
   return message.includes('already in use') || message.includes('already exists');
 }
 
-function isCasConflictError(error: unknown): boolean {
-  const message = toErrorMessage(error).toLowerCase();
-  return message.includes('wrong last sequence') || message.includes('key exists') || message.includes('wrong last');
-}
-
 function createJsonCodec<T>(): JsonCodec<T> {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -351,24 +349,8 @@ function isTerminalStatus(status: WorkerJobState): boolean {
   return status === 'succeeded' || status === 'failed';
 }
 
-function hashOpKey(opKey: string): string {
-  return createHash('sha256').update(opKey).digest('hex');
-}
-
-function opIndexKvKey(opKey: string): string {
-  return `op_index.${hashOpKey(opKey)}`;
-}
-
-function opStateKvKey(opId: string): string {
-  return `op_state.${opId}`;
-}
-
 function jobStateKvKey(jobId: string): string {
   return `job_state.${jobId}`;
-}
-
-function opEventsSubject(opId: string): string {
-  return `${OP_EVENTS_SUBJECT_PREFIX}.${opId}`;
 }
 
 function extractResultRef(kind: WorkerOperationKind, result: unknown): string | undefined {
@@ -682,18 +664,55 @@ async function main(): Promise<void> {
     pdfLayoutHardCapMs: pdfHardCapMs,
   }, 'compute runtime config');
 
-  const opIndexCodec = createJsonCodec<OpIndexEntry>();
-  const opStateCodec = createJsonCodec<StreamedOperationState>();
   const whisperJobCodec = createJsonCodec<QueuedJob<WhisperAlignJobRequest>>();
   const layoutJobCodec = createJsonCodec<QueuedJob<PdfLayoutJobRequest>>();
   const jobStateCodec = createJsonCodec<StoredJobState<WhisperAlignJobResult | PdfLayoutJobResult>>();
   const opEventCodec = createJsonCodec<StreamedOperationState>();
 
+  const putJobState = async (state: StoredJobState<WhisperAlignJobResult | PdfLayoutJobResult>): Promise<void> => {
+    const { kv } = await ensureConnected();
+    await kv.put(jobStateKvKey(state.jobId), jobStateCodec.encode(state));
+  };
+
+  const operationStateStore = new JetStreamOperationStateStore<WhisperAlignJobResult | PdfLayoutJobResult>({
+    getKv: async () => (await ensureConnected()).kv,
+  });
+
+  const operationEventStream = new JetStreamOperationEventStream<WhisperAlignJobResult | PdfLayoutJobResult>({
+    getJs: async () => (await ensureConnected()).js,
+  });
+
+  const operationQueue = new JetStreamOperationQueue({
+    getJs: async () => (await ensureConnected()).js,
+    whisperSubject: WHISPER_JOBS_SUBJECT,
+    layoutSubject: LAYOUT_JOBS_SUBJECT,
+    onEnqueued: async (job) => {
+      await putJobState({
+        jobId: job.jobId,
+        opId: job.opId,
+        opKey: job.opKey,
+        kind: job.kind,
+        status: 'queued',
+        timestamp: job.queuedAt,
+        updatedAt: job.queuedAt,
+      });
+    },
+  });
+
+  const orchestrator = new OperationOrchestrator({
+    queue: operationQueue,
+    stateStore: operationStateStore,
+    eventStream: operationEventStream,
+    config: {
+      opStaleMs,
+      maxCasRetries: 10,
+    },
+  });
+
   const putOpState = async (state: StreamedOperationState): Promise<void> => {
-    const { kv, js } = await ensureConnected();
-    await kv.put(opStateKvKey(state.opId), opStateCodec.encode(state));
+    await operationStateStore.putOpState(state);
     try {
-      await js.publish(opEventsSubject(state.opId), opEventCodec.encode(state));
+      await operationEventStream.append(state.opId, state);
     } catch (error) {
       app.log.warn({
         opId: state.opId,
@@ -704,263 +723,7 @@ async function main(): Promise<void> {
   };
 
   const getOpState = async (opId: string): Promise<StreamedOperationState | null> => {
-    const { kv } = await ensureConnected();
-    const entry = await kv.get(opStateKvKey(opId));
-    if (!entry || entry.operation !== 'PUT') return null;
-    return opStateCodec.decode(entry.value);
-  };
-
-  const putJobState = async (state: StoredJobState<WhisperAlignJobResult | PdfLayoutJobResult>): Promise<void> => {
-    const { kv } = await ensureConnected();
-    await kv.put(jobStateKvKey(state.jobId), jobStateCodec.encode(state));
-  };
-
-  const publishQueuedJob = async (
-    op: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>,
-    payload: WhisperAlignJobRequest | PdfLayoutJobRequest,
-  ): Promise<void> => {
-    const { js } = await ensureConnected();
-    if (op.kind === 'whisper_align') {
-      await js.publish(WHISPER_JOBS_SUBJECT, whisperJobCodec.encode({
-        jobId: op.jobId,
-        opId: op.opId,
-        opKey: op.opKey,
-        kind: 'whisper_align',
-        queuedAt: op.queuedAt,
-        payload: payload as WhisperAlignJobRequest,
-      }));
-      return;
-    }
-
-    await js.publish(LAYOUT_JOBS_SUBJECT, layoutJobCodec.encode({
-      jobId: op.jobId,
-      opId: op.opId,
-      opKey: op.opKey,
-      kind: 'pdf_layout',
-      queuedAt: op.queuedAt,
-      payload: payload as PdfLayoutJobRequest,
-    }));
-  };
-
-  const enqueueOrReuseOperation = async (
-    req: WorkerOperationRequest,
-  ): Promise<WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>> => {
-    const opKey = req.opKey.trim();
-    const indexKey = opIndexKvKey(opKey);
-    const opKeyHash = hashOpKey(opKey).slice(0, 16);
-    const { kv } = await ensureConnected();
-
-    for (let attemptNo = 0; attemptNo < 10; attemptNo += 1) {
-      const indexEntry = await kv.get(indexKey);
-      if (indexEntry && indexEntry.operation === 'PUT') {
-        const pointer = opIndexCodec.decode(indexEntry.value);
-        const current = await getOpState(pointer.opId);
-
-        if (!current) {
-          await sleep(25);
-          continue;
-        }
-
-        if (current && current.kind === req.kind) {
-          const ageMs = Date.now() - current.updatedAt;
-          if (current.status === 'succeeded') {
-            app.log.info({
-              kind: req.kind,
-              opId: current.opId,
-              jobId: current.jobId,
-              opKeyHash,
-              action: 'reused_terminal',
-              status: current.status,
-              ageMs,
-            }, 'op.accepted');
-            return current;
-          }
-          if ((current.status === 'queued' || current.status === 'running') && ageMs <= opStaleMs) {
-            app.log.info({
-              kind: req.kind,
-              opId: current.opId,
-              jobId: current.jobId,
-              opKeyHash,
-              action: 'reused_inflight',
-              status: current.status,
-              ageMs,
-            }, 'op.accepted');
-            return current;
-          }
-          if ((current.status === 'queued' || current.status === 'running') && ageMs > opStaleMs) {
-            app.log.warn({
-              kind: req.kind,
-              opId: current.opId,
-              jobId: current.jobId,
-              opKeyHash,
-              status: current.status,
-              ageMs,
-              opStaleMs,
-            }, 'op.stuck_detected');
-          }
-        }
-
-        const replacementReason = (() => {
-          if (current.kind !== req.kind) return 'kind_mismatch';
-          const ageMs = Date.now() - current.updatedAt;
-          if ((current.status === 'queued' || current.status === 'running') && ageMs > opStaleMs) return 'stale_running';
-          if (current.status === 'failed') return 'failed_prior';
-          return `status_${current.status}`;
-        })();
-
-        const now = Date.now();
-        const replacement: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
-          opId: crypto.randomUUID(),
-          opKey,
-          kind: req.kind,
-          jobId: crypto.randomUUID(),
-          status: 'queued',
-          queuedAt: now,
-          updatedAt: now,
-        };
-
-        try {
-          await kv.update(indexKey, opIndexCodec.encode({ opId: replacement.opId }), indexEntry.revision);
-        } catch (error) {
-          if (isCasConflictError(error)) continue;
-          throw error;
-        }
-
-        await putOpState(replacement);
-        await putJobState({
-          jobId: replacement.jobId,
-          opId: replacement.opId,
-          opKey: replacement.opKey,
-          kind: replacement.kind,
-          status: 'queued',
-          timestamp: now,
-          updatedAt: now,
-        });
-
-        try {
-          await publishQueuedJob(replacement, req.payload);
-          app.log.info({
-            kind: req.kind,
-            opId: replacement.opId,
-            jobId: replacement.jobId,
-            opKeyHash,
-            reason: replacementReason,
-            status: replacement.status,
-          }, 'op.replaced');
-          app.log.info({
-            kind: req.kind,
-            opId: replacement.opId,
-            jobId: replacement.jobId,
-            opKeyHash,
-            action: 'replaced',
-            status: replacement.status,
-            reason: replacementReason,
-          }, 'op.accepted');
-          return replacement;
-        } catch (error) {
-          const failed: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
-            ...replacement,
-            status: 'failed',
-            updatedAt: Date.now(),
-            error: { message: toErrorMessage(error) },
-          };
-          await putOpState(failed);
-          await putJobState({
-            jobId: replacement.jobId,
-            opId: replacement.opId,
-            opKey: replacement.opKey,
-            kind: replacement.kind,
-            status: 'failed',
-            timestamp: replacement.queuedAt,
-            updatedAt: failed.updatedAt,
-            error: failed.error,
-          });
-          app.log.error({
-            kind: req.kind,
-            opId: failed.opId,
-            jobId: failed.jobId,
-            opKeyHash,
-            action: 'replaced',
-            status: failed.status,
-            reason: replacementReason,
-            error: failed.error?.message ?? null,
-          }, 'op.accepted');
-          return failed;
-        }
-      }
-
-      const now = Date.now();
-      const created: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
-        opId: crypto.randomUUID(),
-        opKey,
-        kind: req.kind,
-        jobId: crypto.randomUUID(),
-        status: 'queued',
-        queuedAt: now,
-        updatedAt: now,
-      };
-
-      try {
-        await kv.create(indexKey, opIndexCodec.encode({ opId: created.opId }));
-      } catch (error) {
-        if (isCasConflictError(error)) continue;
-        throw error;
-      }
-
-      await putOpState(created);
-      await putJobState({
-        jobId: created.jobId,
-        opId: created.opId,
-        opKey: created.opKey,
-        kind: created.kind,
-        status: 'queued',
-        timestamp: now,
-        updatedAt: now,
-      });
-
-      try {
-        await publishQueuedJob(created, req.payload);
-        app.log.info({
-          kind: req.kind,
-          opId: created.opId,
-          jobId: created.jobId,
-          opKeyHash,
-          action: 'created',
-          status: created.status,
-        }, 'op.accepted');
-        return created;
-      } catch (error) {
-        const failed: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> = {
-          ...created,
-          status: 'failed',
-          updatedAt: Date.now(),
-          error: { message: toErrorMessage(error) },
-        };
-        await putOpState(failed);
-        await putJobState({
-          jobId: created.jobId,
-          opId: created.opId,
-          opKey: created.opKey,
-          kind: created.kind,
-          status: 'failed',
-          timestamp: created.queuedAt,
-          updatedAt: failed.updatedAt,
-          error: failed.error,
-        });
-        app.log.error({
-          kind: req.kind,
-          opId: failed.opId,
-          jobId: failed.jobId,
-          opKeyHash,
-          action: 'created',
-          status: failed.status,
-          error: failed.error?.message ?? null,
-        }, 'op.accepted');
-        return failed;
-      }
-    }
-
-    throw new Error('Unable to reserve operation after repeated CAS conflicts');
+    return await operationStateStore.getOpState(opId);
   };
 
   const releaseHttp = (request: FastifyRequest): void => {
@@ -1024,7 +787,15 @@ async function main(): Promise<void> {
       };
     }
 
-    const op = await enqueueOrReuseOperation(parsed.data as WorkerOperationRequest);
+    const requestOp = parsed.data as WorkerOperationRequest;
+    const op = await orchestrator.enqueueOrReuse(requestOp);
+    app.log.info({
+      kind: requestOp.kind,
+      opId: op.opId,
+      jobId: op.jobId,
+      status: op.status,
+      opKeyHash: hashOpKey(requestOp.opKey.trim()).slice(0, 16),
+    }, 'op.accepted');
     reply.code(202);
     return op;
   });
