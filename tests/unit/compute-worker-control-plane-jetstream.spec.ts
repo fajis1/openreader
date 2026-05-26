@@ -70,11 +70,11 @@ class FakeJetStream {
     },
   };
 
-  async publish(subject: string, data: Uint8Array): Promise<{ seq: number }> {
+  async publish(subject: string, data: Uint8Array): Promise<{ seq: number; stream: string; duplicate: boolean }> {
     this.seq += 1;
     const payload = JSON.parse(new TextDecoder().decode(data)) as unknown;
     this.published.push({ subject, payload, seq: this.seq });
-    return { seq: this.seq };
+    return { seq: this.seq, stream: 'fake', duplicate: false };
   }
 }
 
@@ -126,18 +126,18 @@ test.describe('worker jetstream control-plane adapters', () => {
   test('queue and event adapters publish expected JetStream subjects', async () => {
     const js = new FakeJetStream();
     const queue = new JetStreamOperationQueue({
-      getJs: async () => js,
+      getJs: async () => js as any,
       whisperSubject: 'jobs.whisper',
       layoutSubject: 'jobs.layout',
     });
     const events = new JetStreamOperationEventStream({
-      getJs: async () => js,
+      getJs: async () => js as any,
       getJsm: async () => ({
         consumers: {
           add: async () => ({ name: 'noop' }),
           delete: async () => true,
         },
-      }),
+      }) as any,
       eventsStreamName: 'compute_events',
     });
 
@@ -170,17 +170,17 @@ test.describe('worker jetstream control-plane adapters', () => {
 
     const store = new JetStreamOperationStateStore({ getKv: async () => kv });
     const events = new JetStreamOperationEventStream({
-      getJs: async () => js,
+      getJs: async () => js as any,
       getJsm: async () => ({
         consumers: {
           add: async () => ({ name: 'noop' }),
           delete: async () => true,
         },
-      }),
+      }) as any,
       eventsStreamName: 'compute_events',
     });
     const queue = new JetStreamOperationQueue({
-      getJs: async () => js,
+      getJs: async () => js as any,
       whisperSubject: 'jobs.whisper',
       layoutSubject: 'jobs.layout',
     });
