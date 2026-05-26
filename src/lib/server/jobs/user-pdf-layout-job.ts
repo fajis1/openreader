@@ -3,7 +3,13 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { documentKey, putParsedDocumentBlob } from '@/lib/server/documents/blobstore';
-import { parseDocumentParseState, stringifyDocumentParseState } from '@/lib/server/documents/parse-state';
+import {
+  parseDocumentParseState,
+  stringifyDocumentParseState,
+  type DocumentParseState,
+} from '@/lib/server/documents/parse-state';
+import { getParseProgressBus } from '@/lib/server/documents/parse-progress-bus';
+import { hashUserId } from '@/lib/server/documents/parse-progress-events';
 import { getCompute } from '@/lib/server/compute';
 import { clearTtsSegmentCache } from '@/lib/server/tts/segments-cache';
 import { UNCLAIMED_USER_ID } from '@/lib/server/storage/docstore-legacy';
@@ -110,6 +116,41 @@ async function updateParseStateForUsers(input: {
     );
 }
 
+function normalizeEventState(state: DocumentParseState): DocumentParseState {
+  return parseDocumentParseState(stringifyDocumentParseState(state));
+}
+
+async function emitParseStateEvents(input: {
+  documentId: string;
+  userIds: string[];
+  state: DocumentParseState;
+}): Promise<void> {
+  if (input.userIds.length === 0) return;
+  const normalized = normalizeEventState(input.state);
+  const bus = await getParseProgressBus();
+
+  const publishResults = await Promise.allSettled(input.userIds.map(async (userId) => bus.publish({
+    version: 1,
+    documentId: input.documentId,
+    userIdHash: hashUserId(userId),
+    parseStatus: normalized.status,
+    parseProgress: normalized.progress ?? null,
+    updatedAt: normalized.updatedAt ?? Date.now(),
+    ...(normalized.opId ? { opId: normalized.opId } : {}),
+    ...(normalized.jobId ? { jobId: normalized.jobId } : {}),
+    ...(normalized.error ? { error: normalized.error } : {}),
+  })));
+
+  publishResults.forEach((result, index) => {
+    if (result.status === 'fulfilled') return;
+    console.warn('[parsePdfJob] failed to publish parse progress event', {
+      documentId: input.documentId,
+      userId: input.userIds[index],
+      error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+    });
+  });
+}
+
 async function syncCallerToSharedResult(input: UserPdfLayoutJobRequest): Promise<void> {
   const deadline = Date.now() + FOLLOWER_WAIT_TIMEOUT_MS;
 
@@ -117,15 +158,21 @@ async function syncCallerToSharedResult(input: UserPdfLayoutJobRequest): Promise
     const rows = await loadScopedRows(input);
     const ready = rows.find(isReadyRow);
     if (ready) {
+      const readyState: DocumentParseState = {
+        status: 'ready',
+        progress: null,
+        updatedAt: Date.now(),
+      };
       await updateParseStateForUsers({
         documentId: input.documentId,
         userIds: [input.userId],
-        parseState: stringifyDocumentParseState({
-          status: 'ready',
-          progress: null,
-          updatedAt: Date.now(),
-        }),
+        parseState: stringifyDocumentParseState(readyState),
         parsedJsonKey: ready.parsedJsonKey,
+      });
+      await emitParseStateEvents({
+        documentId: input.documentId,
+        userIds: [input.userId],
+        state: readyState,
       });
       return;
     }
@@ -134,15 +181,21 @@ async function syncCallerToSharedResult(input: UserPdfLayoutJobRequest): Promise
     const hasInFlight = statuses.some((state) => state.status === 'pending' || state.status === 'running');
     const failedState = statuses.find((state) => state.status === 'failed');
     if (failedState && !hasInFlight) {
+      const nextFailedState: DocumentParseState = {
+        status: 'failed',
+        progress: null,
+        updatedAt: Date.now(),
+        ...(failedState.error ? { error: failedState.error } : {}),
+      };
       await updateParseStateForUsers({
         documentId: input.documentId,
         userIds: [input.userId],
-        parseState: stringifyDocumentParseState({
-          status: 'failed',
-          progress: null,
-          updatedAt: Date.now(),
-          ...(failedState.error ? { error: failedState.error } : {}),
-        }),
+        parseState: stringifyDocumentParseState(nextFailedState),
+      });
+      await emitParseStateEvents({
+        documentId: input.documentId,
+        userIds: [input.userId],
+        state: nextFailedState,
       });
       return;
     }
@@ -170,15 +223,21 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
     if (!input.forceToken?.trim()) {
       const ready = scopedRows.find(isReadyRow);
       if (ready) {
+        const readyState: DocumentParseState = {
+          status: 'ready',
+          progress: null,
+          updatedAt: Date.now(),
+        };
         await updateParseStateForUsers({
           documentId: input.documentId,
           userIds: [input.userId],
-          parseState: stringifyDocumentParseState({
-            status: 'ready',
-            progress: null,
-            updatedAt: Date.now(),
-          }),
+          parseState: stringifyDocumentParseState(readyState),
           parsedJsonKey: ready.parsedJsonKey,
+        });
+        await emitParseStateEvents({
+          documentId: input.documentId,
+          userIds: [input.userId],
+          state: readyState,
         });
         return;
       }
@@ -188,12 +247,13 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
     if (!coordinator) return;
 
     const claimOpId = randomUUID();
-    const runningState = stringifyDocumentParseState({
+    const runningStateData: DocumentParseState = {
       status: 'running',
       progress: null,
       updatedAt: Date.now(),
       opId: claimOpId,
-    });
+    };
+    const runningState = stringifyDocumentParseState(runningStateData);
 
     const claimRows = (await db
       .update(documents)
@@ -223,23 +283,34 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
       userIds: cohortUserIds,
       parseState: runningState,
     });
+    await emitParseStateEvents({
+      documentId: input.documentId,
+      userIds: cohortUserIds,
+      state: runningStateData,
+    });
 
     const compute = await getCompute();
     const writeProgress = async (progress: PdfLayoutProgress): Promise<void> => {
+      const runningProgressState: DocumentParseState = {
+        status: 'running',
+        progress: {
+          totalPages: progress.totalPages,
+          pagesParsed: progress.pagesParsed,
+          currentPage: progress.currentPage,
+          phase: progress.phase,
+        },
+        updatedAt: Date.now(),
+        opId: claimOpId,
+      };
       await updateParseStateForUsers({
         documentId: input.documentId,
         userIds: cohortUserIds,
-        parseState: stringifyDocumentParseState({
-          status: 'running',
-          progress: {
-            totalPages: progress.totalPages,
-            pagesParsed: progress.pagesParsed,
-            currentPage: progress.currentPage,
-            phase: progress.phase,
-          },
-          updatedAt: Date.now(),
-          opId: claimOpId,
-        }),
+        parseState: stringifyDocumentParseState(runningProgressState),
+      });
+      await emitParseStateEvents({
+        documentId: input.documentId,
+        userIds: cohortUserIds,
+        state: runningProgressState,
       });
     };
     const layout = await compute.parsePdfLayout({
@@ -259,19 +330,26 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
 
     const finalScopedRows = await loadScopedRows(input);
     const finalUserIds = userIdsFromRows(finalScopedRows);
+    const readyState: DocumentParseState = {
+      status: 'ready',
+      progress: null,
+      updatedAt: Date.now(),
+    };
+    const readyUserIds = finalUserIds.length > 0 ? finalUserIds : cohortUserIds;
     await updateParseStateForUsers({
       documentId: input.documentId,
-      userIds: finalUserIds.length > 0 ? finalUserIds : cohortUserIds,
-      parseState: stringifyDocumentParseState({
-        status: 'ready',
-        progress: null,
-        updatedAt: Date.now(),
-      }),
+      userIds: readyUserIds,
+      parseState: stringifyDocumentParseState(readyState),
       parsedJsonKey,
+    });
+    await emitParseStateEvents({
+      documentId: input.documentId,
+      userIds: readyUserIds,
+      state: readyState,
     });
 
     // Best-effort cache invalidation should not block parse readiness.
-    for (const userId of (finalUserIds.length > 0 ? finalUserIds : cohortUserIds)) {
+    for (const userId of readyUserIds) {
       void clearTtsSegmentCache({
         userId,
         documentId: input.documentId,
@@ -300,15 +378,22 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
     try {
       const scopedRows = await loadScopedRows(input);
       const scopedUserIds = userIdsFromRows(scopedRows);
+      const failedState: DocumentParseState = {
+        status: 'failed',
+        progress: null,
+        updatedAt: Date.now(),
+        error: message,
+      };
+      const failedUserIds = scopedUserIds.length > 0 ? scopedUserIds : [input.userId];
       await updateParseStateForUsers({
         documentId: input.documentId,
-        userIds: scopedUserIds.length > 0 ? scopedUserIds : [input.userId],
-        parseState: stringifyDocumentParseState({
-          status: 'failed',
-          progress: null,
-          updatedAt: Date.now(),
-          error: message,
-        }),
+        userIds: failedUserIds,
+        parseState: stringifyDocumentParseState(failedState),
+      });
+      await emitParseStateEvents({
+        documentId: input.documentId,
+        userIds: failedUserIds,
+        state: failedState,
       });
     } catch (statusError) {
       console.error('[parsePdfJob] failed to write parse status', {

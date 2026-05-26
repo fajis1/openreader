@@ -3,16 +3,22 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
-import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
-import { isS3Configured } from '@/lib/server/storage/s3';
-import type { PdfParseProgress, PdfParseStatus } from '@/types/parsed-pdf';
+import { readComputeMode } from '@/lib/server/compute/mode';
+import { getParseProgressBus } from '@/lib/server/documents/parse-progress-bus';
+import { hashUserId } from '@/lib/server/documents/parse-progress-events';
 import { isValidDocumentId } from '@/lib/server/documents/blobstore';
 import { normalizeParseStatus, parseDocumentParseState } from '@/lib/server/documents/parse-state';
 import { healStaleDocumentParseState } from '@/lib/server/documents/parse-state-healing';
+import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
+import { isS3Configured } from '@/lib/server/storage/s3';
+import type { PdfParseProgress, PdfParseStatus } from '@/types/parsed-pdf';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 const SSE_POLL_INTERVAL_MS = 1200;
+const SSE_KEEPALIVE_MS = 15_000;
+const SSE_RESYNC_INTERVAL_MS = 30_000;
 
 type ParseRow = {
   id: string;
@@ -95,18 +101,132 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
 
     const initial = await toSnapshot(row);
+    const computeMode = readComputeMode();
+    const bus = computeMode === 'local' ? await getParseProgressBus() : null;
 
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         let closed = false;
+        let unsubscribe: (() => void) | null = null;
+        let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+        let resyncTimer: ReturnType<typeof setInterval> | null = null;
+
+        const allowedUserHashes = new Set(allowedUserIds.map((candidate) => hashUserId(candidate)));
 
         const writeSnapshot = (snapshot: ParsedSnapshot): void => {
           controller.enqueue(encoder.encode(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`));
         };
 
-        const run = async () => {
+        const closeStream = (): void => {
+          if (closed) return;
+          closed = true;
+          if (keepaliveTimer) {
+            clearInterval(keepaliveTimer);
+            keepaliveTimer = null;
+          }
+          if (resyncTimer) {
+            clearInterval(resyncTimer);
+            resyncTimer = null;
+          }
+          if (unsubscribe) {
+            unsubscribe();
+            unsubscribe = null;
+          }
+          try {
+            controller.close();
+          } catch {
+            // no-op
+          }
+        };
+
+        const syncFromDb = async (input: {
+          signature: string;
+        }): Promise<{ snapshot: ParsedSnapshot; signature: string } | null> => {
+          const nextRow = await loadPreferredRow({
+            documentId: id,
+            storageUserId,
+            allowedUserIds,
+          });
+          if (!nextRow) return null;
+
+          const nextSnapshot = await toSnapshot(nextRow);
+          const nextSignature = JSON.stringify(nextSnapshot);
+          if (nextSignature !== input.signature) {
+            writeSnapshot(nextSnapshot);
+          }
+          return {
+            snapshot: nextSnapshot,
+            signature: nextSignature,
+          };
+        };
+
+        const runLocalRealtime = async () => {
+          let current = initial;
+          let signature = JSON.stringify(current);
+          writeSnapshot(current);
+
+          if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
+            closeStream();
+            return;
+          }
+
+          keepaliveTimer = setInterval(() => {
+            if (closed) return;
+            controller.enqueue(encoder.encode(': keepalive\n\n'));
+          }, SSE_KEEPALIVE_MS);
+
+          resyncTimer = setInterval(() => {
+            if (closed) return;
+            void syncFromDb({ signature }).then((next) => {
+              if (closed) return;
+              if (!next) {
+                closeStream();
+                return;
+              }
+              current = next.snapshot;
+              signature = next.signature;
+              if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
+                closeStream();
+              }
+            }).catch((error) => {
+              if (closed) return;
+              controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
+              closeStream();
+            });
+          }, SSE_RESYNC_INTERVAL_MS);
+
+          if (!bus) throw new Error('Local parse progress bus unavailable');
+          const nextUnsubscribe = await bus.subscribe({
+            documentId: id,
+            userIdHashes: allowedUserHashes,
+            onEvent: async () => {
+              const next = await syncFromDb({ signature });
+              if (!next) {
+                closeStream();
+                return;
+              }
+              current = next.snapshot;
+              signature = next.signature;
+              if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
+                closeStream();
+              }
+            },
+            onError: (error) => {
+              if (closed) return;
+              controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
+              closeStream();
+            },
+          });
+          if (closed) {
+            nextUnsubscribe();
+            return;
+          }
+          unsubscribe = nextUnsubscribe;
+        };
+
+        const runWorkerPolling = async () => {
           let current = initial;
           writeSnapshot(current);
           let signature = JSON.stringify(current);
@@ -116,23 +236,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
             await sleep(SSE_POLL_INTERVAL_MS);
             if (closed) break;
 
-            const nextRow = await loadPreferredRow({
-              documentId: id,
-              storageUserId,
-              allowedUserIds,
-            });
-            if (!nextRow) break;
-
-            const next = await toSnapshot(nextRow);
-
-            const nextSignature = JSON.stringify(next);
-            if (nextSignature !== signature) {
-              current = next;
-              signature = nextSignature;
-              writeSnapshot(current);
-            }
+            const next = await syncFromDb({ signature });
+            if (!next) break;
+            current = next.snapshot;
+            signature = next.signature;
           }
         };
+
+        const run = computeMode === 'local' ? runLocalRealtime : runWorkerPolling;
 
         void run()
           .catch((error) => {
@@ -141,24 +252,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
             }
           })
           .finally(() => {
-            if (!closed) {
-              closed = true;
-              try {
-                controller.close();
-              } catch {
-                // no-op
-              }
-            }
+            closeStream();
           });
 
         req.signal.addEventListener('abort', () => {
-          if (closed) return;
-          closed = true;
-          try {
-            controller.close();
-          } catch {
-            // no-op
-          }
+          closeStream();
         }, { once: true });
       },
       cancel() {
