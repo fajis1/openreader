@@ -3,10 +3,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
-import { readComputeMode } from '@/lib/server/compute/mode';
 import { getWorkerClientConfigFromEnv } from '@/lib/server/compute/worker';
-import { getParseProgressBus } from '@/lib/server/documents/parse-progress-bus';
-import { hashUserId } from '@/lib/server/documents/parse-progress-events';
 import { isValidDocumentId } from '@/lib/server/documents/blobstore';
 import { normalizeParseStatus, parseDocumentParseState } from '@/lib/server/documents/parse-state';
 import { healStaleDocumentParseState } from '@/lib/server/documents/parse-state-healing';
@@ -161,21 +158,15 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
 
     const initialState = await toSnapshotState(row);
-    const computeMode = readComputeMode();
-    const bus = computeMode === 'local' ? await getParseProgressBus() : null;
-
-    const workerCfg = computeMode === 'worker' ? getWorkerClientConfigFromEnv() : null;
+    const workerCfg = getWorkerClientConfigFromEnv();
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         let closed = false;
-        let unsubscribe: (() => void) | null = null;
         let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
         let resyncTimer: ReturnType<typeof setInterval> | null = null;
         let workerAbort: AbortController | null = null;
-
-        const allowedUserHashes = new Set(allowedUserIds.map((candidate) => hashUserId(candidate)));
 
         const writeSnapshot = (snapshot: ParsedSnapshot): void => {
           controller.enqueue(encoder.encode(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`));
@@ -192,10 +183,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
             clearInterval(resyncTimer);
             resyncTimer = null;
           }
-          if (unsubscribe) {
-            unsubscribe();
-            unsubscribe = null;
-          }
           if (workerAbort) {
             workerAbort.abort();
             workerAbort = null;
@@ -207,85 +194,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
           }
         };
 
-        const runLocalRealtime = async () => {
-          let current = initialState.snapshot;
-          let signature = JSON.stringify(current);
-          writeSnapshot(current);
-
-          if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
-            closeStream();
-            return;
-          }
-
-          keepaliveTimer = setInterval(() => {
-            if (closed) return;
-            controller.enqueue(encoder.encode(': keepalive\n\n'));
-          }, SSE_KEEPALIVE_MS);
-
-          resyncTimer = setInterval(() => {
-            if (closed) return;
-            void syncFromDb({
-              documentId: id,
-              storageUserId,
-              allowedUserIds,
-              signature,
-              writeSnapshot,
-            }).then((next) => {
-              if (closed) return;
-              if (!next) {
-                closeStream();
-                return;
-              }
-              current = next.snapshot;
-              signature = next.signature;
-              if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
-                closeStream();
-              }
-            }).catch((error) => {
-              if (closed) return;
-              controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
-              closeStream();
-            });
-          }, SSE_RESYNC_INTERVAL_MS);
-
-          if (!bus) throw new Error('Local parse progress bus unavailable');
-          const nextUnsubscribe = await bus.subscribe({
-            documentId: id,
-            userIdHashes: allowedUserHashes,
-            onEvent: async () => {
-              const next = await syncFromDb({
-                documentId: id,
-                storageUserId,
-                allowedUserIds,
-                signature,
-                writeSnapshot,
-              });
-              if (!next) {
-                closeStream();
-                return;
-              }
-              current = next.snapshot;
-              signature = next.signature;
-              if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
-                closeStream();
-              }
-            },
-            onError: (error) => {
-              if (closed) return;
-              controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
-              closeStream();
-            },
-          });
-          if (closed) {
-            nextUnsubscribe();
-            return;
-          }
-          unsubscribe = nextUnsubscribe;
-        };
-
         const runWorkerProxy = async () => {
-          if (!workerCfg) throw new Error('Worker mode selected but worker config is unavailable');
-
           let current = initialState.snapshot;
           let signature = JSON.stringify(current);
           let currentOpId = initialState.opId;
@@ -480,9 +389,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
           }
         };
 
-        const run = computeMode === 'local' ? runLocalRealtime : runWorkerProxy;
-
-        void run()
+        void runWorkerProxy()
           .catch((error) => {
             if (!closed) {
               controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
