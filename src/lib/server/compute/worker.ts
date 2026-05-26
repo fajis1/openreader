@@ -4,6 +4,7 @@ import { getWorkerClientWaitTimeoutMs } from '@openreader/compute-core';
 import type {
   PdfLayoutJobRequest,
   PdfLayoutJobResult,
+  WorkerOperationEvent,
   WhisperAlignJobRequest,
   WhisperAlignJobResult,
   WorkerOperationState,
@@ -118,6 +119,13 @@ function normalizeWorkerBaseUrl(raw: string): string {
   return parsed.toString().replace(/\/+$/, '');
 }
 
+export function getWorkerClientConfigFromEnv(): { baseUrl: string; token: string } {
+  return {
+    baseUrl: normalizeWorkerBaseUrl(readRequiredEnv('COMPUTE_WORKER_URL')),
+    token: readRequiredEnv('COMPUTE_WORKER_TOKEN'),
+  };
+}
+
 function parseRetryAfterMs(value: string | null): number | null {
   if (!value) return null;
   const asNum = Number(value);
@@ -189,6 +197,18 @@ function extractSsePayload(frame: string): string | null {
   return dataLines.join('\n');
 }
 
+function extractSseId(frame: string): number | null {
+  const normalized = frame.replace(/\r\n/g, '\n');
+  for (const line of normalized.split('\n')) {
+    if (!line.startsWith('id:')) continue;
+    const value = Number(line.slice('id:'.length).trim());
+    if (Number.isFinite(value) && value > 0) {
+      return Math.floor(value);
+    }
+  }
+  return null;
+}
+
 type RetryMeta = {
   attempt: number,
   maxAttempts: number,
@@ -240,8 +260,9 @@ export class WorkerComputeBackend implements ComputeBackend {
   private readonly retries: number;
 
   constructor() {
-    this.baseUrl = normalizeWorkerBaseUrl(readRequiredEnv('COMPUTE_WORKER_URL'));
-    this.token = readRequiredEnv('COMPUTE_WORKER_TOKEN');
+    const cfg = getWorkerClientConfigFromEnv();
+    this.baseUrl = cfg.baseUrl;
+    this.token = cfg.token;
     this.waitTimeoutMsByKind = {
       whisper_align: getWorkerClientWaitTimeoutMs('whisper_align'),
       pdf_layout: getWorkerClientWaitTimeoutMs('pdf_layout'),
@@ -371,6 +392,7 @@ export class WorkerComputeBackend implements ComputeBackend {
           documentId: input.documentId,
           attempt,
         });
+        await input.onWorkerSnapshot?.(op);
 
         const final = isTerminalStatus(op.status)
           ? op
@@ -382,6 +404,7 @@ export class WorkerComputeBackend implements ComputeBackend {
             attempt,
             waitTimeoutMs: this.waitTimeoutMsByKind.pdf_layout,
             onSnapshot: (snapshot) => {
+              void input.onWorkerSnapshot?.(snapshot);
               if (snapshot.progress) {
                 void input.onProgress?.(snapshot.progress);
               }
@@ -513,123 +536,150 @@ export class WorkerComputeBackend implements ComputeBackend {
     });
 
     try {
-      const res = await fetch(`${this.baseUrl}/ops/${encodeURIComponent(opId)}/events`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${this.token}`,
-          Accept: 'text/event-stream',
-          'x-openreader-trace-id': traceId,
-        },
-        signal: controller.signal,
-      });
+      let latest: WorkerOperationState<Result> | null = null;
+      let lastEventId: number | null = null;
+      let eventCount = 0;
+      let lastStatus: string | null = null;
 
-      if (!res.ok) {
-        const retryAfterMs = parseRetryAfterMs(res.headers.get('retry-after'));
-        const detail = await res.text().catch(() => '');
-        logWorker(res.status >= 500 ? 'warn' : 'error', 'sse.wait.http_failed', {
+      while (!controller.signal.aborted) {
+        const query = lastEventId && lastEventId > 0
+          ? `?sinceEventId=${encodeURIComponent(String(lastEventId))}`
+          : '';
+        const res = await fetch(`${this.baseUrl}/ops/${encodeURIComponent(opId)}/events${query}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            Accept: 'text/event-stream',
+            'x-openreader-trace-id': traceId,
+            ...(lastEventId && lastEventId > 0 ? { 'Last-Event-ID': String(lastEventId) } : {}),
+          },
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          const retryAfterMs = parseRetryAfterMs(res.headers.get('retry-after'));
+          const detail = await res.text().catch(() => '');
+          logWorker(res.status >= 500 ? 'warn' : 'error', 'sse.wait.http_failed', {
+            ...context,
+            traceId,
+            opId,
+            status: res.status,
+            retryAfterMs,
+            durationMs: Date.now() - startedAt,
+            detail: truncateForLog(detail),
+          });
+          throw new WorkerHttpError(
+            `Worker request failed (GET /ops/${encodeURIComponent(opId)}/events): ${res.status}${detail ? ` ${detail}` : ''}`,
+            res.status,
+            retryAfterMs,
+          );
+        }
+
+        if (!res.body) {
+          logWorker('error', 'sse.wait.no_body', {
+            ...context,
+            traceId,
+            opId,
+            durationMs: Date.now() - startedAt,
+          });
+          throw new Error('Worker operation stream response has no body');
+        }
+
+        logWorker('info', 'sse.wait.connected', {
           ...context,
           traceId,
           opId,
           status: res.status,
-          retryAfterMs,
-          durationMs: Date.now() - startedAt,
-          detail: truncateForLog(detail),
         });
-        throw new WorkerHttpError(
-          `Worker request failed (GET /ops/${encodeURIComponent(opId)}/events): ${res.status}${detail ? ` ${detail}` : ''}`,
-          res.status,
-          retryAfterMs,
-        );
-      }
-
-      if (!res.body) {
-        logWorker('error', 'sse.wait.no_body', {
-          ...context,
-          traceId,
-          opId,
-          durationMs: Date.now() - startedAt,
-        });
-        throw new Error('Worker operation stream response has no body');
-      }
-
-      logWorker('info', 'sse.wait.connected', {
-        ...context,
-        traceId,
-        opId,
-        status: res.status,
-      });
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let latest: WorkerOperationState<Result> | null = null;
-      let eventCount = 0;
-      let lastStatus: string | null = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
         while (true) {
-          const frameEnd = buffer.indexOf('\n\n');
-          if (frameEnd < 0) break;
-          const frame = buffer.slice(0, frameEnd);
-          buffer = buffer.slice(frameEnd + 2);
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
 
-          const payload = extractSsePayload(frame);
-          if (!payload) continue;
+          while (true) {
+            const frameEnd = buffer.indexOf('\n\n');
+            if (frameEnd < 0) break;
+            const frame = buffer.slice(0, frameEnd);
+            buffer = buffer.slice(frameEnd + 2);
 
-          let snapshot: WorkerOperationState<Result>;
-          try {
-            snapshot = JSON.parse(payload) as WorkerOperationState<Result>;
-          } catch {
-            logWorker('warn', 'sse.wait.json_parse_skipped', {
-              ...context,
-              traceId,
-              opId,
-              sample: truncateForLog(payload),
-            });
-            continue;
-          }
+            const eventId = extractSseId(frame);
+            if (eventId && eventId > 0) {
+              lastEventId = eventId;
+            }
+            const payload = extractSsePayload(frame);
+            if (!payload) continue;
 
-          eventCount += 1;
-          latest = snapshot;
-          context.onSnapshot?.(snapshot);
-          if (snapshot.status !== lastStatus) {
-            lastStatus = snapshot.status;
-            logWorker('info', 'sse.wait.status', {
-              ...context,
-              traceId,
-              opId,
-              eventCount,
-              status: snapshot.status,
-              jobId: snapshot.jobId ?? null,
-              updatedAt: snapshot.updatedAt ?? null,
-            });
-          }
-          if (isTerminalStatus(snapshot.status)) {
-            logWorker('info', 'sse.wait.terminal', {
-              ...context,
-              traceId,
-              opId,
-              eventCount,
-              status: snapshot.status,
-              durationMs: Date.now() - startedAt,
-            });
-            return snapshot;
+            let event: WorkerOperationEvent<Result> | WorkerOperationState<Result>;
+            try {
+              event = JSON.parse(payload) as WorkerOperationEvent<Result> | WorkerOperationState<Result>;
+            } catch {
+              logWorker('warn', 'sse.wait.json_parse_skipped', {
+                ...context,
+                traceId,
+                opId,
+                sample: truncateForLog(payload),
+              });
+              continue;
+            }
+
+            const snapshot: WorkerOperationState<Result> = (
+              event && typeof event === 'object' && 'snapshot' in event
+                ? (event as WorkerOperationEvent<Result>).snapshot
+                : (event as WorkerOperationState<Result>)
+            );
+            if (!snapshot || typeof snapshot !== 'object') continue;
+            if (snapshot.opId !== opId) continue;
+
+            eventCount += 1;
+            latest = snapshot;
+            context.onSnapshot?.(snapshot);
+            if (snapshot.status !== lastStatus) {
+              lastStatus = snapshot.status;
+              logWorker('info', 'sse.wait.status', {
+                ...context,
+                traceId,
+                opId,
+                eventCount,
+                status: snapshot.status,
+                jobId: snapshot.jobId ?? null,
+                updatedAt: snapshot.updatedAt ?? null,
+              });
+            }
+            if (isTerminalStatus(snapshot.status)) {
+              logWorker('info', 'sse.wait.terminal', {
+                ...context,
+                traceId,
+                opId,
+                eventCount,
+                status: snapshot.status,
+                durationMs: Date.now() - startedAt,
+              });
+              return snapshot;
+            }
           }
         }
+
+        if (latest && isTerminalStatus(latest.status)) {
+          logWorker('info', 'sse.wait.terminal_after_close', {
+            ...context,
+            traceId,
+            opId,
+            eventCount,
+            status: latest.status,
+            durationMs: Date.now() - startedAt,
+          });
+          return latest;
+        }
+
+        if (controller.signal.aborted) break;
+        await sleep(250);
       }
 
       if (latest && isTerminalStatus(latest.status)) {
-        logWorker('info', 'sse.wait.terminal_after_close', {
-          ...context,
-          traceId,
-          opId,
-          eventCount,
-          status: latest.status,
-          durationMs: Date.now() - startedAt,
-        });
         return latest;
       }
 

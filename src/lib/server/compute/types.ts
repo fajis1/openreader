@@ -4,6 +4,7 @@ import type {
   ParsedPdfDocument,
 } from '@openreader/compute-core/types';
 import type { PdfLayoutProgress, WhisperAlignJobBase } from '@openreader/compute-core/api-contracts';
+import type { PdfLayoutJobResult, WorkerOperationState } from '@openreader/compute-core/api-contracts';
 
 export type ComputeMode = 'local' | 'worker';
 
@@ -23,6 +24,7 @@ export interface PdfLayoutInput {
   pdfBytes?: ArrayBuffer;
   forceToken?: string;
   onProgress?: (progress: PdfLayoutProgress) => void | Promise<void>;
+  onWorkerSnapshot?: (snapshot: WorkerOperationState<PdfLayoutJobResult>) => void | Promise<void>;
 }
 
 export type PdfLayoutResult =

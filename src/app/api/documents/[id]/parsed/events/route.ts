@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { readComputeMode } from '@/lib/server/compute/mode';
+import { getWorkerClientConfigFromEnv } from '@/lib/server/compute/worker';
 import { getParseProgressBus } from '@/lib/server/documents/parse-progress-bus';
 import { hashUserId } from '@/lib/server/documents/parse-progress-events';
 import { isValidDocumentId } from '@/lib/server/documents/blobstore';
@@ -12,6 +13,7 @@ import { healStaleDocumentParseState } from '@/lib/server/documents/parse-state-
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
 import type { PdfParseProgress, PdfParseStatus } from '@/types/parsed-pdf';
+import type { PdfLayoutJobResult, WorkerOperationEvent, WorkerOperationState } from '@openreader/compute-core/api-contracts';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -31,6 +33,11 @@ type ParsedSnapshot = {
   parseProgress: PdfParseProgress | null;
 };
 
+type SnapshotState = {
+  snapshot: ParsedSnapshot;
+  opId: string | null;
+};
+
 function s3NotConfiguredResponse(): NextResponse {
   return NextResponse.json(
     { error: 'Documents storage is not configured. Set S3_* environment variables.' },
@@ -42,7 +49,53 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function toSnapshot(row: ParseRow): Promise<ParsedSnapshot> {
+function parseSsePayload(frame: string): string | null {
+  const lines = frame.replace(/\r\n/g, '\n').split('\n');
+  const dataLines: string[] = [];
+  for (const line of lines) {
+    if (!line.startsWith('data:')) continue;
+    dataLines.push(line.slice('data:'.length).trimStart());
+  }
+  if (dataLines.length === 0) return null;
+  return dataLines.join('\n');
+}
+
+function parseSseEventId(frame: string): number | null {
+  const lines = frame.replace(/\r\n/g, '\n').split('\n');
+  for (const line of lines) {
+    if (!line.startsWith('id:')) continue;
+    const value = Number(line.slice('id:'.length).trim());
+    if (Number.isFinite(value) && value > 0) {
+      return Math.floor(value);
+    }
+  }
+  return null;
+}
+
+function mapWorkerStatusToParseStatus(status: WorkerOperationState['status']): PdfParseStatus {
+  switch (status) {
+    case 'queued':
+      return 'pending';
+    case 'running':
+      return 'running';
+    case 'succeeded':
+      return 'ready';
+    case 'failed':
+      return 'failed';
+    default:
+      return 'pending';
+  }
+}
+
+function snapshotFromWorkerState(state: WorkerOperationState<PdfLayoutJobResult>): ParsedSnapshot {
+  const parseStatus = mapWorkerStatusToParseStatus(state.status);
+  return {
+    parseStatus,
+    parseProgress: parseStatus === 'running' ? (state.progress ?? null) : null,
+  };
+}
+
+async function toSnapshotState(row: ParseRow): Promise<SnapshotState> {
   const state = await healStaleDocumentParseState({
     documentId: row.id,
     userId: row.userId,
@@ -50,8 +103,11 @@ async function toSnapshot(row: ParseRow): Promise<ParsedSnapshot> {
   });
   const parseStatus = normalizeParseStatus(state.status);
   return {
-    parseStatus,
-    parseProgress: state.progress ?? null,
+    snapshot: {
+      parseStatus,
+      parseProgress: state.progress ?? null,
+    },
+    opId: typeof state.opId === 'string' && state.opId.trim() ? state.opId.trim() : null,
   };
 }
 
@@ -70,6 +126,33 @@ async function loadPreferredRow(input: {
     .where(and(eq(documents.id, input.documentId), inArray(documents.userId, input.allowedUserIds)))) as ParseRow[];
 
   return rows.find((candidate) => candidate.userId === input.storageUserId) ?? rows[0] ?? null;
+}
+
+async function syncFromDb(input: {
+  documentId: string;
+  storageUserId: string;
+  allowedUserIds: string[];
+  signature: string;
+  writeSnapshot: (snapshot: ParsedSnapshot) => void;
+}): Promise<{ snapshot: ParsedSnapshot; opId: string | null; signature: string } | null> {
+  const nextRow = await loadPreferredRow({
+    documentId: input.documentId,
+    storageUserId: input.storageUserId,
+    allowedUserIds: input.allowedUserIds,
+  });
+  if (!nextRow) return null;
+
+  const nextState = await toSnapshotState(nextRow);
+  const nextSignature = JSON.stringify(nextState.snapshot);
+  if (nextSignature !== input.signature) {
+    input.writeSnapshot(nextState.snapshot);
+  }
+
+  return {
+    snapshot: nextState.snapshot,
+    opId: nextState.opId,
+    signature: nextSignature,
+  };
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -100,10 +183,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    const initial = await toSnapshot(row);
+    const initialState = await toSnapshotState(row);
     const computeMode = readComputeMode();
     const bus = computeMode === 'local' ? await getParseProgressBus() : null;
 
+    const workerCfg = computeMode === 'worker' ? getWorkerClientConfigFromEnv() : null;
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream<Uint8Array>({
@@ -112,6 +196,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         let unsubscribe: (() => void) | null = null;
         let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
         let resyncTimer: ReturnType<typeof setInterval> | null = null;
+        let workerAbort: AbortController | null = null;
 
         const allowedUserHashes = new Set(allowedUserIds.map((candidate) => hashUserId(candidate)));
 
@@ -134,6 +219,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
             unsubscribe();
             unsubscribe = null;
           }
+          if (workerAbort) {
+            workerAbort.abort();
+            workerAbort = null;
+          }
           try {
             controller.close();
           } catch {
@@ -141,29 +230,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
           }
         };
 
-        const syncFromDb = async (input: {
-          signature: string;
-        }): Promise<{ snapshot: ParsedSnapshot; signature: string } | null> => {
-          const nextRow = await loadPreferredRow({
-            documentId: id,
-            storageUserId,
-            allowedUserIds,
-          });
-          if (!nextRow) return null;
-
-          const nextSnapshot = await toSnapshot(nextRow);
-          const nextSignature = JSON.stringify(nextSnapshot);
-          if (nextSignature !== input.signature) {
-            writeSnapshot(nextSnapshot);
-          }
-          return {
-            snapshot: nextSnapshot,
-            signature: nextSignature,
-          };
-        };
-
         const runLocalRealtime = async () => {
-          let current = initial;
+          let current = initialState.snapshot;
           let signature = JSON.stringify(current);
           writeSnapshot(current);
 
@@ -179,7 +247,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
           resyncTimer = setInterval(() => {
             if (closed) return;
-            void syncFromDb({ signature }).then((next) => {
+            void syncFromDb({
+              documentId: id,
+              storageUserId,
+              allowedUserIds,
+              signature,
+              writeSnapshot,
+            }).then((next) => {
               if (closed) return;
               if (!next) {
                 closeStream();
@@ -202,7 +276,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
             documentId: id,
             userIdHashes: allowedUserHashes,
             onEvent: async () => {
-              const next = await syncFromDb({ signature });
+              const next = await syncFromDb({
+                documentId: id,
+                storageUserId,
+                allowedUserIds,
+                signature,
+                writeSnapshot,
+              });
               if (!next) {
                 closeStream();
                 return;
@@ -226,24 +306,204 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
           unsubscribe = nextUnsubscribe;
         };
 
-        const runWorkerPolling = async () => {
-          let current = initial;
-          writeSnapshot(current);
+        const runWorkerProxy = async () => {
+          if (!workerCfg) throw new Error('Worker mode selected but worker config is unavailable');
+
+          let current = initialState.snapshot;
           let signature = JSON.stringify(current);
+          let currentOpId = initialState.opId;
+          let lastEventId: number | null = null;
+
+          writeSnapshot(current);
+
+          if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
+            closeStream();
+            return;
+          }
+
+          keepaliveTimer = setInterval(() => {
+            if (closed) return;
+            controller.enqueue(encoder.encode(': keepalive\n\n'));
+          }, SSE_KEEPALIVE_MS);
+
+          resyncTimer = setInterval(() => {
+            if (closed) return;
+            void syncFromDb({
+              documentId: id,
+              storageUserId,
+              allowedUserIds,
+              signature,
+              writeSnapshot,
+            }).then((next) => {
+              if (closed) return;
+              if (!next) {
+                closeStream();
+                return;
+              }
+              current = next.snapshot;
+              signature = next.signature;
+              if (next.opId !== currentOpId) {
+                currentOpId = next.opId;
+                lastEventId = null;
+                if (workerAbort) {
+                  workerAbort.abort();
+                  workerAbort = null;
+                }
+              }
+              if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
+                closeStream();
+              }
+            }).catch((error) => {
+              if (closed) return;
+              controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
+            });
+          }, SSE_RESYNC_INTERVAL_MS);
 
           while (!closed) {
-            if (current.parseStatus === 'ready' || current.parseStatus === 'failed') break;
-            await sleep(SSE_POLL_INTERVAL_MS);
-            if (closed) break;
+            if (!currentOpId) {
+              await sleep(SSE_POLL_INTERVAL_MS);
+              const next = await syncFromDb({
+                documentId: id,
+                storageUserId,
+                allowedUserIds,
+                signature,
+                writeSnapshot,
+              });
+              if (!next) {
+                closeStream();
+                return;
+              }
+              current = next.snapshot;
+              signature = next.signature;
+              currentOpId = next.opId;
+              if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
+                closeStream();
+                return;
+              }
+              continue;
+            }
 
-            const next = await syncFromDb({ signature });
-            if (!next) break;
+            workerAbort = new AbortController();
+            const query = lastEventId && lastEventId > 0
+              ? `?sinceEventId=${encodeURIComponent(String(lastEventId))}`
+              : '';
+            const response = await fetch(
+              `${workerCfg.baseUrl}/ops/${encodeURIComponent(currentOpId)}/events${query}`,
+              {
+                method: 'GET',
+                headers: {
+                  Authorization: `Bearer ${workerCfg.token}`,
+                  Accept: 'text/event-stream',
+                  ...(lastEventId && lastEventId > 0 ? { 'Last-Event-ID': String(lastEventId) } : {}),
+                },
+                cache: 'no-store',
+                signal: workerAbort.signal,
+              },
+            );
+
+            if (closed) return;
+
+            if (!response.ok) {
+              const detail = await response.text().catch(() => '');
+              console.warn('[parsed/events] worker stream request failed', {
+                documentId: id,
+                opId: currentOpId,
+                status: response.status,
+                detail,
+              });
+              await sleep(500);
+              continue;
+            }
+            if (!response.body) {
+              await sleep(500);
+              continue;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let streamEnded = false;
+
+            while (!closed && !streamEnded) {
+              const read = await reader.read();
+              if (read.done) {
+                streamEnded = true;
+                break;
+              }
+
+              buffer += decoder.decode(read.value, { stream: true });
+
+              while (true) {
+                const frameEnd = buffer.indexOf('\n\n');
+                if (frameEnd < 0) break;
+                const frame = buffer.slice(0, frameEnd);
+                buffer = buffer.slice(frameEnd + 2);
+
+                const eventId = parseSseEventId(frame);
+                if (eventId && eventId > 0) {
+                  lastEventId = eventId;
+                }
+
+                const payload = parseSsePayload(frame);
+                if (!payload) continue;
+
+                let parsed: WorkerOperationEvent<PdfLayoutJobResult> | WorkerOperationState<PdfLayoutJobResult>;
+                try {
+                  parsed = JSON.parse(payload) as WorkerOperationEvent<PdfLayoutJobResult> | WorkerOperationState<PdfLayoutJobResult>;
+                } catch {
+                  continue;
+                }
+
+                const workerSnapshot: WorkerOperationState<PdfLayoutJobResult> = (
+                  parsed && typeof parsed === 'object' && 'snapshot' in parsed
+                    ? parsed.snapshot
+                    : parsed as WorkerOperationState<PdfLayoutJobResult>
+                );
+                if (!workerSnapshot || workerSnapshot.opId !== currentOpId) continue;
+
+                const nextSnapshot = snapshotFromWorkerState(workerSnapshot);
+                const nextSignature = JSON.stringify(nextSnapshot);
+                if (nextSignature !== signature) {
+                  current = nextSnapshot;
+                  signature = nextSignature;
+                  writeSnapshot(current);
+                }
+
+                if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
+                  closeStream();
+                  return;
+                }
+              }
+            }
+
+            if (closed) return;
+
+            const next = await syncFromDb({
+              documentId: id,
+              storageUserId,
+              allowedUserIds,
+              signature,
+              writeSnapshot,
+            });
+            if (!next) {
+              closeStream();
+              return;
+            }
             current = next.snapshot;
             signature = next.signature;
+            if (next.opId !== currentOpId) {
+              currentOpId = next.opId;
+              lastEventId = null;
+            }
+            if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
+              closeStream();
+              return;
+            }
+            await sleep(250);
           }
         };
 
-        const run = computeMode === 'local' ? runLocalRealtime : runWorkerPolling;
+        const run = computeMode === 'local' ? runLocalRealtime : runWorkerProxy;
 
         void run()
           .catch((error) => {

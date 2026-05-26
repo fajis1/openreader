@@ -13,7 +13,12 @@ import { hashUserId } from '@/lib/server/documents/parse-progress-events';
 import { getCompute } from '@/lib/server/compute';
 import { clearTtsSegmentCache } from '@/lib/server/tts/segments-cache';
 import { UNCLAIMED_USER_ID } from '@/lib/server/storage/docstore-legacy';
-import type { PdfLayoutJobBase, PdfLayoutProgress } from '@openreader/compute-core/api-contracts';
+import type {
+  PdfLayoutJobBase,
+  PdfLayoutJobResult,
+  PdfLayoutProgress,
+  WorkerOperationState,
+} from '@openreader/compute-core/api-contracts';
 
 type UserPdfLayoutJobRequest = PdfLayoutJobBase & {
   userId: string;
@@ -24,6 +29,7 @@ const running = new Set<string>();
 
 const FOLLOWER_WAIT_TIMEOUT_MS = 180_000;
 const FOLLOWER_POLL_MS = 1_200;
+const WORKER_PROGRESS_DB_THROTTLE_MS = 10_000;
 
 type ParseRow = {
   userId: string;
@@ -290,7 +296,72 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
     });
 
     const compute = await getCompute();
+    const isWorkerCompute = compute.mode === 'worker';
+    let activeOpId: string = claimOpId;
+    let activeJobId: string | undefined;
+    let lastWorkerProgressWriteAt = 0;
+    let lastWorkerSnapshotWriteAt = 0;
+    let lastWorkerSnapshotStatus: 'pending' | 'running' | null = null;
+    let lastWorkerSnapshotOpId: string = claimOpId;
+    let lastWorkerSnapshotJobId: string | undefined;
+
+    const persistRunningState = async (state: DocumentParseState): Promise<void> => {
+      await updateParseStateForUsers({
+        documentId: input.documentId,
+        userIds: cohortUserIds,
+        parseState: stringifyDocumentParseState(state),
+      });
+      await emitParseStateEvents({
+        documentId: input.documentId,
+        userIds: cohortUserIds,
+        state,
+      });
+    };
+
+    const onWorkerSnapshot = async (snapshot: WorkerOperationState<PdfLayoutJobResult>): Promise<void> => {
+      if (!isWorkerCompute) return;
+      if (snapshot.opId) activeOpId = snapshot.opId;
+      if (snapshot.jobId) activeJobId = snapshot.jobId;
+
+      const mappedStatus = snapshot.status === 'queued'
+        ? 'pending'
+        : snapshot.status === 'running'
+          ? 'running'
+          : null;
+      if (!mappedStatus) return;
+
+      const now = Date.now();
+      const forceWrite = (
+        mappedStatus !== lastWorkerSnapshotStatus
+        || activeOpId !== lastWorkerSnapshotOpId
+        || activeJobId !== lastWorkerSnapshotJobId
+      );
+      if (!forceWrite && (now - lastWorkerSnapshotWriteAt) < WORKER_PROGRESS_DB_THROTTLE_MS) {
+        return;
+      }
+
+      const nextState: DocumentParseState = {
+        status: mappedStatus,
+        progress: snapshot.progress ?? null,
+        updatedAt: now,
+        opId: activeOpId,
+        ...(activeJobId ? { jobId: activeJobId } : {}),
+      };
+      await persistRunningState(nextState);
+      lastWorkerSnapshotWriteAt = now;
+      lastWorkerSnapshotStatus = mappedStatus;
+      lastWorkerSnapshotOpId = activeOpId;
+      lastWorkerSnapshotJobId = activeJobId;
+    };
+
     const writeProgress = async (progress: PdfLayoutProgress): Promise<void> => {
+      if (isWorkerCompute) {
+        const now = Date.now();
+        if ((now - lastWorkerProgressWriteAt) < WORKER_PROGRESS_DB_THROTTLE_MS && progress.pagesParsed < progress.totalPages) {
+          return;
+        }
+        lastWorkerProgressWriteAt = now;
+      }
       const runningProgressState: DocumentParseState = {
         status: 'running',
         progress: {
@@ -300,18 +371,10 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
           phase: progress.phase,
         },
         updatedAt: Date.now(),
-        opId: claimOpId,
+        opId: activeOpId,
+        ...(activeJobId ? { jobId: activeJobId } : {}),
       };
-      await updateParseStateForUsers({
-        documentId: input.documentId,
-        userIds: cohortUserIds,
-        parseState: stringifyDocumentParseState(runningProgressState),
-      });
-      await emitParseStateEvents({
-        documentId: input.documentId,
-        userIds: cohortUserIds,
-        state: runningProgressState,
-      });
+      await persistRunningState(runningProgressState);
     };
     const layout = await compute.parsePdfLayout({
       documentId: input.documentId,
@@ -319,6 +382,7 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
       documentObjectKey: documentKey(input.documentId, input.namespace),
       forceToken: input.forceToken,
       onProgress: writeProgress,
+      onWorkerSnapshot,
     });
 
     let parsedJsonKey = layout.parsedObjectKey ?? null;

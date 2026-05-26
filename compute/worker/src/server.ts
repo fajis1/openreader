@@ -37,6 +37,7 @@ import {
 import type {
   PdfLayoutJobRequest,
   PdfLayoutJobResult,
+  WorkerOperationEvent,
   WhisperAlignJobRequest,
   WhisperAlignJobResult,
   WorkerJobErrorShape,
@@ -54,11 +55,12 @@ const WHISPER_JOBS_SUBJECT = 'jobs.whisper';
 const LAYOUT_JOBS_SUBJECT = 'jobs.layout';
 const WHISPER_CONSUMER_NAME = 'compute_whisper';
 const LAYOUT_CONSUMER_NAME = 'compute_layout';
+const EVENTS_STREAM_NAME = 'compute_events';
 const COMPUTE_STATE_BUCKET = 'compute_state';
 const COMPUTE_STATE_TTL_MS = 24 * 60 * 60 * 1000;
 const LOOP_ERROR_BACKOFF_MS = 500;
-const SSE_POLL_INTERVAL_MS = 400;
 const RUNNING_HEARTBEAT_MS = 5000;
+const OP_EVENTS_SUBJECT_PREFIX = 'ops.events';
 const DOCUMENT_ID_REGEX = /^[a-f0-9]{64}$/i;
 const SAFE_NAMESPACE_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
 const WHISPER_MAX_DELIVER = 1;
@@ -114,6 +116,8 @@ interface NatsSession {
   whisperConsumer: Consumer;
   layoutConsumer: Consumer;
 }
+
+type StreamedOperationState = WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>;
 
 type JsonCodec<T> = {
   encode(value: T): Uint8Array;
@@ -363,6 +367,10 @@ function jobStateKvKey(jobId: string): string {
   return `job_state.${jobId}`;
 }
 
+function opEventsSubject(opId: string): string {
+  return `${OP_EVENTS_SUBJECT_PREFIX}.${opId}`;
+}
+
 function extractResultRef(kind: WorkerOperationKind, result: unknown): string | undefined {
   if (kind !== 'pdf_layout' || !result || typeof result !== 'object') return undefined;
   const maybe = result as { parsedObjectKey?: unknown };
@@ -400,7 +408,8 @@ async function ensureJetStreamResources(
   whisperTimeoutMs: number,
   pdfTimeoutMs: number,
   pdfAttempts: number,
-  maxBytes: number,
+  jobsMaxBytes: number,
+  eventsMaxBytes: number,
   natsReplicas: number,
 ): Promise<void> {
   const streamConfig = {
@@ -408,7 +417,7 @@ async function ensureJetStreamResources(
     subjects: [WHISPER_JOBS_SUBJECT, LAYOUT_JOBS_SUBJECT],
     retention: RetentionPolicy.Workqueue,
     storage: StorageType.File,
-    max_bytes: maxBytes,
+    max_bytes: jobsMaxBytes,
     num_replicas: natsReplicas,
   };
 
@@ -418,7 +427,29 @@ async function ensureJetStreamResources(
     if (!isAlreadyExistsError(error)) throw error;
     await jsm.streams.update(JOBS_STREAM_NAME, {
       subjects: [WHISPER_JOBS_SUBJECT, LAYOUT_JOBS_SUBJECT],
-      max_bytes: maxBytes,
+      max_bytes: jobsMaxBytes,
+      num_replicas: natsReplicas,
+    });
+  }
+
+  const eventsStreamConfig = {
+    name: EVENTS_STREAM_NAME,
+    subjects: [`${OP_EVENTS_SUBJECT_PREFIX}.*`],
+    retention: RetentionPolicy.Limits,
+    storage: StorageType.File,
+    max_bytes: eventsMaxBytes,
+    max_age: nanos(COMPUTE_STATE_TTL_MS),
+    num_replicas: natsReplicas,
+  };
+
+  try {
+    await jsm.streams.add(eventsStreamConfig);
+  } catch (error) {
+    if (!isAlreadyExistsError(error)) throw error;
+    await jsm.streams.update(EVENTS_STREAM_NAME, {
+      subjects: [`${OP_EVENTS_SUBJECT_PREFIX}.*`],
+      max_bytes: eventsMaxBytes,
+      max_age: nanos(COMPUTE_STATE_TTL_MS),
       num_replicas: natsReplicas,
     });
   }
@@ -471,6 +502,7 @@ async function main(): Promise<void> {
   const pdfAttempts = readIntEnv('COMPUTE_PDF_JOB_ATTEMPTS', 1);
   const prewarmModels = parseBoolEnv('COMPUTE_PREWARM_MODELS', true);
   const jobsStreamMaxBytes = readIntEnv('COMPUTE_JOBS_STREAM_MAX_BYTES', 256 * 1024 * 1024);
+  const eventsStreamMaxBytes = readIntEnv('COMPUTE_EVENTS_STREAM_MAX_BYTES', 128 * 1024 * 1024);
   const jobStatesMaxBytes = readIntEnv('COMPUTE_JOB_STATES_MAX_BYTES', 64 * 1024 * 1024);
   const natsReplicas = normalizeNatsReplicas(readIntEnv('COMPUTE_NATS_REPLICAS', 1));
   const opStaleMs = getComputeOpStaleMs();
@@ -555,7 +587,15 @@ async function main(): Promise<void> {
       const nc: NatsConnection = await connect(connectOpts);
       const js: JetStreamClient = jetstream(nc, { timeout: NATS_API_TIMEOUT_MS });
       const jsm: JetStreamManager = await jetstreamManager(nc, { timeout: NATS_API_TIMEOUT_MS });
-      await ensureJetStreamResources(jsm, whisperTimeoutMs, pdfTimeoutMs, pdfAttempts, jobsStreamMaxBytes, natsReplicas);
+      await ensureJetStreamResources(
+        jsm,
+        whisperTimeoutMs,
+        pdfTimeoutMs,
+        pdfAttempts,
+        jobsStreamMaxBytes,
+        eventsStreamMaxBytes,
+        natsReplicas,
+      );
       const kv = await new Kvm(js).create(COMPUTE_STATE_BUCKET, {
         replicas: natsReplicas,
         history: 1,
@@ -638,21 +678,32 @@ async function main(): Promise<void> {
     onnxThreadsPerJob: getOnnxThreadsPerJob(),
     natsApiTimeoutMs: NATS_API_TIMEOUT_MS,
     natsReplicas,
+    eventsStreamMaxBytes,
     pdfLayoutHardCapMs: pdfHardCapMs,
   }, 'compute runtime config');
 
   const opIndexCodec = createJsonCodec<OpIndexEntry>();
-  const opStateCodec = createJsonCodec<WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>>();
+  const opStateCodec = createJsonCodec<StreamedOperationState>();
   const whisperJobCodec = createJsonCodec<QueuedJob<WhisperAlignJobRequest>>();
   const layoutJobCodec = createJsonCodec<QueuedJob<PdfLayoutJobRequest>>();
   const jobStateCodec = createJsonCodec<StoredJobState<WhisperAlignJobResult | PdfLayoutJobResult>>();
+  const opEventCodec = createJsonCodec<StreamedOperationState>();
 
-  const putOpState = async (state: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>): Promise<void> => {
-    const { kv } = await ensureConnected();
+  const putOpState = async (state: StreamedOperationState): Promise<void> => {
+    const { kv, js } = await ensureConnected();
     await kv.put(opStateKvKey(state.opId), opStateCodec.encode(state));
+    try {
+      await js.publish(opEventsSubject(state.opId), opEventCodec.encode(state));
+    } catch (error) {
+      app.log.warn({
+        opId: state.opId,
+        status: state.status,
+        error: toErrorMessage(error),
+      }, 'failed to publish op event');
+    }
   };
 
-  const getOpState = async (opId: string): Promise<WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult> | null> => {
+  const getOpState = async (opId: string): Promise<StreamedOperationState | null> => {
     const { kv } = await ensureConnected();
     const entry = await kv.get(opStateKvKey(opId));
     if (!entry || entry.operation !== 'PUT') return null;
@@ -1007,6 +1058,18 @@ async function main(): Promise<void> {
       return { error: 'Operation not found' };
     }
 
+    const cursorQueryRaw = request.query as { sinceEventId?: string | number | null } | undefined;
+    const cursorFromQuery = Number(cursorQueryRaw?.sinceEventId ?? 0);
+    const lastEventIdHeader = request.headers['last-event-id'];
+    const cursorFromHeader = Number(
+      Array.isArray(lastEventIdHeader) ? (lastEventIdHeader[0] ?? 0) : (lastEventIdHeader ?? 0),
+    );
+    const sinceEventId = Math.max(
+      0,
+      Number.isFinite(cursorFromQuery) ? Math.floor(cursorFromQuery) : 0,
+      Number.isFinite(cursorFromHeader) ? Math.floor(cursorFromHeader) : 0,
+    );
+
     reply.hijack();
     // onResponse will not fire for a hijacked reply, so release the HTTP in-flight
     // count here and track the long-lived stream via activeSse instead.
@@ -1018,12 +1081,18 @@ async function main(): Promise<void> {
     reply.raw.setHeader('Connection', 'keep-alive');
     reply.raw.setHeader('X-Accel-Buffering', 'no');
 
-    const writeSnapshot = (snapshot: WorkerOperationState<WhisperAlignJobResult | PdfLayoutJobResult>): void => {
+    const writeSnapshot = (snapshot: StreamedOperationState, eventId: number): void => {
       if (closed || reply.raw.writableEnded) return;
-      reply.raw.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
+      const frameEvent: WorkerOperationEvent<WhisperAlignJobResult | PdfLayoutJobResult> = {
+        eventId,
+        snapshot,
+      };
+      reply.raw.write(`id: ${eventId}\nevent: snapshot\ndata: ${JSON.stringify(frameEvent)}\n\n`);
     };
 
     let closed = false;
+    let consumerName: string | null = null;
+    let messages: Awaited<ReturnType<Consumer['consume']>> | null = null;
     request.raw.on('close', () => {
       closed = true;
       activeSse = Math.max(0, activeSse - 1);
@@ -1032,25 +1101,54 @@ async function main(): Promise<void> {
 
     try {
       let current = initial;
-      writeSnapshot(current);
       let signature = JSON.stringify(current);
+      writeSnapshot(current, sinceEventId > 0 ? sinceEventId : 0);
+      if (isTerminalStatus(current.status)) {
+        return reply;
+      }
 
-      while (!closed && !isTerminalStatus(current.status)) {
-        await sleep(SSE_POLL_INTERVAL_MS);
-        const next = await getOpState(params.data.opId);
-        if (!next) break;
-        const nextSignature = JSON.stringify(next);
+      const { jsm, js } = await ensureConnected();
+      const consumerConfig = {
+        name: `op_events_${params.data.opId.slice(0, 12)}_${crypto.randomUUID().replaceAll('-', '').slice(0, 12)}`,
+        ack_policy: AckPolicy.None,
+        deliver_policy: sinceEventId > 0 ? DeliverPolicy.StartSequence : DeliverPolicy.New,
+        replay_policy: ReplayPolicy.Instant,
+        filter_subject: opEventsSubject(params.data.opId),
+        max_deliver: 1,
+        inactive_threshold: nanos(60_000_000_000),
+        ...(sinceEventId > 0 ? { opt_start_seq: sinceEventId + 1 } : {}),
+      };
+      const info = await jsm.consumers.add(EVENTS_STREAM_NAME, consumerConfig);
+      consumerName = info.name;
+      const consumer = await js.consumers.get(EVENTS_STREAM_NAME, info.name);
+      messages = await consumer.consume();
+
+      for await (const msg of messages) {
+        if (closed) break;
+        const state = opEventCodec.decode(msg.data);
+        if (state.opId !== params.data.opId) continue;
+
+        const nextSignature = JSON.stringify(state);
         if (nextSignature !== signature) {
-          current = next;
+          current = state;
           signature = nextSignature;
-          writeSnapshot(current);
+          writeSnapshot(current, msg.seq);
         }
+        if (isTerminalStatus(state.status)) break;
       }
     } catch (error) {
       app.log.warn({
         opId: params.data.opId,
         error: toErrorMessage(error),
       }, 'op events stream loop error');
+    } finally {
+      if (messages) {
+        await messages.close().catch(() => undefined);
+      }
+      if (consumerName) {
+        const { jsm } = await ensureConnected();
+        await jsm.consumers.delete(EVENTS_STREAM_NAME, consumerName).catch(() => undefined);
+      }
     }
 
     if (!reply.raw.writableEnded) {

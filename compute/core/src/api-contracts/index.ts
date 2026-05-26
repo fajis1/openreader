@@ -113,3 +113,8 @@ export interface WorkerOperationState<Result = unknown> {
   timing?: WorkerJobTiming;
   progress?: PdfLayoutProgress;
 }
+
+export interface WorkerOperationEvent<Result = unknown> {
+  eventId: number;
+  snapshot: WorkerOperationState<Result>;
+}
