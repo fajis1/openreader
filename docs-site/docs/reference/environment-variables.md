@@ -53,12 +53,11 @@ For auth-enabled deployments, use **Settings → Admin** as the primary source o
 | `RUN_FS_MIGRATIONS` | Storage migrations | `true` | Set `false` to skip startup filesystem -> S3/DB migration pass |
 | `IMPORT_LIBRARY_DIR` | Library import | `docstore/library` fallback | Set a single server library root |
 | `IMPORT_LIBRARY_DIRS` | Library import | unset | Set multiple roots (comma/colon/semicolon separated) |
-| `COMPUTE_MODE` | Heavy compute backend | `local` | Select `local` (in-process) or `worker` (external worker service) |
-| `COMPUTE_WORKER_URL` | Heavy compute backend | unset | Required when `COMPUTE_MODE=worker`; base URL for external compute worker |
+| `COMPUTE_WORKER_URL` | Heavy compute backend | unset | Required; base URL for external compute worker |
 | `COMPUTE_WORKER_TOKEN` | Heavy compute backend | unset | Required bearer token for external compute worker auth |
-| `COMPUTE_JOB_CONCURRENCY` | Heavy compute backend | `1` | Local in-process compute concurrency cap; set worker service concurrency in compute-worker env/docs |
-| `COMPUTE_WHISPER_TIMEOUT_MS` | Heavy compute backend | `30000` | Shared whisper alignment timeout budget (local + worker + worker client wait budget) |
-| `COMPUTE_PDF_TIMEOUT_MS` | Heavy compute backend | `300000` | Shared PDF idle-timeout budget (local + worker + worker client wait budget) |
+| `COMPUTE_JOB_CONCURRENCY` | Heavy compute backend | `1` | Worker-side shared compute concurrency cap |
+| `COMPUTE_WHISPER_TIMEOUT_MS` | Heavy compute backend | `30000` | Shared whisper alignment timeout budget (worker + worker client wait budget) |
+| `COMPUTE_PDF_TIMEOUT_MS` | Heavy compute backend | `300000` | Shared PDF idle-timeout budget (worker + worker client wait budget) |
 | `COMPUTE_OP_STALE_MS` | Heavy compute backend | `max(30m, 4x max compute timeout)` | Shared stale window for worker op replacement and app-side stale PDF parse-state healing |
 | `PDF_LAYOUT_MODEL_BASE_URL` | PDF layout model | PP-DocLayoutV3 ONNX base URL | Optional base URL override for `ensureModel()` |
 | `WHISPER_MODEL_BASE_URL` | Whisper ONNX model | onnx-community defaults | Optional base URL override for ONNX whisper-base_timestamped int8 downloads |
@@ -354,40 +353,26 @@ Multiple library roots for server library import.
 
 ## Audio Tooling and Alignment
 
-### COMPUTE_MODE
-
-Selects the backend for heavy compute features (ONNX word alignment + PDF layout parsing).
-
-- Default: `local`
-- Supported in v1:
-  - `local`: run compute in-process on the app server
-  - `worker`: enqueue async jobs in an external durable compute worker (NATS JetStream + NATS KV)
-- `worker` requires `COMPUTE_WORKER_URL` and `COMPUTE_WORKER_TOKEN`
-- `worker` assumes the external worker can directly reach shared object storage (S3-compatible endpoint)
-- `worker` is not compatible with non-exposed embedded `weed mini` storage topologies
-- Worker service env vars are documented in [Compute Worker (NATS JetStream)](../deploy/compute-worker)
-
 ### COMPUTE_WORKER_URL
 
 Base URL for external compute worker mode.
 
-- Used only when `COMPUTE_MODE=worker`
+- Required
 - Example: `http://localhost:8081`
 
 ### COMPUTE_WORKER_TOKEN
 
 Bearer token for external compute worker auth.
 
-- Used only when `COMPUTE_MODE=worker`
+- Required
 - Must match worker service `COMPUTE_WORKER_TOKEN`
 
 ### COMPUTE_JOB_CONCURRENCY
 
-In-process compute concurrency cap for app-server local compute mode.
+Worker-side shared compute concurrency cap.
 
 - Default: `1`
-- Applies when `COMPUTE_MODE=local`
-- For `COMPUTE_MODE=worker`, set worker-side `COMPUTE_JOB_CONCURRENCY` in [Compute Worker (NATS JetStream)](../deploy/compute-worker)
+- Set on the compute-worker service environment
 
 ### COMPUTE_WHISPER_TIMEOUT_MS
 
@@ -395,8 +380,7 @@ Shared whisper alignment timeout budget in milliseconds.
 
 - Default: `30000`
 - Used by:
-  - Local compute whisper runtime (`COMPUTE_MODE=local`)
-  - Worker compute whisper runtime (`COMPUTE_MODE=worker`)
+  - Worker compute whisper runtime
   - App server worker-client wait budget (SSE wait timeout)
 
 ### COMPUTE_PDF_TIMEOUT_MS
@@ -405,7 +389,6 @@ Shared PDF idle-timeout budget in milliseconds.
 
 - Default: `300000` (5 minutes)
 - Used by:
-  - Local compute PDF runtime (idle timeout)
   - Worker compute PDF runtime (idle timeout)
   - App server worker-client wait budget (SSE wait timeout)
 
@@ -418,7 +401,7 @@ Shared stale window in milliseconds.
   - Worker op reuse/replacement guard (`/ops` opKey stale detection)
   - App-server PDF parse-state stale healing in `/api/documents/[id]/parsed*`
 - If a parse row is stuck in `pending`/`running` past this window, app routes mark it failed so retries/reparse can proceed.
-- In `COMPUTE_MODE=worker`, keep this value aligned on both app-server and worker service envs.
+- Keep this value aligned on both app-server and worker service envs.
 
 ### PDF_LAYOUT_MODEL_BASE_URL
 
@@ -430,7 +413,7 @@ Optional base URL override for PP-DocLayoutV3 artifacts downloaded by `ensureMod
   - `PP-DocLayoutV3.onnx.data`
   - `config.json`
   - `preprocessor_config.json`
-- In `COMPUTE_MODE=worker`, configure this on the worker service env (not only the app server env)
+- Configure this on the worker service env (not only the app server env)
 
 ### WHISPER_MODEL_BASE_URL
 
@@ -439,7 +422,7 @@ Optional base URL override for the built-in ONNX Whisper alignment model downloa
 - Default: `https://huggingface.co/onnx-community/whisper-base_timestamped/resolve/main`
 - Default model variant: int8 (`encoder_model_int8.onnx`, `decoder_model_merged_int8.onnx`, `decoder_with_past_model_int8.onnx`)
 - The base URL must host all expected manifest files under the same relative paths.
-- In `COMPUTE_MODE=worker`, configure this on the worker service env (not only the app server env)
+- Configure this on the worker service env (not only the app server env)
 
 ### FFMPEG_BIN
 

@@ -118,7 +118,7 @@ sudo apt install -y libreoffice
 
 No extra native Whisper CLI build step is required.
 
-Set `COMPUTE_MODE=local` to enable built-in ONNX word alignment in-process.
+Word-by-word highlighting and PDF layout parsing are worker-backed in current releases.
 
 If you need mirrors or pinned artifact locations, set `WHISPER_MODEL_BASE_URL` in `.env`.
 
@@ -148,7 +148,6 @@ pnpm dev
 For app server worker mode, set:
 
 ```env
-COMPUTE_MODE=worker
 COMPUTE_WORKER_URL=http://localhost:8081
 COMPUTE_WORKER_TOKEN=<same-token-used-by-worker>
 ```
@@ -183,6 +182,13 @@ cp .env.example .env
 
 Then edit `.env`.
 
+Required compute worker connectivity (all modes):
+
+```env
+COMPUTE_WORKER_URL=http://localhost:8081
+COMPUTE_WORKER_TOKEN=<same-token-used-by-worker>
+```
+
 Use one of these `.env` mode templates:
 
 <Tabs groupId="local-env-modes">
@@ -191,7 +197,6 @@ Use one of these `.env` mode templates:
 ```env
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
-COMPUTE_MODE=local
 # Leave BASE_URL and AUTH_SECRET unset to keep auth disabled.
 # (Admin panel is unavailable without auth.)
 # API_BASE/API_KEY seed a shared default provider if you want shared mode.
@@ -203,7 +208,6 @@ COMPUTE_MODE=local
 ```env
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
-COMPUTE_MODE=local
 BASE_URL=http://localhost:3003
 AUTH_SECRET=<generate-with-openssl-rand-hex-32>
 # Optional when you need multiple local origins:
@@ -218,7 +222,6 @@ AUTH_SECRET=<generate-with-openssl-rand-hex-32>
 # on first boot, then no longer read. Manage them in Settings → Admin afterwards.
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
-COMPUTE_MODE=local
 BASE_URL=http://localhost:3003
 AUTH_SECRET=<generate-with-openssl-rand-hex-32>
 # Comma-separated emails to auto-promote to admin on signin.
@@ -231,7 +234,6 @@ ADMIN_EMAILS=you@example.com
 ```env
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
-COMPUTE_MODE=local
 USE_EMBEDDED_WEED_MINI=false
 S3_BUCKET=your-bucket
 S3_REGION=us-east-1
@@ -248,7 +250,6 @@ S3_SECRET_ACCESS_KEY=your-secret-key
 ```env
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
-COMPUTE_MODE=worker
 COMPUTE_WORKER_URL=http://localhost:8081
 COMPUTE_WORKER_TOKEN=<same-token-used-by-worker>
 USE_EMBEDDED_WEED_MINI=false

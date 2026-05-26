@@ -59,7 +59,7 @@ Monorepo packages under `compute/`:
   - Storage: AWS SDK v3 S3 client for reading/writing blobs
   - Logging: [Pino](https://getpino.io/)
   - Validation: [Zod](https://zod.dev/)
-- Compute mode is controlled by `COMPUTE_MODE` env var: `local` (in-process) or `worker` (remote queue via HTTP + NATS)
+- Heavy compute is worker-backed via `COMPUTE_WORKER_URL` + `COMPUTE_WORKER_TOKEN` (remote queue via HTTP + NATS)
 
 ## Tooling and testing
 

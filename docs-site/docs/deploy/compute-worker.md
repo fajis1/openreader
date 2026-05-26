@@ -1,7 +1,7 @@
 title: Compute Worker (NATS JetStream)
 ---
 
-Use this guide for `COMPUTE_MODE=worker` deployments where heavy compute runs outside the Next.js app server.
+Use this guide for worker-backed deployments where heavy compute runs outside the Next.js app server.
 
 ## Overview
 
@@ -59,12 +59,11 @@ Advanced tuning (usually leave unset unless you need overrides):
 - `COMPUTE_NATS_REPLICAS=1` (JetStream stream + KV replicas; valid: `1`, `3`, `5`)
 - `COMPUTE_OP_STALE_MS=1800000` (stale op replacement window)
 
-## App server environment variables (worker mode)
+## App server environment variables
 
 Set on the Next.js app server:
 
 ```env
-COMPUTE_MODE=worker
 # Local worker example:
 # COMPUTE_WORKER_URL=http://localhost:8081
 # Cloud worker example (Railway):
@@ -85,7 +84,7 @@ Model artifact overrides (`WHISPER_MODEL_BASE_URL`, `PDF_LAYOUT_MODEL_BASE_URL`)
 
 Set the same value on app + worker envs.
 
-`COMPUTE_MODE=worker` has no local fallback. If worker is unavailable, affected requests fail.
+There is no app-local compute fallback. If worker is unavailable, affected requests fail.
 
 ## Production notes
 
@@ -184,12 +183,11 @@ Notes:
 - `COMPUTE_JOBS_STREAM_MAX_BYTES` and `COMPUTE_JOB_STATES_MAX_BYTES` are optional; defaults are `268435456` (256MiB) and `67108864` (64MiB).
 - `COMPUTE_NATS_REPLICAS` is optional; default is `1`. Valid values are `1`, `3`, `5`.
 
-### 4. Configure the OpenReader app server (worker mode)
+### 4. Configure the OpenReader app server
 
 Set these env vars on the app server:
 
 ```env
-COMPUTE_MODE=worker
 COMPUTE_WORKER_URL=https://<railway-worker-domain>
 COMPUTE_WORKER_TOKEN=<same-token-as-worker>
 ```

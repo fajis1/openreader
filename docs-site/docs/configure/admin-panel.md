@@ -78,7 +78,7 @@ Runtime-editable settings, one row per key:
 | `enableDocxConversion` | Accept .docx uploads (converted to PDF server-side). |
 | `enableDestructiveDeleteActions` | Show "Delete all data" buttons in the Documents tab (auth-disabled mode). |
 
-Word-by-word highlighting and PDF layout parsing capability are controlled by `COMPUTE_MODE` (server env), not an admin runtime flag.
+Word-by-word highlighting and PDF layout parsing capability are controlled by compute-worker server env configuration, not an admin runtime flag.
 
 Each row shows a source badge:
 

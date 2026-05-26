@@ -8,7 +8,7 @@ This guide covers deploying OpenReader to Vercel with external Postgres and S3-c
 
 - Documents (PDF/EPUB/TXT/MD) work with `POSTGRES_URL` + external S3 storage.
 - Audiobook routes work on Node.js serverless functions using `ffmpeg-static`.
-- Heavy compute features (Whisper alignment + PDF layout parsing) work through `COMPUTE_MODE=worker` with an external compute worker service.
+- Heavy compute features (Whisper alignment + PDF layout parsing) run through an external compute worker service.
 - For worker setup details and worker-specific env vars, see [Compute Worker (NATS JetStream)](./compute-worker).
 
 :::warning DOCX Conversion Limitation
@@ -37,10 +37,7 @@ BASE_URL=https://your-app.vercel.app
 AUTH_SECRET=...
 ADMIN_EMAILS=you@example.com  # comma-separated; admins manage TTS + features in-app
 
-# Heavy compute (recommended on Vercel in v1)
-# local  = requires native binaries/models in-process (not recommended on Vercel)
-# worker = external durable compute worker (recommended)
-COMPUTE_MODE=worker
+# Heavy compute (required on Vercel in current releases)
 COMPUTE_WORKER_URL=https://<railway-worker-domain>
 COMPUTE_WORKER_TOKEN=...
 
@@ -145,4 +142,4 @@ Adjust memory per route if your files are larger or your plan differs.
 1. Upload and read a PDF/EPUB document.
 2. Confirm sync/blob fetch works across refreshes/devices.
 3. Generate at least one audiobook chapter and play/download it.
-4. Verify worker-backed word highlighting and PDF parsing in `COMPUTE_MODE=worker`.
+4. Verify worker-backed word highlighting and PDF parsing.
