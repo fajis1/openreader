@@ -13,7 +13,7 @@ import { deleteDocumentPreviewArtifacts } from '@/lib/server/documents/previews-
 import { deleteDocumentPreviewRows } from '@/lib/server/documents/previews';
 import { audiobookPrefix, deleteAudiobookPrefix } from '@/lib/server/audiobooks/blobstore';
 import { deleteTtsSegmentPrefix } from '@/lib/server/tts/segments-blobstore';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, hashForLog, serverLogger } from '@/lib/server/logger';
 
 type DocumentRow = { id: string };
 type AudiobookRow = { id: string };
@@ -50,13 +50,27 @@ export async function deleteUserStorageData(
         await deleteDocumentBlob(doc.id, namespace);
         docsDeleted++;
       } catch (error) {
-        serverLogger.warn({ err: error }, `[user-data-cleanup] Failed to delete document blob ${doc.id}:`);
+        serverLogger.warn({
+          event: 'user.data_cleanup.document_blob_delete.failed',
+          degraded: true,
+          step: 'delete_document_blob',
+          documentId: doc.id,
+          userIdHash: hashForLog(userId),
+          error: errorToLog(error),
+        }, 'Failed to delete document blob');
       }
 
       try {
         await deleteDocumentPreviewArtifacts(doc.id, namespace);
       } catch (error) {
-        serverLogger.warn({ err: error }, `[user-data-cleanup] Failed to delete preview for ${doc.id}:`);
+        serverLogger.warn({
+          event: 'user.data_cleanup.document_preview_delete.failed',
+          degraded: true,
+          step: 'delete_document_preview_artifacts',
+          documentId: doc.id,
+          userIdHash: hashForLog(userId),
+          error: errorToLog(error),
+        }, 'Failed to delete preview artifacts');
       }
     }
 
@@ -64,7 +78,14 @@ export async function deleteUserStorageData(
     try {
       await deleteDocumentPreviewRows(doc.id, namespace);
     } catch (error) {
-      serverLogger.warn({ err: error }, `[user-data-cleanup] Failed to delete preview rows for ${doc.id}:`);
+      serverLogger.warn({
+        event: 'user.data_cleanup.document_preview_rows_delete.failed',
+        degraded: true,
+        step: 'delete_document_preview_rows',
+        documentId: doc.id,
+        userIdHash: hashForLog(userId),
+        error: errorToLog(error),
+      }, 'Failed to delete preview rows');
     }
   }
 
@@ -83,7 +104,14 @@ export async function deleteUserStorageData(
       await deleteAudiobookPrefix(prefix);
       booksDeleted++;
     } catch (error) {
-      serverLogger.warn({ err: error }, `[user-data-cleanup] Failed to delete audiobook blobs ${book.id}:`);
+      serverLogger.warn({
+        event: 'user.data_cleanup.audiobook_blobs_delete.failed',
+        degraded: true,
+        step: 'delete_audiobook_prefix',
+        bookId: book.id,
+        userIdHash: hashForLog(userId),
+        error: errorToLog(error),
+      }, 'Failed to delete audiobook blobs');
     }
   }
 
@@ -98,16 +126,25 @@ export async function deleteUserStorageData(
       segmentsDeleted += await deleteTtsSegmentPrefix(ttsPrefixV1);
       segmentsDeleted += await deleteTtsSegmentPrefix(ttsPrefixV2);
     } catch (error) {
-      serverLogger.warn({ err: error }, `[user-data-cleanup] Failed to delete TTS segment blobs for user ${userId}:`);
+      serverLogger.warn({
+        event: 'user.data_cleanup.tts_segments_delete.failed',
+        degraded: true,
+        step: 'delete_tts_segment_prefixes',
+        userIdHash: hashForLog(userId),
+        error: errorToLog(error),
+      }, 'Failed to delete TTS segment blobs');
     }
   }
 
   if (docsDeleted > 0 || booksDeleted > 0 || segmentsDeleted > 0) {
-    serverLogger.info(
-      `[user-data-cleanup] Cleaned up S3 data for user ${userId}: ` +
-      `${docsDeleted}/${userDocs.length} document(s), ` +
-      `${booksDeleted}/${userBooks.length} audiobook(s), ` +
-      `${segmentsDeleted} tts segment object(s)`,
-    );
+    serverLogger.info({
+      event: 'user.data_cleanup.completed',
+      userIdHash: hashForLog(userId),
+      docsDeleted,
+      totalDocs: userDocs.length,
+      booksDeleted,
+      totalBooks: userBooks.length,
+      segmentsDeleted,
+    }, 'Completed user storage cleanup');
   }
 }

@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { and, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { documentPreviews } from '@/db/schema';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 import {
   DOCUMENT_PREVIEW_CONTENT_TYPE,
   DOCUMENT_PREVIEW_VARIANT,
@@ -375,7 +375,12 @@ export async function ensureDocumentPreview(doc: PreviewSourceDocument, namespac
         eTag: head.eTag,
       });
     } catch (error) {
-      serverLogger.error({ err: error }, `[document-previews] Preview generation failed for ${doc.id} (type=${doc.type}):`);
+      serverLogger.error({
+        event: 'documents.preview.generate.failed',
+        documentId: doc.id,
+        documentType: doc.type,
+        error: errorToLog(error),
+      }, 'Preview generation failed');
       await markPreviewFailed(doc.id, namespaceKey, error);
     }
   }

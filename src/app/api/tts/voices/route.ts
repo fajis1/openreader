@@ -5,7 +5,7 @@ import { defaultModelForProviderType, resolveTtsModelForProvider, resolveTtsProv
 import { resolveVoices } from '@/lib/server/tts/voice-resolution';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 
 export async function GET(req: NextRequest) {
   try {
@@ -62,7 +62,10 @@ export async function GET(req: NextRequest) {
     });
     return NextResponse.json({ voices });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error in voices endpoint:');
+    serverLogger.error({
+      event: 'tts.voices.resolve.failed',
+      error: errorToLog(error),
+    }, 'Failed to resolve voices');
     const providerRef = req.headers.get('x-tts-provider') || 'openai';
     const model = req.headers.get('x-tts-model') || 'tts-1';
     const provider = isBuiltInTtsProviderId(providerRef) ? providerRef : 'openai';

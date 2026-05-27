@@ -25,7 +25,6 @@ class WorkerHttpError extends Error {
 }
 
 const DEFAULT_RETRIES = 2;
-const LOG_PREFIX = '[compute-worker-client]';
 const MAX_LOG_DETAIL_CHARS = 600;
 const LOG_EVENTS = new Set([
   'align.request.failed',
@@ -63,22 +62,27 @@ function errorToLog(error: unknown): Record<string, unknown> {
 
 function logWorker(level: WorkerLogLevel, event: string, fields: Record<string, unknown>): void {
   if (!LOG_EVENTS.has(event)) return;
-
-  const payload = {
-    ts: new Date().toISOString(),
-    event,
-    ...fields,
-  };
-  const line = `${LOG_PREFIX} ${JSON.stringify(payload)}`;
   if (level === 'error') {
-    serverLogger.error(line);
+    serverLogger.error({
+      event: `compute.worker_client.${event}`,
+      operation: 'compute_worker_client',
+      ...fields,
+    }, `Worker client ${event}`);
     return;
   }
   if (level === 'warn') {
-    serverLogger.warn(line);
+    serverLogger.warn({
+      event: `compute.worker_client.${event}`,
+      operation: 'compute_worker_client',
+      ...fields,
+    }, `Worker client ${event}`);
     return;
   }
-  serverLogger.info(line);
+  serverLogger.info({
+    event: `compute.worker_client.${event}`,
+    operation: 'compute_worker_client',
+    ...fields,
+  }, `Worker client ${event}`);
 }
 
 function opSummary(value: unknown): Record<string, unknown> {

@@ -6,7 +6,7 @@ import type { ReaderType } from '@/types/user-state';
 import { isValidDocumentId } from '@/lib/server/documents/blobstore';
 import { resolveUserStateScope } from '@/lib/server/user/resolve-state-scope';
 import { coerceTimestampMs, nowTimestampMs } from '@/lib/shared/timestamps';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,7 +63,10 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error loading user progress:');
+    serverLogger.error({
+      event: 'user.progress.load.failed',
+      error: errorToLog(error),
+    }, 'Failed to load user progress');
     return NextResponse.json({ error: 'Failed to load user progress' }, { status: 500 });
   }
 }
@@ -173,7 +176,10 @@ export async function PUT(req: NextRequest) {
       applied: true,
     });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error updating user progress:');
+    serverLogger.error({
+      event: 'user.progress.update.failed',
+      error: errorToLog(error),
+    }, 'Failed to update user progress');
     return NextResponse.json({ error: 'Failed to update user progress' }, { status: 500 });
   }
 }

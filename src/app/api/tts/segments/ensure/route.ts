@@ -335,7 +335,7 @@ export async function POST(request: NextRequest) {
           documentId: parsed.documentId,
           completedSoFar: manifest.length,
           totalRequested: normalized.length,
-        });
+        }, 'TTS segment ensure request aborted');
         break;
       }
 
@@ -778,7 +778,7 @@ export async function POST(request: NextRequest) {
             segmentId: segment.segmentId,
             completedSoFar: manifest.length,
             totalRequested: normalized.length,
-          });
+          }, 'Stopping segment ensure after abort');
           break;
         }
       }
@@ -804,7 +804,7 @@ export async function POST(request: NextRequest) {
           upstreamStatus: item.error?.upstreamStatus ?? null,
           retryAfterSeconds: item.error?.retryAfterSeconds ?? null,
         })),
-      });
+      }, 'TTS segment ensure completed with partial errors');
     }
 
     const response = NextResponse.json({
@@ -817,7 +817,7 @@ export async function POST(request: NextRequest) {
     logger.error({
       event: 'tts.segments.ensure.route_failed',
       error: errorToLog(error),
-    });
+    }, 'TTS segments ensure route failed');
     const response = NextResponse.json({ error: 'Failed to ensure TTS segments' }, { status: 500 });
     attachDeviceIdCookie(response, deviceIdToSet, didCreateDeviceIdCookie);
     return response;

@@ -1,5 +1,5 @@
 import { LRUCache } from 'lru-cache';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 import {
   resolveProviderModels,
   type ReplicateVoiceInputKey,
@@ -193,7 +193,10 @@ async function fetchReplicateOpenApiSchema(apiKey: string, model: string): Promi
     if (error instanceof DOMException && error.name === 'AbortError') {
       return null;
     }
-    serverLogger.error({ err: error }, 'Error fetching Replicate model schema:');
+    serverLogger.error({
+      event: 'tts.voice_resolution.replicate_schema_fetch.failed',
+      error: errorToLog(error),
+    }, 'Failed fetching Replicate model schema');
     return null;
   } finally {
     clearTimeout(timeoutId);
@@ -284,7 +287,10 @@ async function fetchDeepinfraVoices(apiKey: string): Promise<string[]> {
     if (error instanceof DOMException && error.name === 'AbortError') {
       return [];
     }
-    serverLogger.error({ err: error }, 'Error fetching Deepinfra voices:');
+    serverLogger.error({
+      event: 'tts.voice_resolution.deepinfra_voices_fetch.failed',
+      error: errorToLog(error),
+    }, 'Failed fetching Deepinfra voices');
     return [];
   } finally {
     clearTimeout(timeoutId);
@@ -316,7 +322,11 @@ async function fetchCustomOpenAiVoices(baseUrl: string, apiKey: string): Promise
       ? data.voices
       : null;
   } catch {
-    serverLogger.info('Custom endpoint does not support voices, using defaults');
+    serverLogger.info({
+      event: 'tts.voice_resolution.custom_endpoint.voices_unsupported',
+      degraded: true,
+      fallbackPath: 'provider_default_voices',
+    }, 'Custom endpoint does not support voices, using defaults');
     return null;
   } finally {
     clearTimeout(timeoutId);

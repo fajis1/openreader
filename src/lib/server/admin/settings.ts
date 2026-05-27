@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { adminProviders, adminSettings } from '@/db/schema';
 import { isAuthEnabled } from '@/lib/server/auth/config';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 
 /**
  * Runtime config: site-wide settings that used to live in build-time env vars.
@@ -114,7 +114,11 @@ async function resolveImplicitDefaultTtsProvider(): Promise<string | undefined> 
       .limit(1);
     return rows[0]?.slug;
   } catch (error) {
-    serverLogger.warn({ err: error }, '[runtime-config] implicit defaultTtsProvider lookup failed:');
+    serverLogger.warn({
+      event: 'admin.runtime_config.default_provider_lookup.failed',
+      degraded: true,
+      error: errorToLog(error),
+    }, 'Implicit defaultTtsProvider lookup failed');
     return undefined;
   }
 }
@@ -142,7 +146,11 @@ async function readAllRows(): Promise<Map<string, { value: unknown; source: stri
     }
     return out;
   } catch (error) {
-    serverLogger.warn({ err: error }, '[runtime-config] read failed (table may not exist yet):');
+    serverLogger.warn({
+      event: 'admin.runtime_config.read.failed',
+      degraded: true,
+      error: errorToLog(error),
+    }, 'Runtime config read failed');
     return new Map();
   }
 }
@@ -298,7 +306,12 @@ export async function seedRuntimeConfigFromEnv(): Promise<{ seeded: RuntimeConfi
         .onConflictDoNothing({ target: adminSettings.key });
       seeded.push(key);
     } catch (error) {
-      serverLogger.warn({ key: key, err: error }, '[runtime-config] seed failed for');
+      serverLogger.warn({
+        event: 'admin.runtime_config.seed.failed',
+        degraded: true,
+        key,
+        error: errorToLog(error),
+      }, 'Runtime config seed failed');
     }
   }
   return { seeded };

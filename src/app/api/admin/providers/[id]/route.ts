@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminContext } from '@/lib/server/auth/admin';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 import {
   AdminProviderError,
   deleteAdminProvider,
@@ -42,7 +42,11 @@ export async function PUT(
     if (error instanceof AdminProviderError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    serverLogger.error({ err: error }, '[admin/providers/:id] update failed:');
+    serverLogger.error({
+      event: 'admin.providers.update.failed',
+      providerId: id,
+      error: errorToLog(error),
+    }, 'Admin provider update failed');
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }
@@ -62,7 +66,11 @@ export async function DELETE(
     if (error instanceof AdminProviderError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    serverLogger.error({ err: error }, '[admin/providers/:id] delete failed:');
+    serverLogger.error({
+      event: 'admin.providers.delete.failed',
+      providerId: id,
+      error: errorToLog(error),
+    }, 'Admin provider delete failed');
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }

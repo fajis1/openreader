@@ -11,7 +11,7 @@ import { requireAuthContext } from '@/lib/server/auth/auth';
 import { rateLimiter, RATE_LIMITS, isTtsRateLimitEnabled } from '@/lib/server/rate-limit/rate-limiter';
 import { getClientIp } from '@/lib/server/rate-limit/request-ip';
 import { getOrCreateDeviceId, setDeviceIdCookie } from '@/lib/server/rate-limit/device-id';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 import {
   deleteAudiobookObject,
   getAudiobookObjectBuffer,
@@ -186,7 +186,12 @@ async function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
     }
 
     ffmpeg.stderr.on('data', (data) => {
-      serverLogger.warn(`ffmpeg stderr: ${data}`);
+      serverLogger.warn({
+        event: 'audiobook.chapter.ffmpeg.stderr',
+        degraded: true,
+        step: 'ffmpeg',
+        stderr: String(data),
+      }, 'ffmpeg stderr');
     });
 
     ffmpeg.on('close', (code) => {
@@ -326,7 +331,11 @@ export async function POST(request: NextRequest) {
         fallbackProviderRef: runtimeConfig.defaultTtsProvider,
       });
       if (!existingResult.settings) {
-        serverLogger.error({ bookId, storageUserId }, 'Invalid audiobook.meta.json settings payload');
+        serverLogger.error({
+          event: 'audiobook.chapter.meta_settings.invalid',
+          bookId,
+          storageUserId,
+        }, 'Invalid audiobook.meta.json settings payload');
         return NextResponse.json({ error: 'Invalid audiobook metadata settings' }, { status: 500 });
       }
       normalizedExistingSettings = normalizeNativeSpeedForSettings(existingResult.settings);
@@ -401,6 +410,9 @@ export async function POST(request: NextRequest) {
         );
       } catch (error) {
         serverLogger.warn({
+          event: 'audiobook.chapter.meta_settings.persist_migration_failed',
+          degraded: true,
+          step: 'persist_migrated_settings',
           bookId,
           storageUserId,
           error: error instanceof Error ? error.message : String(error),
@@ -609,7 +621,12 @@ export async function POST(request: NextRequest) {
           request.signal,
         );
       } catch (copyError) {
-        serverLogger.warn({ err: copyError }, 'Chapter remux failed; falling back to mp3 re-encode:');
+        serverLogger.warn({
+          event: 'audiobook.chapter.remux.failed',
+          degraded: true,
+          fallbackPath: 'mp3_reencode',
+          error: errorToLog(copyError),
+        }, 'Chapter remux failed; falling back to mp3 re-encode');
         await runFFmpeg(
           chapterEncodeArgs(inputPath, chapterOutputTempPath, format, postSpeed, titleTag),
           request.signal,
@@ -729,7 +746,10 @@ export async function POST(request: NextRequest) {
       return response;
     }
 
-    serverLogger.error({ err: error }, 'Error processing audio chapter:');
+    serverLogger.error({
+      event: 'audiobook.chapter.process.failed',
+      error: errorToLog(error),
+    }, 'Failed to process audio chapter');
     const response = NextResponse.json({ error: 'Failed to process audio chapter' }, { status: 500 });
     attachDeviceIdCookie(response, deviceIdToSet, didCreateDeviceIdCookie);
     return response;
@@ -824,7 +844,10 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error downloading chapter:');
+    serverLogger.error({
+      event: 'audiobook.chapter.download.failed',
+      error: errorToLog(error),
+    }, 'Failed to download chapter');
     return NextResponse.json({ error: 'Failed to download chapter' }, { status: 500 });
   }
 }
@@ -892,7 +915,10 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error deleting chapter:');
+    serverLogger.error({
+      event: 'audiobook.chapter.delete.failed',
+      error: errorToLog(error),
+    }, 'Failed to delete chapter');
     return NextResponse.json({ error: 'Failed to delete chapter' }, { status: 500 });
   }
 }

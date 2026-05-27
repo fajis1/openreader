@@ -7,7 +7,7 @@ import { contentTypeForName } from '@/lib/server/storage/library-mount';
 import { getDocumentBlob, isMissingBlobError, isValidDocumentId } from '@/lib/server/documents/blobstore';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,7 +45,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
     }
 
-    serverLogger.info({ id }, '[blob-fallback] download proxy used');
+    serverLogger.info({
+      event: 'documents.blob.get.fallback.proxy_used',
+      degraded: true,
+      fallbackPath: 'download_proxy',
+      documentId: id,
+    }, 'Document download fallback proxy used');
 
     const rows = (await db
       .select({ id: documents.id, userId: documents.userId, name: documents.name })
@@ -82,7 +87,10 @@ export async function GET(req: NextRequest) {
       throw error;
     }
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error loading document content fallback:');
+    serverLogger.error({
+      event: 'documents.blob.get.fallback.failed',
+      error: errorToLog(error),
+    }, 'Failed to load document content fallback');
     return NextResponse.json({ error: 'Failed to load document content' }, { status: 500 });
   }
 }

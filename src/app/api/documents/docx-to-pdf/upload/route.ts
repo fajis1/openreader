@@ -15,7 +15,7 @@ import { stringifyDocumentParseState } from '@/lib/server/documents/parse-state'
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
 import { putDocumentBlob } from '@/lib/server/documents/blobstore';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 
 const DOCSTORE_DIR = path.join(process.cwd(), 'docstore');
 const TEMP_DIR = path.join(DOCSTORE_DIR, 'tmp');
@@ -163,7 +163,13 @@ export async function POST(req: NextRequest) {
         },
         testNamespace,
       ).catch((error) => {
-        serverLogger.warn({ err: error }, `Failed to enqueue preview for converted DOCX ${id}:`);
+        serverLogger.warn({
+          event: 'documents.docx.preview_enqueue.failed',
+          degraded: true,
+          fallbackPath: 'skip_preview_enqueue',
+          documentId: id,
+          error: errorToLog(error),
+        }, 'Failed to enqueue preview for converted DOCX');
       });
 
       enqueueParsePdfJob({
@@ -185,7 +191,10 @@ export async function POST(req: NextRequest) {
       await rm(jobDir, { recursive: true, force: true }).catch(() => {});
     }
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error converting/uploading DOCX:');
+    serverLogger.error({
+      event: 'documents.docx.convert_upload.failed',
+      error: errorToLog(error),
+    }, 'Failed converting/uploading DOCX');
     return NextResponse.json({ error: 'Failed to convert document' }, { status: 500 });
   }
 }

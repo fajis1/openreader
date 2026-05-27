@@ -5,7 +5,7 @@ import { userPreferences } from '@/db/schema';
 import { normalizeVersion, shouldOpenChangelogForVersionChange } from '@/lib/shared/changelog';
 import { nowTimestampMs } from '@/lib/shared/timestamps';
 import { resolveUserStateScope } from '@/lib/server/user/resolve-state-scope';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 import {
   deserializeUserPreferencesPayload,
   extractUserPreferencesMeta,
@@ -81,7 +81,10 @@ export async function POST(req: NextRequest) {
       lastSeenVersion,
     });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error checking changelog version:');
+    serverLogger.error({
+      event: 'user.changelog.version_check.failed',
+      error: errorToLog(error),
+    }, 'Failed to check changelog version');
     return NextResponse.json({ error: 'Failed to check changelog version' }, { status: 500 });
   }
 }

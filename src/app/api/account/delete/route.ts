@@ -4,7 +4,7 @@ import { auth } from '@/lib/server/auth/auth';
 import { isAuthEnabled } from '@/lib/server/auth/config';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { deleteUserStorageData } from '@/lib/server/user/data-cleanup';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, hashForLog, serverLogger } from '@/lib/server/logger';
 
 export async function DELETE() {
   if (!isAuthEnabled() || !auth) {
@@ -29,7 +29,13 @@ export async function DELETE() {
       try {
         await deleteUserStorageData(session.user.id, testNamespace);
       } catch (error) {
-        serverLogger.warn({ err: error }, '[account-delete] Failed to clean up namespaced user storage before deletion:');
+        serverLogger.warn({
+          event: 'account.delete.storage_cleanup_failed',
+          degraded: true,
+          step: 'namespaced_storage_cleanup',
+          userIdHash: hashForLog(session.user.id),
+          error: errorToLog(error),
+        }, 'Failed to clean up namespaced user storage before deletion');
       }
     }
 
@@ -41,7 +47,10 @@ export async function DELETE() {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Failed to delete account:');
+    serverLogger.error({
+      event: 'account.delete.failed',
+      error: errorToLog(error),
+    }, 'Failed to delete account');
     return NextResponse.json(
       { error: 'Failed to delete account' },
       { status: 500 }

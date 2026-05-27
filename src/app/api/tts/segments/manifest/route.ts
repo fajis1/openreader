@@ -389,7 +389,7 @@ export async function GET(request: NextRequest) {
     logger.error({
       event: 'tts.segments.manifest.list_failed',
       error: errorToLog(error),
-    });
+    }, 'Failed to list TTS segments');
     return NextResponse.json({ error: 'Failed to list TTS segments' }, { status: 500 });
   }
 }

@@ -273,7 +273,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                 storageUserIdHash,
                 requestId,
                 error: error instanceof Error ? error.message : String(error),
-              });
+              }, 'SSE DB resync failed');
               controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
             });
           }, SSE_RESYNC_INTERVAL_MS);
@@ -306,7 +306,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                     storageUserIdHash,
                     parseStatus: current.parseStatus,
                     requestedOpId,
-                  });
+                  }, 'Parse stream running without opId and non-terminal status');
                 }
               } else if (loggedMissingOpId) {
                 loggedMissingOpId = false;
@@ -346,7 +346,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                 opId: currentOpId,
                 status: response.status,
                 detail,
-              });
+              }, 'Worker stream request failed');
               await sleep(500);
               continue;
             }
@@ -355,7 +355,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
                 event: 'documents.parsed.events.worker_stream_missing_body',
                 documentId: id,
                 opId: currentOpId,
-              });
+              }, 'Worker stream response missing body');
               await sleep(500);
               continue;
             }
@@ -456,7 +456,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
               event: 'documents.parsed.events.worker_proxy_crashed',
               documentId: id,
               error: errorToLog(error),
-            });
+            }, 'Worker proxy crashed while streaming parse events');
             if (!closed) {
               controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
             }
@@ -486,7 +486,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     logger.error({
       event: 'documents.parsed.events.route_failed',
       error: errorToLog(error),
-    });
+    }, 'Parsed events route failed');
     return NextResponse.json({ error: 'Failed to stream parsed PDF progress' }, { status: 500 });
   }
 }

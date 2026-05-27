@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { presignDocumentPreviewGet } from '@/lib/server/documents/previews-blobstore';
 import { ensureDocumentPreview } from '@/lib/server/documents/previews';
 import { validatePreviewRequest } from '../utils';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +38,12 @@ export async function GET(req: NextRequest) {
 
     const directUrl = await presignDocumentPreviewGet(doc.id, testNamespace).catch(() => null);
     if (!directUrl) {
-      serverLogger.warn({ id: doc.id }, '[blob-fallback] presign preview unavailable, redirecting to proxy fallback');
+      serverLogger.warn({
+        event: 'documents.preview.presign.unavailable',
+        degraded: true,
+        fallbackPath: 'preview_proxy',
+        documentId: doc.id,
+      }, 'Presigned document preview unavailable, redirecting to proxy fallback');
       return NextResponse.redirect(fallbackUrl, {
         status: 307,
         headers: { 'Cache-Control': 'no-store' },
@@ -50,7 +55,10 @@ export async function GET(req: NextRequest) {
       headers: { 'Cache-Control': 'no-store' },
     });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error creating document preview signature:');
+    serverLogger.error({
+      event: 'documents.preview.presign.failed',
+      error: errorToLog(error),
+    }, 'Failed to create document preview signature');
     return NextResponse.json({ error: 'Failed to prepare document preview' }, { status: 500 });
   }
 }

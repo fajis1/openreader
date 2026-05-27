@@ -3,7 +3,7 @@ import { adminProviders, adminSettings } from '@/db/schema';
 import { encryptSecret, apiKeyLast4 } from '@/lib/server/crypto/secrets';
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 import {
   RUNTIME_CONFIG_SCHEMA,
   seedRuntimeConfigFromEnv,
@@ -31,7 +31,11 @@ let seedPromise: Promise<void> | null = null;
 export async function ensureAdminSeed(): Promise<void> {
   if (!seedPromise) {
     seedPromise = runSeed().catch((error) => {
-      serverLogger.warn({ err: error }, '[admin-seed] failed:');
+      serverLogger.warn({
+        event: 'admin.seed.run.failed',
+        degraded: true,
+        error: errorToLog(error),
+      }, 'Admin seed run failed');
       // Reset so a subsequent call can retry (e.g. once migrations run).
       seedPromise = null;
       throw error;
@@ -59,7 +63,11 @@ async function seedDefaultAdminProvider(): Promise<void> {
   try {
     existing = await db.select({ id: adminProviders.id }).from(adminProviders).limit(1);
   } catch (error) {
-    serverLogger.warn({ err: error }, '[admin-seed] could not check admin_providers (table missing?)');
+    serverLogger.warn({
+      event: 'admin.seed.providers.check_failed',
+      degraded: true,
+      error: errorToLog(error),
+    }, 'Could not check admin_providers');
     return;
   }
   if (existing.length > 0) return;
@@ -86,14 +94,24 @@ async function seedDefaultAdminProvider(): Promise<void> {
             updatedAt: now,
           })
           .onConflictDoNothing({ target: adminSettings.key });
-        serverLogger.warn(
-          '[admin-seed] API_KEY present but AUTH_SECRET missing; defaulting restrictUserApiKeys=false so BYOK remains available',
-        );
+        serverLogger.warn({
+          event: 'admin.seed.restrict_user_api_keys.defaulted',
+          degraded: true,
+          step: 'set_restrict_user_api_keys_fallback',
+        }, 'API_KEY present but AUTH_SECRET missing; defaulting restrictUserApiKeys=false');
       } catch (fallbackError) {
-        serverLogger.warn({ err: fallbackError }, '[admin-seed] failed to write restrictUserApiKeys fallback after encryption failure');
+        serverLogger.warn({
+          event: 'admin.seed.restrict_user_api_keys.fallback_write_failed',
+          degraded: true,
+          error: errorToLog(fallbackError),
+        }, 'Failed to write restrictUserApiKeys fallback after encryption failure');
       }
     }
-    serverLogger.warn({ err: error }, '[admin-seed] failed to encrypt default provider API key');
+    serverLogger.warn({
+      event: 'admin.seed.provider_key_encrypt.failed',
+      degraded: true,
+      error: errorToLog(error),
+    }, 'Failed to encrypt default provider API key');
     return;
   }
 
@@ -112,9 +130,17 @@ async function seedDefaultAdminProvider(): Promise<void> {
       createdAt: now,
       updatedAt: now,
     });
-    serverLogger.info('[admin-seed] created default-openai admin provider from env');
+    serverLogger.info({
+      event: 'admin.seed.provider_insert.succeeded',
+      providerSlug: 'default-openai',
+    }, 'Created default-openai admin provider from env');
   } catch (error) {
-    serverLogger.warn({ err: error }, '[admin-seed] failed to insert default-openai provider');
+    serverLogger.warn({
+      event: 'admin.seed.provider_insert.failed',
+      degraded: true,
+      providerSlug: 'default-openai',
+      error: errorToLog(error),
+    }, 'Failed to insert default-openai provider');
   }
 }
 
@@ -138,7 +164,11 @@ async function cleanupLegacyDefaultTtsProviderSeedRow(): Promise<void> {
         ),
       );
   } catch (error) {
-    serverLogger.warn({ err: error }, '[admin-seed] failed to cleanup legacy defaultTtsProvider seed row');
+    serverLogger.warn({
+      event: 'admin.seed.legacy_default_provider_cleanup.failed',
+      degraded: true,
+      error: errorToLog(error),
+    }, 'Failed to cleanup legacy defaultTtsProvider seed row');
   }
 }
 
@@ -148,6 +178,10 @@ async function cleanupLegacyDefaultTtsModelRows(): Promise<void> {
       .delete(adminSettings)
       .where(eq(adminSettings.key, 'defaultTtsModel'));
   } catch (error) {
-    serverLogger.warn({ err: error }, '[admin-seed] failed to cleanup legacy defaultTtsModel rows');
+    serverLogger.warn({
+      event: 'admin.seed.legacy_default_model_cleanup.failed',
+      degraded: true,
+      error: errorToLog(error),
+    }, 'Failed to cleanup legacy defaultTtsModel rows');
   }
 }

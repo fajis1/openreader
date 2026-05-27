@@ -4,7 +4,7 @@ import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { safeDocumentName, toDocumentTypeFromName } from '@/lib/server/documents/utils';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 import {
   cleanupDocumentPreviewArtifacts,
   deleteDocumentPreviewRows,
@@ -173,7 +173,13 @@ export async function POST(req: NextRequest) {
         },
         testNamespace,
       ).catch((error) => {
-        serverLogger.warn({ err: error }, `Failed to enqueue preview for document ${doc.id}:`);
+        serverLogger.warn({
+          event: 'documents.preview.enqueue.failed',
+          degraded: true,
+          fallbackPath: 'skip_preview_enqueue',
+          documentId: doc.id,
+          error: errorToLog(error),
+        }, 'Failed to enqueue document preview');
       });
 
       if (doc.type === 'pdf') {
@@ -187,7 +193,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, stored });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error registering documents:');
+    serverLogger.error({
+      event: 'documents.register.failed',
+      error: errorToLog(error),
+    }, 'Failed to register documents');
     return NextResponse.json({ error: 'Failed to register documents' }, { status: 500 });
   }
 }
@@ -263,7 +272,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ documents: results });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error loading document metadata:');
+    serverLogger.error({
+      event: 'documents.list.failed',
+      error: errorToLog(error),
+    }, 'Failed to load document metadata');
     return NextResponse.json({ error: 'Failed to load documents' }, { status: 500 });
   }
 }
@@ -343,21 +355,42 @@ export async function DELETE(req: NextRequest) {
         await deleteDocumentBlob(id, testNamespace);
       } catch (error) {
         if (!isMissingBlobError(error)) {
-          serverLogger.warn({ err: error }, `[best-effort] Failed to delete blob for document ${id}, orphaned blob may need manual cleanup:`);
+          serverLogger.warn({
+            event: 'documents.delete.blob_cleanup_failed',
+            degraded: true,
+            step: 'delete_document_blob',
+            documentId: id,
+            error: errorToLog(error),
+          }, 'Failed to delete document blob during cleanup');
         }
       }
 
       await cleanupDocumentPreviewArtifacts(id, testNamespace).catch((error) => {
-        serverLogger.warn({ err: error }, `Failed to cleanup preview artifacts for document ${id}:`);
+        serverLogger.warn({
+          event: 'documents.delete.preview_artifacts_cleanup_failed',
+          degraded: true,
+          step: 'delete_preview_artifacts',
+          documentId: id,
+          error: errorToLog(error),
+        }, 'Failed to cleanup preview artifacts');
       });
       await deleteDocumentPreviewRows(id, testNamespace).catch((error) => {
-        serverLogger.warn({ err: error }, `Failed to cleanup preview rows for document ${id}:`);
+        serverLogger.warn({
+          event: 'documents.delete.preview_rows_cleanup_failed',
+          degraded: true,
+          step: 'delete_preview_rows',
+          documentId: id,
+          error: errorToLog(error),
+        }, 'Failed to cleanup preview rows');
       });
     }
 
     return NextResponse.json({ success: true, deleted: deletedRows.length });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error deleting documents:');
+    serverLogger.error({
+      event: 'documents.delete.failed',
+      error: errorToLog(error),
+    }, 'Failed to delete documents');
     return NextResponse.json({ error: 'Failed to delete documents' }, { status: 500 });
   }
 }

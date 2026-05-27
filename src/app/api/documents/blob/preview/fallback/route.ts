@@ -3,7 +3,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 import {
   getDocumentRange,
   isMissingBlobError as isMissingDocumentBlobError,
@@ -67,9 +67,12 @@ export async function GET(req: NextRequest) {
     }
 
     serverLogger.info({
-      id,
+      event: 'documents.preview.fallback.proxy_used',
+      degraded: true,
+      fallbackPath: 'preview_proxy',
+      documentId: id,
       snippetRequested,
-    }, '[blob-fallback] preview proxy used');
+    }, 'Document preview fallback proxy used');
 
     const rows = (await db
       .select({
@@ -176,7 +179,10 @@ export async function GET(req: NextRequest) {
       throw error;
     }
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error loading document preview fallback:');
+    serverLogger.error({
+      event: 'documents.preview.fallback.failed',
+      error: errorToLog(error),
+    }, 'Failed to load document preview fallback');
     return NextResponse.json({ error: 'Failed to load document preview' }, { status: 500 });
   }
 }

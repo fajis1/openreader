@@ -3,7 +3,7 @@ import { db } from '@/db';
 import { ttsSegmentEntries, ttsSegmentVariants } from '@/db/schema';
 import { deleteTtsSegmentAudioObjects } from '@/lib/server/tts/segments-blobstore';
 import type { ReaderType } from '@/types/user-state';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 
 type ClearTtsSegmentCacheInput = {
   userId: string;
@@ -67,10 +67,13 @@ export async function clearTtsSegmentCache(
     } catch (error) {
       warning = error instanceof Error ? error.message : 'Failed deleting some audio objects';
       serverLogger.warn({
+        event: 'tts.segments.cache.audio_cleanup_failed',
+        degraded: true,
+        step: 'delete_tts_audio_objects',
         documentId: input.documentId,
         userId: input.userId,
-        error: warning,
-      }, 'Failed clearing some TTS segment audio objects:');
+        error: errorToLog(error),
+      }, 'Failed clearing some TTS segment audio objects');
     }
   }
 

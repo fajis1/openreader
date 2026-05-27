@@ -11,7 +11,13 @@ function readPositiveIntEnv(name: string, fallback: number): number {
 
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    serverLogger.warn(`[rate-limiter] Invalid ${name}=${raw}; using default ${fallback}`);
+    serverLogger.warn({
+      event: 'rate_limit.config.invalid_env',
+      degraded: true,
+      envVar: name,
+      envValue: raw,
+      fallbackValue: fallback,
+    }, 'Invalid rate limiter env value; using default');
     return fallback;
   }
 

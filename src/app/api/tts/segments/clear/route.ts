@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     logger.error({
       event: 'tts.segments.clear_failed',
       error: errorToLog(error),
-    });
+    }, 'Failed to clear TTS segment cache');
     return NextResponse.json({ error: 'Failed to clear TTS segment cache' }, { status: 500 });
   }
 }

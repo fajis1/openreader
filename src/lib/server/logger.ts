@@ -4,6 +4,34 @@ import pino, { type Logger } from 'pino';
 import pinoPretty from 'pino-pretty';
 
 export type ServerLogger = Logger;
+export type ServerLogLevel = 'error' | 'warn' | 'info';
+
+export type ServerErrorClass =
+  | 'validation'
+  | 'auth'
+  | 'permission'
+  | 'upstream'
+  | 'storage'
+  | 'db'
+  | 'timeout'
+  | 'unknown';
+
+export type ServerErrorContract = {
+  errorCode: string;
+  errorClass: ServerErrorClass;
+  retryable: boolean;
+  httpStatus: number;
+  operation: string;
+  degraded: boolean;
+  cause?: unknown;
+};
+
+export type ServerApiErrorBody = {
+  error: string;
+  errorCode: string;
+  retryable?: boolean;
+  details?: Record<string, unknown>;
+};
 
 const LOG_FORMAT = process.env.LOG_FORMAT?.trim().toLowerCase() || 'pretty';
 const LOG_LEVEL = process.env.LOG_LEVEL?.trim() || 'info';
@@ -46,6 +74,17 @@ export function errorToLog(error: unknown): Record<string, unknown> {
     };
   }
   return { message: String(error) };
+}
+
+export function apiErrorBody(
+  input: Omit<ServerApiErrorBody, 'errorCode'> & { errorCode: string },
+): ServerApiErrorBody {
+  return {
+    error: input.error,
+    errorCode: input.errorCode,
+    ...(typeof input.retryable === 'boolean' ? { retryable: input.retryable } : {}),
+    ...(input.details ? { details: input.details } : {}),
+  };
 }
 
 export function hashForLog(value: string | null | undefined): string | null {

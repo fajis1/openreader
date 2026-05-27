@@ -166,7 +166,7 @@ async function finalizeFromWorkerState(input: {
       documentId: input.row.id,
       userIdHash: hashForLog(input.row.userId),
       parsedJsonKey,
-    });
+    }, 'Worker output parsed successfully but contained no blocks');
   }
 
   return new NextResponse(new Uint8Array(json), {
@@ -223,7 +223,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         documentId: id,
         userIdHash: hashForLog(row.userId),
         opId: requestedOpId,
-      });
+      }, 'Requested worker operation id was unavailable');
     }
 
     let state = parseDocumentParseState(row.parseState);
@@ -288,7 +288,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
           documentId: id,
           userIdHash: hashForLog(row.userId),
           parsedJsonKey: row.parsedJsonKey,
-        });
+        }, 'Parsed document blob contained no blocks');
       }
 
       return new NextResponse(new Uint8Array(json), {
@@ -308,7 +308,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     logger.error({
       event: 'documents.parsed.get_failed',
       error: errorToLog(error),
-    });
+    }, 'Failed to read parsed PDF');
     return NextResponse.json({ error: 'Failed to read parsed PDF' }, { status: 500 });
   }
 }
@@ -388,7 +388,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     logger.error({
       event: 'documents.parsed.force_refresh_failed',
       error: errorToLog(error),
-    });
+    }, 'Failed to force PDF refresh');
     return NextResponse.json({ error: 'Failed to force PDF refresh' }, { status: 500 });
   }
 }

@@ -1,6 +1,6 @@
 import { getWorkerClientConfigFromEnv } from '@/lib/server/compute/worker';
 import type { WorkerOperationState } from '@openreader/compute-core/api-contracts';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 
 const WORKER_OP_REQUEST_TIMEOUT_MS = 2_500;
 
@@ -15,9 +15,11 @@ export async function fetchWorkerOperationState<Result>(
     cfg = getWorkerClientConfigFromEnv();
   } catch (error) {
     serverLogger.warn({
+      event: 'compute.worker_op_state.config.invalid',
       opId: normalized,
-      error: error instanceof Error ? error.message : String(error),
-    }, '[worker-op-state] worker client env missing/invalid');
+      degraded: true,
+      error: errorToLog(error),
+    }, 'Worker client env missing/invalid');
     return null;
   }
 
@@ -38,25 +40,31 @@ export async function fetchWorkerOperationState<Result>(
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
       serverLogger.warn({
+        event: 'compute.worker_op_state.fetch.failed',
         opId: normalized,
         status: res.status,
         detail,
-      }, '[worker-op-state] worker op request failed');
+        degraded: true,
+      }, 'Worker op request failed');
       return null;
     }
     const parsed = await res.json() as WorkerOperationState<Result>;
     if (!parsed || typeof parsed !== 'object' || parsed.opId !== normalized) {
       serverLogger.warn({
+        event: 'compute.worker_op_state.response.invalid',
         opId: normalized,
-      }, '[worker-op-state] worker op response invalid');
+        degraded: true,
+      }, 'Worker op response invalid');
       return null;
     }
     return parsed;
   } catch (error) {
     serverLogger.warn({
+      event: 'compute.worker_op_state.fetch.error',
       opId: normalized,
-      error: error instanceof Error ? error.message : String(error),
-    }, '[worker-op-state] worker op request threw');
+      degraded: true,
+      error: errorToLog(error),
+    }, 'Worker op request threw');
     return null;
   } finally {
     clearTimeout(timeout);

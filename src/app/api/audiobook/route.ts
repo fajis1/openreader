@@ -7,7 +7,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { audiobooks, audiobookChapters } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 import {
   audiobookPrefix,
   deleteAudiobookObject,
@@ -116,7 +116,12 @@ async function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
     }
 
     ffmpeg.stderr.on('data', (data) => {
-      serverLogger.warn(`ffmpeg stderr: ${data}`);
+      serverLogger.warn({
+        event: 'audiobook.ffmpeg.stderr',
+        degraded: true,
+        step: 'ffmpeg',
+        stderr: String(data),
+      }, 'ffmpeg stderr');
     });
 
     ffmpeg.on('close', (code) => {
@@ -283,7 +288,12 @@ export async function GET(request: NextRequest) {
           request.signal,
         );
       } catch (copyError) {
-        serverLogger.warn({ err: copyError }, 'MP3 concat copy failed; falling back to re-encode:');
+        serverLogger.warn({
+          event: 'audiobook.concat_copy.mp3.failed',
+          degraded: true,
+          fallbackPath: 'reencode',
+          error: errorToLog(copyError),
+        }, 'MP3 concat copy failed; falling back to re-encode');
         await runFFmpeg(
           ['-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-b:a', '64k', outputPath],
           request.signal,
@@ -312,7 +322,12 @@ export async function GET(request: NextRequest) {
           request.signal,
         );
       } catch (copyError) {
-        serverLogger.warn({ err: copyError }, 'M4B concat copy failed; falling back to re-encode:');
+        serverLogger.warn({
+          event: 'audiobook.concat_copy.m4b.failed',
+          degraded: true,
+          fallbackPath: 'reencode',
+          error: errorToLog(copyError),
+        }, 'M4B concat copy failed; falling back to re-encode');
         await runFFmpeg(
           [
             '-f',
@@ -361,7 +376,10 @@ export async function GET(request: NextRequest) {
     if ((error as Error)?.message === 'ABORTED' || request.signal.aborted) {
       return NextResponse.json({ error: 'cancelled' }, { status: 499 });
     }
-    serverLogger.error({ err: error }, 'Error creating full audiobook:');
+    serverLogger.error({
+      event: 'audiobook.create.failed',
+      error: errorToLog(error),
+    }, 'Failed to create full audiobook');
     return NextResponse.json({ error: 'Failed to create full audiobook file' }, { status: 500 });
   } finally {
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});
@@ -409,7 +427,10 @@ export async function DELETE(request: NextRequest) {
     const deleted = await deleteAudiobookPrefix(audiobookPrefix(bookId, storageUserId, testNamespace)).catch(() => 0);
     return NextResponse.json({ success: true, existed: deleted > 0 });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error resetting audiobook:');
+    serverLogger.error({
+      event: 'audiobook.reset.failed',
+      error: errorToLog(error),
+    }, 'Failed to reset audiobook');
     return NextResponse.json({ error: 'Failed to reset audiobook' }, { status: 500 });
   }
 }

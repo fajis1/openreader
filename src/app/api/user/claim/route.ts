@@ -5,7 +5,7 @@ import { db } from '@/db';
 import { audiobooks, documents, userDocumentProgress, userPreferences } from '@/db/schema';
 import { count, eq, ne } from 'drizzle-orm';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
-import { serverLogger } from '@/lib/server/logger';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
 
 async function checkClaimMigrationReadiness(): Promise<NextResponse | null> {
   const [legacyRows] = await db
@@ -57,7 +57,10 @@ export async function GET(req: NextRequest) {
     const counts = await getClaimableCounts(unclaimedUserId);
     return NextResponse.json({ success: true, ...counts });
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error checking claimable data:');
+    serverLogger.error({
+      event: 'user.claim.status.failed',
+      error: errorToLog(error),
+    }, 'Failed checking claimable data');
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
@@ -84,7 +87,10 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error) {
-    serverLogger.error({ err: error }, 'Error claiming data:');
+    serverLogger.error({
+      event: 'user.claim.execute.failed',
+      error: errorToLog(error),
+    }, 'Failed claiming anonymous data');
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
