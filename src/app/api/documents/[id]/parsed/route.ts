@@ -96,6 +96,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         });
         effectiveStatus = merged.parseStatus;
         effectiveProgress = merged.parseProgress;
+      } else {
+        console.warn('[documents/parsed:get] worker state unavailable for op', {
+          documentId: id,
+          userId: row.userId,
+          opId,
+          parseStatus: effectiveStatus,
+        });
       }
     }
 
@@ -220,6 +227,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         });
         effectiveStatus = merged.parseStatus;
         effectiveProgress = merged.parseProgress;
+      } else {
+        console.warn('[documents/parsed:post] worker state unavailable for op', {
+          documentId: id,
+          userId: row.userId,
+          opId,
+          parseStatus: effectiveStatus,
+        });
       }
     }
 

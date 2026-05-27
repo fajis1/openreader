@@ -12,7 +12,11 @@ export async function fetchWorkerOperationState<Result>(
   let cfg: { baseUrl: string; token: string };
   try {
     cfg = getWorkerClientConfigFromEnv();
-  } catch {
+  } catch (error) {
+    console.warn('[worker-op-state] worker client env missing/invalid', {
+      opId: normalized,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 
@@ -30,14 +34,30 @@ export async function fetchWorkerOperationState<Result>(
       signal: controller.signal,
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      console.warn('[worker-op-state] worker op request failed', {
+        opId: normalized,
+        status: res.status,
+        detail,
+      });
+      return null;
+    }
     const parsed = await res.json() as WorkerOperationState<Result>;
-    if (!parsed || typeof parsed !== 'object' || parsed.opId !== normalized) return null;
+    if (!parsed || typeof parsed !== 'object' || parsed.opId !== normalized) {
+      console.warn('[worker-op-state] worker op response invalid', {
+        opId: normalized,
+      });
+      return null;
+    }
     return parsed;
-  } catch {
+  } catch (error) {
+    console.warn('[worker-op-state] worker op request threw', {
+      opId: normalized,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   } finally {
     clearTimeout(timeout);
   }
 }
-

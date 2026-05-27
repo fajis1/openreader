@@ -244,8 +244,12 @@ export function usePdfDocument(): PdfDocumentState {
         }
       },
       onError: () => {
-        // EventSource reconnects automatically. Keep stream open.
+        // EventSource reconnects automatically. Keep stream open, but log so
+        // production debugging can correlate UI stalls with SSE churn.
         if (controller.signal.aborted) return;
+        console.warn('[pdf] parsed/events stream error; waiting for auto-reconnect', {
+          documentId,
+        });
       },
     });
     parseSseCloseRef.current = closeSse;

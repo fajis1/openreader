@@ -149,6 +149,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const initialState = await toSnapshotState(row);
     const workerCfg = getWorkerClientConfigFromEnv();
     const encoder = new TextEncoder();
+    console.info('[parsed/events] stream open', {
+      documentId: id,
+      storageUserId,
+      initialParseStatus: initialState.snapshot.parseStatus,
+      initialOpId: initialState.opId,
+    });
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -230,6 +236,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
               }
             }).catch((error) => {
               if (closed) return;
+              console.warn('[parsed/events] db resync failed', {
+                documentId: id,
+                storageUserId,
+                error: error instanceof Error ? error.message : String(error),
+              });
               controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
             });
           }, SSE_RESYNC_INTERVAL_MS);
@@ -251,6 +262,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
               current = next.snapshot;
               signature = next.signature;
               currentOpId = next.opId;
+              if (!currentOpId) {
+                console.warn('[parsed/events] waiting for worker opId', {
+                  documentId: id,
+                  parseStatus: current.parseStatus,
+                });
+              }
               if (current.parseStatus === 'ready' || current.parseStatus === 'failed') {
                 closeStream();
                 return;
@@ -290,6 +307,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
               continue;
             }
             if (!response.body) {
+              console.warn('[parsed/events] worker stream response missing body', {
+                documentId: id,
+                opId: currentOpId,
+              });
               await sleep(500);
               continue;
             }
@@ -380,6 +401,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
         void runWorkerProxy()
           .catch((error) => {
+            console.error('[parsed/events] worker proxy crashed', {
+              documentId: id,
+              error: error instanceof Error ? error.message : String(error),
+            });
             if (!closed) {
               controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
             }
