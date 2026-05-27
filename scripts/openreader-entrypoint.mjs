@@ -345,7 +345,7 @@ async function main() {
     shutdownPromise = (async () => {
       await Promise.all([
         terminateChild(appProc, signal, 4000),
-        terminateChild(workerProc, 'SIGTERM', 4000, true),
+        terminateChild(workerProc, 'SIGTERM', 4000),
         terminateChild(natsProc, 'SIGTERM', 4000),
         terminateChild(weedProc, 'SIGTERM', 4000),
       ]);
@@ -397,7 +397,12 @@ async function main() {
       const waitTimeout = Number.isFinite(waitSec) ? waitSec : 20;
       const launchWeed = (endpointUrl) => {
         const parsedEndpoint = parseS3Endpoint(endpointUrl);
-        const weedArgs = ['mini', `-dir=${runtimeEnv.WEED_MINI_DIR}`];
+        const weedArgs = [
+          '-alsologtostderr=false',
+          '-stderrthreshold=WARNING',
+          'mini',
+          `-dir=${runtimeEnv.WEED_MINI_DIR}`,
+        ];
         weedArgs.push(`-s3.port=${parsedEndpoint.port}`);
         if (runningInDocker) {
           weedArgs.push('-ip.bind=0.0.0.0');
@@ -512,7 +517,6 @@ async function main() {
           env: workerEnv,
           stdio: ['ignore', 'pipe', 'pipe'],
           shell: process.platform === 'win32',
-          detached: process.platform !== 'win32',
         },
       );
       stopWorkerStdoutForward = forwardChildStream(workerProc.stdout, process.stdout);
