@@ -26,6 +26,7 @@ import {
   FORCE_REPARSE_CONFIRM_TITLE,
   isForceReparseDisabled,
 } from '@/lib/client/pdf/force-reparse';
+import { useUnmountCleanupRef } from '@/hooks/useUnmountCleanupRef';
 import { usePdfDocument } from './usePdfDocument';
 
 // Dynamic import for client-side rendering only
@@ -72,7 +73,6 @@ export default function PDFViewerPage() {
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const inFlightDocIdRef = useRef<string | null>(null);
   const loadedDocIdRef = useRef<string | null>(null);
-  const clearCurrDocRef = useRef(clearCurrDoc);
   const [isNavigatingBack, setIsNavigatingBack] = useState(false);
   const parseUiState: NonNullable<typeof parseStatus> = parseStatus ?? 'pending';
   const hasResolvedParseStatus = parseStatus !== null;
@@ -153,15 +153,7 @@ export default function PDFViewerPage() {
     loadDocument();
   }, [loadDocument]);
 
-  useEffect(() => {
-    clearCurrDocRef.current = clearCurrDoc;
-  }, [clearCurrDoc]);
-
-  useEffect(() => {
-    return () => {
-      clearCurrDocRef.current();
-    };
-  }, []);
+  useUnmountCleanupRef(clearCurrDoc);
 
   useEffect(() => {
     if (isLoading) return;

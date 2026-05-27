@@ -19,6 +19,7 @@ import { resolveDocumentId } from '@/lib/client/dexie';
 import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
+import { useUnmountCleanupRef } from '@/hooks/useUnmountCleanupRef';
 import { useEpubDocument } from './useEpubDocument';
 
 export default function EPUBPage() {
@@ -46,7 +47,6 @@ export default function EPUBPage() {
   const inFlightDocIdRef = useRef<string | null>(null);
   const loadedDocIdRef = useRef<string | null>(null);
   const didInitPadPctRef = useRef(false);
-  const clearCurrDocRef = useRef(clearCurrDoc);
 
   useEffect(() => {
     setIsLoading(true);
@@ -103,15 +103,7 @@ export default function EPUBPage() {
     loadDocument();
   }, [loadDocument, isLoading]);
 
-  useEffect(() => {
-    clearCurrDocRef.current = clearCurrDoc;
-  }, [clearCurrDoc]);
-
-  useEffect(() => {
-    return () => {
-      clearCurrDocRef.current();
-    };
-  }, []);
+  useUnmountCleanupRef(clearCurrDoc);
 
   // Compute available height = viewport - (header height + tts bar height)
   useEffect(() => {

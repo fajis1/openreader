@@ -17,6 +17,7 @@ import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
+import { useUnmountCleanupRef } from '@/hooks/useUnmountCleanupRef';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import { useHtmlDocument } from './useHtmlDocument';
@@ -46,7 +47,6 @@ export default function HTMLPage() {
   const [maxPadPx, setMaxPadPx] = useState<number>(0);
   const inFlightDocIdRef = useRef<string | null>(null);
   const loadedDocIdRef = useRef<string | null>(null);
-  const clearCurrDocRef = useRef(clearCurrDoc);
 
   useEffect(() => {
     setIsLoading(true);
@@ -103,15 +103,7 @@ export default function HTMLPage() {
     loadDocument();
   }, [loadDocument, isLoading]);
 
-  useEffect(() => {
-    clearCurrDocRef.current = clearCurrDoc;
-  }, [clearCurrDoc]);
-
-  useEffect(() => {
-    return () => {
-      clearCurrDocRef.current();
-    };
-  }, []);
+  useUnmountCleanupRef(clearCurrDoc);
 
   // Compute available height = viewport - (header height + tts bar height)
   useEffect(() => {
