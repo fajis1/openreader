@@ -33,6 +33,9 @@ Required:
 > [!IMPORTANT]
 > This file (`compute/worker/.env*`) is only for standalone worker deployments.
 > In embedded/local startup, app entrypoint spawns worker with the already-resolved root `.env` values.
+> In standalone external worker mode:
+> - App server env (root `.env` or platform env): `COMPUTE_WORKER_URL`, `COMPUTE_WORKER_TOKEN`, optional shared timeout/stale overrides.
+> - Worker service env (`compute/worker/.env*` or platform env): worker runtime values (`NATS_*`, `S3_*`, model base URLs, worker tuning).
 > For standalone worker deployments, keep shared app/worker values aligned:
 > - `COMPUTE_WORKER_TOKEN`
 > - shared object storage settings (`S3_*`)

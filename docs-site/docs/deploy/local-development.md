@@ -188,6 +188,10 @@ COMPUTE_WORKER_URL=http://localhost:8081
 COMPUTE_WORKER_TOKEN=<same-token-used-by-worker>
 ```
 
+Ownership in external worker mode:
+- root `.env`: app routing/auth (`COMPUTE_WORKER_URL`, `COMPUTE_WORKER_TOKEN`) plus optional shared timeout/stale overrides
+- `compute/worker/.env*` (or worker platform env): worker runtime variables (`NATS_*`, `S3_*`, model base URLs, worker tuning)
+
 Worker mode requires worker-reachable shared object storage (S3-compatible endpoint).
 For external worker mode, object storage must be shared/reachable by both app and worker services.
 
@@ -231,6 +235,10 @@ External worker flow:
 COMPUTE_WORKER_URL=http://localhost:8081
 COMPUTE_WORKER_TOKEN=<same-token-used-by-worker>
 ```
+
+Use the same ownership split:
+- root `.env`: app routing/auth (`COMPUTE_WORKER_URL`, `COMPUTE_WORKER_TOKEN`) plus optional shared timeout/stale overrides
+- `compute/worker/.env*` (or worker platform env): worker runtime variables (`NATS_*`, `S3_*`, model base URLs, worker tuning)
 
 Use one of these `.env` mode templates:
 

@@ -365,6 +365,7 @@ Base URL for standalone external compute worker mode.
 - Leave unset for embedded/local startup (`pnpm dev` / `pnpm start`) so entrypoint can start embedded worker+NATS.
 - Embedded startup requires `nats-server` available on host PATH.
 - Required only when using a standalone external worker service.
+- App-side only: set on app server/root `.env` (routing target), not worker-only env files.
 - Example: `http://localhost:8081`
 
 ### COMPUTE_WORKER_TOKEN
@@ -374,6 +375,7 @@ Bearer token for compute-worker auth.
 - Required for standalone external worker service mode.
 - Must match worker service `COMPUTE_WORKER_TOKEN`.
 - In embedded startup, entrypoint auto-generates one if unset.
+- In external worker mode, set this on both app server/root `.env` and worker service env (`compute/worker/.env*` or platform env).
 
 ### EMBEDDED_COMPUTE_WORKER_PORT
 
@@ -406,6 +408,7 @@ NATS connection URL used by compute worker runtime.
 - Embedded startup default: `nats://127.0.0.1:4222`
 - Standalone worker service: set in worker service env (`compute/worker/.env*` or platform env)
 - For embedded startup, this is optional; startup supplies the default value.
+- Worker-side only in external mode: set on worker service env, not app/root `.env`.
 
 ### COMPUTE_JOB_CONCURRENCY
 
