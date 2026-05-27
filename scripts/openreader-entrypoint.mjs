@@ -326,6 +326,8 @@ async function main() {
   let workerExitPromise = Promise.resolve();
   let appProc = null;
   let shutdownPromise = null;
+  let isShuttingDown = false;
+  let fatalExitScheduled = false;
   let stopWeedStdoutForward = () => { };
   let stopWeedStderrForward = () => { };
   let stopNatsStdoutForward = () => { };
@@ -340,8 +342,22 @@ async function main() {
     process.exit(code);
   };
 
+  const scheduleFatalShutdown = (serviceName, code, signal, detail) => {
+    if (fatalExitScheduled || isShuttingDown || didExit) return;
+    fatalExitScheduled = true;
+    const codeLabel = typeof code === 'number' ? String(code) : 'null';
+    const signalLabel = signal ?? 'null';
+    const suffix = detail ? ` (${detail})` : '';
+    console.error(
+      `Critical service "${serviceName}" exited unexpectedly: code=${codeLabel} signal=${signalLabel}${suffix}. `
+      + 'Shutting down all services.',
+    );
+    void shutdown('SIGTERM').finally(() => exitOnce(typeof code === 'number' && code !== 0 ? code : 1));
+  };
+
   const shutdown = async (signal = 'SIGTERM') => {
     if (shutdownPromise) return shutdownPromise;
+    isShuttingDown = true;
     shutdownPromise = (async () => {
       await Promise.all([
         terminateChild(appProc, signal, 4000),
@@ -417,13 +433,13 @@ async function main() {
         weedExitPromise = once(weedProc, 'exit').then(() => undefined).catch(() => undefined);
 
         weedProc.on('exit', (code, signal) => {
+          if (isShuttingDown) return;
           if (typeof code === 'number' && code !== 0) {
             console.error(`Embedded weed mini exited with code ${code}.`);
-            return;
-          }
-          if (signal) {
+          } else if (signal) {
             console.error(`Embedded weed mini exited due to signal ${signal}.`);
           }
+          scheduleFatalShutdown('weed mini', code, signal, 'embedded storage service');
         });
       };
 
@@ -491,16 +507,17 @@ async function main() {
       stopNatsStderrForward = forwardChildStream(natsProc.stderr, process.stderr);
       natsExitPromise = once(natsProc, 'exit').then(() => undefined).catch(() => undefined);
       natsProc.on('exit', (code, signal) => {
+        if (isShuttingDown) return;
         if (typeof code === 'number' && code !== 0) {
           console.error(`Embedded nats-server exited with code ${code}.`);
-          return;
-        }
-        if (signal) {
+        } else if (signal) {
           console.error(`Embedded nats-server exited due to signal ${signal}.`);
         }
+        scheduleFatalShutdown('nats-server', code, signal, 'embedded queue service');
       });
       natsProc.on('error', (error) => {
         console.error(`Embedded nats-server failed to start: ${error instanceof Error ? error.message : String(error)}`);
+        scheduleFatalShutdown('nats-server', null, null, 'failed to start');
       });
       await waitForEndpoint(`http://127.0.0.1:${embeddedNatsMonitorPort}/healthz`, 20);
       console.log(`Embedded nats-server is ready at nats://127.0.0.1:${embeddedNatsPort}`);
@@ -523,16 +540,17 @@ async function main() {
       stopWorkerStderrForward = forwardChildStream(workerProc.stderr, process.stderr);
       workerExitPromise = once(workerProc, 'exit').then(() => undefined).catch(() => undefined);
       workerProc.on('exit', (code, signal) => {
+        if (isShuttingDown) return;
         if (typeof code === 'number' && code !== 0) {
           console.error(`Embedded compute-worker exited with code ${code}.`);
-          return;
-        }
-        if (signal) {
+        } else if (signal) {
           console.error(`Embedded compute-worker exited due to signal ${signal}.`);
         }
+        scheduleFatalShutdown('compute-worker', code, signal, 'embedded compute service');
       });
       workerProc.on('error', (error) => {
         console.error(`Embedded compute-worker failed to start: ${error instanceof Error ? error.message : String(error)}`);
+        scheduleFatalShutdown('compute-worker', null, null, 'failed to start');
       });
       await waitForEndpoint(`http://127.0.0.1:${embeddedWorkerPort}/health/ready`, 30);
       console.log(`Embedded compute-worker is ready at http://127.0.0.1:${embeddedWorkerPort}`);
