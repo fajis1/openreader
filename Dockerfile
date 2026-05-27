@@ -19,8 +19,10 @@ RUN npm install -g pnpm@11.1.2
 # Create app directory
 WORKDIR /app
 
-# Copy package files
+# Copy workspace manifests needed for dependency installation
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY compute/core/package.json ./compute/core/package.json
+COPY compute/worker/package.json ./compute/worker/package.json
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
