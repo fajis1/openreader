@@ -390,7 +390,6 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
     } catch (statusError) {
       serverLogger.error({
         event: 'documents.parse.status_write.failed',
-        errorCode: 'DOCUMENTS_PARSE_STATUS_WRITE_FAILED',
         documentId: input.documentId,
         parseStatus,
         error: errorToLog(statusError),
@@ -398,7 +397,6 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
     }
     serverLogger.error({
       event: 'documents.parse.job.failed',
-      errorCode: 'DOCUMENTS_PARSE_JOB_FAILED',
       documentId: input.documentId,
       parseStatus,
       error: errorToLog(error),
@@ -415,7 +413,6 @@ export function enqueueParsePdfJob(input: UserPdfLayoutJobRequest): void {
       serverLogger.error({
         event: 'documents.parse.job.uncaught_error',
         documentId: input.documentId,
-        errorCode: 'DOCUMENTS_PARSE_JOB_UNCAUGHT_ERROR',
         error: errorToLog(error),
       }, 'Parse job uncaught error');
     });

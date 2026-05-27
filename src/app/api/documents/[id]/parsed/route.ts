@@ -220,7 +220,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       }
       logger.warn({
         event: 'documents.parsed.requested_op_unavailable',
-        errorCode: 'DOCUMENTS_PARSED_REQUESTED_OP_UNAVAILABLE',
         degraded: true,
         step: 'requested_op_lookup',
         documentId: id,
@@ -314,7 +313,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   } catch (error) {
     logger.error({
       event: 'documents.parsed.get_failed',
-      errorCode: 'DOCUMENTS_PARSED_GET_FAILED',
       error: errorToLog(error),
     }, 'Failed to read parsed PDF');
     return NextResponse.json({ error: 'Failed to read parsed PDF' }, { status: 500 });
@@ -395,7 +393,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   } catch (error) {
     logger.error({
       event: 'documents.parsed.force_refresh_failed',
-      errorCode: 'DOCUMENTS_PARSED_FORCE_REFRESH_FAILED',
       error: errorToLog(error),
     }, 'Failed to force PDF refresh');
     return NextResponse.json({ error: 'Failed to force PDF refresh' }, { status: 500 });

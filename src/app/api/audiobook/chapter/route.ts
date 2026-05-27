@@ -333,7 +333,6 @@ export async function POST(request: NextRequest) {
       if (!existingResult.settings) {
         serverLogger.error({
           event: 'audiobook.chapter.meta_settings.invalid',
-          errorCode: 'AUDIOBOOK_CHAPTER_META_SETTINGS_INVALID',
           bookId,
           storageUserId,
           error: {

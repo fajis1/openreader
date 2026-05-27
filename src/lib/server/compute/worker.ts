@@ -300,7 +300,6 @@ export class WorkerComputeBackend implements ComputeBackend {
         return { alignments: final.result.alignments };
       }, ({ attempt, maxAttempts, willRetry, delayMs, error }) => {
         logWorker(willRetry ? 'warn' : 'error', 'align.request.attempt_error', {
-          errorCode: 'COMPUTE_WORKER_ALIGN_REQUEST_ATTEMPT_ERROR',
           traceId,
           kind: 'whisper_align',
           opKeyHash,
@@ -321,7 +320,6 @@ export class WorkerComputeBackend implements ComputeBackend {
       return result;
     } catch (error) {
       logWorker('error', 'align.request.failed', {
-        errorCode: 'COMPUTE_WORKER_ALIGN_REQUEST_FAILED',
         traceId,
         kind: 'whisper_align',
         opKeyHash,
@@ -400,7 +398,6 @@ export class WorkerComputeBackend implements ComputeBackend {
         throw new Error('PDF layout worker operation completed without parsed output');
       }, ({ attempt, maxAttempts, willRetry, delayMs, error }) => {
         logWorker(willRetry ? 'warn' : 'error', 'pdf_layout.request.attempt_error', {
-          errorCode: 'COMPUTE_WORKER_PDF_LAYOUT_REQUEST_ATTEMPT_ERROR',
           traceId,
           kind: 'pdf_layout',
           opKeyHash,
@@ -423,7 +420,6 @@ export class WorkerComputeBackend implements ComputeBackend {
       return result;
     } catch (error) {
       logWorker('error', 'pdf_layout.request.failed', {
-        errorCode: 'COMPUTE_WORKER_PDF_LAYOUT_REQUEST_FAILED',
         traceId,
         kind: 'pdf_layout',
         opKeyHash,
@@ -468,7 +464,6 @@ export class WorkerComputeBackend implements ComputeBackend {
         retryAfterMs,
       );
       logWorker(res.status >= 500 ? 'warn' : 'error', 'http.request.failed', {
-        errorCode: 'COMPUTE_WORKER_HTTP_REQUEST_FAILED',
         ...context,
         traceId,
         method,
@@ -547,7 +542,6 @@ export class WorkerComputeBackend implements ComputeBackend {
             retryAfterMs,
           );
           logWorker(res.status >= 500 ? 'warn' : 'error', 'sse.wait.http_failed', {
-            errorCode: 'COMPUTE_WORKER_SSE_WAIT_HTTP_FAILED',
             ...context,
             traceId,
             opId,
@@ -669,7 +663,6 @@ export class WorkerComputeBackend implements ComputeBackend {
       }
 
       logWorker('error', 'sse.wait.ended_without_terminal', {
-        errorCode: 'COMPUTE_WORKER_SSE_WAIT_ENDED_WITHOUT_TERMINAL',
         ...context,
         traceId,
         opId,
@@ -684,7 +677,6 @@ export class WorkerComputeBackend implements ComputeBackend {
       throw new Error(`Operation stream ended before terminal state for op ${opId}`);
     } catch (error) {
       logWorker('error', 'sse.wait.failed', {
-        errorCode: 'COMPUTE_WORKER_SSE_WAIT_FAILED',
         ...context,
         traceId,
         opId,

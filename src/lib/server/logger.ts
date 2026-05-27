@@ -17,7 +17,6 @@ export type ServerErrorClass =
   | 'unknown';
 
 export type ServerErrorContract = {
-  errorCode: string;
   errorClass: ServerErrorClass;
   retryable: boolean;
   httpStatus: number;
@@ -28,7 +27,6 @@ export type ServerErrorContract = {
 
 export type ServerApiErrorBody = {
   error: string;
-  errorCode: string;
   retryable?: boolean;
   details?: Record<string, unknown>;
 };
@@ -144,11 +142,10 @@ export function errorToLog(error: unknown, depth = 0): LoggedError {
 }
 
 export function apiErrorBody(
-  input: Omit<ServerApiErrorBody, 'errorCode'> & { errorCode: string },
+  input: ServerApiErrorBody,
 ): ServerApiErrorBody {
   return {
     error: input.error,
-    errorCode: input.errorCode,
     ...(typeof input.retryable === 'boolean' ? { retryable: input.retryable } : {}),
     ...(input.details ? { details: input.details } : {}),
   };
