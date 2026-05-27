@@ -12,6 +12,7 @@ import { isS3Configured } from '@/lib/server/storage/s3';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { nowTimestampMs } from '@/lib/shared/timestamps';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,10 @@ export async function GET(req: NextRequest) {
   }
 
   if (!auth) {
-    return NextResponse.json({ error: 'Auth not initialized' }, { status: 500 });
+    return errorResponse(new Error('Auth not initialized'), {
+      apiErrorMessage: 'Auth not initialized',
+      normalize: { code: 'USER_EXPORT_AUTH_NOT_INITIALIZED', errorClass: 'auth', httpStatus: 500 },
+    });
   }
 
   const session = await auth.api.getSession({

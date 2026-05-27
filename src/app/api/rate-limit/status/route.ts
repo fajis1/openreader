@@ -7,6 +7,7 @@ import { getClientIp } from '@/lib/server/rate-limit/request-ip';
 import { getOrCreateDeviceId, setDeviceIdCookie } from '@/lib/server/rate-limit/device-id';
 import { nextUtcMidnightTimestampMs } from '@/lib/shared/timestamps';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,9 +90,9 @@ export async function GET(req: NextRequest) {
       event: 'rate_limit.status.get.failed',
       error: errorToLog(error),
     }, 'Failed to get rate limit status');
-    return NextResponse.json(
-      { error: 'Failed to get rate limit status' },
-      { status: 500 }
-    );
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to get rate limit status',
+      normalize: { code: 'RATE_LIMIT_STATUS_GET_FAILED', errorClass: 'db' },
+    });
   }
 }

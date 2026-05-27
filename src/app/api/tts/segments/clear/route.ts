@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveSegmentDocumentScope } from '@/lib/server/tts/segments-auth';
 import { clearTtsSegmentCache } from '@/lib/server/tts/segments-cache';
-import { createRequestLogger, errorToLog } from '@/lib/server/logger';
+import { createRequestLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,10 +40,12 @@ export async function POST(request: NextRequest) {
       ...cleared,
     });
   } catch (error) {
-    logger.error({
+    return errorResponse(error, {
+      logger,
       event: 'tts.segments.clear_failed',
-      error: errorToLog(error),
-    }, 'Failed to clear TTS segment cache');
-    return NextResponse.json({ error: 'Failed to clear TTS segment cache' }, { status: 500 });
+      msg: 'Failed to clear TTS segment cache',
+      apiErrorMessage: 'Failed to clear TTS segment cache',
+      normalize: { code: 'TTS_SEGMENTS_CLEAR_FAILED', errorClass: 'storage' },
+    });
   }
 }

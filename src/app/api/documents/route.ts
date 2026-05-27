@@ -5,6 +5,7 @@ import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { safeDocumentName, toDocumentTypeFromName } from '@/lib/server/documents/utils';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 import {
   cleanupDocumentPreviewArtifacts,
   deleteDocumentPreviewRows,
@@ -197,7 +198,10 @@ export async function POST(req: NextRequest) {
       event: 'documents.register.failed',
       error: errorToLog(error),
     }, 'Failed to register documents');
-    return NextResponse.json({ error: 'Failed to register documents' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to register documents',
+      normalize: { code: 'DOCUMENTS_REGISTER_FAILED', errorClass: 'db' },
+    });
   }
 }
 
@@ -276,7 +280,10 @@ export async function GET(req: NextRequest) {
       event: 'documents.list.failed',
       error: errorToLog(error),
     }, 'Failed to load document metadata');
-    return NextResponse.json({ error: 'Failed to load documents' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to load documents',
+      normalize: { code: 'DOCUMENTS_LIST_FAILED', errorClass: 'db' },
+    });
   }
 }
 
@@ -391,6 +398,9 @@ export async function DELETE(req: NextRequest) {
       event: 'documents.delete.failed',
       error: errorToLog(error),
     }, 'Failed to delete documents');
-    return NextResponse.json({ error: 'Failed to delete documents' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to delete documents',
+      normalize: { code: 'DOCUMENTS_DELETE_FAILED', errorClass: 'db' },
+    });
   }
 }

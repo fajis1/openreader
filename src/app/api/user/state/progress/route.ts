@@ -7,6 +7,7 @@ import { isValidDocumentId } from '@/lib/server/documents/blobstore';
 import { resolveUserStateScope } from '@/lib/server/user/resolve-state-scope';
 import { coerceTimestampMs, nowTimestampMs } from '@/lib/shared/timestamps';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,7 +68,10 @@ export async function GET(req: NextRequest) {
       event: 'user.progress.load.failed',
       error: errorToLog(error),
     }, 'Failed to load user progress');
-    return NextResponse.json({ error: 'Failed to load user progress' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to load user progress',
+      normalize: { code: 'USER_PROGRESS_LOAD_FAILED', errorClass: 'db' },
+    });
   }
 }
 
@@ -180,6 +184,9 @@ export async function PUT(req: NextRequest) {
       event: 'user.progress.update.failed',
       error: errorToLog(error),
     }, 'Failed to update user progress');
-    return NextResponse.json({ error: 'Failed to update user progress' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to update user progress',
+      normalize: { code: 'USER_PROGRESS_UPDATE_FAILED', errorClass: 'db' },
+    });
   }
 }

@@ -17,6 +17,8 @@ const DYNAMIC_LOGGER_CALL_SELECTOR =
 const LOGGER_RECEIVER_SELECTOR =
   ":matches([callee.object.name=/^(logger|serverLogger)$/],[callee.object.property.name='logger'])";
 const SERVER_LOGGER_CALL_SELECTOR = `:matches(${STATIC_LOGGER_CALL_SELECTOR}${LOGGER_RECEIVER_SELECTOR},${DYNAMIC_LOGGER_CALL_SELECTOR}${LOGGER_RECEIVER_SELECTOR})`;
+const NEXT_RESPONSE_ERROR_JSON_SELECTOR =
+  "CallExpression[callee.type='MemberExpression'][callee.object.name='NextResponse'][callee.property.name='json'][arguments.0.type='ObjectExpression']:has(Property[key.name='error'])";
 
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
@@ -88,6 +90,11 @@ const eslintConfig = [
             "Do not use top-level `detail` in server logger context; keep throwable text under `error.message`.",
         },
         {
+          selector: `${SERVER_LOGGER_CALL_SELECTOR} > ObjectExpression:first-child > Property[key.name='errorCode']`,
+          message:
+            "Do not use top-level `errorCode` in server logger context; classify failures under nested `error.code`.",
+        },
+        {
           selector: `${SERVER_LOGGER_CALL_SELECTOR} > ObjectExpression:first-child > Property[key.name='err']`,
           message:
             "Use `error` (typically from errorToLog(...)) instead of `err` in server logs.",
@@ -101,6 +108,11 @@ const eslintConfig = [
           selector: `${SERVER_LOGGER_CALL_SELECTOR} > ObjectExpression:first-child > Property[key.name='error'][value.type='TemplateLiteral']`,
           message:
             "Server logger `error` must be a structured object (prefer `errorToLog(...)`), not template text.",
+        },
+        {
+          selector: `CatchClause ReturnStatement > ${NEXT_RESPONSE_ERROR_JSON_SELECTOR}[arguments.1.type='ObjectExpression']:has(Property[key.name='status'][value.value=500])`,
+          message:
+            "Use shared error response helpers (e.g. errorResponse(...)) for terminal 500 route failures instead of direct NextResponse.json({ error }).",
         },
       ],
     },

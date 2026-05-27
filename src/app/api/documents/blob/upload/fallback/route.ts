@@ -4,6 +4,7 @@ import { isValidDocumentId, putDocumentBlob } from '@/lib/server/documents/blobs
 import { isS3Configured } from '@/lib/server/storage/s3';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +59,9 @@ export async function PUT(req: NextRequest) {
       event: 'documents.blob.upload.fallback.failed',
       error: errorToLog(error),
     }, 'Failed to proxy-upload document blob');
-    return NextResponse.json({ error: 'Failed to upload document blob' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to upload document blob',
+      normalize: { code: 'DOCUMENTS_BLOB_UPLOAD_FALLBACK_FAILED', errorClass: 'storage' },
+    });
   }
 }

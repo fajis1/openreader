@@ -8,6 +8,7 @@ import { mergeDocumentSettings } from '@/lib/shared/document-settings';
 import { DEFAULT_DOCUMENT_SETTINGS, type DocumentSettings } from '@/types/document-settings';
 import { coerceTimestampMs, nowTimestampMs } from '@/lib/shared/timestamps';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,7 +98,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       event: 'documents.settings.load.failed',
       error: errorToLog(error),
     }, 'Failed to load document settings');
-    return NextResponse.json({ error: 'Failed to load document settings' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to load document settings',
+      normalize: { code: 'DOCUMENTS_SETTINGS_LOAD_FAILED', errorClass: 'db' },
+    });
   }
 }
 
@@ -169,6 +173,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       event: 'documents.settings.update.failed',
       error: errorToLog(error),
     }, 'Failed to update document settings');
-    return NextResponse.json({ error: 'Failed to update document settings' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to update document settings',
+      normalize: { code: 'DOCUMENTS_SETTINGS_UPDATE_FAILED', errorClass: 'db' },
+    });
   }
 }

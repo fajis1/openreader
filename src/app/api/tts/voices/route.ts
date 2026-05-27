@@ -6,6 +6,8 @@ import { resolveVoices } from '@/lib/server/tts/voice-resolution';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
+import { normalizeServerError, toApiErrorBody, toHttpStatus } from '@/lib/server/errors/contract';
 
 export async function GET(req: NextRequest) {
   try {
@@ -41,7 +43,10 @@ export async function GET(req: NextRequest) {
     }
 
     if (!isBuiltInTtsProviderId(resolved.provider)) {
-      return NextResponse.json({ error: `Unsupported provider type: ${resolved.provider}` }, { status: 500 });
+      return errorResponse(new Error(`Unsupported provider type: ${resolved.provider}`), {
+        apiErrorMessage: `Unsupported provider type: ${resolved.provider}`,
+        normalize: { code: 'TTS_VOICES_UNSUPPORTED_PROVIDER', errorClass: 'validation', httpStatus: 500 },
+      });
     }
     const effectiveProviderRef = resolved.adminRecord?.slug
       ?? req.headers.get('x-tts-provider')
@@ -69,16 +74,24 @@ export async function GET(req: NextRequest) {
     const providerRef = req.headers.get('x-tts-provider') || 'openai';
     const model = req.headers.get('x-tts-model') || 'tts-1';
     const provider = isBuiltInTtsProviderId(providerRef) ? providerRef : 'openai';
+    const normalized = normalizeServerError(error, {
+      code: 'TTS_VOICES_RESOLVE_FAILED',
+      errorClass: 'upstream',
+    });
+    const fallbackVoices = resolveTtsProviderModelPolicy({
+      providerRef,
+      providerType: provider,
+      model,
+    }).defaultVoices;
     return NextResponse.json(
       {
-        error: 'Failed to resolve voices',
-        fallbackVoices: resolveTtsProviderModelPolicy({
-          providerRef,
-          providerType: provider,
-          model,
-        }).defaultVoices,
+        ...toApiErrorBody(
+          { ...normalized, message: 'Failed to resolve voices' },
+          { includeDetails: false, includeRetryable: false },
+        ),
+        fallbackVoices,
       },
-      { status: 500 },
+      { status: toHttpStatus(normalized) },
     );
   }
 }

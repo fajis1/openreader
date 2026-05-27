@@ -7,7 +7,8 @@ import {
   ttsSegmentsS3NotConfiguredResponse,
 } from '@/lib/server/tts/segments-audio';
 import { getTtsSegmentAudioObjectStream } from '@/lib/server/tts/segments-blobstore';
-import { createRequestLogger, errorToLog } from '@/lib/server/logger';
+import { createRequestLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,10 +51,12 @@ export async function GET(request: NextRequest) {
       headers,
     });
   } catch (error) {
-    logger.error({
+    return errorResponse(error, {
+      logger,
       event: 'tts.segments.audio_fallback_failed',
-      error: errorToLog(error),
-    }, 'Failed to load segment audio from fallback route');
-    return NextResponse.json({ error: 'Failed to load segment audio' }, { status: 500 });
+      msg: 'Failed to load segment audio from fallback route',
+      apiErrorMessage: 'Failed to load segment audio',
+      normalize: { code: 'TTS_SEGMENT_AUDIO_FALLBACK_FAILED', errorClass: 'storage' },
+    });
   }
 }

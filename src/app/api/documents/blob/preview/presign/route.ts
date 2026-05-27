@@ -3,6 +3,7 @@ import { presignDocumentPreviewGet } from '@/lib/server/documents/previews-blobs
 import { ensureDocumentPreview } from '@/lib/server/documents/previews';
 import { validatePreviewRequest } from '../utils';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,9 @@ export async function GET(req: NextRequest) {
       event: 'documents.preview.presign.failed',
       error: errorToLog(error),
     }, 'Failed to create document preview signature');
-    return NextResponse.json({ error: 'Failed to prepare document preview' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to prepare document preview',
+      normalize: { code: 'DOCUMENTS_PREVIEW_PRESIGN_FAILED', errorClass: 'storage' },
+    });
   }
 }

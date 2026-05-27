@@ -8,6 +8,7 @@ import { db } from '@/db';
 import { audiobooks, audiobookChapters } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 import {
   audiobookPrefix,
   deleteAudiobookObject,
@@ -380,7 +381,10 @@ export async function GET(request: NextRequest) {
       event: 'audiobook.create.failed',
       error: errorToLog(error),
     }, 'Failed to create full audiobook');
-    return NextResponse.json({ error: 'Failed to create full audiobook file' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to create full audiobook file',
+      normalize: { code: 'AUDIOBOOK_CREATE_FAILED', errorClass: 'upstream' },
+    });
   } finally {
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -431,6 +435,9 @@ export async function DELETE(request: NextRequest) {
       event: 'audiobook.reset.failed',
       error: errorToLog(error),
     }, 'Failed to reset audiobook');
-    return NextResponse.json({ error: 'Failed to reset audiobook' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to reset audiobook',
+      normalize: { code: 'AUDIOBOOK_RESET_FAILED', errorClass: 'db' },
+    });
   }
 }

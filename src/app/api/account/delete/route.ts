@@ -5,6 +5,7 @@ import { isAuthEnabled } from '@/lib/server/auth/config';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { deleteUserStorageData } from '@/lib/server/user/data-cleanup';
 import { errorToLog, hashForLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export async function DELETE() {
   if (!isAuthEnabled() || !auth) {
@@ -51,9 +52,9 @@ export async function DELETE() {
       event: 'account.delete.failed',
       error: errorToLog(error),
     }, 'Failed to delete account');
-    return NextResponse.json(
-      { error: 'Failed to delete account' },
-      { status: 500 }
-    );
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to delete account',
+      normalize: { code: 'ACCOUNT_DELETE_FAILED', errorClass: 'db' },
+    });
   }
 }

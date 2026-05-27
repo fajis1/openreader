@@ -11,7 +11,9 @@ import { normalizeParseStatus, parseDocumentParseState } from '@/lib/server/docu
 import { healStaleDocumentParseState } from '@/lib/server/documents/parse-state-healing';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
-import { createRequestLogger, errorToLog, hashForLog } from '@/lib/server/logger';
+import { createRequestLogger, hashForLog } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
+import { logDegraded, logServerError } from '@/lib/server/errors/logging';
 import type { PdfParseProgress, PdfParseStatus } from '@/types/parsed-pdf';
 import { parseSseEventId, parseSsePayload } from '@openreader/compute-core';
 import type { PdfLayoutJobResult, WorkerOperationEvent, WorkerOperationState } from '@openreader/compute-core/api-contracts';
@@ -267,15 +269,17 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
               }
             }).catch((error) => {
               if (closed) return;
-              logger.warn({
+              logDegraded(logger, {
                 event: 'documents.parsed.events.db_resync_failed',
-                degraded: true,
+                msg: 'SSE DB resync failed',
                 step: 'db_resync',
-                documentId: id,
-                storageUserIdHash,
-                requestId,
-                error: errorToLog(error),
-              }, 'SSE DB resync failed');
+                context: {
+                  documentId: id,
+                  storageUserIdHash,
+                  requestId,
+                },
+                error,
+              });
               controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
             });
           }, SSE_RESYNC_INTERVAL_MS);
@@ -468,11 +472,16 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
         void runWorkerProxy()
           .catch((error) => {
-            logger.error({
+            logServerError(logger, {
               event: 'documents.parsed.events.worker_proxy_crashed',
-              documentId: id,
-              error: errorToLog(error),
-            }, 'Worker proxy crashed while streaming parse events');
+              error,
+              msg: 'Worker proxy crashed while streaming parse events',
+              context: { documentId: id },
+              normalize: {
+                code: 'DOCUMENTS_PARSED_EVENTS_WORKER_PROXY_CRASHED',
+                errorClass: 'upstream',
+              },
+            });
             if (!closed) {
               controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: String(error) })}\n\n`));
             }
@@ -499,10 +508,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       },
     });
   } catch (error) {
-    logger.error({
+    return errorResponse(error, {
+      logger,
       event: 'documents.parsed.events.route_failed',
-      error: errorToLog(error),
-    }, 'Parsed events route failed');
-    return NextResponse.json({ error: 'Failed to stream parsed PDF progress' }, { status: 500 });
+      msg: 'Parsed events route failed',
+      apiErrorMessage: 'Failed to stream parsed PDF progress',
+      normalize: { code: 'DOCUMENTS_PARSED_EVENTS_ROUTE_FAILED', errorClass: 'upstream' },
+    });
   }
 }

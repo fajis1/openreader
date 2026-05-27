@@ -8,6 +8,7 @@ import { getDocumentBlob, isMissingBlobError, isValidDocumentId } from '@/lib/se
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,6 +92,9 @@ export async function GET(req: NextRequest) {
       event: 'documents.blob.get.fallback.failed',
       error: errorToLog(error),
     }, 'Failed to load document content fallback');
-    return NextResponse.json({ error: 'Failed to load document content' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to load document content',
+      normalize: { code: 'DOCUMENTS_BLOB_GET_FALLBACK_FAILED', errorClass: 'storage' },
+    });
   }
 }

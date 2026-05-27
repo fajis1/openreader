@@ -10,6 +10,7 @@ import { listAdminProviders } from '@/lib/server/admin/providers';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { normalizeLegacyProviderRef, resolveProviderDefaults } from '@/lib/shared/tts-provider-policy';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 import {
   deserializeUserPreferencesPayload,
   extractUserPreferencesMeta,
@@ -246,7 +247,10 @@ export async function GET(req: NextRequest) {
       event: 'user.preferences.load.failed',
       error: errorToLog(error),
     }, 'Failed to load user preferences');
-    return NextResponse.json({ error: 'Failed to load user preferences' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to load user preferences',
+      normalize: { code: 'USER_PREFERENCES_LOAD_FAILED', errorClass: 'db' },
+    });
   }
 }
 
@@ -323,6 +327,9 @@ export async function PUT(req: NextRequest) {
       event: 'user.preferences.update.failed',
       error: errorToLog(error),
     }, 'Failed to update user preferences');
-    return NextResponse.json({ error: 'Failed to update user preferences' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to update user preferences',
+      normalize: { code: 'USER_PREFERENCES_UPDATE_FAILED', errorClass: 'db' },
+    });
   }
 }

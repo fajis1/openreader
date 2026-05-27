@@ -16,6 +16,7 @@ import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/li
 import { isS3Configured } from '@/lib/server/storage/s3';
 import { putDocumentBlob } from '@/lib/server/documents/blobstore';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 const DOCSTORE_DIR = path.join(process.cwd(), 'docstore');
 const TEMP_DIR = path.join(DOCSTORE_DIR, 'tmp');
@@ -195,6 +196,9 @@ export async function POST(req: NextRequest) {
       event: 'documents.docx.convert_upload.failed',
       error: errorToLog(error),
     }, 'Failed converting/uploading DOCX');
-    return NextResponse.json({ error: 'Failed to convert document' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to convert document',
+      normalize: { code: 'DOCUMENTS_DOCX_CONVERT_UPLOAD_FAILED', errorClass: 'upstream' },
+    });
   }
 }

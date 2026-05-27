@@ -6,6 +6,7 @@ import { normalizeVersion, shouldOpenChangelogForVersionChange } from '@/lib/sha
 import { nowTimestampMs } from '@/lib/shared/timestamps';
 import { resolveUserStateScope } from '@/lib/server/user/resolve-state-scope';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 import {
   deserializeUserPreferencesPayload,
   extractUserPreferencesMeta,
@@ -85,6 +86,9 @@ export async function POST(req: NextRequest) {
       event: 'user.changelog.version_check.failed',
       error: errorToLog(error),
     }, 'Failed to check changelog version');
-    return NextResponse.json({ error: 'Failed to check changelog version' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to check changelog version',
+      normalize: { code: 'USER_CHANGELOG_VERSION_CHECK_FAILED', errorClass: 'db' },
+    });
   }
 }

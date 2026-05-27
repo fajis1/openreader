@@ -1,6 +1,7 @@
 import { getWorkerClientConfigFromEnv } from '@/lib/server/compute/worker';
 import type { WorkerOperationState } from '@openreader/compute-core/api-contracts';
-import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { serverLogger } from '@/lib/server/logger';
+import { logDegraded } from '@/lib/server/errors/logging';
 
 const WORKER_OP_REQUEST_TIMEOUT_MS = 2_500;
 
@@ -14,13 +15,13 @@ export async function fetchWorkerOperationState<Result>(
   try {
     cfg = getWorkerClientConfigFromEnv();
   } catch (error) {
-    serverLogger.warn({
+    logDegraded(serverLogger, {
       event: 'compute.worker_op_state.config.invalid',
-      opId: normalized,
-      degraded: true,
+      msg: 'Worker client env missing/invalid',
       step: 'read_worker_config',
-      error: errorToLog(error),
-    }, 'Worker client env missing/invalid');
+      context: { opId: normalized },
+      error,
+    });
     return null;
   }
 
@@ -40,39 +41,41 @@ export async function fetchWorkerOperationState<Result>(
 
     if (!res.ok) {
       const upstreamResponseBody = await res.text().catch(() => '');
-      serverLogger.warn({
+      logDegraded(serverLogger, {
         event: 'compute.worker_op_state.fetch.failed',
-        opId: normalized,
-        status: res.status,
-        upstreamResponseBody,
-        degraded: true,
+        msg: 'Worker op request failed',
         step: 'fetch_worker_op',
+        context: {
+          opId: normalized,
+          status: res.status,
+          upstreamResponseBody,
+        },
         error: {
           name: 'WorkerOpStateFetchFailed',
           message: `Worker op request failed with status ${res.status}`,
         },
-      }, 'Worker op request failed');
+      });
       return null;
     }
     const parsed = await res.json() as WorkerOperationState<Result>;
     if (!parsed || typeof parsed !== 'object' || parsed.opId !== normalized) {
-      serverLogger.warn({
+      logDegraded(serverLogger, {
         event: 'compute.worker_op_state.response.invalid',
-        opId: normalized,
-        degraded: true,
+        msg: 'Worker op response invalid',
         step: 'validate_worker_op_response',
-      }, 'Worker op response invalid');
+        context: { opId: normalized },
+      });
       return null;
     }
     return parsed;
   } catch (error) {
-    serverLogger.warn({
+    logDegraded(serverLogger, {
       event: 'compute.worker_op_state.fetch.error',
-      opId: normalized,
-      degraded: true,
+      msg: 'Worker op request threw',
       step: 'fetch_worker_op',
-      error: errorToLog(error),
-    }, 'Worker op request threw');
+      context: { opId: normalized },
+      error,
+    });
     return null;
   } finally {
     clearTimeout(timeout);

@@ -20,7 +20,8 @@ import type {
 import { isTtsProviderType } from '@/lib/shared/tts-provider-catalog';
 import { resolveEffectiveProviderType } from '@/lib/shared/tts-provider-policy';
 import { resolveSegmentAudioUrls } from '@/lib/server/tts/segment-audio-urls';
-import { createRequestLogger, errorToLog } from '@/lib/server/logger';
+import { createRequestLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -386,10 +387,12 @@ export async function GET(request: NextRequest) {
     };
     return NextResponse.json(response);
   } catch (error) {
-    logger.error({
+    return errorResponse(error, {
+      logger,
       event: 'tts.segments.manifest.list_failed',
-      error: errorToLog(error),
-    }, 'Failed to list TTS segments');
-    return NextResponse.json({ error: 'Failed to list TTS segments' }, { status: 500 });
+      msg: 'Failed to list TTS segments',
+      apiErrorMessage: 'Failed to list TTS segments',
+      normalize: { code: 'TTS_SEGMENTS_MANIFEST_LIST_FAILED', errorClass: 'db' },
+    });
   }
 }

@@ -35,6 +35,7 @@ import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { resolveTtsModelForProvider } from '@/lib/shared/tts-provider-policy';
 import { resolveSegmentAudioUrls } from '@/lib/server/tts/segment-audio-urls';
 import { createRequestLogger, errorToLog } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 import type {
   TTSSegmentInput,
   TTSSegmentManifestItem,
@@ -828,11 +829,13 @@ export async function POST(request: NextRequest) {
     attachDeviceIdCookie(response, deviceIdToSet, didCreateDeviceIdCookie);
     return response;
   } catch (error) {
-    logger.error({
+    const response = errorResponse(error, {
+      logger,
       event: 'tts.segments.ensure.route_failed',
-      error: errorToLog(error),
-    }, 'TTS segments ensure route failed');
-    const response = NextResponse.json({ error: 'Failed to ensure TTS segments' }, { status: 500 });
+      msg: 'TTS segments ensure route failed',
+      apiErrorMessage: 'Failed to ensure TTS segments',
+      normalize: { code: 'TTS_SEGMENTS_ENSURE_ROUTE_FAILED', errorClass: 'upstream' },
+    });
     attachDeviceIdCookie(response, deviceIdToSet, didCreateDeviceIdCookie);
     return response;
   }

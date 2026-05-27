@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
 import {
   getDocumentRange,
   isMissingBlobError as isMissingDocumentBlobError,
@@ -183,6 +184,9 @@ export async function GET(req: NextRequest) {
       event: 'documents.preview.fallback.failed',
       error: errorToLog(error),
     }, 'Failed to load document preview fallback');
-    return NextResponse.json({ error: 'Failed to load document preview' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to load document preview',
+      normalize: { code: 'DOCUMENTS_PREVIEW_FALLBACK_FAILED', errorClass: 'storage' },
+    });
   }
 }

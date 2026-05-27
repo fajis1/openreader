@@ -44,6 +44,7 @@ import {
   coerceAudiobookGenerationSettings,
   type SharedProviderPolicyEntry,
 } from '@/lib/server/audiobooks/settings';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const dynamic = 'force-dynamic';
 
@@ -340,7 +341,10 @@ export async function POST(request: NextRequest) {
             message: 'Invalid audiobook.meta.json settings payload',
           },
         }, 'Invalid audiobook.meta.json settings payload');
-        return NextResponse.json({ error: 'Invalid audiobook metadata settings' }, { status: 500 });
+        return errorResponse(new Error('Invalid audiobook metadata settings payload'), {
+          apiErrorMessage: 'Invalid audiobook metadata settings',
+          normalize: { code: 'AUDIOBOOK_CHAPTER_META_SETTINGS_INVALID', errorClass: 'validation', httpStatus: 500 },
+        });
       }
       normalizedExistingSettings = normalizeNativeSpeedForSettings(existingResult.settings);
       existingSettingsNeedsMigration = existingResult.migrated;
@@ -419,7 +423,7 @@ export async function POST(request: NextRequest) {
           step: 'persist_migrated_settings',
           bookId,
           storageUserId,
-          error: error instanceof Error ? error.message : String(error),
+          error: errorToLog(error),
         }, 'Failed to persist migrated audiobook metadata settings');
       }
     }
@@ -503,7 +507,10 @@ export async function POST(request: NextRequest) {
     }
     const provider = credResolved.provider;
     if (!isBuiltInTtsProviderId(provider)) {
-      return NextResponse.json({ error: `Unsupported TTS provider type: ${provider}` }, { status: 500 });
+      return errorResponse(new Error(`Unsupported TTS provider type: ${provider}`), {
+        apiErrorMessage: `Unsupported TTS provider type: ${provider}`,
+        normalize: { code: 'AUDIOBOOK_CHAPTER_UNSUPPORTED_PROVIDER', errorClass: 'validation', httpStatus: 500 },
+      });
     }
     const openApiKey = credResolved.apiKey || 'none';
     const openApiBaseUrl = credResolved.baseUrl;
@@ -754,7 +761,10 @@ export async function POST(request: NextRequest) {
       event: 'audiobook.chapter.process.failed',
       error: errorToLog(error),
     }, 'Failed to process audio chapter');
-    const response = NextResponse.json({ error: 'Failed to process audio chapter' }, { status: 500 });
+    const response = errorResponse(error, {
+      apiErrorMessage: 'Failed to process audio chapter',
+      normalize: { code: 'AUDIOBOOK_CHAPTER_PROCESS_FAILED', errorClass: 'upstream' },
+    });
     attachDeviceIdCookie(response, deviceIdToSet, didCreateDeviceIdCookie);
     return response;
   } finally {
@@ -852,7 +862,10 @@ export async function GET(request: NextRequest) {
       event: 'audiobook.chapter.download.failed',
       error: errorToLog(error),
     }, 'Failed to download chapter');
-    return NextResponse.json({ error: 'Failed to download chapter' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to download chapter',
+      normalize: { code: 'AUDIOBOOK_CHAPTER_DOWNLOAD_FAILED', errorClass: 'storage' },
+    });
   }
 }
 
@@ -923,6 +936,9 @@ export async function DELETE(request: NextRequest) {
       event: 'audiobook.chapter.delete.failed',
       error: errorToLog(error),
     }, 'Failed to delete chapter');
-    return NextResponse.json({ error: 'Failed to delete chapter' }, { status: 500 });
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to delete chapter',
+      normalize: { code: 'AUDIOBOOK_CHAPTER_DELETE_FAILED', errorClass: 'db' },
+    });
   }
 }

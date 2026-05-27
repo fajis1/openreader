@@ -23,7 +23,9 @@ import {
 import { healStaleDocumentParseState } from '@/lib/server/documents/parse-state-healing';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
-import { createRequestLogger, errorToLog, hashForLog, type ServerLogger } from '@/lib/server/logger';
+import { createRequestLogger, hashForLog, type ServerLogger } from '@/lib/server/logger';
+import { errorResponse } from '@/lib/server/errors/next-response';
+import { logDegraded } from '@/lib/server/errors/logging';
 import type { ParsedPdfDocument } from '@/types/parsed-pdf';
 import type { PdfLayoutJobResult, WorkerOperationState } from '@openreader/compute-core/api-contracts';
 
@@ -138,7 +140,10 @@ async function finalizeFromWorkerState(input: {
   }
 
   if (!parsedJsonKey) {
-    return NextResponse.json({ error: 'Worker completed without parsed output' }, { status: 500 });
+    return errorResponse(new Error('Worker completed without parsed output'), {
+      apiErrorMessage: 'Worker completed without parsed output',
+      normalize: { code: 'DOCUMENTS_PARSED_WORKER_OUTPUT_MISSING', errorClass: 'upstream' },
+    });
   }
 
   await writeParseRowState({
@@ -218,18 +223,20 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
           logger,
         });
       }
-      logger.warn({
+      logDegraded(logger, {
         event: 'documents.parsed.requested_op_unavailable',
-        degraded: true,
+        msg: 'Requested worker operation id was unavailable',
         step: 'requested_op_lookup',
-        documentId: id,
-        userIdHash: hashForLog(row.userId),
-        opId: requestedOpId,
-        error: {
-          name: 'RequestedOperationUnavailable',
-          message: `Requested worker operation ${requestedOpId} was unavailable`,
+        context: {
+          documentId: id,
+          userIdHash: hashForLog(row.userId),
+          opId: requestedOpId,
+          error: {
+            name: 'RequestedOperationUnavailable',
+            message: `Requested worker operation ${requestedOpId} was unavailable`,
+          },
         },
-      }, 'Requested worker operation id was unavailable');
+      });
     }
 
     let state = parseDocumentParseState(row.parseState);
@@ -311,11 +318,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       throw error;
     }
   } catch (error) {
-    logger.error({
+    return errorResponse(error, {
+      logger,
       event: 'documents.parsed.get_failed',
-      error: errorToLog(error),
-    }, 'Failed to read parsed PDF');
-    return NextResponse.json({ error: 'Failed to read parsed PDF' }, { status: 500 });
+      msg: 'Failed to read parsed PDF',
+      apiErrorMessage: 'Failed to read parsed PDF',
+      normalize: { code: 'DOCUMENTS_PARSED_GET_FAILED', errorClass: 'storage' },
+    });
   }
 }
 
@@ -391,10 +400,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       opId: created.opId,
     }, { status: 202 });
   } catch (error) {
-    logger.error({
+    return errorResponse(error, {
+      logger,
       event: 'documents.parsed.force_refresh_failed',
-      error: errorToLog(error),
-    }, 'Failed to force PDF refresh');
-    return NextResponse.json({ error: 'Failed to force PDF refresh' }, { status: 500 });
+      msg: 'Failed to force PDF refresh',
+      apiErrorMessage: 'Failed to force PDF refresh',
+      normalize: { code: 'DOCUMENTS_PARSED_FORCE_REFRESH_FAILED', errorClass: 'upstream' },
+    });
   }
 }

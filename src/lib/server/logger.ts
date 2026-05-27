@@ -6,31 +6,6 @@ import pinoPretty from 'pino-pretty';
 export type ServerLogger = Logger;
 export type ServerLogLevel = 'error' | 'warn' | 'info';
 
-export type ServerErrorClass =
-  | 'validation'
-  | 'auth'
-  | 'permission'
-  | 'upstream'
-  | 'storage'
-  | 'db'
-  | 'timeout'
-  | 'unknown';
-
-export type ServerErrorContract = {
-  errorClass: ServerErrorClass;
-  retryable: boolean;
-  httpStatus: number;
-  operation: string;
-  degraded: boolean;
-  cause?: unknown;
-};
-
-export type ServerApiErrorBody = {
-  error: string;
-  retryable?: boolean;
-  details?: Record<string, unknown>;
-};
-
 export type LoggedError = {
   name: string;
   message: string;
@@ -138,16 +113,6 @@ export function errorToLog(error: unknown, depth = 0): LoggedError {
   return {
     name: 'NonErrorThrowable',
     message: String(error),
-  };
-}
-
-export function apiErrorBody(
-  input: ServerApiErrorBody,
-): ServerApiErrorBody {
-  return {
-    error: input.error,
-    ...(typeof input.retryable === 'boolean' ? { retryable: input.retryable } : {}),
-    ...(input.details ? { details: input.details } : {}),
   };
 }
 
