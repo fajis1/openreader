@@ -36,10 +36,10 @@ jobs:
         weed version
     - name: Install NATS server binary
       run: |
-        curl -fsSL -o /tmp/nats-server.zip \
-          https://github.com/nats-io/nats-server/releases/download/v2.12.1/nats-server-v2.12.1-linux-amd64.zip
-        unzip -j /tmp/nats-server.zip '*/nats-server' -d /tmp
-        sudo install -m 0755 /tmp/nats-server /usr/local/bin/nats-server
+        curl -fsSL -o /tmp/nats-server.tar.gz \
+          https://github.com/nats-io/nats-server/releases/download/v2.12.1/nats-server-v2.12.1-linux-amd64.tar.gz
+        tar -xzf /tmp/nats-server.tar.gz -C /tmp
+        sudo install -m 0755 /tmp/nats-server-v2.12.1-linux-amd64/nats-server /usr/local/bin/nats-server
         nats-server -v
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
