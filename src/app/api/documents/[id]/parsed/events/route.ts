@@ -17,6 +17,7 @@ import type { PdfLayoutJobResult, WorkerOperationEvent, WorkerOperationState } f
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 300;
 
 const SSE_KEEPALIVE_MS = 15_000;
 const SSE_RESYNC_INTERVAL_MS = 30_000;
