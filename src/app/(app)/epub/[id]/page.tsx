@@ -46,6 +46,7 @@ export default function EPUBPage() {
   const inFlightDocIdRef = useRef<string | null>(null);
   const loadedDocIdRef = useRef<string | null>(null);
   const didInitPadPctRef = useRef(false);
+  const clearCurrDocRef = useRef(clearCurrDoc);
 
   useEffect(() => {
     setIsLoading(true);
@@ -103,10 +104,14 @@ export default function EPUBPage() {
   }, [loadDocument, isLoading]);
 
   useEffect(() => {
-    return () => {
-      clearCurrDoc();
-    };
+    clearCurrDocRef.current = clearCurrDoc;
   }, [clearCurrDoc]);
+
+  useEffect(() => {
+    return () => {
+      clearCurrDocRef.current();
+    };
+  }, []);
 
   // Compute available height = viewport - (header height + tts bar height)
   useEffect(() => {
