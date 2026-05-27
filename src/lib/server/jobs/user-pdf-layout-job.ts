@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
@@ -200,12 +199,10 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
     const coordinator = [...scopedRows].sort((a, b) => a.userId.localeCompare(b.userId))[0];
     if (!coordinator) return;
 
-    const claimOpId = randomUUID();
     const runningStateData: DocumentParseState = {
       status: 'running',
       progress: null,
       updatedAt: Date.now(),
-      opId: claimOpId,
     };
     const runningState = stringifyDocumentParseState(runningStateData);
 
@@ -239,12 +236,12 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
     });
 
     const compute = await getCompute();
-    let activeOpId: string = claimOpId;
+    let activeOpId: string | undefined;
     let activeJobId: string | undefined;
     let lastProgressWriteAt = 0;
     let lastSnapshotWriteAt = 0;
     let lastSnapshotStatus: 'pending' | 'running' | null = null;
-    let lastSnapshotOpId: string = claimOpId;
+    let lastSnapshotOpId: string | undefined;
     let lastSnapshotJobId: string | undefined;
 
     const persistRunningState = async (state: DocumentParseState): Promise<void> => {
@@ -280,7 +277,7 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
         status: mappedStatus,
         progress: snapshot.progress ?? null,
         updatedAt: now,
-        opId: activeOpId,
+        ...(activeOpId ? { opId: activeOpId } : {}),
         ...(activeJobId ? { jobId: activeJobId } : {}),
       };
       await persistRunningState(nextState);
@@ -306,7 +303,7 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
           phase: progress.phase,
         },
         updatedAt: Date.now(),
-        opId: activeOpId,
+        ...(activeOpId ? { opId: activeOpId } : {}),
         ...(activeJobId ? { jobId: activeJobId } : {}),
       };
       await persistRunningState(runningProgressState);
