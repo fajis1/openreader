@@ -8,6 +8,7 @@ import type {
   Folder,
   IconSize,
 } from '@/types/documents';
+import { formatDocumentSize } from '@/components/doclist/formatSize';
 import { Button } from '@headlessui/react';
 import { DocumentTile } from './DocumentTile';
 import { FolderIcon } from '../window/finderIcons';
@@ -26,12 +27,26 @@ interface IconsViewProps {
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
 }
 
-const COLS: Record<IconSize, string> = {
-  sm: 'grid-cols-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-8',
-  md: 'grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6',
-  lg: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5',
-  xl: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
+const TILE_WIDTH_PX: Record<IconSize, number> = {
+  sm: 112,
+  md: 136,
+  lg: 162,
+  xl: 192,
 };
+
+function responsiveGridTemplate(iconSize: IconSize): string {
+  const width = TILE_WIDTH_PX[iconSize];
+  return `repeat(auto-fit, minmax(${width}px, 1fr))`;
+}
+
+const gridGap = '12px';
+
+function gridStyle(iconSize: IconSize): React.CSSProperties {
+  return {
+    gridTemplateColumns: responsiveGridTemplate(iconSize),
+    gap: gridGap,
+  };
+}
 
 function FolderGridRow({
   folder,
@@ -84,7 +99,7 @@ function FolderGridRow({
           <FolderIcon className="w-3.5 h-3.5 text-accent" />
           {folder.name}
           <span className="text-[10px] font-normal text-muted ml-1">
-            {folder.documents.length} • {(totalSize / 1024 / 1024).toFixed(1)} MB
+            {folder.documents.length} • {formatDocumentSize(totalSize)}
           </span>
           <svg
             className={`w-3 h-3 transition-transform ${collapsed ? '-rotate-90' : ''}`}
@@ -119,7 +134,10 @@ function FolderGridRow({
         leaveFrom="opacity-100 max-h-[2000px]"
         leaveTo="opacity-0 max-h-0"
       >
-        <div className={`grid gap-2 sm:gap-3 p-2 ${COLS[iconSize]}`}>
+        <div
+          className="grid p-2"
+          style={gridStyle(iconSize)}
+        >
           {folder.documents.map((doc) => (
             <DocumentTile
               key={`${doc.type}-${doc.id}`}
@@ -166,7 +184,10 @@ export function IconsView({
       onClick={handleBackgroundClick}
       className="flex-1 min-h-0 overflow-y-auto p-3"
     >
-      <div className={`grid gap-2 sm:gap-3 ${COLS[iconSize]}`}>
+      <div
+        className="grid"
+        style={gridStyle(iconSize)}
+      >
         {folders.map((folder) => (
           <FolderGridRow
             key={folder.id}
