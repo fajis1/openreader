@@ -4,7 +4,7 @@ import { useRef, type CSSProperties, type ReactNode } from 'react';
 import { useDrop } from 'react-dnd';
 import type { Folder, SidebarFilter } from '@/types/documents';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
-import { FolderIcon, HomeIcon, ClockIcon } from './finderIcons';
+import { FolderIcon, HomeIcon, ClockIcon, FolderPlusIcon } from './finderIcons';
 import { DND_DOCUMENT, type DocumentDragItem } from '../dnd/dndTypes';
 
 interface FinderSidebarProps {
@@ -12,6 +12,8 @@ interface FinderSidebarProps {
   onFilterChange: (filter: SidebarFilter) => void;
   folders: Folder[];
   counts: { all: number; pdf: number; epub: number; html: number };
+  onDeleteFolder: (folderId: string) => void;
+  onNewFolder: () => void;
   /** When dragging onto a folder row, move dropped docs into that folder. */
   onDropOnFolder: (folderId: string, item: DocumentDragItem) => void;
   /** Width controls (desktop only). */
@@ -29,6 +31,7 @@ interface SidebarRowProps {
   icon: ReactNode;
   label: string;
   count?: number;
+  countClassName?: string;
   trailing?: ReactNode;
   isDropTarget?: boolean;
 }
@@ -39,6 +42,7 @@ function SidebarRow({
   icon,
   label,
   count,
+  countClassName,
   trailing,
   isDropTarget,
 }: SidebarRowProps) {
@@ -64,7 +68,11 @@ function SidebarRow({
       </span>
       <span className="truncate flex-1">{label}</span>
       {typeof count === 'number' && count > 0 && (
-        <span className="text-[10px] text-muted tabular-nums">{count}</span>
+        <span
+          className={`text-[10px] text-muted tabular-nums transition-transform duration-200 ease-out ${countClassName ?? ''}`}
+        >
+          {count}
+        </span>
       )}
       {trailing}
     </button>
@@ -75,11 +83,13 @@ function FolderRow({
   folder,
   active,
   onClick,
+  onDelete,
   onDropOnFolder,
 }: {
   folder: Folder;
   active: boolean;
   onClick: () => void;
+  onDelete: () => void;
   onDropOnFolder: (folderId: string, item: DocumentDragItem) => void;
 }) {
   const [{ isOver, canDrop }, dropRef] = useDrop<
@@ -103,15 +113,33 @@ function FolderRow({
 
   const isDropTarget = isOver && canDrop;
   return (
-    <div ref={dropRef as unknown as React.RefObject<HTMLDivElement>}>
+    <div
+      ref={dropRef as unknown as React.RefObject<HTMLDivElement>}
+      className="group/folder relative"
+    >
       <SidebarRow
         active={active}
         onClick={onClick}
         icon={<FolderIcon className="w-3.5 h-3.5" />}
         label={folder.name}
         count={folder.documents.length}
+        countClassName="group-hover/folder:-translate-x-6 group-focus-within/folder:-translate-x-6"
         isDropTarget={isDropTarget}
       />
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        className="absolute right-1 top-1/2 -translate-y-1/2 h-5 w-5 inline-flex items-center justify-center rounded text-muted opacity-0 group-hover/folder:opacity-100 group-focus-within/folder:opacity-100 hover:text-accent hover:bg-offbase transition"
+        aria-label={`Delete ${folder.name}`}
+        title={`Delete ${folder.name}`}
+      >
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
     </div>
   );
 }
@@ -134,6 +162,8 @@ export function FinderSidebar({
   onFilterChange,
   folders,
   counts,
+  onDeleteFolder,
+  onNewFolder,
   onDropOnFolder,
   width,
   onWidthChange,
@@ -205,19 +235,33 @@ export function FinderSidebar({
           count={counts.html}
         />
 
-        {folders.length > 0 && (
-          <>
-            <SectionLabel>Folders</SectionLabel>
-            {folders.map((folder) => (
-              <FolderRow
-                key={folder.id}
-                folder={folder}
-                active={filter === `folder:${folder.id}`}
-                onClick={() => onFilterChange(`folder:${folder.id}`)}
-                onDropOnFolder={onDropOnFolder}
-              />
-            ))}
-          </>
+        <div className="px-2 pt-3 pb-1 flex items-center justify-between">
+          <p className="text-[10px] uppercase tracking-[0.08em] text-muted font-semibold">
+            Folders
+          </p>
+          <button
+            type="button"
+            onClick={onNewFolder}
+            className="inline-flex items-center justify-center h-6 w-6 rounded-md border border-offbase bg-base text-foreground hover:text-accent hover:border-accent hover:bg-offbase transition-all duration-200 ease-out hover:scale-[1.01]"
+            title="New folder"
+            aria-label="New folder"
+          >
+            <FolderPlusIcon className="w-4 h-4" />
+          </button>
+        </div>
+        {folders.length === 0 ? (
+          <p className="px-2 py-1 text-[11px] text-muted">No folders yet</p>
+        ) : (
+          folders.map((folder) => (
+            <FolderRow
+              key={folder.id}
+              folder={folder}
+              active={filter === `folder:${folder.id}`}
+              onClick={() => onFilterChange(`folder:${folder.id}`)}
+              onDelete={() => onDeleteFolder(folder.id)}
+              onDropOnFolder={onDropOnFolder}
+            />
+          ))
         )}
       </div>
 

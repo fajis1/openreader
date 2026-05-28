@@ -123,7 +123,6 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>(DEFAULT_STATE.viewMode);
   const [iconSize, setIconSize] = useState<IconSize>(DEFAULT_STATE.iconSize);
   const [folders, setFolders] = useState<Folder[]>(DEFAULT_STATE.folders);
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [showHint, setShowHint] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_STATE.sidebarWidth);
   const [sidebarFilter, setSidebarFilter] = useState<SidebarFilter>('all');
@@ -167,7 +166,6 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         setSortBy(saved.sortBy);
         setSortDirection(saved.sortDirection);
         setFolders(saved.folders ?? []);
-        setCollapsedFolders(new Set(saved.collapsedFolders ?? []));
         setShowHint(saved.showHint ?? true);
         setViewMode(normalizeViewMode(saved.viewMode));
         setIconSize(saved.iconSize ?? DEFAULT_STATE.iconSize);
@@ -189,7 +187,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
       sortBy,
       sortDirection,
       folders,
-      collapsedFolders: Array.from(collapsedFolders),
+      collapsedFolders: [],
       showHint,
       viewMode,
       iconSize,
@@ -202,7 +200,6 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     sortBy,
     sortDirection,
     folders,
-    collapsedFolders,
     showHint,
     viewMode,
     iconSize,
@@ -257,22 +254,45 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     [rawDocuments, recentlyOpenedById],
   );
 
-  // Reconcile folders against server.
-  useEffect(() => {
-    if (!isInitialized) return;
-    const ids = new Set(allDocuments.map((d) => d.id));
-    setFolders((prev) =>
-      prev.map((f) => ({
-        ...f,
-        documents: f.documents.filter((d) => ids.has(d.id)),
+  const allDocumentsById = useMemo(() => {
+    const map = new Map<string, DocumentListDocument>();
+    for (const doc of allDocuments) map.set(doc.id, doc);
+    return map;
+  }, [allDocuments]);
+
+  const foldersWithLiveDocs = useMemo(
+    () =>
+      folders.map((folder) => ({
+        ...folder,
+        documents: folder.documents
+          .map((d) => allDocumentsById.get(d.id))
+          .filter((d): d is DocumentListDocument => Boolean(d))
+          .map((d) => ({ ...d, folderId: folder.id })),
       })),
-    );
-  }, [isInitialized, allDocuments]);
+    [folders, allDocumentsById],
+  );
+
+  const folderIdByDocId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const folder of foldersWithLiveDocs) {
+      for (const doc of folder.documents) map.set(doc.id, folder.id);
+    }
+    return map;
+  }, [foldersWithLiveDocs]);
+
+  const allDocumentsWithFolder = useMemo(
+    () =>
+      allDocuments.map((doc) => ({
+        ...doc,
+        folderId: folderIdByDocId.get(doc.id),
+      })),
+    [allDocuments, folderIdByDocId],
+  );
 
   // Filter based on sidebar selection + search query.
-  const visibleAll = useMemo(() => {
+  const visibleDocuments = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let docs = allDocuments;
+    let docs = allDocumentsWithFolder;
     if (sidebarFilter === 'pdf') docs = docs.filter((d) => d.type === 'pdf');
     else if (sidebarFilter === 'epub') docs = docs.filter((d) => d.type === 'epub');
     else if (sidebarFilter === 'html') docs = docs.filter((d) => d.type === 'html');
@@ -283,42 +303,23 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         .slice(0, 20);
     } else if (sidebarFilter.startsWith('folder:')) {
       const fid = sidebarFilter.slice('folder:'.length);
-      const folder = folders.find((f) => f.id === fid);
-      docs = folder ? folder.documents : [];
+      const folder = foldersWithLiveDocs.find((f) => f.id === fid);
+      docs = folder
+        ? folder.documents
+            .map((d) => allDocumentsById.get(d.id))
+            .filter((d): d is DocumentListDocument => Boolean(d))
+            .map((d) => ({ ...d, folderId: fid }))
+        : [];
     }
     if (q) docs = docs.filter((d) => d.name.toLowerCase().includes(q));
     return docs;
-  }, [allDocuments, sidebarFilter, query, folders]);
+  }, [allDocumentsWithFolder, sidebarFilter, query, foldersWithLiveDocs, allDocumentsById]);
 
   // Apply sort.
   const sortedVisible = useMemo(() => {
-    if (sidebarFilter === 'recents') return visibleAll;
-    return sortDocs(visibleAll, sortBy, sortDirection);
-  }, [visibleAll, sidebarFilter, sortBy, sortDirection]);
-
-  // Split into folders + unfoldered for the current filter context.
-  const showAllScope = sidebarFilter === 'all';
-  const visibleFolders = useMemo<Folder[]>(() => {
-    if (!showAllScope) return [];
-    // Within a kind-filter (pdf/epub/html), still show folders that contain matches.
-    return folders.map((f) => ({
-      ...f,
-      documents: sortDocs(
-        f.documents.filter((d) =>
-          query ? d.name.toLowerCase().includes(query.toLowerCase()) : true,
-        ),
-        sortBy,
-        sortDirection,
-      ),
-    }));
-  }, [folders, showAllScope, query, sortBy, sortDirection]);
-
-  const unfolderedDocs = useMemo(() => {
-    if (sidebarFilter === 'recents') return sortedVisible;
-    const inFolder = new Set<string>();
-    folders.forEach((f) => f.documents.forEach((d) => inFolder.add(d.id)));
-    return sortedVisible.filter((d) => !inFolder.has(d.id));
-  }, [folders, sidebarFilter, sortedVisible]);
+    if (sidebarFilter === 'recents') return visibleDocuments;
+    return sortDocs(visibleDocuments, sortBy, sortDirection);
+  }, [visibleDocuments, sidebarFilter, sortBy, sortDirection]);
 
   const counts = useMemo(
     () => ({
@@ -376,6 +377,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
           return { ...f, documents: [...f.documents, ...newDocs] };
         }),
       );
+      setSidebarFilter(`folder:${folderId}`);
       selection.clear();
     },
     [selection],
@@ -412,6 +414,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     setPendingMerge(null);
     setNewFolderName('');
     setShowHint(false);
+    setSidebarFilter(`folder:${folderId}`);
     selection.clear();
   }, [pendingMerge, newFolderName, selection]);
 
@@ -421,21 +424,13 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     setFolders((prev) => [...prev, { id: folderId, name, documents: [] }]);
     setNewFolderName('');
     setManualFolderPrompt(false);
+    setSidebarFilter(`folder:${folderId}`);
   }, [newFolderName]);
 
   const handleDeleteFolder = useCallback((folderId: string) => {
     setFolders((prev) => prev.filter((f) => f.id !== folderId));
     if (sidebarFilter === `folder:${folderId}`) setSidebarFilter('all');
   }, [sidebarFilter]);
-
-  const toggleFolderCollapse = useCallback((folderId: string) => {
-    setCollapsedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(folderId)) next.delete(folderId);
-      else next.add(folderId);
-      return next;
-    });
-  }, []);
 
   // Status bar summary.
   const summary = useMemo(() => {
@@ -473,10 +468,6 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
           }
           query={query}
           onQueryChange={setQuery}
-          onNewFolder={() => {
-            setNewFolderName('');
-            setManualFolderPrompt(true);
-          }}
           onToggleSidebar={() =>
             isNarrow
               ? setMobileSidebarOpen((p) => !p)
@@ -492,8 +483,13 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         <FinderSidebar
           filter={sidebarFilter}
           onFilterChange={setSidebarFilter}
-          folders={folders}
+          folders={foldersWithLiveDocs}
           counts={counts}
+          onDeleteFolder={handleDeleteFolder}
+          onNewFolder={() => {
+            setNewFolderName('');
+            setManualFolderPrompt(true);
+          }}
           onDropOnFolder={handleDropOnFolder}
           width={sidebarWidth}
           onWidthChange={setSidebarWidth}
@@ -546,50 +542,36 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         <DocumentUploader variant="overlay" className="flex-1 min-h-0 flex flex-col">
           {fallbackViewMode === 'icons' && (
             <IconsView
-              folders={visibleFolders}
-              unfolderedDocs={unfolderedDocs}
+              documents={sortedVisible}
               iconSize={iconSize}
-              collapsedFolders={collapsedFolders}
-              onToggleCollapse={toggleFolderCollapse}
-              onDeleteFolder={handleDeleteFolder}
               onDeleteDoc={handleDeleteDoc}
-              onDropOnFolder={handleDropOnFolder}
               onMergeIntoFolder={handleMergeIntoFolder}
             />
           )}
           {fallbackViewMode === 'list' && (
             <ListView
-              folders={visibleFolders}
-              unfolderedDocs={unfolderedDocs}
+              documents={sortedVisible}
               sortBy={sortBy}
               sortDirection={sortDirection}
               onSortChange={(b, d) => {
                 setSortBy(b);
                 setSortDirection(d);
               }}
-              collapsedFolders={collapsedFolders}
-              onToggleCollapse={toggleFolderCollapse}
-              onDeleteFolder={handleDeleteFolder}
               onDeleteDoc={handleDeleteDoc}
-              onDropOnFolder={handleDropOnFolder}
               onMergeIntoFolder={handleMergeIntoFolder}
             />
           )}
           {fallbackViewMode === 'columns' && (
             <ColumnsView
-              folders={visibleFolders}
-              unfolderedDocs={unfolderedDocs}
+              documents={sortedVisible}
               onDeleteDoc={handleDeleteDoc}
-              onDropOnFolder={handleDropOnFolder}
               onMergeIntoFolder={handleMergeIntoFolder}
             />
           )}
           {fallbackViewMode === 'gallery' && (
             <GalleryView
-              folders={visibleFolders}
-              unfolderedDocs={unfolderedDocs}
+              documents={sortedVisible}
               onDeleteDoc={handleDeleteDoc}
-              onDropOnFolder={handleDropOnFolder}
               onMergeIntoFolder={handleMergeIntoFolder}
             />
           )}

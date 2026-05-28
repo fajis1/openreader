@@ -3,30 +3,23 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
-import { Button, Transition } from '@headlessui/react';
+import { Button } from '@headlessui/react';
 import type {
   DocumentListDocument,
-  Folder,
   SortBy,
   SortDirection,
 } from '@/types/documents';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
 import { formatDocumentSize } from '@/components/doclist/formatSize';
-import { FolderIcon } from '../window/finderIcons';
 import { useDocumentSelection } from '../dnd/DocumentSelectionContext';
 import { DND_DOCUMENT, type DocumentDragItem } from '../dnd/dndTypes';
 
 interface ListViewProps {
-  folders: Folder[];
-  unfolderedDocs: DocumentListDocument[];
+  documents: DocumentListDocument[];
   sortBy: SortBy;
   sortDirection: SortDirection;
   onSortChange: (sortBy: SortBy, direction: SortDirection) => void;
-  collapsedFolders: Set<string>;
-  onToggleCollapse: (folderId: string) => void;
-  onDeleteFolder: (folderId: string) => void;
   onDeleteDoc: (doc: DocumentListDocument) => void;
-  onDropOnFolder: (folderId: string, item: DocumentDragItem) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
 }
 
@@ -84,12 +77,10 @@ function HeaderCell({
 
 function DocRow({
   doc,
-  isFirstColumnIndented,
   onDeleteDoc,
   onMergeIntoFolder,
 }: {
   doc: DocumentListDocument;
-  isFirstColumnIndented?: boolean;
   onDeleteDoc: (d: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
 }) {
@@ -163,10 +154,7 @@ function DocRow({
         href={href}
         draggable={false}
         onClick={handleClick}
-        className={
-          'flex items-center gap-2 min-w-0 px-2 py-1.5 ' +
-          (isFirstColumnIndented ? 'pl-8' : '')
-        }
+        className="flex items-center gap-2 min-w-0 px-2 py-1.5"
       >
         <KindIcon doc={doc} />
         <span className="truncate">{doc.name}</span>
@@ -199,118 +187,19 @@ function DocRow({
   );
 }
 
-function FolderRowGroup({
-  folder,
-  collapsed,
-  onToggleCollapse,
-  onDelete,
-  onDeleteDoc,
-  onDropOnFolder,
-  onMergeIntoFolder,
-}: {
-  folder: Folder;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
-  onDelete: () => void;
-  onDeleteDoc: (d: DocumentListDocument) => void;
-  onDropOnFolder: (folderId: string, item: DocumentDragItem) => void;
-  onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
-}) {
-  const [{ isOver, canDrop }, dropRef] = useDrop<DocumentDragItem, void, { isOver: boolean; canDrop: boolean }>(() => ({
-    accept: DND_DOCUMENT,
-    canDrop: (item) => item.docs.some((d) => d.folderId !== folder.id),
-    drop: (item) => onDropOnFolder(folder.id, item),
-    collect: (m) => ({ isOver: m.isOver({ shallow: true }), canDrop: m.canDrop() }),
-  }), [folder.id, onDropOnFolder]);
-
-  const isTarget = isOver && canDrop;
-  const totalSize = folder.documents.reduce((acc, d) => acc + d.size, 0);
-
-  return (
-    <div ref={dropRef as unknown as React.RefObject<HTMLDivElement>}>
-      <div
-        className={
-          'grid grid-cols-[minmax(0,1fr)_72px_88px_120px_28px] sm:grid-cols-[minmax(0,1fr)_88px_96px_140px_32px] items-center text-[12px] border-b border-offbase bg-base ' +
-          (isTarget ? 'ring-1 ring-accent ring-inset' : '')
-        }
-      >
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          className="flex items-center gap-1.5 min-w-0 px-2 py-1.5 text-left font-semibold hover:text-accent transition-colors duration-200 ease-out"
-        >
-          <svg
-            className={`w-3 h-3 text-muted transition-transform ${collapsed ? '-rotate-90' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-          </svg>
-          <FolderIcon className="w-3.5 h-3.5 text-accent" />
-          <span className="truncate">{folder.name}</span>
-        </button>
-        <span className="px-2 text-[11px] text-muted">Folder</span>
-        <span className="px-2 text-[11px] text-muted text-right tabular-nums">
-          {formatDocumentSize(totalSize)}
-        </span>
-        <span className="px-2 text-[11px] text-muted tabular-nums">
-          {folder.documents.length} items
-        </span>
-        <Button
-          onClick={onDelete}
-          className="h-7 w-7 flex items-center justify-center text-muted hover:text-accent hover:bg-offbase hover:scale-[1.02] rounded transition-all duration-200 ease-out"
-          aria-label={`Delete ${folder.name}`}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </Button>
-      </div>
-      <Transition
-        show={!collapsed}
-        enter="transition-all duration-200"
-        enterFrom="opacity-0 max-h-0"
-        enterTo="opacity-100 max-h-[2000px]"
-        leave="transition-all duration-150"
-        leaveFrom="opacity-100 max-h-[2000px]"
-        leaveTo="opacity-0 max-h-0"
-      >
-        <div>
-          {folder.documents.map((doc) => (
-            <DocRow
-              key={`${doc.type}-${doc.id}`}
-              doc={doc}
-              isFirstColumnIndented
-              onDeleteDoc={onDeleteDoc}
-              onMergeIntoFolder={onMergeIntoFolder}
-            />
-          ))}
-        </div>
-      </Transition>
-    </div>
-  );
-}
-
 export function ListView({
-  folders,
-  unfolderedDocs,
+  documents,
   sortBy,
   sortDirection,
   onSortChange,
-  collapsedFolders,
-  onToggleCollapse,
-  onDeleteFolder,
   onDeleteDoc,
-  onDropOnFolder,
   onMergeIntoFolder,
 }: ListViewProps) {
   const { setVisibleOrder, clear } = useDocumentSelection();
 
   useEffect(() => {
-    const all = [...folders.flatMap((f) => f.documents), ...unfolderedDocs];
-    setVisibleOrder(all);
-  }, [folders, unfolderedDocs, setVisibleOrder]);
+    setVisibleOrder(documents);
+  }, [documents, setVisibleOrder]);
 
   const handleBackgroundClick: React.MouseEventHandler = (e) => {
     if ((e.target as HTMLElement).closest('[data-doc-tile]')) return;
@@ -327,19 +216,7 @@ export function ListView({
         <span />
       </div>
       <div>
-        {folders.map((folder) => (
-          <FolderRowGroup
-            key={folder.id}
-            folder={folder}
-            collapsed={collapsedFolders.has(folder.id)}
-            onToggleCollapse={() => onToggleCollapse(folder.id)}
-            onDelete={() => onDeleteFolder(folder.id)}
-            onDeleteDoc={onDeleteDoc}
-            onDropOnFolder={onDropOnFolder}
-            onMergeIntoFolder={onMergeIntoFolder}
-          />
-        ))}
-        {unfolderedDocs.map((doc) => (
+        {documents.map((doc) => (
           <DocRow
             key={`${doc.type}-${doc.id}`}
             doc={doc}

@@ -3,19 +3,16 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
-import type { DocumentListDocument, Folder } from '@/types/documents';
+import type { DocumentListDocument } from '@/types/documents';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
-import { FolderIcon } from '../window/finderIcons';
 import { DocumentPreview } from '@/components/doclist/DocumentPreview';
 import { formatDocumentSize } from '@/components/doclist/formatSize';
 import { useDocumentSelection } from '../dnd/DocumentSelectionContext';
 import { DND_DOCUMENT, type DocumentDragItem } from '../dnd/dndTypes';
 
 interface GalleryViewProps {
-  folders: Folder[];
-  unfolderedDocs: DocumentListDocument[];
+  documents: DocumentListDocument[];
   onDeleteDoc: (doc: DocumentListDocument) => void;
-  onDropOnFolder: (folderId: string, item: DocumentDragItem) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
 }
 
@@ -89,84 +86,38 @@ function GalleryThumb({
   );
 }
 
-function GalleryFolderThumb({
-  folder,
-  active,
-  onClick,
-  onDropOnFolder,
-}: {
-  folder: Folder;
-  active: boolean;
-  onClick: () => void;
-  onDropOnFolder: (folderId: string, item: DocumentDragItem) => void;
-}) {
-  const [{ isOver, canDrop }, dropRef] = useDrop<DocumentDragItem, void, { isOver: boolean; canDrop: boolean }>(() => ({
-    accept: DND_DOCUMENT,
-    canDrop: (item) => item.docs.some((d) => d.folderId !== folder.id),
-    drop: (item) => onDropOnFolder(folder.id, item),
-    collect: (m) => ({ isOver: m.isOver({ shallow: true }), canDrop: m.canDrop() }),
-  }), [folder.id, onDropOnFolder]);
-
-  return (
-    <div
-      ref={dropRef as unknown as React.RefObject<HTMLDivElement>}
-      onClick={onClick}
-      className={
-        'shrink-0 cursor-pointer rounded-md overflow-hidden border transition-all duration-200 ease-out snap-start flex flex-col items-center justify-center gap-2 ' +
-        (active
-          ? 'border-accent ring-1 ring-accent w-[110px]'
-          : 'border-offbase hover:border-accent hover:scale-[1.01] w-[88px]') +
-        (isOver && canDrop ? ' ring-1 ring-accent' : '')
-      }
-    >
-      <div className="aspect-[3/4] w-full bg-base flex items-center justify-center">
-        <FolderIcon className="w-10 h-10 text-accent" />
-      </div>
-      <div className="px-1.5 py-1 w-full text-center bg-base">
-        <span className="text-[10px] text-foreground truncate block">{folder.name}</span>
-        <span className="text-[9px] text-muted">{folder.documents.length} items</span>
-      </div>
-    </div>
-  );
-}
-
 export function GalleryView({
-  folders,
-  unfolderedDocs,
+  documents,
   onDeleteDoc,
-  onDropOnFolder,
   onMergeIntoFolder,
 }: GalleryViewProps) {
   const { setVisibleOrder } = useDocumentSelection();
-  const allDocs = useMemo(
-    () => [...folders.flatMap((f) => f.documents), ...unfolderedDocs],
-    [folders, unfolderedDocs],
-  );
   const [activeIdx, setActiveIdx] = useState(0);
+  const activeDoc = useMemo(() => documents[activeIdx], [documents, activeIdx]);
 
   useEffect(() => {
-    setVisibleOrder(allDocs);
-  }, [allDocs, setVisibleOrder]);
+    setVisibleOrder(documents);
+  }, [documents, setVisibleOrder]);
 
   useEffect(() => {
-    if (activeIdx >= allDocs.length) setActiveIdx(Math.max(0, allDocs.length - 1));
-  }, [allDocs.length, activeIdx]);
+    if (activeIdx >= documents.length) {
+      setActiveIdx(Math.max(0, documents.length - 1));
+    }
+  }, [documents.length, activeIdx]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target?.closest('input, textarea, [contenteditable]')) return;
       if (e.key === 'ArrowRight') {
-        setActiveIdx((i) => Math.min(allDocs.length - 1, i + 1));
+        setActiveIdx((i) => Math.min(documents.length - 1, i + 1));
       } else if (e.key === 'ArrowLeft') {
         setActiveIdx((i) => Math.max(0, i - 1));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [allDocs.length]);
-
-  const activeDoc = allDocs[activeIdx];
+  }, [documents.length]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -207,16 +158,7 @@ export function GalleryView({
 
       <div className="shrink-0 border-t border-offbase bg-base">
         <div className="flex gap-2 overflow-x-auto p-2 snap-x snap-mandatory">
-          {folders.map((f) => (
-            <GalleryFolderThumb
-              key={f.id}
-              folder={f}
-              active={false}
-              onClick={() => { /* could expand later */ }}
-              onDropOnFolder={onDropOnFolder}
-            />
-          ))}
-          {allDocs.map((doc, i) => (
+          {documents.map((doc, i) => (
             <GalleryThumb
               key={`${doc.type}-${doc.id}`}
               doc={doc}

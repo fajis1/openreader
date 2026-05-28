@@ -8,7 +8,6 @@ import {
   ColumnsViewIcon,
   GalleryViewIcon,
   SearchIcon,
-  FolderPlusIcon,
   HamburgerIcon,
 } from './finderIcons';
 import { ChevronUpDownIcon } from '@/components/icons/Icons';
@@ -25,7 +24,6 @@ interface FinderToolbarProps {
   onSortDirectionToggle: () => void;
   query: string;
   onQueryChange: (q: string) => void;
-  onNewFolder: () => void;
   onToggleSidebar: () => void;
   isSidebarOpen: boolean;
   /** True when the columns view should be disabled (mobile viewport). */
@@ -84,7 +82,6 @@ export function FinderToolbar({
   onSortDirectionToggle,
   query,
   onQueryChange,
-  onNewFolder,
   onToggleSidebar,
   isSidebarOpen,
   isNarrow,
@@ -221,16 +218,6 @@ export function FinderToolbar({
             className="flex-1 min-w-0 bg-transparent outline-none text-xs text-foreground placeholder:text-muted"
           />
         </div>
-
-        <button
-          type="button"
-          onClick={onNewFolder}
-          className={`${TOOLBAR_BTN} ${TOOLBAR_BTN_INACTIVE} gap-1 shrink-0`}
-          title="New folder"
-        >
-          <FolderPlusIcon className="w-4 h-4" />
-          <span className="hidden md:inline">New Folder</span>
-        </button>
 
         {rightSlot && (
           <div className="shrink-0 flex items-center gap-2 pl-1 sm:pl-2 sm:border-l sm:border-offbase ml-0.5">
