@@ -34,17 +34,23 @@ const TILE_WIDTH_PX: Record<IconSize, number> = {
   xl: 192,
 };
 
-function responsiveGridTemplate(iconSize: IconSize): string {
+const SMALL_GRID_ITEM_COUNT = 3;
+
+function responsiveGridTemplate(iconSize: IconSize, itemCount: number): string {
   const width = TILE_WIDTH_PX[iconSize];
+  if (itemCount <= SMALL_GRID_ITEM_COUNT) {
+    return `repeat(auto-fill, minmax(${width}px, ${width}px))`;
+  }
   return `repeat(auto-fit, minmax(${width}px, 1fr))`;
 }
 
 const gridGap = '12px';
 
-function gridStyle(iconSize: IconSize): React.CSSProperties {
+function gridStyle(iconSize: IconSize, itemCount: number): React.CSSProperties {
   return {
-    gridTemplateColumns: responsiveGridTemplate(iconSize),
+    gridTemplateColumns: responsiveGridTemplate(iconSize, itemCount),
     gap: gridGap,
+    justifyContent: itemCount <= SMALL_GRID_ITEM_COUNT ? 'start' : undefined,
   };
 }
 
@@ -136,7 +142,7 @@ function FolderGridRow({
       >
         <div
           className="grid p-2"
-          style={gridStyle(iconSize)}
+          style={gridStyle(iconSize, folder.documents.length)}
         >
           {folder.documents.map((doc) => (
             <DocumentTile
@@ -186,7 +192,7 @@ export function IconsView({
     >
       <div
         className="grid"
-        style={gridStyle(iconSize)}
+        style={gridStyle(iconSize, unfolderedDocs.length)}
       >
         {folders.map((folder) => (
           <FolderGridRow

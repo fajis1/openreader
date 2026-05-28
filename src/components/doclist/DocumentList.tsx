@@ -12,7 +12,11 @@ import type {
   SortDirection,
   ViewMode,
 } from '@/types/documents';
-import { getDocumentListState, saveDocumentListState } from '@/lib/client/dexie';
+import {
+  getDocumentListState,
+  getDocumentRecentlyOpenedMap,
+  saveDocumentListState,
+} from '@/lib/client/dexie';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { CreateFolderDialog } from '@/components/doclist/CreateFolderDialog';
 import { DocumentListSkeleton } from '@/components/doclist/DocumentListSkeleton';
@@ -126,6 +130,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [recentlyOpenedById, setRecentlyOpenedById] = useState<Record<string, number>>({});
 
   const [isInitialized, setIsInitialized] = useState(false);
 
@@ -214,13 +219,42 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   }, [isNarrow]);
 
   // Build the union document list.
-  const allDocuments: DocumentListDocument[] = useMemo(
+  const rawDocuments: DocumentListDocument[] = useMemo(
     () => [
       ...pdfDocs.map((d) => ({ ...d, type: 'pdf' as const })),
       ...epubDocs.map((d) => ({ ...d, type: 'epub' as const })),
       ...htmlDocs.map((d) => ({ ...d, type: 'html' as const })),
     ],
     [pdfDocs, epubDocs, htmlDocs],
+  );
+  const rawDocumentIdsKey = useMemo(
+    () => rawDocuments.map((d) => d.id).sort().join('|'),
+    [rawDocuments],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const recentMap = await getDocumentRecentlyOpenedMap();
+        if (cancelled) return;
+        setRecentlyOpenedById(recentMap);
+      } catch (err) {
+        console.warn('Failed to load recently opened cache metadata:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rawDocumentIdsKey]);
+
+  const allDocuments: DocumentListDocument[] = useMemo(
+    () =>
+      rawDocuments.map((doc) => ({
+        ...doc,
+        recentlyOpenedAt: recentlyOpenedById[doc.id] ?? 0,
+      })),
+    [rawDocuments, recentlyOpenedById],
   );
 
   // Reconcile folders against server.
@@ -244,7 +278,8 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     else if (sidebarFilter === 'html') docs = docs.filter((d) => d.type === 'html');
     else if (sidebarFilter === 'recents') {
       docs = [...docs]
-        .sort((a, b) => b.lastModified - a.lastModified)
+        .filter((d) => (d.recentlyOpenedAt ?? 0) > 0)
+        .sort((a, b) => (b.recentlyOpenedAt ?? 0) - (a.recentlyOpenedAt ?? 0))
         .slice(0, 20);
     } else if (sidebarFilter.startsWith('folder:')) {
       const fid = sidebarFilter.slice('folder:'.length);
@@ -256,14 +291,13 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   }, [allDocuments, sidebarFilter, query, folders]);
 
   // Apply sort.
-  const sortedVisible = useMemo(
-    () => sortDocs(visibleAll, sortBy, sortDirection),
-    [visibleAll, sortBy, sortDirection],
-  );
+  const sortedVisible = useMemo(() => {
+    if (sidebarFilter === 'recents') return visibleAll;
+    return sortDocs(visibleAll, sortBy, sortDirection);
+  }, [visibleAll, sidebarFilter, sortBy, sortDirection]);
 
   // Split into folders + unfoldered for the current filter context.
-  const showAllScope =
-    sidebarFilter === 'all' || sidebarFilter === 'recents';
+  const showAllScope = sidebarFilter === 'all';
   const visibleFolders = useMemo<Folder[]>(() => {
     if (!showAllScope) return [];
     // Within a kind-filter (pdf/epub/html), still show folders that contain matches.
@@ -280,10 +314,11 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   }, [folders, showAllScope, query, sortBy, sortDirection]);
 
   const unfolderedDocs = useMemo(() => {
+    if (sidebarFilter === 'recents') return sortedVisible;
     const inFolder = new Set<string>();
     folders.forEach((f) => f.documents.forEach((d) => inFolder.add(d.id)));
     return sortedVisible.filter((d) => !inFolder.has(d.id));
-  }, [folders, sortedVisible]);
+  }, [folders, sidebarFilter, sortedVisible]);
 
   const counts = useMemo(
     () => ({

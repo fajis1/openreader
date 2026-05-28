@@ -179,7 +179,7 @@ export function FinderSidebar({
           active={filter === 'recents'}
           onClick={() => onFilterChange('recents')}
           icon={<ClockIcon className="w-3.5 h-3.5" />}
-          label="Recents"
+          label="Recently Opened"
         />
 
         <SectionLabel>Kinds</SectionLabel>

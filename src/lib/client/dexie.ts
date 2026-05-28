@@ -825,6 +825,29 @@ export async function clearHtmlDocuments(): Promise<void> {
   });
 }
 
+export async function getDocumentRecentlyOpenedMap(): Promise<Record<string, number>> {
+  return withDB(async () => {
+    const [pdfRows, epubRows, htmlRows] = await Promise.all([
+      db[PDF_TABLE].toArray(),
+      db[EPUB_TABLE].toArray(),
+      db[HTML_TABLE].toArray(),
+    ]);
+
+    const byId: Record<string, number> = {};
+    const write = (id: string, ts: unknown) => {
+      const value = toPositiveInt(ts, 0);
+      if (value <= 0) return;
+      if (!byId[id] || value > byId[id]) byId[id] = value;
+    };
+
+    pdfRows.forEach((row) => write(row.id, row.cacheAccessedAt));
+    epubRows.forEach((row) => write(row.id, row.cacheAccessedAt));
+    htmlRows.forEach((row) => write(row.id, row.cacheAccessedAt));
+
+    return byId;
+  });
+}
+
 export async function getAppConfig(): Promise<AppConfigRow | null> {
   return withDB(async () => {
     const row = await db[APP_CONFIG_TABLE].get('singleton');

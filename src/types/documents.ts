@@ -5,6 +5,7 @@ export interface BaseDocument {
   name: string;
   size: number;
   lastModified: number;
+  recentlyOpenedAt?: number;
   type: DocumentType;
   parseStatus?: 'pending' | 'running' | 'ready' | 'failed' | null;
   parsedJsonKey?: string | null;
