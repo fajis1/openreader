@@ -61,7 +61,7 @@ export interface Folder {
 export type SortBy = 'name' | 'type' | 'date' | 'size';
 export type SortDirection = 'asc' | 'desc';
 
-export type ViewMode = 'icons' | 'list' | 'columns' | 'gallery';
+export type ViewMode = 'icons' | 'list' | 'gallery';
 export type IconSize = 'sm' | 'md' | 'lg' | 'xl';
 
 // Filter applied from the sidebar.
@@ -74,7 +74,7 @@ export interface DocumentListState {
   folders: Folder[];
   collapsedFolders: string[];
   showHint: boolean;
-  viewMode?: ViewMode | 'list' | 'grid';
+  viewMode?: ViewMode | 'grid';
   iconSize?: IconSize;
   sidebarWidth?: number;
   sidebarFilter?: SidebarFilter;

@@ -75,36 +75,6 @@ function ListSkeleton() {
   );
 }
 
-function ColumnsSkeleton() {
-  return (
-    <div className="h-full min-h-0 flex overflow-x-auto overflow-y-hidden">
-      <div className="w-[260px] shrink-0 h-full bg-base border-r border-offbase overflow-y-auto">
-        <div className="sticky top-0 px-3 py-1.5 border-b border-offbase bg-base">
-          <div className="h-2.5 w-20 rounded bg-offbase" />
-        </div>
-        <div className="p-1.5 flex flex-col gap-1">
-          {Array.from({ length: 11 }).map((_, rowIndex) => (
-            <div key={rowIndex} className="h-7 rounded-md bg-offbase" />
-          ))}
-        </div>
-      </div>
-      <div className="flex-1 min-w-[280px] h-full bg-background overflow-y-auto p-4">
-        <div className="max-w-[360px] mx-auto">
-          <div className="rounded-lg overflow-hidden border border-offbase bg-base">
-            <div className="aspect-[3/4] w-full bg-offbase" />
-          </div>
-          <div className="mt-3 h-3.5 w-4/5 rounded bg-offbase" />
-          <div className="mt-2 h-2.5 w-1/3 rounded bg-offbase" />
-          <div className="mt-3 flex gap-2">
-            <div className="flex-1 h-8 rounded-md bg-offbase" />
-            <div className="w-20 h-8 rounded-md bg-offbase" />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function GallerySkeleton() {
   return (
     <div className="h-full min-h-0 flex flex-col">
@@ -142,8 +112,6 @@ export function DocumentListSkeleton({
   let body;
   if (viewMode === 'list') {
     body = <ListSkeleton />;
-  } else if (viewMode === 'columns') {
-    body = <ColumnsSkeleton />;
   } else if (viewMode === 'gallery') {
     body = <GallerySkeleton />;
   } else {

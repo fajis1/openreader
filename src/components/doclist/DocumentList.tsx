@@ -33,7 +33,6 @@ import { FinderSidebar } from './window/FinderSidebar';
 import { FinderStatusBar } from './window/FinderStatusBar';
 import { IconsView } from './views/IconsView';
 import { ListView } from './views/ListView';
-import { ColumnsView } from './views/ColumnsView';
 import { GalleryView } from './views/GalleryView';
 
 let cachedDocumentListState: DocumentListState | null = null;
@@ -71,7 +70,8 @@ const DEFAULT_STATE: Required<
 function normalizeViewMode(stored: DocumentListState['viewMode']): ViewMode {
   if (stored === 'grid' || stored === undefined) return 'icons';
   if (stored === 'list') return 'list';
-  return stored;
+  if (stored === 'gallery') return 'gallery';
+  return 'icons';
 }
 
 function generateDefaultFolderName(
@@ -463,7 +463,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     const parts: string[] = [];
     if (counts.pdf) parts.push(`${counts.pdf} PDF${counts.pdf === 1 ? '' : 's'}`);
     if (counts.epub) parts.push(`${counts.epub} EPUB${counts.epub === 1 ? '' : 's'}`);
-    if (counts.html) parts.push(`${counts.html} HTML${counts.html === 1 ? '' : 's'}`);
+    if (counts.html) parts.push(`${counts.html} Text${counts.html === 1 ? ' Doc' : ' Docs'}`);
     return parts.join(' • ');
   }, [counts]);
 
@@ -474,8 +474,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
 
   const isLoading = isPDFLoading || isEPUBLoading || isHTMLLoading;
 
-  const fallbackViewMode: ViewMode =
-    viewMode === 'columns' && isNarrow ? 'list' : viewMode;
+  const fallbackViewMode: ViewMode = viewMode;
   const effectiveSidebarOpen = isNarrow ? mobileSidebarOpen : sidebarOpen;
 
   return (
@@ -500,7 +499,6 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               : setSidebarOpen((p) => !p)
           }
           isSidebarOpen={effectiveSidebarOpen}
-          isNarrow={isNarrow}
           leftSlot={brand}
         />
       }
@@ -584,13 +582,6 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
                 setSortBy(b);
                 setSortDirection(d);
               }}
-              onDeleteDoc={handleDeleteDoc}
-              onMergeIntoFolder={handleMergeIntoFolder}
-            />
-          )}
-          {fallbackViewMode === 'columns' && (
-            <ColumnsView
-              documents={sortedVisible}
               onDeleteDoc={handleDeleteDoc}
               onMergeIntoFolder={handleMergeIntoFolder}
             />

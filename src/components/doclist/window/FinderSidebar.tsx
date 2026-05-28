@@ -246,7 +246,7 @@ export function FinderSidebar({
             active={filter === 'html'}
             onClick={() => onFilterChange('html')}
             icon={<FileIcon className="w-3.5 h-3.5" />}
-            label="HTML / Text"
+            label="Text"
             count={counts.html}
           />
 

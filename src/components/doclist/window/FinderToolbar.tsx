@@ -5,7 +5,6 @@ import type { IconSize, SortBy, SortDirection, ViewMode } from '@/types/document
 import {
   IconsViewIcon,
   ListViewIcon,
-  ColumnsViewIcon,
   GalleryViewIcon,
   SearchIcon,
   HamburgerIcon,
@@ -26,8 +25,6 @@ interface FinderToolbarProps {
   onQueryChange: (q: string) => void;
   onToggleSidebar: () => void;
   isSidebarOpen: boolean;
-  /** True when the columns view should be disabled (mobile viewport). */
-  isNarrow: boolean;
   /** App-level content rendered at the far left (brand/logo). */
   leftSlot?: ReactNode;
   /** App-level content rendered at the far right (settings, user menu). */
@@ -37,7 +34,6 @@ interface FinderToolbarProps {
 const VIEW_BUTTONS: Array<{ value: ViewMode; label: string; Icon: typeof IconsViewIcon }> = [
   { value: 'icons', label: 'Icons', Icon: IconsViewIcon },
   { value: 'list', label: 'List', Icon: ListViewIcon },
-  { value: 'columns', label: 'Columns', Icon: ColumnsViewIcon },
   { value: 'gallery', label: 'Gallery', Icon: GalleryViewIcon },
 ];
 
@@ -84,7 +80,6 @@ export function FinderToolbar({
   onQueryChange,
   onToggleSidebar,
   isSidebarOpen,
-  isNarrow,
   leftSlot,
   rightSlot,
 }: FinderToolbarProps) {
@@ -113,7 +108,6 @@ export function FinderToolbar({
 
         <div className={PILL}>
           {VIEW_BUTTONS.map(({ value, label, Icon }) => {
-            const disabled = value === 'columns' && isNarrow;
             const active = viewMode === value;
             const isIconsToggle = value === 'icons';
             return (
@@ -123,16 +117,14 @@ export function FinderToolbar({
               >
                 <button
                   type="button"
-                  disabled={disabled}
                   onClick={() => onViewModeChange(value)}
                   aria-pressed={active}
                   aria-label={`${label} view`}
-                  title={disabled ? `${label} (desktop only)` : `${label} view`}
+                  title={`${label} view`}
                   className={
                     PILL_SEGMENT +
                     ' h-6 w-7 ' +
-                    (active ? PILL_SEGMENT_ACTIVE : PILL_SEGMENT_INACTIVE) +
-                    (disabled ? ' opacity-40 cursor-not-allowed hover:bg-transparent hover:text-muted' : '')
+                    (active ? PILL_SEGMENT_ACTIVE : PILL_SEGMENT_INACTIVE)
                   }
                 >
                   <Icon className="w-4 h-4" />

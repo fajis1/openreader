@@ -57,14 +57,6 @@ export const ListViewIcon = (props: IconProps) => (
   </svg>
 );
 
-export const ColumnsViewIcon = (props: IconProps) => (
-  <svg {...baseSvg(props)}>
-    <rect x="3" y="4" width="5" height="16" rx="1" />
-    <rect x="10" y="4" width="5" height="16" rx="1" />
-    <rect x="17" y="4" width="4" height="16" rx="1" />
-  </svg>
-);
-
 export const GalleryViewIcon = (props: IconProps) => (
   <svg {...baseSvg(props)}>
     <rect x="3" y="4" width="18" height="11" rx="1.5" />
