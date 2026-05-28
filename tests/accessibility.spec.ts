@@ -15,7 +15,7 @@ test.describe('Accessibility smoke', () => {
 
   test('dropzone input and hint text are accessible', async ({ page }) => {
     // Input is present and visible
-    await expect(page.locator('input[type="file"]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('input[type="file"]').first()).toBeVisible({ timeout: 10000 });
 
     // Hint text present (supports compact or default variants)
     await expect(
@@ -27,9 +27,9 @@ test.describe('Accessibility smoke', () => {
     await uploadFiles(page, 'sample.pdf', 'sample.epub', 'sample.txt');
     await ensureDocumentsListed(page, ['sample.pdf', 'sample.epub', 'sample.txt']);
 
-    await expect(page.getByRole('link', { name: /sample\.pdf/i })).toBeVisible();
-    await expect(page.getByRole('link', { name: /sample\.epub/i })).toBeVisible();
-    await expect(page.getByRole('link', { name: /sample\.txt/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /^sample\.pdf$/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /^sample\.epub$/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /^sample\.txt$/i })).toBeVisible();
   });
 
   test('ConfirmDialog exposes role=dialog with title and actions', async ({ page }) => {
@@ -37,7 +37,7 @@ test.describe('Accessibility smoke', () => {
     await ensureDocumentsListed(page, ['sample.pdf']);
 
     // Open the confirm dialog by clicking the row delete button
-    await page.getByRole('button', { name: 'Delete document' }).first().click();
+    await page.getByRole('button', { name: /^Delete sample\.pdf$/i }).first().click();
 
     // Title and dialog role visible
     const heading = page.getByRole('heading', { name: 'Delete Document' });

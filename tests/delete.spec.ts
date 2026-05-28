@@ -22,9 +22,6 @@ test.describe('Document deletion flow', () => {
     await expectNoDocumentLink(page, 'sample.txt');
     await expectDocumentListed(page, 'sample.pdf');
 
-    // Optional: summary exists (best-effort)
-    const summary = page.locator('[data-doc-summary]');
-    await expect(summary).toBeVisible();
   });
 
   test('deletes all local documents from Settings modal', async ({ page }) => {

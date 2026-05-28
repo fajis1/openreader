@@ -419,8 +419,7 @@ export async function expectViewerForFile(page: Page, fileName: string) {
 
 // Delete a single document by filename via row action and confirm dialog
 export async function deleteDocumentByName(page: Page, fileName: string) {
-  const link = page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).first();
-  await link.locator('xpath=..').getByRole('button', { name: 'Delete document' }).click();
+  await page.getByRole('button', { name: new RegExp(`^Delete\\s+${escapeRegExp(fileName)}$`, 'i') }).first().click();
 
   const heading = page.getByRole('heading', { name: 'Delete Document' });
   await expect(heading).toBeVisible({ timeout: 10000 });
