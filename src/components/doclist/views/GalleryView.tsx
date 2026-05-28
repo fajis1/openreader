@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
 import type { DocumentListDocument } from '@/types/documents';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
@@ -65,12 +65,13 @@ function GalleryThumb({
       ref={setRefs}
       data-doc-tile
       onClick={onClick}
+      aria-current={active ? 'true' : undefined}
       className={
-        'shrink-0 cursor-pointer rounded-md overflow-hidden border transition-all duration-200 ease-out snap-start ' +
+        'group relative w-[98px] sm:w-[110px] shrink-0 cursor-pointer rounded-lg overflow-hidden border bg-base snap-start transition-all duration-200 ease-out ' +
         (active
-          ? 'border-accent ring-1 ring-accent w-[110px]'
-          : 'border-offbase hover:border-accent hover:scale-[1.01] w-[88px]') +
-        (isOver && canDrop ? ' ring-1 ring-accent' : '') +
+          ? 'border-accent shadow-[0_10px_24px_-18px_rgba(0,0,0,0.85)] -translate-y-0.5'
+          : 'border-offbase hover:border-accent hover:-translate-y-0.5') +
+        (isOver && canDrop ? ' border-accent' : '') +
         (isDragging ? ' opacity-50' : '')
       }
       title={doc.name}
@@ -78,9 +79,27 @@ function GalleryThumb({
       <div className="aspect-[3/4] bg-base">
         <DocumentPreview doc={doc} />
       </div>
-      <div className="px-1.5 py-1 flex items-center gap-1 bg-base">
-        <KindIcon doc={doc} className="w-3 h-3 shrink-0 text-muted" />
-        <span className="truncate text-[10px] text-foreground">{doc.name}</span>
+      <div
+        className={
+          'px-2 py-1.5 flex items-center gap-1.5 border-t transition-colors duration-200 ' +
+          (active ? 'bg-offbase border-accent' : 'bg-base border-offbase')
+        }
+      >
+        <KindIcon
+          doc={doc}
+          className={
+            'w-3 h-3 shrink-0 transition-colors duration-200 ' +
+            (active ? 'text-accent' : 'text-muted')
+          }
+        />
+        <span
+          className={
+            'truncate text-[10px] leading-none transition-colors duration-200 ' +
+            (active ? 'text-accent font-medium' : 'text-foreground')
+          }
+        >
+          {doc.name}
+        </span>
       </div>
     </div>
   );
@@ -92,6 +111,7 @@ export function GalleryView({
   onMergeIntoFolder,
 }: GalleryViewProps) {
   const { setVisibleOrder } = useDocumentSelection();
+  const railRef = useRef<HTMLDivElement | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const activeDoc = useMemo(() => documents[activeIdx], [documents, activeIdx]);
 
@@ -104,6 +124,12 @@ export function GalleryView({
       setActiveIdx(Math.max(0, documents.length - 1));
     }
   }, [documents.length, activeIdx]);
+
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    rail.scrollLeft = 0;
+  }, [documents.length]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -156,8 +182,11 @@ export function GalleryView({
         )}
       </div>
 
-      <div className="shrink-0 border-t border-offbase bg-base">
-        <div className="flex gap-2 overflow-x-auto p-2 snap-x snap-mandatory">
+      <div className="shrink-0 border-t border-offbase bg-gradient-to-b from-base to-offbase/30">
+        <div
+          ref={railRef}
+          className="flex gap-2.5 overflow-x-auto pl-4 pr-3 pt-2.5 pb-1.5 snap-x snap-proximity scroll-pl-4 sm:scroll-pl-5 scroll-pr-3 sm:scroll-pr-4"
+        >
           {documents.map((doc, i) => (
             <GalleryThumb
               key={`${doc.type}-${doc.id}`}

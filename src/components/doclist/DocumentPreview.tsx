@@ -62,6 +62,7 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
       lowerName.endsWith('.mkd'));
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isImageReady, setIsImageReady] = useState(false);
@@ -206,6 +207,17 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
     setIsImageReady(false);
   }, [imagePreview]);
 
+  // Cached blob/http sources can already be decoded before React's onLoad handler
+  // runs on remount, leaving opacity at 0. Promote already-complete images.
+  useEffect(() => {
+    if (!imagePreview) return;
+    const img = imageRef.current;
+    if (!img) return;
+    if (img.complete && img.naturalWidth > 0) {
+      setIsImageReady(true);
+    }
+  }, [imagePreview]);
+
   const gradientClass = isPDF
     ? 'from-red-500/80 via-red-400/60 to-red-600/80'
     : isEPUB
@@ -246,6 +258,7 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
           ) : null}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
+            ref={imageRef}
             src={imagePreview}
             alt={`${doc.name} preview`}
             className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-150 ${isImageReady ? 'opacity-100' : 'opacity-0'}`}
