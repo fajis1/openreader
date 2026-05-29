@@ -47,6 +47,6 @@ test.describe('Document deletion flow', () => {
     await expectNoDocumentLink(page, 'sample.epub');
 
     // Uploader should be visible when no docs remain
-    await expect(page.locator('input[type=file]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('input[type=file]').first()).toBeVisible({ timeout: 10000 });
   });
 });
