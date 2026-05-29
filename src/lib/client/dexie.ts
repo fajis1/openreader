@@ -827,22 +827,24 @@ export async function clearHtmlDocuments(): Promise<void> {
 
 export async function getDocumentRecentlyOpenedMap(): Promise<Record<string, number>> {
   return withDB(async () => {
-    const [pdfRows, epubRows, htmlRows] = await Promise.all([
-      db[PDF_TABLE].toArray(),
-      db[EPUB_TABLE].toArray(),
-      db[HTML_TABLE].toArray(),
-    ]);
-
     const byId: Record<string, number> = {};
-    const write = (id: string, ts: unknown) => {
+    const write = (identity: string, ts: unknown) => {
       const value = toPositiveInt(ts, 0);
       if (value <= 0) return;
-      if (!byId[id] || value > byId[id]) byId[id] = value;
+      if (!byId[identity] || value > byId[identity]) byId[identity] = value;
     };
 
-    pdfRows.forEach((row) => write(row.id, row.cacheAccessedAt));
-    epubRows.forEach((row) => write(row.id, row.cacheAccessedAt));
-    htmlRows.forEach((row) => write(row.id, row.cacheAccessedAt));
+    await Promise.all([
+      db[PDF_TABLE]
+        .orderBy('cacheAccessedAt')
+        .eachKey((cacheAccessedAt, cursor) => write(`pdf|${String(cursor.primaryKey)}`, cacheAccessedAt)),
+      db[EPUB_TABLE]
+        .orderBy('cacheAccessedAt')
+        .eachKey((cacheAccessedAt, cursor) => write(`epub|${String(cursor.primaryKey)}`, cacheAccessedAt)),
+      db[HTML_TABLE]
+        .orderBy('cacheAccessedAt')
+        .eachKey((cacheAccessedAt, cursor) => write(`html|${String(cursor.primaryKey)}`, cacheAccessedAt)),
+    ]);
 
     return byId;
   });

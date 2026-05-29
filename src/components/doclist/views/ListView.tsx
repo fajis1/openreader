@@ -12,7 +12,7 @@ import type {
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
 import { formatDocumentSize } from '@/components/doclist/formatSize';
 import { useDocumentSelection } from '../dnd/DocumentSelectionContext';
-import { DND_DOCUMENT, type DocumentDragItem } from '../dnd/dndTypes';
+import { DND_DOCUMENT, documentIdentityKey, type DocumentDragItem } from '../dnd/dndTypes';
 
 interface ListViewProps {
   documents: DocumentListDocument[];
@@ -96,17 +96,17 @@ function DocRow({
       const dragging = isSelected && selected.length > 1 ? selected : [doc];
       if (!isSelected) selection.replace([doc]);
       return {
-        ids: dragging.map((d) => d.id),
+        items: dragging.map(({ id, type }) => ({ id, type })),
         docs: dragging,
         fromFolderId: doc.folderId,
       };
     },
     collect: (m) => ({ isDragging: m.isDragging() }),
-  }), [doc, isSelected]);
+  }), [doc, isSelected, selection]);
 
   const [{ isOver, canDrop }, dropRef] = useDrop<DocumentDragItem, void, { isOver: boolean; canDrop: boolean }>(() => ({
     accept: DND_DOCUMENT,
-    canDrop: (item) => !isInFolder && !item.ids.includes(doc.id),
+    canDrop: (item) => !isInFolder && !item.items.some((it) => documentIdentityKey(it) === documentIdentityKey(doc)),
     drop: (item) => onMergeIntoFolder(item.docs, doc),
     collect: (m) => ({ isOver: m.isOver({ shallow: true }), canDrop: m.canDrop() }),
   }), [doc, isInFolder, onMergeIntoFolder]);

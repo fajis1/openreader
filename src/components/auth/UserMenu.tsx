@@ -76,6 +76,7 @@ export function UserMenu({
         onClick={handleDisconnectAccount}
         className={`${rowClass} ${className}`}
         title="Disconnect account"
+        aria-label="Disconnect account"
       >
         <UserIcon className="h-3.5 w-3.5 text-muted" />
         <span className="truncate flex-1">{session.user.email || 'Account'}</span>

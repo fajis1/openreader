@@ -8,7 +8,7 @@ import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
 import { DocumentPreview } from '@/components/doclist/DocumentPreview';
 import { formatDocumentSize } from '@/components/doclist/formatSize';
 import { useDocumentSelection } from '../dnd/DocumentSelectionContext';
-import { DND_DOCUMENT, type DocumentDragItem } from '../dnd/dndTypes';
+import { DND_DOCUMENT, documentIdentityKey, type DocumentDragItem } from '../dnd/dndTypes';
 
 interface GalleryViewProps {
   documents: DocumentListDocument[];
@@ -63,14 +63,18 @@ function GalleryThumb({
       const sel = selection.getSelectedDocs();
       const dragging = isSelected && sel.length > 1 ? sel : [doc];
       if (!isSelected) selection.replace([doc]);
-      return { ids: dragging.map((d) => d.id), docs: dragging, fromFolderId: doc.folderId };
+      return {
+        items: dragging.map(({ id, type }) => ({ id, type })),
+        docs: dragging,
+        fromFolderId: doc.folderId,
+      };
     },
     collect: (m) => ({ isDragging: m.isDragging() }),
-  }), [doc, isSelected]);
+  }), [doc, isSelected, selection]);
 
   const [{ isOver, canDrop }, dropRef] = useDrop<DocumentDragItem, void, { isOver: boolean; canDrop: boolean }>(() => ({
     accept: DND_DOCUMENT,
-    canDrop: (item) => !isInFolder && !item.ids.includes(doc.id),
+    canDrop: (item) => !isInFolder && !item.items.some((it) => documentIdentityKey(it) === documentIdentityKey(doc)),
     drop: (item) => onMergeIntoFolder(item.docs, doc),
     collect: (m) => ({ isOver: m.isOver({ shallow: true }), canDrop: m.canDrop() }),
   }), [doc, isInFolder, onMergeIntoFolder]);
@@ -155,6 +159,7 @@ export function GalleryView({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (documents.length === 0) return;
       const target = e.target as HTMLElement;
       if (target?.closest('input, textarea, [contenteditable]')) return;
       if (e.key === 'ArrowRight') {

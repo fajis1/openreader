@@ -10,7 +10,6 @@ interface FinderWindowProps {
   children: ReactNode;
   /** Controlled sidebar open/closed state (drives mobile drawer + desktop collapse). */
   sidebarOpen: boolean;
-  onSidebarOpenChange: (open: boolean) => void;
 }
 
 const NARROW_QUERY = '(max-width: 767px)';
@@ -38,7 +37,6 @@ export function FinderWindow({
   statusBar,
   children,
   sidebarOpen,
-  onSidebarOpenChange,
 }: FinderWindowProps) {
   const isNarrow = useIsNarrow();
 
@@ -61,7 +59,7 @@ export function FinderWindow({
       {/* Mobile drawer */}
       <Transition show={isNarrow && sidebarOpen} as={Fragment}>
         <Dialog
-          onClose={() => onSidebarOpenChange(false)}
+          onClose={() => undefined}
           className="relative z-40 md:hidden"
         >
           <TransitionChild

@@ -27,7 +27,7 @@ import {
   DocumentSelectionProvider,
   useDocumentSelection,
 } from './dnd/DocumentSelectionContext';
-import type { DocumentDragItem } from './dnd/dndTypes';
+import { documentIdentityKey, type DocumentDragItem } from './dnd/dndTypes';
 import { FinderWindow, useIsNarrow } from './window/FinderWindow';
 import { FinderToolbar } from './window/FinderToolbar';
 import { FinderSidebar } from './window/FinderSidebar';
@@ -244,7 +244,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     [pdfDocs, epubDocs, htmlDocs],
   );
   const rawDocumentIdsKey = useMemo(
-    () => rawDocuments.map((d) => d.id).sort().join('|'),
+    () => rawDocuments.map((d) => documentIdentityKey(d)).sort().join('|'),
     [rawDocuments],
   );
   const recentlyOpenedById = useLiveQuery<Record<string, number>, Record<string, number>>(
@@ -264,14 +264,14 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     () =>
       rawDocuments.map((doc) => ({
         ...doc,
-        recentlyOpenedAt: recentlyOpenedById[doc.id] ?? 0,
+        recentlyOpenedAt: recentlyOpenedById[documentIdentityKey(doc)] ?? 0,
       })),
     [rawDocuments, recentlyOpenedById],
   );
 
   const allDocumentsById = useMemo(() => {
     const map = new Map<string, DocumentListDocument>();
-    for (const doc of allDocuments) map.set(doc.id, doc);
+    for (const doc of allDocuments) map.set(documentIdentityKey(doc), doc);
     return map;
   }, [allDocuments]);
 
@@ -280,7 +280,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
       folders.map((folder) => ({
         ...folder,
         documents: folder.documents
-          .map((d) => allDocumentsById.get(d.id))
+          .map((d) => allDocumentsById.get(documentIdentityKey(d)))
           .filter((d): d is DocumentListDocument => Boolean(d))
           .map((d) => ({ ...d, folderId: folder.id })),
       })),
@@ -299,7 +299,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const folderIdByDocId = useMemo(() => {
     const map = new Map<string, string>();
     for (const folder of foldersWithLiveDocs) {
-      for (const doc of folder.documents) map.set(doc.id, folder.id);
+      for (const doc of folder.documents) map.set(documentIdentityKey(doc), folder.id);
     }
     return map;
   }, [foldersWithLiveDocs]);
@@ -308,7 +308,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     () =>
       allDocuments.map((doc) => ({
         ...doc,
-        folderId: folderIdByDocId.get(doc.id),
+        folderId: folderIdByDocId.get(documentIdentityKey(doc)),
       })),
     [allDocuments, folderIdByDocId],
   );
@@ -330,7 +330,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
       const folder = foldersWithLiveDocs.find((f) => f.id === fid);
       docs = folder
         ? folder.documents
-            .map((d) => allDocumentsById.get(d.id))
+            .map((d) => allDocumentsById.get(documentIdentityKey(d)))
             .filter((d): d is DocumentListDocument => Boolean(d))
             .map((d) => ({ ...d, folderId: fid }))
         : [];
@@ -390,13 +390,13 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
             return {
               ...f,
               documents: f.documents.filter(
-                (d) => !item.ids.includes(d.id),
+                (d) => !item.items.some((it) => it.id === d.id && it.type === d.type),
               ),
             };
           }
-          const existingIds = new Set(f.documents.map((d) => d.id));
+          const existingIdentities = new Set(f.documents.map((d) => documentIdentityKey(d)));
           const newDocs = item.docs
-            .filter((d) => !existingIds.has(d.id))
+            .filter((d) => !existingIdentities.has(documentIdentityKey(d)))
             .map((d) => ({ ...d, folderId }));
           return { ...f, documents: [...f.documents, ...newDocs] };
         }),
@@ -410,7 +410,8 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const handleMergeIntoFolder = useCallback(
     (sources: DocumentListDocument[], target: DocumentListDocument) => {
       if (target.folderId) return;
-      const filtered = sources.filter((s) => s.id !== target.id && !s.folderId);
+      const targetKey = documentIdentityKey(target);
+      const filtered = sources.filter((s) => documentIdentityKey(s) !== targetKey && !s.folderId);
       if (filtered.length === 0) return;
       setPendingMerge({ sources: filtered, target });
       setNewFolderName('');
@@ -543,10 +544,6 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         />
       }
       sidebarOpen={effectiveSidebarOpen}
-      onSidebarOpenChange={(open) => {
-        if (isNarrow) setMobileSidebarOpen(open);
-        else setSidebarOpen(open);
-      }}
     >
       {!isLoading && showHint && allDocuments.length > 1 && (
         <div className="px-3 pt-3 shrink-0 bg-background">

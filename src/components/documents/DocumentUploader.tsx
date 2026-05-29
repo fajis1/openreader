@@ -115,7 +115,17 @@ export function DocumentUploader({ className = '', variant = 'default', children
                   ? 'Accepts PDF, EPUB, TXT, MD, or DOCX'
                   : 'Accepts PDF, EPUB, TXT, or MD'}
               </p>
+              {error && (
+                <p className="mt-3 text-sm text-red-500">
+                  Upload failed: {error} — try again.
+                </p>
+              )}
             </div>
+          </div>
+        )}
+        {!isDragActive && error && (
+          <div className="absolute inset-x-4 bottom-4 z-40 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-center text-sm text-red-500 pointer-events-none">
+            Upload failed: {error} — try again.
           </div>
         )}
       </div>

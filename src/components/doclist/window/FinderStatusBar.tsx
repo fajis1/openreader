@@ -1,16 +1,12 @@
 'use client';
 
+import { formatDocumentSize } from '@/components/doclist/formatSize';
+
 interface FinderStatusBarProps {
   itemCount: number;
   selectedCount: number;
   totalSize: number;
   summary?: string;
-}
-
-function formatSize(bytes: number): string {
-  const mb = bytes / 1024 / 1024;
-  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
-  return `${mb.toFixed(2)} MB`;
 }
 
 export function FinderStatusBar({
@@ -31,7 +27,7 @@ export function FinderStatusBar({
           ? `${selectedCount} of ${itemCount} selected`
           : `${itemCount} item${itemCount === 1 ? '' : 's'}`}
         <span className="mx-1.5 text-muted">•</span>
-        {formatSize(totalSize)}
+        {formatDocumentSize(totalSize)}
       </span>
     </div>
   );

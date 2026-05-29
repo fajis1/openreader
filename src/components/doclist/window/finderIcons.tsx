@@ -2,7 +2,9 @@ import type { SVGProps } from 'react';
 
 type IconProps = SVGProps<SVGSVGElement>;
 
-const baseSvg = (props: IconProps) => ({
+const baseSvg = (props: IconProps) => {
+  const { width = '1em', height = '1em', ...rest } = props;
+  return {
   xmlns: 'http://www.w3.org/2000/svg',
   viewBox: '0 0 24 24',
   fill: 'none',
@@ -10,10 +12,11 @@ const baseSvg = (props: IconProps) => ({
   strokeWidth: 1.6,
   strokeLinecap: 'round' as const,
   strokeLinejoin: 'round' as const,
-  width: props.width ?? '1em',
-  height: props.height ?? '1em',
-  ...props,
-});
+  width,
+  height,
+  ...rest,
+  };
+};
 
 export const SearchIcon = (props: IconProps) => (
   <svg {...baseSvg(props)}>

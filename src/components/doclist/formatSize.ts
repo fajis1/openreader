@@ -1,4 +1,7 @@
 export function formatDocumentSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${Math.max(0, Math.floor(bytes))} B`;
+  }
   if (bytes >= 1024 * 1024 * 1024) {
     return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
   }

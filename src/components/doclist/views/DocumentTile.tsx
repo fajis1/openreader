@@ -9,7 +9,7 @@ import { DocumentPreview } from '@/components/doclist/DocumentPreview';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
 import { useDocumentSelection } from '../dnd/DocumentSelectionContext';
-import { DND_DOCUMENT, type DocumentDragItem } from '../dnd/dndTypes';
+import { DND_DOCUMENT, documentIdentityKey, type DocumentDragItem } from '../dnd/dndTypes';
 
 interface DocumentTileProps {
   doc: DocumentListDocument;
@@ -95,14 +95,14 @@ export function DocumentTile({
         // Reflect the actual drag in the selection so visuals match.
         if (!isSelected) selection.replace([doc]);
         return {
-          ids: dragging.map((d) => d.id),
+          items: dragging.map(({ id, type }) => ({ id, type })),
           docs: dragging,
           fromFolderId: doc.folderId,
         };
       },
       collect: (monitor: DragSourceMonitor) => ({ isDragging: monitor.isDragging() }),
     };
-  }, [doc, isSelected]);
+  }, [doc, isSelected, selection]);
 
   const [{ isOver, canDrop }, dropRef] = useDrop<
     DocumentDragItem,
@@ -113,7 +113,7 @@ export function DocumentTile({
     canDrop: (item) => {
       // Only allow drop-to-merge on unfoldered docs, and don't drop a doc on itself.
       if (isInFolder) return false;
-      return !item.ids.includes(doc.id);
+      return !item.items.some((it) => documentIdentityKey(it) === documentIdentityKey(doc));
     },
     drop: (item) => onMergeIntoFolder(item.docs, doc),
     collect: (monitor) => ({
