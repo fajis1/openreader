@@ -544,6 +544,9 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         />
       }
       sidebarOpen={effectiveSidebarOpen}
+      onRequestSidebarClose={() => {
+        if (isNarrow) setMobileSidebarOpen(false);
+      }}
     >
       {!isLoading && showHint && allDocuments.length > 1 && (
         <div className="px-3 pt-3 shrink-0 bg-background">
