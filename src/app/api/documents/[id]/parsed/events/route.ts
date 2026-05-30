@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { getWorkerClientConfigFromEnv } from '@/lib/server/compute/worker';
+import { isAbortLikeError } from '@/lib/server/compute/abort-like-error';
 import { snapshotFromWorkerState } from '@/lib/server/compute/worker-parse-state';
 import { fetchWorkerOperationState } from '@/lib/server/compute/worker-op-state';
 import { isValidDocumentId } from '@/lib/server/documents/blobstore';
@@ -472,6 +473,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
         void runWorkerProxy()
           .catch((error) => {
+            if (closed || isAbortLikeError(error)) return;
             logServerError(logger, {
               event: 'documents.parsed.events.worker_proxy_crashed',
               error,

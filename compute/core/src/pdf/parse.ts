@@ -11,6 +11,10 @@ import { normalizeTextItemsForLayout } from './normalize-text';
 interface ParsePdfInput {
   documentId: string;
   pdfBytes: ArrayBuffer;
+  onPageStarted?: (input: {
+    pageNumber: number;
+    totalPages: number;
+  }) => void | Promise<void>;
   onPageParsed?: (input: {
     pageNumber: number;
     totalPages: number;
@@ -57,6 +61,12 @@ export async function parsePdf(input: ParsePdfInput): Promise<ParsedPdfDocument>
 
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
       const pageStartedAt = Date.now();
+      if (input.onPageStarted) {
+        await input.onPageStarted({
+          pageNumber,
+          totalPages: pdf.numPages,
+        });
+      }
       const page = await pdf.getPage(pageNumber);
       const viewport = page.getViewport({ scale: 1.0 });
       const textContent = await page.getTextContent();
@@ -91,9 +101,9 @@ export async function parsePdf(input: ParsePdfInput): Promise<ParsedPdfDocument>
         pageImage: rendered.image,
       });
       const merged = mergeTextWithRegions(regions, layoutTextItems);
-      if (textItems.length > 0 && merged.length === 0) {
-        throw new Error(`layout-merge-empty: page=${pageNumber} regions=${regions.length}`);
-      }
+      // Do not fail the full document parse when a page has text but model
+      // detection/assignment yields no merged regions. Emit an empty page so
+      // downstream playback/tts flows can naturally skip it.
 
       const blocks = merged
         .map((entry, readingOrder) => ({

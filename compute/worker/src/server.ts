@@ -56,6 +56,7 @@ import {
   hashOpKey,
 } from './control-plane/jetstream';
 import { type JsonCodec, createJsonCodec } from './control-plane/json-codec';
+import { buildInferProgressForPageParsed, buildInferProgressForPageStart } from './pdf-progress';
 
 const JOBS_STREAM_NAME = 'compute_jobs';
 const WHISPER_JOBS_SUBJECT = 'jobs.whisper';
@@ -874,7 +875,11 @@ async function main(): Promise<void> {
     const parsed = alignSchema.parse(payload);
 
     const s3FetchStartedAt = Date.now();
-    const audioBuffer = await readObjectByKey(parsed.audioObjectKey);
+    const audioBuffer = await withTimeout(
+      readObjectByKey(parsed.audioObjectKey),
+      whisperTimeoutMs,
+      'whisper s3 fetch',
+    );
     const s3FetchMs = Date.now() - s3FetchStartedAt;
 
     const computeStartedAt = Date.now();
@@ -908,7 +913,11 @@ async function main(): Promise<void> {
     const parsed = layoutSchema.parse(payload);
 
     const s3FetchStartedAt = Date.now();
-    const pdfBytes = await readObjectByKey(parsed.documentObjectKey);
+    const pdfBytes = await withTimeout(
+      readObjectByKey(parsed.documentObjectKey),
+      Math.max(pdfTimeoutMs, 1_000),
+      'pdf s3 fetch',
+    );
     const s3FetchMs = Date.now() - s3FetchStartedAt;
 
     let lastTotalPages = 0;
@@ -921,17 +930,24 @@ async function main(): Promise<void> {
       run: async (touchProgress) => runPdfLayoutFromPdfBuffer({
         documentId: parsed.documentId,
         pdfBytes,
+        onPageStarted: async ({ pageNumber, totalPages }) => {
+          touchProgress();
+          lastTotalPages = totalPages;
+          if (!hooks?.onProgress) return;
+          await hooks.onProgress(buildInferProgressForPageStart({
+            pageNumber,
+            totalPages,
+          }));
+        },
         onPageParsed: async ({ pageNumber, totalPages }) => {
           touchProgress();
           lastTotalPages = totalPages;
           lastPagesParsed = pageNumber;
           if (!hooks?.onProgress) return;
-          await hooks.onProgress({
+          await hooks.onProgress(buildInferProgressForPageParsed({
+            pageNumber,
             totalPages,
-            pagesParsed: pageNumber,
-            currentPage: pageNumber,
-            phase: 'infer',
-          });
+          }));
         },
       }),
     });
