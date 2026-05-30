@@ -9,20 +9,35 @@ const TILE_WIDTH_PX: Record<IconSize, number> = {
 };
 
 const SMALL_GRID_ITEM_COUNT = 3;
-const GRID_GAP_PX = 12;
+export const GRID_GAP_PX = 12;
 
-function responsiveGridTemplate(iconSize: IconSize, itemCount: number): string {
+export function iconTileWidthPx(iconSize: IconSize): number {
+  return TILE_WIDTH_PX[iconSize];
+}
+
+export function maxColumnsForIconGrid(iconSize: IconSize, gridWidthPx: number): number {
+  if (!Number.isFinite(gridWidthPx) || gridWidthPx <= 0) return 1;
+  const tileWidth = iconTileWidthPx(iconSize);
+  return Math.max(1, Math.floor((gridWidthPx + GRID_GAP_PX) / (tileWidth + GRID_GAP_PX)));
+}
+
+function responsiveGridTemplate(iconSize: IconSize, itemCount: number, suppressStretch: boolean): string {
   const width = TILE_WIDTH_PX[iconSize];
-  if (itemCount <= SMALL_GRID_ITEM_COUNT) {
-    return `repeat(auto-fill, minmax(${width}px, ${width}px))`;
+  if (suppressStretch || itemCount <= SMALL_GRID_ITEM_COUNT) {
+    return `repeat(auto-fill, minmax(min(100%, ${width}px), ${width}px))`;
   }
   return `repeat(auto-fit, minmax(${width}px, 1fr))`;
 }
 
-export function iconsGridStyle(iconSize: IconSize, itemCount: number): CSSProperties {
+export function iconsGridStyle(
+  iconSize: IconSize,
+  itemCount: number,
+  options?: { suppressSingleRowStretch?: boolean },
+): CSSProperties {
+  const suppressSingleRowStretch = Boolean(options?.suppressSingleRowStretch);
   return {
-    gridTemplateColumns: responsiveGridTemplate(iconSize, itemCount),
+    gridTemplateColumns: responsiveGridTemplate(iconSize, itemCount, suppressSingleRowStretch),
     gap: `${GRID_GAP_PX}px`,
-    justifyContent: itemCount <= SMALL_GRID_ITEM_COUNT ? 'start' : undefined,
+    justifyContent: suppressSingleRowStretch || itemCount <= SMALL_GRID_ITEM_COUNT ? 'start' : undefined,
   };
 }
