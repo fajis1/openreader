@@ -1,8 +1,8 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 import { buildPageTextFromBlocks } from '../../src/lib/client/pdf-block-text';
 import type { ParsedPdfPage } from '../../src/types/parsed-pdf';
 
-test.describe('buildPageTextFromBlocks', () => {
+describe('buildPageTextFromBlocks', () => {
   test('filters skipped kinds and preserves reading order', () => {
     const page: ParsedPdfPage = {
       pageNumber: 1,

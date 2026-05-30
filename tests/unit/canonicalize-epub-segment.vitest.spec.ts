@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
 import {
   canonicalizeEpubSegmentAgainstSpineText,
@@ -6,7 +6,7 @@ import {
 } from '../../src/lib/client/epub/canonicalize-epub-segment';
 import { planCanonicalTtsSegments } from '../../src/lib/shared/tts-segment-plan';
 
-test.describe('canonicalizeEpubSegmentAgainstSpineText', () => {
+describe('canonicalizeEpubSegmentAgainstSpineText', () => {
   test('maps an exact sentence to the canonical segment identity', () => {
     const spineText = [
       'First section sentence with enough words to stand alone.',
@@ -95,7 +95,7 @@ test.describe('canonicalizeEpubSegmentAgainstSpineText', () => {
   });
 });
 
-test.describe('canonicalizeEpubSegmentsAgainstSpineText', () => {
+describe('canonicalizeEpubSegmentsAgainstSpineText', () => {
   test('maps overlap-boundary drift sentences to forward canonical segments', () => {
     const sourceSentences = [
       'The star was particularly bright when the station lights switched off for cycle night.',

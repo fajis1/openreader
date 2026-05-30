@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
 import { buildPdfPageSourceUnits, buildPdfPrefetchPayload } from '../../src/lib/client/pdf-tts-planning';
 import type { ParsedPdfPage } from '../../src/types/parsed-pdf';
@@ -39,7 +39,7 @@ function buildPage(pageNumber: number): ParsedPdfPage {
   };
 }
 
-test.describe('pdf tts planning helpers', () => {
+describe('pdf tts planning helpers', () => {
   test('buildPdfPageSourceUnits uses parsed blocks, honors skip kinds, and pins locator page', () => {
     const page = buildPage(2);
     const units = buildPdfPageSourceUnits(page, 2, ['header']);

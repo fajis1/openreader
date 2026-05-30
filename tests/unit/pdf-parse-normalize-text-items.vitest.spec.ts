@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
 import { normalizeTextItemsForLayout } from '@openreader/compute-core';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
@@ -19,7 +19,7 @@ function makeTextItem(
   } as unknown as TextItem;
 }
 
-test.describe('normalizeTextItemsForLayout', () => {
+describe('normalizeTextItemsForLayout', () => {
   test('keeps horizontal body text and drops rotated/skewed margin text', () => {
     const horizontal = makeTextItem(
       'Powered by large language models',
@@ -35,5 +35,13 @@ test.describe('normalizeTextItemsForLayout', () => {
     const normalized = normalizeTextItemsForLayout([horizontal, rotated], 800);
     expect(normalized).toHaveLength(1);
     expect(normalized[0]?.text).toBe('Powered by large language models');
+  });
+
+  test('drops malformed/vertical-only runs so downstream layout planning sees no body text', () => {
+    const vertical = makeTextItem('Side label', [0, 10, -10, 0, 30, 200]);
+    const skewed = makeTextItem('Watermark', [10, 5, 2, 10, 200, 500]);
+
+    const normalized = normalizeTextItemsForLayout([vertical, skewed], 800);
+    expect(normalized).toEqual([]);
   });
 });

@@ -1,15 +1,15 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 import { createPdfAudiobookSourceAdapter } from '../../src/lib/client/audiobooks/adapters/pdf';
 import type { ParsedPdfDocument } from '../../src/types/parsed-pdf';
 import type { DocumentSettings } from '../../src/types/document-settings';
 
-test.describe('pdf audiobook adapter', () => {
+describe('pdf audiobook adapter', () => {
   test('builds chapters from paragraph titles and filters skipped kinds', async () => {
     const parsed: ParsedPdfDocument = {
       schemaVersion: 1,
       documentId: 'doc-1',
       parserVersion: 'test',
-      parsedAt: Date.now(),
+      parsedAt: 1_700_000_000_000,
       pages: [
         {
           pageNumber: 1,
@@ -77,7 +77,7 @@ test.describe('pdf audiobook adapter', () => {
       schemaVersion: 1,
       documentId: 'doc-2',
       parserVersion: 'test',
-      parsedAt: Date.now(),
+      parsedAt: 1_700_000_000_001,
       pages: [
         {
           pageNumber: 1,

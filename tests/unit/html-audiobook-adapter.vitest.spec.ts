@@ -1,11 +1,11 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 import { createHtmlAudiobookSourceAdapter } from '../../src/lib/client/audiobooks/adapters/html';
 import { parseHtmlBlocks, type HtmlBlock } from '../../src/lib/client/html/blocks';
 
 const blocksFromMd = (src: string): HtmlBlock[] => parseHtmlBlocks(src, false);
 const blocksFromTxt = (src: string): HtmlBlock[] => parseHtmlBlocks(src, true);
 
-test.describe('createHtmlAudiobookSourceAdapter (markdown chapter splitting)', () => {
+describe('createHtmlAudiobookSourceAdapter (markdown chapter splitting)', () => {
   test('starts a new chapter at each h1/h2 heading by default', async () => {
     const blocks = blocksFromMd(
       [
@@ -95,7 +95,7 @@ test.describe('createHtmlAudiobookSourceAdapter (markdown chapter splitting)', (
   });
 });
 
-test.describe('createHtmlAudiobookSourceAdapter (txt chapter splitting)', () => {
+describe('createHtmlAudiobookSourceAdapter (txt chapter splitting)', () => {
   test('chunks TXT documents into "Part N" of 50 blocks by default', async () => {
     const blocks = blocksFromTxt(
       Array.from({ length: 120 }, (_, i) => `Block ${i + 1}.`).join('\n\n'),
@@ -130,7 +130,7 @@ test.describe('createHtmlAudiobookSourceAdapter (txt chapter splitting)', () => 
   });
 });
 
-test.describe('createHtmlAudiobookSourceAdapter — prepareChapter', () => {
+describe('createHtmlAudiobookSourceAdapter — prepareChapter', () => {
   test('returns the same chapter by index that prepareChapters lists', async () => {
     const blocks = blocksFromMd(['# A', '', 'one', '', '## B', '', 'two'].join('\n'));
     const adapter = createHtmlAudiobookSourceAdapter({

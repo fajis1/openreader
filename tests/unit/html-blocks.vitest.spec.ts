@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 import {
   mdToPlainText,
   parseHtmlBlocks,
@@ -6,7 +6,7 @@ import {
   splitTxtBlocks,
 } from '../../src/lib/client/html/blocks';
 
-test.describe('parseHtmlBlocks (markdown)', () => {
+describe('parseHtmlBlocks (markdown)', () => {
   test('splits headings, paragraphs, and lists into separate blocks', () => {
     const src = [
       '# Title',
@@ -55,7 +55,7 @@ test.describe('parseHtmlBlocks (markdown)', () => {
   });
 });
 
-test.describe('parseHtmlBlocks (txt)', () => {
+describe('parseHtmlBlocks (txt)', () => {
   test('splits on blank-line boundaries and preserves intra-block whitespace', () => {
     const src = 'First block\nmore.\n\nSecond block.\n\n\nThird block.';
     const blocks = parseHtmlBlocks(src, true);
@@ -73,7 +73,7 @@ test.describe('parseHtmlBlocks (txt)', () => {
   });
 });
 
-test.describe('mdToPlainText badge/image stripping', () => {
+describe('mdToPlainText badge/image stripping', () => {
   // The bug: badge alt text was being kept in plainText. Since the rendered
   // DOM is just an <img> with no text node, the sentence-highlight pattern
   // matcher couldn't find those words and the WHOLE first-segment match
@@ -124,7 +124,7 @@ test.describe('mdToPlainText badge/image stripping', () => {
   });
 });
 
-test.describe('buildFullDocumentText-style integration (badge-only blocks)', () => {
+describe('buildFullDocumentText-style integration (badge-only blocks)', () => {
   // If a paragraph is composed only of badges, its plainText is empty after
   // stripping. The reader filters empty plainText out of the TTS source
   // (`useHtmlDocument#buildFullDocumentText`), so badge blocks don't generate

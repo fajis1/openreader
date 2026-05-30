@@ -1,6 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 import { stitchCrossPageBlocks } from '@openreader/compute-core';
 import type { ParsedPdfBlock, ParsedPdfDocument, ParsedPdfBlockKind } from '../../src/types/parsed-pdf';
+import { makeParsedPdfDocument, makeParsedPdfPage } from './support/document-fixtures';
 
 function makeBlock(
   id: string,
@@ -23,19 +24,13 @@ function makeBlock(
 }
 
 function makeDoc(page1Blocks: ParsedPdfBlock[], page2Blocks: ParsedPdfBlock[]): ParsedPdfDocument {
-  return {
-    schemaVersion: 1,
-    documentId: 'doc',
-    parserVersion: 'test',
-    parsedAt: 0,
-    pages: [
-      { pageNumber: 1, width: 100, height: 100, blocks: page1Blocks },
-      { pageNumber: 2, width: 100, height: 100, blocks: page2Blocks },
-    ],
-  };
+  return makeParsedPdfDocument([
+    makeParsedPdfPage(1, page1Blocks),
+    makeParsedPdfPage(2, page2Blocks),
+  ]);
 }
 
-test.describe('stitchCrossPageBlocks', () => {
+describe('stitchCrossPageBlocks', () => {
   test('stitches paragraph continuation across footer/header noise', () => {
     const doc = makeDoc(
       [

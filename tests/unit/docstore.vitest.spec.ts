@@ -1,10 +1,10 @@
-import { test, expect } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 import { getMigratedDocumentFileName } from '../../src/lib/server/storage/docstore-legacy';
 
-test.describe('Docstore Filename Safety', () => {
+describe('docstore filename safety', () => {
   const id = 'a'.repeat(64); // Simulate sha256 hex ID
 
-  test('should generate standard filename for short names', () => {
+  test('generates stable file names for short inputs', () => {
     const name = 'test-file.pdf';
     const result = getMigratedDocumentFileName(id, name);
     expect(result).toBe(`${id}__test-file.pdf`);
@@ -49,5 +49,14 @@ test.describe('Docstore Filename Safety', () => {
      const result = getMigratedDocumentFileName(id, name);
      expect(result.length).toBe(240);
      expect(result).not.toContain('truncated-');
+  });
+
+  test('drops path traversal and null-byte fragments from migrated file names', () => {
+    const dirtyName = '../nested/\u0000financial-report.pdf';
+    const result = getMigratedDocumentFileName(id, dirtyName);
+
+    expect(result).toBe(`${id}__financial-report.pdf`);
+    expect(result).not.toContain('..');
+    expect(result).not.toContain('\u0000');
   });
 });

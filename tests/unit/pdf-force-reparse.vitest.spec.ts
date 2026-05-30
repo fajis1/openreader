@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 import {
   FORCE_REPARSE_CONFIRM_MESSAGE,
   FORCE_REPARSE_CONFIRM_TEXT,
@@ -6,7 +6,7 @@ import {
   isForceReparseDisabled,
 } from '../../src/lib/client/pdf/force-reparse';
 
-test.describe('pdf force reparse controls', () => {
+describe('pdf force reparse controls', () => {
   test('disables action while parse is pending or running', () => {
     expect(isForceReparseDisabled('pending')).toBeTruthy();
     expect(isForceReparseDisabled('running')).toBeTruthy();
