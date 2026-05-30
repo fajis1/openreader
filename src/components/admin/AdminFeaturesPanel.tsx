@@ -280,6 +280,13 @@ export function AdminFeaturesPanel() {
           right={renderSource('showAllProviderModels')}
           variant="flat"
         />
+      </Section>
+
+      <Section
+        title="Rate limiting"
+        subtitle="Daily TTS quotas, PDF parsing throttle, and upload size."
+        action={<Badge tone="foreground">Limits</Badge>}
+      >
         <ToggleRow
           label="Disable TTS daily rate limiting"
           description="When on, per-user/IP daily character quotas are not enforced."
@@ -418,20 +425,26 @@ export function AdminFeaturesPanel() {
           </div>
         ) : null}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 px-0.5 py-1.5">
-          <div className="space-y-1">
-            <div className="flex items-center justify-between gap-2">
-              <label className="text-xs font-medium text-foreground">Max upload size (MB)</label>
-              {renderSource('maxUploadMb')}
+        <div className="px-0.5 pt-1 pb-2 border-b border-offbase last:border-b-0">
+          <div className="flex items-center gap-2.5">
+            <div className="flex-1 min-w-0 space-y-0.5">
+              <span className="block text-sm font-medium leading-5 text-foreground">Max upload size</span>
+              <span className="block text-xs leading-4 text-muted">Largest single document upload accepted.</span>
             </div>
-            <input
-              type="number"
-              min={1}
-              step={1}
-              className={inputClass}
-              value={String(draft.maxUploadMb ?? '')}
-              onChange={(event) => updatePositiveIntDraft('maxUploadMb', event.target.value)}
-            />
+            <div className="shrink-0 self-start pl-1.5">{renderSource('maxUploadMb')}</div>
+            <div className="shrink-0 flex items-center gap-1.5">
+              <input
+                type="number"
+                min={1}
+                step={1}
+                inputMode="numeric"
+                aria-label="Max upload size in megabytes"
+                className="w-20 rounded-md bg-background border border-offbase px-2.5 py-1.5 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-accent"
+                value={String(draft.maxUploadMb ?? '')}
+                onChange={(event) => updatePositiveIntDraft('maxUploadMb', event.target.value)}
+              />
+              <span className="text-xs text-muted">MB</span>
+            </div>
           </div>
         </div>
       </Section>

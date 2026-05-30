@@ -77,14 +77,6 @@ Runtime-editable settings, one row per key:
 | `enableAudiobookExport` | Show the audiobook export entry points on PDF/EPUB pages. |
 | `enableDocxConversion` | Accept .docx uploads (converted to PDF server-side). |
 | `enableDestructiveDeleteActions` | Show "Delete all data" buttons in the Documents tab (auth-disabled mode). |
-| `disableTtsRateLimit` | Disable the per-user/IP daily TTS character limits. When `false`, the daily-limit fields below it apply. |
-| `disableComputeRateLimit` | Disable per-user PDF parsing rate limiting. When `false`, the burst/sustained limit fields below it apply. |
-| `maxUploadMb` | Maximum size (MB) accepted for a single document upload. Enforced server-side and signed into the presigned S3 PUT. |
-
-The **Disable TTS daily rate limiting** and **Disable PDF parsing rate limiting** toggles each reveal a collapsible group of numeric inputs when set to `false`:
-
-- TTS: anonymous/authenticated per-user daily limits and anonymous/authenticated IP daily backstops.
-- PDF parsing: burst limit + window (seconds) and sustained limit + window (seconds). The sustained window doubles as a concurrency cap.
 
 Word-by-word highlighting and PDF layout parsing capability are controlled by compute-worker server env configuration, not an admin runtime flag.
 
@@ -97,6 +89,21 @@ Each row shows a source badge:
 :::warning Security note for `restrictUserApiKeys`
 Turning `restrictUserApiKeys` off allows user-supplied API keys to flow through this server. Use this only for trusted/self-hosted deployments where that tradeoff is acceptable.
 :::
+
+## Rate limiting
+
+A dedicated **Rate limiting** group (within the same admin panel) collects the daily quotas, the PDF parsing throttle, and the upload size cap:
+
+| Key | What it controls |
+| --- | --- |
+| `disableTtsRateLimit` | Disable the per-user/IP daily TTS character limits. When `false`, the daily-limit fields below it apply. |
+| `disableComputeRateLimit` | Disable per-user PDF parsing rate limiting. When `false`, the burst/sustained limit fields below it apply. |
+| `maxUploadMb` | Maximum size (MB) accepted for a single document upload. Enforced server-side and signed into the presigned S3 PUT. |
+
+The **Disable TTS daily rate limiting** and **Disable PDF parsing rate limiting** toggles each reveal a collapsible group of numeric inputs when set to `false`:
+
+- TTS: anonymous/authenticated per-user daily limits and anonymous/authenticated IP daily backstops.
+- PDF parsing: burst limit + window (seconds) and sustained limit + window (seconds). The sustained window doubles as a concurrency cap.
 
 ## Migrating off env vars
 
