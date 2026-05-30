@@ -16,6 +16,7 @@ if (process.env.CI === 'true') {
  */
 export default defineConfig({
   testDir: './tests',
+  testIgnore: '**/unit/**',
   tsconfig: './tsconfig.json',
   timeout: 30 * 1000,
   outputDir: './tests/results',
@@ -60,7 +61,6 @@ export default defineConfig({
 
     {
       name: 'firefox',
-      testIgnore: '**/unit/**',
       use: {
         ...devices['Desktop Firefox'],
         extraHTTPHeaders: { 'x-openreader-test-namespace': 'firefox' },
@@ -69,7 +69,6 @@ export default defineConfig({
 
     {
       name: 'webkit',
-      testIgnore: '**/unit/**',
       use: {
         ...devices['Desktop Safari'],
         extraHTTPHeaders: { 'x-openreader-test-namespace': 'webkit' },

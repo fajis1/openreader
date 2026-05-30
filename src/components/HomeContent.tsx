@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { DocumentList } from '@/components/doclist/DocumentList';
-import { SettingsModal } from '@/components/SettingsModal';
+import { SettingsModal, SettingsTrigger } from '@/components/SettingsModal';
 import { UserMenu } from '@/components/auth/UserMenu';
 
 const Brand = () => (
@@ -14,20 +15,24 @@ const Brand = () => (
   </div>
 );
 
-const AppActions = () => (
-  <div className="flex flex-col gap-0.5 w-full">
-    <SettingsModal
-      triggerLabel="Settings"
-      className="w-full justify-start gap-2 px-2 py-1 text-[12px] border-transparent hover:border-accent"
-    />
-    <UserMenu variant="sidebar" />
-  </div>
-);
-
 export function HomeContent() {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const appActions = (
+    <div className="flex flex-col gap-0.5 w-full">
+      <SettingsTrigger
+        triggerLabel="Settings"
+        className="w-full justify-start gap-2 px-2 py-1 text-[12px] border-transparent hover:border-accent"
+        onOpen={() => setSettingsOpen(true)}
+      />
+      <UserMenu variant="sidebar" />
+    </div>
+  );
+
   return (
     <div className="w-full h-full">
-      <DocumentList brand={<Brand />} appActions={<AppActions />} />
+      <DocumentList brand={<Brand />} appActions={appActions} />
+      <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }
