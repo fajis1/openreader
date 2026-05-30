@@ -1,14 +1,11 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
 import { resolvePreferredSharedProviderSlug } from '../../src/lib/shared/shared-provider-selection';
+import { makeSharedProviders } from './support/factories';
 
-const PROVIDERS = [
-  { slug: 'shared-a' },
-  { slug: 'default-openai' },
-  { slug: 'shared-b' },
-] as const;
+const PROVIDERS = makeSharedProviders(['shared-a', 'default-openai', 'shared-b']);
 
-test.describe('resolvePreferredSharedProviderSlug', () => {
+describe('resolvePreferredSharedProviderSlug', () => {
   test('prefers requested shared slug when present', () => {
     expect(resolvePreferredSharedProviderSlug({
       providers: PROVIDERS,

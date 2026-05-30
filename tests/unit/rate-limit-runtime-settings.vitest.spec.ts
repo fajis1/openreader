@@ -1,8 +1,8 @@
-import { expect, test } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
 
 import { RUNTIME_CONFIG_SCHEMA } from '../../src/lib/server/admin/settings';
 
-test.describe('TTS rate limit runtime config seeds', () => {
+describe('TTS rate limit runtime config seeds', () => {
   test('defaults disable TTS daily rate limiting', () => {
     expect(RUNTIME_CONFIG_SCHEMA.disableTtsRateLimit.default).toBe(true);
   });
@@ -12,6 +12,9 @@ test.describe('TTS rate limit runtime config seeds', () => {
     expect(RUNTIME_CONFIG_SCHEMA.disableTtsRateLimit.parseEnv('false')).toBe(false);
     expect(RUNTIME_CONFIG_SCHEMA.disableTtsRateLimit.parseEnv('1')).toBe(true);
     expect(RUNTIME_CONFIG_SCHEMA.disableTtsRateLimit.parseEnv('0')).toBe(false);
+    expect(RUNTIME_CONFIG_SCHEMA.disableTtsRateLimit.parseEnv('on')).toBe(true);
+    expect(RUNTIME_CONFIG_SCHEMA.disableTtsRateLimit.parseEnv('no')).toBe(false);
+    expect(RUNTIME_CONFIG_SCHEMA.disableTtsRateLimit.parseEnv('invalid')).toBeUndefined();
   });
 
   test('daily limit values are runtime-only (no env seed vars)', () => {
