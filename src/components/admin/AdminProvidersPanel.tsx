@@ -57,6 +57,7 @@ interface FormState {
 const providerDefaultModel = defaultModelForProviderType;
 const ADMIN_PROVIDERS_QUERY_KEY = ['admin-providers'] as const;
 const ADMIN_SETTINGS_QUERY_KEY = ['admin-settings'] as const;
+const ADMIN_DEFAULT_PROVIDER_QUERY_KEY = ['admin-settings', 'default-provider-slug'] as const;
 
 async function fetchDefaultProviderSlug(): Promise<string> {
   const res = await fetch('/api/admin/settings');
@@ -160,7 +161,7 @@ export function AdminProvidersPanel() {
     data: defaultProviderSlug = '',
     error: defaultProviderError,
   } = useQuery({
-    queryKey: ADMIN_SETTINGS_QUERY_KEY,
+    queryKey: ADMIN_DEFAULT_PROVIDER_QUERY_KEY,
     queryFn: fetchDefaultProviderSlug,
   });
 
@@ -183,6 +184,7 @@ export function AdminProvidersPanel() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ADMIN_PROVIDERS_QUERY_KEY }),
         queryClient.invalidateQueries({ queryKey: ADMIN_SETTINGS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ADMIN_DEFAULT_PROVIDER_QUERY_KEY }),
       ]);
     },
     onError: (mutationError) => {
@@ -198,6 +200,7 @@ export function AdminProvidersPanel() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ADMIN_PROVIDERS_QUERY_KEY }),
         queryClient.invalidateQueries({ queryKey: ADMIN_SETTINGS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ADMIN_DEFAULT_PROVIDER_QUERY_KEY }),
       ]);
     },
     onError: (mutationError) => {
@@ -212,6 +215,7 @@ export function AdminProvidersPanel() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ADMIN_PROVIDERS_QUERY_KEY }),
         queryClient.invalidateQueries({ queryKey: ADMIN_SETTINGS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ADMIN_DEFAULT_PROVIDER_QUERY_KEY }),
       ]);
     },
     onError: (mutationError) => {
@@ -223,7 +227,10 @@ export function AdminProvidersPanel() {
     mutationFn: patchDefaultProviderSlug,
     onSuccess: async () => {
       toast.success('Default provider updated');
-      await queryClient.invalidateQueries({ queryKey: ADMIN_SETTINGS_QUERY_KEY });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ADMIN_SETTINGS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ADMIN_DEFAULT_PROVIDER_QUERY_KEY }),
+      ]);
     },
     onError: (mutationError) => {
       console.error('[AdminProvidersPanel] set default failed:', mutationError);
