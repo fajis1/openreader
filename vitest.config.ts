@@ -23,7 +23,7 @@ export default defineConfig({
   },
   test: {
     alias,
-    reporters: process.env.CI ? ['default', 'github'] : ['default'],
+    reporters: process.env.CI ? ['default', 'github-actions'] : ['default'],
     projects: [
       {
         resolve: {
