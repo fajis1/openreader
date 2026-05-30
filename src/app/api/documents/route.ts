@@ -196,7 +196,7 @@ export async function POST(req: NextRequest) {
         // re-parse limiter reads. We record (not reject) here so a legitimate
         // bulk upload always parses; the recorded load still throttles
         // subsequent loopable re-parse spam via /parsed.
-        await recordJobEvent(ctxOrRes.userId, 'pdf_layout', `register:${randomUUID()}`, pdfRateConfig ?? { enabled: false });
+        await recordJobEvent(ctxOrRes.userId, 'pdf_layout', `register:${randomUUID()}`, pdfRateConfig ?? { enabled: false, windows: [] });
         enqueueParsePdfJob({
           documentId: doc.id,
           userId: storageUserId,

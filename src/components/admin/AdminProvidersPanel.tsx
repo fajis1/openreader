@@ -72,7 +72,21 @@ async function patchDefaultProviderSlug(slug: string): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ updates: { defaultTtsProvider: slug } }),
   });
-  if (!res.ok && res.status !== 207) throw new Error(`HTTP ${res.status}`);
+  if (res.status === 200 || res.status === 204) return;
+  if (res.status === 207) {
+    // Multi-status: the request succeeded for some keys but failed for others.
+    // Only treat it as success when the defaultTtsProvider field itself was
+    // accepted (no matching entry in the errors array).
+    const payload = (await res.json().catch(() => ({}))) as {
+      errors?: Array<{ key?: string; message?: string }>;
+    };
+    const failure = payload.errors?.find((entry) => entry?.key === 'defaultTtsProvider');
+    if (failure) {
+      throw new Error(failure.message || 'Failed to update default provider');
+    }
+    return;
+  }
+  throw new Error(`HTTP ${res.status}`);
 }
 
 async function patchProviderEnabled(input: { id: string; enabled: boolean }): Promise<void> {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { beforeAll, describe, expect, test } from 'vitest';
 import {
   audiobookKey,
   audiobookPrefix,
@@ -15,7 +15,7 @@ function configureS3Env() {
 }
 
 describe('audiobooks-blobstore', () => {
-  test.beforeAll(() => {
+  beforeAll(() => {
     configureS3Env();
   });
 

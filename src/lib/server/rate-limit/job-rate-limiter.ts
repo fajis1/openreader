@@ -131,7 +131,7 @@ export async function recordJobEvent(
   userId: string | null | undefined,
   action: JobRateAction,
   opId: string,
-  config: Pick<JobRateConfig, 'enabled'>,
+  config: JobRateConfig,
 ): Promise<void> {
   if (!isActive(config, userId) || !opId) return;
 
@@ -145,15 +145,20 @@ export async function recordJobEvent(
     // Recording is best-effort; never block op creation on ledger writes.
   }
 
-  // Opportunistic prune of rows older than a generous retention window so the
-  // ledger stays small without a separate cron.
+  // Opportunistic prune of rows older than the largest configured window so
+  // the ledger stays small without a separate cron, but never deletes events
+  // that could still affect an in-window count.
   if (Math.random() < 0.05) {
+    const largestWindowMs = config.windows.reduce(
+      (max, w) => (Number.isFinite(w.windowMs) && w.windowMs > max ? w.windowMs : max),
+      24 * 60 * 60 * 1000,
+    );
     try {
       await safeDb()
         .delete(userJobEvents)
         .where(and(
           eq(userJobEvents.action, action),
-          lt(userJobEvents.createdAt, now - 24 * 60 * 60 * 1000),
+          lt(userJobEvents.createdAt, now - largestWindowMs),
         ));
     } catch {
       // ignore prune failures

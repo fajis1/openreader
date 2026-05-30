@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
 
       // Record upload-driven parse load (see register route for rationale).
       const pdfRateConfig = getPdfLayoutRateConfig(await getResolvedRuntimeConfig());
-      await recordJobEvent(ctxOrRes.userId, 'pdf_layout', `docx:${randomUUID()}`, pdfRateConfig);
+      await recordJobEvent(storageUserId, 'pdf_layout', `docx:${randomUUID()}`, pdfRateConfig);
       enqueueParsePdfJob({
         documentId: id,
         userId: storageUserId,

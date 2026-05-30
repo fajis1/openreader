@@ -84,11 +84,11 @@ function positiveIntValue(defaultValue: number, envVar?: string): RuntimeConfigK
       const trimmed = raw.trim();
       if (!trimmed) return undefined;
       const parsed = Number(trimmed);
-      if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+      if (!Number.isFinite(parsed) || parsed < 1) return undefined;
       return Math.floor(parsed);
     },
     validate(value) {
-      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined;
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) return undefined;
       return Math.floor(value);
     },
   };

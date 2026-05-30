@@ -46,14 +46,42 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const body = Buffer.from(await req.arrayBuffer());
-    // Backstop for chunked/omitted Content-Length: enforce on the actual bytes.
-    if (body.byteLength > maxUploadBytes) {
+    // Backstop for chunked/omitted Content-Length: stream the body so we can
+    // bail out as soon as the running total crosses the cap instead of
+    // buffering the entire payload first.
+    const stream = req.body;
+    if (!stream) {
+      return NextResponse.json({ error: 'Missing request body' }, { status: 400 });
+    }
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    let overLimit = false;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        totalBytes += value.byteLength;
+        if (totalBytes > maxUploadBytes) {
+          overLimit = true;
+          break;
+        }
+        chunks.push(value);
+      }
+    } finally {
+      if (overLimit) {
+        await reader.cancel().catch(() => {});
+      }
+      reader.releaseLock();
+    }
+    if (overLimit) {
       return NextResponse.json(
         { error: `Upload exceeds the maximum allowed size of ${maxUploadBytes} bytes`, maxBytes: maxUploadBytes },
         { status: 413 },
       );
     }
+    const body = Buffer.concat(chunks, totalBytes);
 
     const namespace = getOpenReaderTestNamespace(req.headers);
 
