@@ -71,7 +71,7 @@ For auth-enabled deployments, use **Settings → Admin** as the primary source o
 | `RUNTIME_SEED_DEFAULT_TTS_PROVIDER` | Legacy bootstrap seed | `custom-openai` | Optional first-boot seed for default TTS provider slug |
 | `RUNTIME_SEED_ENABLE_AUDIOBOOK_EXPORT` | Legacy bootstrap seed | `true` | Optional first-boot seed to enable audiobook export UI |
 | `RUNTIME_SEED_DISABLE_TTS_LIMIT` | Legacy bootstrap seed | `true` | Optional first-boot seed that keeps TTS daily rate limiting disabled |
-| `RUNTIME_SEED_DISABLE_COMPUTE_LIMIT` | Legacy bootstrap seed | `false` | Optional first-boot seed that disables PDF parsing rate limiting (other compute-limit values + max upload size are admin-only) |
+| `RUNTIME_SEED_DISABLE_COMPUTE_LIMIT` | Legacy bootstrap seed | `true` | Optional first-boot seed that keeps PDF parsing rate limiting disabled (other compute-limit values + max upload size are admin-only) |
 | `RUN_DRIZZLE_MIGRATIONS` | Database migrations | `true` | Set `false` to skip startup Drizzle schema migrations |
 | `RUN_FS_MIGRATIONS` | Storage migrations | `true` | Set `false` to skip startup filesystem -> S3/DB migration pass |
 
@@ -496,7 +496,7 @@ Absolute path or executable name for the ffmpeg binary used by audiobook/process
 
 Per-user throttling of expensive PDF layout parsing is managed from **Settings → Admin → Site features**, not env vars. Enforcement applies only when auth is enabled.
 
-- `disableComputeRateLimit` default: `false` (rate limiting enabled)
+- `disableComputeRateLimit` default: `true` (rate limiting disabled, like the TTS limit; enable it in the admin panel)
 - When enabled, the following admin-tunable sub-limits apply:
   - `computeParseBurstMax` (default `8`) over `computeParseBurstWindowSec` (default `60`)
   - `computeParseSustainedMax` (default `24`) over `computeParseSustainedWindowSec` (default `600`)
@@ -590,7 +590,7 @@ Seeds the TTS daily character rate-limit on/off state on first boot.
 
 Seeds the PDF parsing rate-limit on/off state on first boot.
 
-- Default: `false` (PDF parsing rate limiting enabled)
+- Default: `true` (PDF parsing rate limiting disabled, matching `RUNTIME_SEED_DISABLE_TTS_LIMIT`)
 - Runtime key: `disableComputeRateLimit`
 - The burst/sustained limits, their windows, and the max upload size are admin-only runtime settings (see [Compute (PDF Parsing) Rate Limiting](#compute-pdf-parsing-rate-limiting-runtime-settings)).
 

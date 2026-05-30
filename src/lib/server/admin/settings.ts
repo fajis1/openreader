@@ -111,11 +111,12 @@ export const RUNTIME_CONFIG_SCHEMA = {
   ttsDailyLimitAuthenticated: positiveIntValue(500_000),
   ttsIpDailyLimitAnonymous: positiveIntValue(100_000),
   ttsIpDailyLimitAuthenticated: positiveIntValue(1_000_000),
-  // Per-user throttle for expensive PDF-layout parsing. Enabled by default.
+  // Per-user throttle for expensive PDF-layout parsing. Disabled by default
+  // (admins enable it in Settings → Admin), mirroring disableTtsRateLimit.
   // When enabled, the sub-limits below apply (admin-tunable, no env seed):
   // a short "burst" window plus a wider "sustained" window that also bounds
   // concurrency (the worker caps each job's duration).
-  disableComputeRateLimit: booleanFlag(false, 'RUNTIME_SEED_DISABLE_COMPUTE_LIMIT'),
+  disableComputeRateLimit: booleanFlag(true, 'RUNTIME_SEED_DISABLE_COMPUTE_LIMIT'),
   computeParseBurstMax: positiveIntValue(8),
   computeParseBurstWindowSec: positiveIntValue(60),
   computeParseSustainedMax: positiveIntValue(24),
