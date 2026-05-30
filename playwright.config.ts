@@ -16,6 +16,7 @@ if (process.env.CI === 'true') {
  */
 export default defineConfig({
   testDir: './tests',
+  testIgnore: '**/unit/**',
   tsconfig: './tsconfig.json',
   timeout: 30 * 1000,
   outputDir: './tests/results',
@@ -39,8 +40,10 @@ export default defineConfig({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    // Disable auth rate limiting for tests to support parallel workers creating sessions
-    command: `pnpm build && DISABLE_AUTH_RATE_LIMIT=true pnpm start`,
+    // Disable auth rate limiting for tests to support parallel workers creating sessions.
+    // ENABLE_TEST_NAMESPACE opts the production build into honoring the
+    // x-openreader-test-namespace header (ignored on real prod deployments).
+    command: `pnpm build && DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true pnpm start`,
     url: 'http://localhost:3003',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
@@ -58,7 +61,6 @@ export default defineConfig({
 
     {
       name: 'firefox',
-      testIgnore: '**/unit/**',
       use: {
         ...devices['Desktop Firefox'],
         extraHTTPHeaders: { 'x-openreader-test-namespace': 'firefox' },
@@ -67,7 +69,6 @@ export default defineConfig({
 
     {
       name: 'webkit',
-      testIgnore: '**/unit/**',
       use: {
         ...devices['Desktop Safari'],
         extraHTTPHeaders: { 'x-openreader-test-namespace': 'webkit' },

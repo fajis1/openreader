@@ -130,19 +130,42 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
 
 type AdminSubTab = 'providers' | 'features';
 
-export function SettingsModal({
+export function SettingsTrigger({
   className = '',
   triggerLabel,
+  onOpen,
 }: {
   className?: string;
   triggerLabel?: string;
+  onOpen: () => void;
+}) {
+  return (
+    <Button
+      onClick={onOpen}
+      className={`inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase hover:text-accent transition-transform transition-colors duration-200 ease-out hover:scale-[1.01] ${className}`}
+      aria-label="Settings"
+      tabIndex={0}
+    >
+      <SettingsIcon className="w-4 h-4 transition-transform duration-200 ease-out hover:scale-[1.01] hover:rotate-45" />
+      {triggerLabel && <span className="ml-2">{triggerLabel}</span>}
+    </Button>
+  );
+}
+
+export function SettingsModal({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const runtimeConfig = useRuntimeConfig();
   const enableDestructiveDelete = runtimeConfig.enableDestructiveDeleteActions;
   const showAllProviderModels = runtimeConfig.showAllProviderModels;
   const enableTTSProvidersTab = runtimeConfig.enableTtsProvidersTab;
   const restrictUserApiKeys = runtimeConfig.restrictUserApiKeys;
-  const [isOpen, setIsOpen] = useState(false);
+  const isOpen = open;
+  const setIsOpen = onOpenChange;
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>(enableTTSProvidersTab ? 'api' : 'theme');
 
@@ -215,7 +238,7 @@ export function SettingsModal({
     if (changelogOpenSignal <= 0) return;
     setIsOpen(true);
     setIsChangelogOpen(true);
-  }, [changelogOpenSignal]);
+  }, [changelogOpenSignal, setIsOpen]);
 
   useEffect(() => {
     setLocalApiKey(apiKey);
@@ -409,7 +432,7 @@ export function SettingsModal({
     } else {
       setCustomModelInput('');
     }
-  }, [apiKey, baseUrl, providerRef, providerType, ttsModel, ttsInstructions, ttsModels]);
+  }, [apiKey, baseUrl, providerRef, providerType, ttsModel, ttsInstructions, ttsModels, setIsOpen]);
 
   const [systemIsDark, setSystemIsDark] = useState(
     typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -489,19 +512,6 @@ export function SettingsModal({
 
   return (
     <>
-      <Button
-        onClick={() => {
-          setIsOpen(true);
-          setIsChangelogOpen(false);
-        }}
-        className={`inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase hover:text-accent transition-transform transition-colors duration-200 ease-out hover:scale-[1.01] ${className}`}
-        aria-label="Settings"
-        tabIndex={0}
-      >
-        <SettingsIcon className="w-4 h-4 transition-transform duration-200 ease-out hover:scale-[1.01] hover:rotate-45" />
-        {triggerLabel && <span className="ml-2">{triggerLabel}</span>}
-      </Button>
-
       <Transition appear show={isOpen} as={Fragment}>
         <Dialog
           as="div"
