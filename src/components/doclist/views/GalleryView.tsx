@@ -174,10 +174,11 @@ export function GalleryView({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <div className="flex-1 min-h-0 flex items-center justify-center p-6 bg-background">
+      <div className="flex-1 min-h-0 overflow-y-auto bg-background">
+        <div className="min-h-full flex items-center justify-center p-3 sm:p-6">
         {activeDoc ? (
           <div className="w-full max-w-[920px] flex flex-col md:flex-row items-center md:items-start justify-center gap-4 md:gap-6">
-            <div className="flex flex-col items-center gap-3 w-[260px] sm:w-[320px] shrink-0">
+            <div className="flex flex-col items-center gap-3 w-[180px] sm:w-[260px] md:w-[320px] shrink-0">
               <div className="w-full aspect-[3/4] rounded-lg overflow-hidden border border-offbase shadow-lg">
                 <DocumentPreview doc={activeDoc} />
               </div>
@@ -206,7 +207,7 @@ export function GalleryView({
                 </button>
               </div>
             </div>
-            <dl className="w-full max-w-[360px] md:max-w-[340px] grid grid-cols-2 gap-x-2 gap-y-1 rounded-md border border-offbase bg-base px-3 py-2 text-[11px] md:self-center">
+            <dl className="w-full max-w-[280px] sm:max-w-[360px] md:max-w-[340px] grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-offbase bg-base px-3 py-2 text-[11px] md:self-center">
               <dt className="text-muted">Type</dt>
               <dd className="text-foreground text-right uppercase tracking-wide">{activeDoc.type}</dd>
               <dt className="text-muted">Size</dt>
@@ -234,6 +235,7 @@ export function GalleryView({
         ) : (
           <p className="text-[12px] text-muted">No documents to show</p>
         )}
+        </div>
       </div>
 
       <div className="shrink-0 border-t border-offbase bg-gradient-to-b from-base to-offbase/30">

@@ -29,9 +29,9 @@ function formatDate(ms: number): string {
 }
 
 function KindIcon({ doc }: { doc: DocumentListDocument }) {
-  if (doc.type === 'pdf') return <PDFIcon className="w-4 h-4 text-red-500" />;
-  if (doc.type === 'epub') return <EPUBIcon className="w-4 h-4 text-blue-500" />;
-  return <FileIcon className="w-4 h-4 text-muted" />;
+  if (doc.type === 'pdf') return <PDFIcon className="w-4 h-4 shrink-0 text-red-500" />;
+  if (doc.type === 'epub') return <EPUBIcon className="w-4 h-4 shrink-0 text-blue-500" />;
+  return <FileIcon className="w-4 h-4 shrink-0 text-muted" />;
 }
 
 function HeaderCell({
@@ -131,7 +131,7 @@ function DocRow({
       data-doc-tile
       aria-selected={isSelected}
       className={
-        'grid grid-cols-[minmax(0,1fr)_72px_88px_120px_28px] sm:grid-cols-[minmax(0,1fr)_88px_96px_140px_32px] items-center text-[12px] border-b border-offbase transition-colors duration-200 ease-out ' +
+        'grid grid-cols-[minmax(0,1fr)_44px_72px_104px_28px] sm:grid-cols-[minmax(0,1fr)_56px_96px_140px_32px] items-center text-[12px] border-b border-offbase transition-colors duration-200 ease-out ' +
         (isSelected
           ? 'bg-offbase text-accent'
           : 'text-foreground hover:bg-offbase') +
@@ -198,7 +198,7 @@ export function ListView({
 
   return (
     <div onClick={handleBackgroundClick} className="flex-1 min-h-0 overflow-y-auto">
-      <div className="sticky top-0 z-10 bg-base border-b border-offbase grid grid-cols-[minmax(0,1fr)_72px_88px_120px_28px] sm:grid-cols-[minmax(0,1fr)_88px_96px_140px_32px]">
+      <div className="sticky top-0 z-10 bg-base border-b border-offbase grid grid-cols-[minmax(0,1fr)_44px_72px_104px_28px] sm:grid-cols-[minmax(0,1fr)_56px_96px_140px_32px]">
         <HeaderCell label="Name" field="name" sortBy={sortBy} sortDirection={sortDirection} onSortChange={onSortChange} />
         <HeaderCell label="Kind" field="type" sortBy={sortBy} sortDirection={sortDirection} onSortChange={onSortChange} />
         <HeaderCell label="Size" field="size" sortBy={sortBy} sortDirection={sortDirection} onSortChange={onSortChange} align="right" />
