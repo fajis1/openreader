@@ -111,6 +111,7 @@ export async function uploadAndDisplay(page: Page, fileName: string) {
 
 async function dismissOnboardingModals(page: Page): Promise<void> {
   const privacyDialog = page.getByTestId('privacy-modal');
+  const claimDialog = page.getByTestId('claim-modal');
   const migrationDialog = page.getByTestId('migration-modal');
   const settingsDialog = page.getByTestId('settings-modal');
 
@@ -130,6 +131,16 @@ async function dismissOnboardingModals(page: Page): Promise<void> {
       await expect(continueBtn).toBeEnabled({ timeout: 10000 });
       await continueBtn.click();
       await privacyDialog.waitFor({ state: 'hidden', timeout: 15000 });
+      await page.waitForTimeout(100);
+      settledWithoutDialog = 0;
+      continue;
+    }
+
+    if (await claimDialog.isVisible().catch(() => false)) {
+      const dismissBtn = page.getByTestId('claim-dismiss-button');
+      await expect(dismissBtn).toBeEnabled({ timeout: 10000 });
+      await dismissBtn.click();
+      await claimDialog.waitFor({ state: 'hidden', timeout: 15000 });
       await page.waitForTimeout(100);
       settledWithoutDialog = 0;
       continue;
@@ -419,8 +430,7 @@ export async function expectViewerForFile(page: Page, fileName: string) {
 
 // Delete a single document by filename via row action and confirm dialog
 export async function deleteDocumentByName(page: Page, fileName: string) {
-  const link = page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).first();
-  await link.locator('xpath=..').getByRole('button', { name: 'Delete document' }).click();
+  await page.getByRole('button', { name: new RegExp(`^Delete\\s+${escapeRegExp(fileName)}$`, 'i') }).first().click();
 
   const heading = page.getByRole('heading', { name: 'Delete Document' });
   await expect(heading).toBeVisible({ timeout: 10000 });
@@ -432,7 +442,9 @@ export async function deleteDocumentByName(page: Page, fileName: string) {
 // Open Settings modal and navigate to Documents section
 export async function openSettingsDocumentsTab(page: Page) {
   await page.getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('button', { name: 'Documents' }).click();
+  const settingsDialog = page.locator('[data-testid="settings-modal"]');
+  await expect(settingsDialog).toBeVisible({ timeout: 10000 });
+  await settingsDialog.getByRole('button', { name: /^Documents$/ }).click();
 }
 
 // Delete all local documents through Settings and close dialogs

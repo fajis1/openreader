@@ -118,9 +118,9 @@ function formatLocatorGroupLabel(locator: TTSSegmentLocator | null): string {
   }
   if (isHtmlLocator(locator)) {
     if (/^\d+$/.test(locator.location)) {
-      return `Block ${locator.location} · HTML`;
+      return `Block ${locator.location} · Text`;
     }
-    return `${locator.location} · HTML`;
+    return `${locator.location} · Text`;
   }
   return 'Unknown location';
 }

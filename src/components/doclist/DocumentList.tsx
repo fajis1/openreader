@@ -1,410 +1,789 @@
 'use client';
 
-import { useCallback, useState, useEffect, DragEvent, KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { useDocuments } from '@/contexts/DocumentContext';
-import { DndProvider } from 'react-dnd';
-import { HTML5Backend } from 'react-dnd-html5-backend';
-import { DocumentType, DocumentListDocument, Folder, DocumentListState, SortBy, SortDirection } from '@/types/documents';
-import { getDocumentListState, saveDocumentListState } from '@/lib/client/dexie';
+import type {
+  DocumentListDocument,
+  DocumentListState,
+  Folder,
+  IconSize,
+  SidebarFilter,
+  SortBy,
+  SortDirection,
+  ViewMode,
+} from '@/types/documents';
+import {
+  getDocumentListState,
+  getDocumentRecentlyOpenedMap,
+  saveDocumentListState,
+} from '@/lib/client/dexie';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { DocumentListItem } from '@/components/doclist/DocumentListItem';
-import { DocumentFolder } from '@/components/doclist/DocumentFolder';
-import { SortControls } from '@/components/doclist/SortControls';
 import { CreateFolderDialog } from '@/components/doclist/CreateFolderDialog';
 import { DocumentListSkeleton } from '@/components/doclist/DocumentListSkeleton';
-import { Button } from '@headlessui/react';
-import { DocumentUploader } from '@/components/documents/DocumentUploader';
-import { buttonClass } from '@/components/formPrimitives';
+import { DocumentUploader, type UploadBatchState } from '@/components/documents/DocumentUploader';
+import { DocumentDndProvider } from './dnd/DocumentDndProvider';
+import {
+  DocumentSelectionProvider,
+  useDocumentSelection,
+} from './dnd/DocumentSelectionContext';
+import { documentIdentityKey, type DocumentDragItem } from './dnd/dndTypes';
+import { FinderWindow, useIsNarrow } from './window/FinderWindow';
+import { FinderToolbar } from './window/FinderToolbar';
+import { FinderSidebar } from './window/FinderSidebar';
+import { FinderStatusBar } from './window/FinderStatusBar';
+import { IconsView } from './views/IconsView';
+import { ListView } from './views/ListView';
+import { GalleryView } from './views/GalleryView';
+
+let cachedDocumentListState: DocumentListState | null = null;
 
 type DocumentToDelete = {
   id: string;
   name: string;
-  type: DocumentType;
+  type: DocumentListDocument['type'];
 };
 
-const generateDefaultFolderName = (doc1: DocumentListDocument, doc2: DocumentListDocument) => {
-  // Try to find common words between the two document names
-  const words1 = doc1.name.toLowerCase().split(/[\s-_\.]+/);
-  const words2 = doc2.name.toLowerCase().split(/[\s-_\.]+/);
-  const commonWords = words1.filter(word => words2.includes(word));
+const DEFAULT_STATE: Required<
+  Pick<
+    DocumentListState,
+    'sortBy' | 'sortDirection' | 'folders' | 'collapsedFolders' | 'showHint'
+  >
+> & {
+  viewMode: ViewMode;
+  iconSize: IconSize;
+  sidebarWidth: number;
+  sidebarFilter: SidebarFilter;
+  sidebarCollapsed: boolean;
+} = {
+  sortBy: 'name',
+  sortDirection: 'asc',
+  folders: [],
+  collapsedFolders: [],
+  showHint: true,
+  viewMode: 'icons',
+  iconSize: 'md',
+  sidebarWidth: 220,
+  sidebarFilter: 'all',
+  sidebarCollapsed: false,
+};
 
-  if (commonWords.length > 0) {
-    // Use the first common word that's at least 3 characters long
-    const significant = commonWords.find(word => word.length >= 3);
-    if (significant) {
-      if (significant === 'pdf') return 'PDFs';
-      if (significant === 'epub') return 'EPUBs';
-      if (significant === 'txt' || significant === 'md') return 'Documents';
-      return `${significant.charAt(0).toUpperCase()}${significant.slice(1)}`;
-    }
+function normalizeViewMode(stored: DocumentListState['viewMode']): ViewMode {
+  if (stored === 'grid' || stored === undefined) return 'icons';
+  if (stored === 'list') return 'list';
+  if (stored === 'gallery') return 'gallery';
+  return 'icons';
+}
+
+function generateDefaultFolderName(
+  doc1: DocumentListDocument,
+  doc2: DocumentListDocument,
+): string {
+  const words1 = doc1.name.toLowerCase().split(/[\s\-_.]+/);
+  const words2 = doc2.name.toLowerCase().split(/[\s\-_.]+/);
+  const common = words1.filter((w) => words2.includes(w));
+  const significant = common.find((w) => w.length >= 3);
+  if (significant) {
+    if (significant === 'pdf') return 'PDFs';
+    if (significant === 'epub') return 'EPUBs';
+    if (significant === 'txt' || significant === 'md') return 'Documents';
+    return significant.charAt(0).toUpperCase() + significant.slice(1);
   }
-
-  // Fallback to a numbered folder
   const timestamp = new Date().toISOString().slice(0, 10);
   return `Folder ${timestamp}`;
-};
+}
 
-export function DocumentList() {
-  // State hooks
-  const [sortBy, setSortBy] = useState<SortBy>('name');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const [folders, setFolders] = useState<Folder[]>([]);
+function sortDocs(
+  docs: DocumentListDocument[],
+  sortBy: SortBy,
+  direction: SortDirection,
+): DocumentListDocument[] {
+  const sorted = [...docs].sort((a, b) => {
+    switch (sortBy) {
+      case 'name':
+        return a.name.localeCompare(b.name);
+      case 'type':
+        return a.type.localeCompare(b.type);
+      case 'size':
+        return a.size - b.size;
+      default:
+        return a.lastModified - b.lastModified;
+    }
+  });
+  return direction === 'asc' ? sorted : sorted.reverse();
+}
+
+interface DocumentListInnerProps {
+  brand?: ReactNode;
+  appActions?: ReactNode;
+}
+
+function SidebarUploadLoader({
+  totalFiles,
+  completedFiles,
+  phase,
+  currentFileName,
+}: {
+  totalFiles: number;
+  completedFiles: number;
+  phase: 'uploading' | 'converting';
+  currentFileName: string | null;
+}) {
+  const progress = totalFiles > 0 ? Math.min(100, Math.round((completedFiles / totalFiles) * 100)) : 0;
+  const label = phase === 'converting' ? 'Converting' : 'Uploading';
+  const radius = 7;
+  const stroke = 2;
+  const size = 18;
+  const normalizedRadius = radius - stroke / 2;
+  const circumference = 2 * Math.PI * normalizedRadius;
+  const dashOffset = circumference - (progress / 100) * circumference;
+
+  return (
+    <div className="rounded-md border border-offbase bg-offbase/60 px-2 py-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 flex items-center gap-1.5 text-[11px] leading-tight">
+          <span className="font-medium text-foreground">{label}</span>
+          <span className="shrink-0 tabular-nums text-muted">{completedFiles}/{totalFiles}</span>
+        </div>
+        <div className="shrink-0 flex items-center gap-1 text-accent" aria-label={`Upload progress ${progress}%`}>
+          <span className="text-[10px] tabular-nums text-muted">{progress}%</span>
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className={phase === 'converting' ? 'animate-spin' : ''}>
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={normalizedRadius}
+              fill="none"
+              stroke="currentColor"
+              strokeOpacity="0.2"
+              strokeWidth={stroke}
+            />
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={normalizedRadius}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={stroke}
+              strokeLinecap="round"
+              strokeDasharray={`${circumference} ${circumference}`}
+              strokeDashoffset={dashOffset}
+              transform={`rotate(-90 ${size / 2} ${size / 2})`}
+              style={{ transition: 'stroke-dashoffset 200ms ease-out' }}
+            />
+          </svg>
+        </div>
+      </div>
+      {currentFileName && (
+        <p className="mt-0.5 truncate text-[10px] text-muted" title={currentFileName}>
+          {currentFileName}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
+  const cachedState = cachedDocumentListState;
+  const [sortBy, setSortBy] = useState<SortBy>(cachedState?.sortBy ?? DEFAULT_STATE.sortBy);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    cachedState?.sortDirection ?? DEFAULT_STATE.sortDirection,
+  );
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    normalizeViewMode(cachedState?.viewMode ?? DEFAULT_STATE.viewMode),
+  );
+  const [iconSize, setIconSize] = useState<IconSize>(cachedState?.iconSize ?? DEFAULT_STATE.iconSize);
+  const [folders, setFolders] = useState<Folder[]>(cachedState?.folders ?? DEFAULT_STATE.folders);
+  const [showHint, setShowHint] = useState(cachedState?.showHint ?? true);
+  const [sidebarWidth, setSidebarWidth] = useState(cachedState?.sidebarWidth ?? DEFAULT_STATE.sidebarWidth);
+  const [sidebarFilter, setSidebarFilter] = useState<SidebarFilter>(cachedState?.sidebarFilter ?? 'all');
+  const [sidebarOpen, setSidebarOpen] = useState(!(cachedState?.sidebarCollapsed ?? false));
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [activeUploadBatches, setActiveUploadBatches] = useState<Record<string, UploadBatchState>>({});
+
+  const [isInitialized, setIsInitialized] = useState(cachedState !== null);
+
   const [documentToDelete, setDocumentToDelete] = useState<DocumentToDelete | null>(null);
-  const [draggedDoc, setDraggedDoc] = useState<DocumentListDocument | null>(null);
-  const [dropTargetDoc, setDropTargetDoc] = useState<DocumentListDocument | null>(null);
+  const [pendingMerge, setPendingMerge] = useState<
+    | { sources: DocumentListDocument[]; target: DocumentListDocument }
+    | null
+  >(null);
   const [newFolderName, setNewFolderName] = useState('');
-  const [pendingFolderDocs, setPendingFolderDocs] = useState<{ source: DocumentListDocument, target: DocumentListDocument } | null>(null);
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [showHint, setShowHint] = useState(true);
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
+  const [manualFolderPrompt, setManualFolderPrompt] = useState(false);
+  const [clearFoldersPrompt, setClearFoldersPrompt] = useState(false);
+
+  const isNarrow = useIsNarrow();
+  const selection = useDocumentSelection();
 
   const {
     pdfDocs,
-    removePDFDocument: removePDF,
+    removePDFDocument,
     isPDFLoading,
     epubDocs,
-    removeEPUBDocument: removeEPUB,
+    removeEPUBDocument,
     isEPUBLoading,
     htmlDocs,
-    removeHTMLDocument: removeHTML,
+    removeHTMLDocument,
     isHTMLLoading,
   } = useDocuments();
 
+  // Load saved state.
   useEffect(() => {
-    // Load saved state
-    const loadState = async () => {
-      const savedState = await getDocumentListState();
-      if (savedState) {
-        setSortBy(savedState.sortBy);
-        setSortDirection(savedState.sortDirection);
-        setFolders(savedState.folders);
-        setCollapsedFolders(new Set(savedState.collapsedFolders));
-        setShowHint(savedState.showHint ?? true); // Use saved hint state or default to true
-        setViewMode(savedState.viewMode ?? 'grid');
+    let cancelled = false;
+    (async () => {
+      const saved = await getDocumentListState();
+      if (cancelled) return;
+      if (saved) {
+        cachedDocumentListState = saved;
+        setSortBy(saved.sortBy);
+        setSortDirection(saved.sortDirection);
+        setFolders(saved.folders ?? []);
+        setShowHint(saved.showHint ?? true);
+        setViewMode(normalizeViewMode(saved.viewMode));
+        setIconSize(saved.iconSize ?? DEFAULT_STATE.iconSize);
+        setSidebarWidth(saved.sidebarWidth ?? DEFAULT_STATE.sidebarWidth);
+        setSidebarFilter(saved.sidebarFilter ?? 'all');
+        setSidebarOpen(!(saved.sidebarCollapsed ?? false));
+      } else {
+        cachedDocumentListState = null;
+        setSortBy(DEFAULT_STATE.sortBy);
+        setSortDirection(DEFAULT_STATE.sortDirection);
+        setFolders(DEFAULT_STATE.folders);
+        setShowHint(DEFAULT_STATE.showHint);
+        setViewMode(DEFAULT_STATE.viewMode);
+        setIconSize(DEFAULT_STATE.iconSize);
+        setSidebarWidth(DEFAULT_STATE.sidebarWidth);
+        setSidebarFilter(DEFAULT_STATE.sidebarFilter);
+        setSidebarOpen(!DEFAULT_STATE.sidebarCollapsed);
       }
       setIsInitialized(true);
+    })();
+    return () => {
+      cancelled = true;
     };
-
-    loadState();
   }, []);
 
-  useEffect(() => {
-    const saveState = async () => {
-      const state: DocumentListState = {
-        sortBy,
-        sortDirection,
-        folders,
-        collapsedFolders: Array.from(collapsedFolders),
-        showHint,
-        viewMode
-      };
-      await saveDocumentListState(state);
-    };
-
-    if (isInitialized) { // Prevents saving empty state on first render or back navigation
-      saveState();
-    }
-  }, [sortBy, sortDirection, folders, collapsedFolders, showHint, viewMode, isInitialized]);
-
-  // Reconcile folder state against the current server-backed document list.
-  // If a document no longer exists on the server, drop it from folders to avoid stale UI.
+  // Persist.
   useEffect(() => {
     if (!isInitialized) return;
-    const ids = new Set<string>([...pdfDocs, ...epubDocs, ...htmlDocs].map((d) => d.id));
-    setFolders((prev) =>
-      prev.map((folder) => ({
-        ...folder,
-        documents: folder.documents.filter((d) => ids.has(d.id)),
-      })),
-    );
-  }, [isInitialized, pdfDocs, epubDocs, htmlDocs]);
+    const state: DocumentListState = {
+      sortBy,
+      sortDirection,
+      folders,
+      collapsedFolders: [],
+      showHint,
+      viewMode,
+      iconSize,
+      sidebarWidth,
+      sidebarFilter,
+      sidebarCollapsed: !sidebarOpen,
+    };
+    cachedDocumentListState = state;
+    void saveDocumentListState(state);
+  }, [
+    sortBy,
+    sortDirection,
+    folders,
+    showHint,
+    viewMode,
+    iconSize,
+    sidebarWidth,
+    sidebarFilter,
+    sidebarOpen,
+    isInitialized,
+  ]);
 
-  const allDocuments: DocumentListDocument[] = [
-    ...pdfDocs.map((doc) => ({ ...doc, type: 'pdf' as const })),
-    ...epubDocs.map((doc) => ({ ...doc, type: 'epub' as const })),
-    ...htmlDocs.map((doc) => ({ ...doc, type: 'html' as const })),
-  ];
+  // Mobile drawer should never auto-open from persisted desktop state.
+  useEffect(() => {
+    if (!isNarrow) return;
+    setMobileSidebarOpen(false);
+  }, [isNarrow]);
 
-  const sortDocuments = useCallback((docs: DocumentListDocument[]) => {
-    return [...docs].sort((a, b) => {
-      switch (sortBy) {
-        case 'name':
-          return sortDirection === 'asc'
-            ? a.name.localeCompare(b.name)
-            : b.name.localeCompare(a.name);
-        case 'type':
-          return sortDirection === 'asc'
-            ? a.type.localeCompare(b.type)
-            : b.type.localeCompare(a.type);
-        case 'size':
-          return sortDirection === 'asc'
-            ? a.size - b.size
-            : b.size - a.size;
-        default:
-          return sortDirection === 'asc'
-            ? a.lastModified - b.lastModified
-            : b.lastModified - a.lastModified;
+  // Build the union document list.
+  const rawDocuments: DocumentListDocument[] = useMemo(
+    () => [
+      ...pdfDocs.map((d) => ({ ...d, type: 'pdf' as const })),
+      ...epubDocs.map((d) => ({ ...d, type: 'epub' as const })),
+      ...htmlDocs.map((d) => ({ ...d, type: 'html' as const })),
+    ],
+    [pdfDocs, epubDocs, htmlDocs],
+  );
+  const rawDocumentIdsKey = useMemo(
+    () => rawDocuments.map((d) => documentIdentityKey(d)).sort().join('|'),
+    [rawDocuments],
+  );
+  const recentlyOpenedById = useLiveQuery<Record<string, number>, Record<string, number>>(
+    async () => {
+      try {
+        return await getDocumentRecentlyOpenedMap();
+      } catch (err) {
+        console.warn('Failed to load recently opened cache metadata:', err);
+        return {};
       }
-    });
-  }, [sortBy, sortDirection]);
+    },
+    [rawDocumentIdsKey],
+    {},
+  );
+
+  const allDocuments: DocumentListDocument[] = useMemo(
+    () =>
+      rawDocuments.map((doc) => ({
+        ...doc,
+        recentlyOpenedAt: recentlyOpenedById[documentIdentityKey(doc)] ?? 0,
+      })),
+    [rawDocuments, recentlyOpenedById],
+  );
+
+  const allDocumentsById = useMemo(() => {
+    const map = new Map<string, DocumentListDocument>();
+    for (const doc of allDocuments) map.set(documentIdentityKey(doc), doc);
+    return map;
+  }, [allDocuments]);
+
+  const foldersWithLiveDocs = useMemo(
+    () =>
+      folders.map((folder) => ({
+        ...folder,
+        documents: folder.documents
+          .map((d) => allDocumentsById.get(documentIdentityKey(d)))
+          .filter((d): d is DocumentListDocument => Boolean(d))
+          .map((d) => ({ ...d, folderId: folder.id })),
+      })),
+    [folders, allDocumentsById],
+  );
+
+  const folderNameById = useMemo(
+    () =>
+      foldersWithLiveDocs.reduce<Record<string, string>>((acc, folder) => {
+        acc[folder.id] = folder.name;
+        return acc;
+      }, {}),
+    [foldersWithLiveDocs],
+  );
+
+  const folderIdByDocId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const folder of foldersWithLiveDocs) {
+      for (const doc of folder.documents) map.set(documentIdentityKey(doc), folder.id);
+    }
+    return map;
+  }, [foldersWithLiveDocs]);
+
+  const allDocumentsWithFolder = useMemo(
+    () =>
+      allDocuments.map((doc) => ({
+        ...doc,
+        folderId: folderIdByDocId.get(documentIdentityKey(doc)),
+      })),
+    [allDocuments, folderIdByDocId],
+  );
+
+  // Filter based on sidebar selection + search query.
+  const visibleDocuments = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let docs = allDocumentsWithFolder;
+    if (sidebarFilter === 'pdf') docs = docs.filter((d) => d.type === 'pdf');
+    else if (sidebarFilter === 'epub') docs = docs.filter((d) => d.type === 'epub');
+    else if (sidebarFilter === 'html') docs = docs.filter((d) => d.type === 'html');
+    else if (sidebarFilter === 'recents') {
+      docs = [...docs]
+        .filter((d) => (d.recentlyOpenedAt ?? 0) > 0)
+        .sort((a, b) => (b.recentlyOpenedAt ?? 0) - (a.recentlyOpenedAt ?? 0))
+        .slice(0, 20);
+    } else if (sidebarFilter.startsWith('folder:')) {
+      const fid = sidebarFilter.slice('folder:'.length);
+      const folder = foldersWithLiveDocs.find((f) => f.id === fid);
+      docs = folder
+        ? folder.documents
+            .map((d) => allDocumentsById.get(documentIdentityKey(d)))
+            .filter((d): d is DocumentListDocument => Boolean(d))
+            .map((d) => ({ ...d, folderId: fid }))
+        : [];
+    }
+    if (q) docs = docs.filter((d) => d.name.toLowerCase().includes(q));
+    return docs;
+  }, [allDocumentsWithFolder, sidebarFilter, query, foldersWithLiveDocs, allDocumentsById]);
+
+  // Apply sort.
+  const sortedVisible = useMemo(() => {
+    if (sidebarFilter === 'recents') return visibleDocuments;
+    return sortDocs(visibleDocuments, sortBy, sortDirection);
+  }, [visibleDocuments, sidebarFilter, sortBy, sortDirection]);
+
+  const counts = useMemo(
+    () => ({
+      all: allDocuments.length,
+      pdf: pdfDocs.length,
+      epub: epubDocs.length,
+      html: htmlDocs.length,
+    }),
+    [allDocuments.length, pdfDocs.length, epubDocs.length, htmlDocs.length],
+  );
+
+  // --- Actions ---
 
   const handleDelete = useCallback(async () => {
     if (!documentToDelete) return;
-
     try {
-      if (documentToDelete.type === 'pdf') {
-        await removePDF(documentToDelete.id);
-      } else if (documentToDelete.type === 'epub') {
-        await removeEPUB(documentToDelete.id);
-      } else if (documentToDelete.type === 'html') {
-        await removeHTML(documentToDelete.id);
-      }
-
-      // Remove from folders if document is in one
-      setFolders(prev => prev.map(folder => ({
-        ...folder,
-        documents: folder.documents.filter(doc =>
-          !(doc.id === documentToDelete.id && doc.type === documentToDelete.type)
-        )
-      })));
-
+      if (documentToDelete.type === 'pdf') await removePDFDocument(documentToDelete.id);
+      else if (documentToDelete.type === 'epub') await removeEPUBDocument(documentToDelete.id);
+      else if (documentToDelete.type === 'html') await removeHTMLDocument(documentToDelete.id);
+      setFolders((prev) =>
+        prev.map((f) => ({
+          ...f,
+          documents: f.documents.filter(
+            (d) => !(d.id === documentToDelete.id && d.type === documentToDelete.type),
+          ),
+        })),
+      );
       setDocumentToDelete(null);
     } catch (err) {
       console.error('Failed to remove document:', err);
     }
-  }, [documentToDelete, removePDF, removeEPUB, removeHTML]);
+  }, [documentToDelete, removePDFDocument, removeEPUBDocument, removeHTMLDocument]);
 
-  const handleDragStart = useCallback((doc: DocumentListDocument) => {
-    if (!doc.folderId) {
-      setDraggedDoc(doc);
-    }
+  const handleDeleteDoc = useCallback((doc: DocumentListDocument) => {
+    setDocumentToDelete({ id: doc.id, name: doc.name, type: doc.type });
   }, []);
 
-  const handleDragEnd = useCallback(() => {
-    setDraggedDoc(null);
-    setDropTargetDoc(null);
-  }, []);
+  const handleDropOnFolder = useCallback(
+    (folderId: string, item: DocumentDragItem) => {
+      setFolders((prev) =>
+        prev.map((f) => {
+          if (f.id !== folderId) {
+            // Remove the dropped docs from any other folder they were in.
+            return {
+              ...f,
+              documents: f.documents.filter(
+                (d) => !item.items.some((it) => it.id === d.id && it.type === d.type),
+              ),
+            };
+          }
+          const existingIdentities = new Set(f.documents.map((d) => documentIdentityKey(d)));
+          const newDocs = item.docs
+            .filter((d) => !existingIdentities.has(documentIdentityKey(d)))
+            .map((d) => ({ ...d, folderId }));
+          return { ...f, documents: [...f.documents, ...newDocs] };
+        }),
+      );
+      setSidebarFilter(`folder:${folderId}`);
+      selection.clear();
+    },
+    [selection],
+  );
 
-  const handleDragOver = useCallback((e: DragEvent, doc: DocumentListDocument) => {
-    e.preventDefault();
-    if (draggedDoc && draggedDoc.id !== doc.id && !draggedDoc.folderId) {
-      // Only highlight target if neither document is in a folder
-      if (!doc.folderId) {
-        setDropTargetDoc(doc);
-      }
-    }
-  }, [draggedDoc]);
-
-  const handleDragLeave = useCallback(() => {
-    setDropTargetDoc(null);
-  }, []);
-
-  const handleDrop = useCallback((e: DragEvent, targetDoc: DocumentListDocument) => {
-    e.preventDefault();
-    console.log('Dropped', draggedDoc?.name, 'on', targetDoc.name);
-
-    if (!draggedDoc || draggedDoc.id === targetDoc.id || draggedDoc.folderId) return;
-
-    // If target doc is unfoldered, create a new folder
-    if (!targetDoc.folderId) {
-      setPendingFolderDocs({
-        source: draggedDoc,
-        target: targetDoc
-      });
+  const handleMergeIntoFolder = useCallback(
+    (sources: DocumentListDocument[], target: DocumentListDocument) => {
+      if (target.folderId) return;
+      const targetKey = documentIdentityKey(target);
+      const filtered = sources.filter((s) => documentIdentityKey(s) !== targetKey && !s.folderId);
+      if (filtered.length === 0) return;
+      setPendingMerge({ sources: filtered, target });
       setNewFolderName('');
-    }
+    },
+    [],
+  );
 
-    setDraggedDoc(null);
-    setDropTargetDoc(null);
-  }, [draggedDoc]);
-
-  const handleFolderDrop = useCallback((e: DragEvent, folderId: string) => {
-    e.preventDefault();
-    if (!draggedDoc || draggedDoc.folderId) return;
-
-    // Add document to existing folder
-    setFolders(folders.map(f => {
-      if (f.id === folderId && !f.documents.some(d => d.id === draggedDoc.id)) {
-        return {
-          ...f,
-          documents: [...f.documents, { ...draggedDoc, folderId }]
-        };
-      }
-      return f;
-    }));
-
-    setDraggedDoc(null);
-    setDropTargetDoc(null);
-  }, [draggedDoc, folders]);
-
-  const toggleFolderCollapse = useCallback((folderId: string) => {
-    setCollapsedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(folderId)) {
-        next.delete(folderId);
-      } else {
-        next.add(folderId);
-      }
-      return next;
-    });
-  }, []);
-
-  const createFolder = useCallback(() => {
-    if (!pendingFolderDocs) return;
-
-    const folderName = newFolderName.trim() ||
-      generateDefaultFolderName(pendingFolderDocs.source, pendingFolderDocs.target);
-
+  const createFolderFromPending = useCallback(() => {
+    if (!pendingMerge) return;
+    const name =
+      newFolderName.trim() ||
+      generateDefaultFolderName(pendingMerge.sources[0], pendingMerge.target);
     const folderId = `folder-${Date.now()}`;
-    setFolders(prev => [
+    setFolders((prev) => [
       ...prev,
       {
         id: folderId,
-        name: folderName,
+        name,
         documents: [
-          { ...pendingFolderDocs.source, folderId },
-          { ...pendingFolderDocs.target, folderId }
-        ]
-      }
+          ...pendingMerge.sources.map((d) => ({ ...d, folderId })),
+          { ...pendingMerge.target, folderId },
+        ],
+      },
     ]);
-
-    setPendingFolderDocs(null);
+    setPendingMerge(null);
     setNewFolderName('');
-    setDropTargetDoc(null);
-    setDraggedDoc(null);
     setShowHint(false);
-  }, [pendingFolderDocs, newFolderName]);
+    setSidebarFilter(`folder:${folderId}`);
+    selection.clear();
+  }, [pendingMerge, newFolderName, selection]);
 
-  const handleFolderNameKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      createFolder();
-    } else if (e.key === 'Escape') {
-      setPendingFolderDocs(null);
-      setNewFolderName('');
-    }
-  }, [createFolder]);
+  const createManualFolder = useCallback(() => {
+    const name = newFolderName.trim() || `New Folder`;
+    const folderId = `folder-${Date.now()}`;
+    setFolders((prev) => [...prev, { id: folderId, name, documents: [] }]);
+    setNewFolderName('');
+    setManualFolderPrompt(false);
+    setSidebarFilter(`folder:${folderId}`);
+  }, [newFolderName]);
 
-  if (isPDFLoading || isEPUBLoading || isHTMLLoading) {
-    return <DocumentListSkeleton viewMode={viewMode} />;
-  }
+  const handleDeleteFolder = useCallback((folderId: string) => {
+    setFolders((prev) => prev.filter((f) => f.id !== folderId));
+    if (sidebarFilter === `folder:${folderId}`) setSidebarFilter('all');
+  }, [sidebarFilter]);
 
-  if (allDocuments.length === 0) {
-    return <div className="w-full text-center text-muted">No documents uploaded yet</div>;
-  }
+  const handleClearFolders = useCallback(() => {
+    setFolders([]);
+    if (sidebarFilter.startsWith('folder:')) setSidebarFilter('all');
+    setClearFoldersPrompt(false);
+    selection.clear();
+  }, [selection, sidebarFilter]);
 
-  const unfolderedDocuments = allDocuments.filter(
-    doc => !folders.some(folder => folder.documents.some(d => d.id === doc.id))
+  // Status bar summary.
+  const summary = useMemo(() => {
+    const parts: string[] = [];
+    if (counts.pdf) parts.push(`${counts.pdf} PDF${counts.pdf === 1 ? '' : 's'}`);
+    if (counts.epub) parts.push(`${counts.epub} EPUB${counts.epub === 1 ? '' : 's'}`);
+    if (counts.html) parts.push(`${counts.html} Text${counts.html === 1 ? ' Doc' : ' Docs'}`);
+    return parts.join(' • ');
+  }, [counts]);
+
+  const totalBytes = useMemo(
+    () => allDocuments.reduce((acc, d) => acc + d.size, 0),
+    [allDocuments],
+  );
+  const visibleSelectedCount = useMemo(
+    () => sortedVisible.reduce((count, doc) => count + (selection.isSelected(doc) ? 1 : 0), 0),
+    [sortedVisible, selection],
   );
 
-  // Build compact summary (counts per type + total size)
-  const summaryParts: string[] = [];
-  if (pdfDocs.length) summaryParts.push(`${pdfDocs.length} PDF${pdfDocs.length === 1 ? '' : 's'}`);
-  if (epubDocs.length) summaryParts.push(`${epubDocs.length} EPUB${epubDocs.length === 1 ? '' : 's'}`);
-  if (htmlDocs.length) summaryParts.push(`${htmlDocs.length} HTML${htmlDocs.length === 1 ? '' : 's'}`);
-  const totalSizeMB = (allDocuments.reduce((acc, d) => acc + d.size, 0) / 1024 / 1024).toFixed(2);
+  const isLoading = isPDFLoading || isEPUBLoading || isHTMLLoading;
+
+  const handleUploadBatchChange = useCallback((state: UploadBatchState) => {
+    setActiveUploadBatches((prev) => {
+      if (!state.isActive) {
+        if (!prev[state.uploaderId]) return prev;
+        const next = { ...prev };
+        delete next[state.uploaderId];
+        return next;
+      }
+      return { ...prev, [state.uploaderId]: state };
+    });
+  }, []);
+
+  const sidebarUploadState = useMemo(() => {
+    const batches = Object.values(activeUploadBatches);
+    if (batches.length === 0) return null;
+    const totalFiles = batches.reduce((sum, batch) => sum + batch.totalFiles, 0);
+    const completedFiles = batches.reduce((sum, batch) => sum + batch.completedFiles, 0);
+    const convertingBatch = batches.find((batch) => batch.phase === 'converting');
+    const phase: 'uploading' | 'converting' = convertingBatch ? 'converting' : 'uploading';
+    const currentFileName = convertingBatch?.currentFileName ?? batches.find((batch) => batch.currentFileName)?.currentFileName ?? null;
+    return { totalFiles, completedFiles, phase, currentFileName };
+  }, [activeUploadBatches]);
+
+  const fallbackViewMode: ViewMode = viewMode;
+  const effectiveSidebarOpen = isNarrow ? mobileSidebarOpen : sidebarOpen;
 
   return (
-    <DndProvider backend={HTML5Backend}>
-      <div className="w-full mx-auto">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg sm:text-xl font-semibold text-foreground">Your Documents</h2>
-          <SortControls
-            sortBy={sortBy}
-            sortDirection={sortDirection}
-            onSortByChange={setSortBy}
-            onSortDirectionChange={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-          />
-        </div>
-
-        <p className="text-xs text-muted mb-2" data-doc-summary>
-          {summaryParts.join(' • ')}{summaryParts.length ? ' • ' : ''}{totalSizeMB} MB total
-        </p>
-        <div className="mb-3">
-          <DocumentUploader variant="compact" />
-        </div>
-
-        {showHint && allDocuments.length > 1 && (
-          <div className="flex items-center justify-between bg-offbase border border-offbase rounded-md px-3 py-1 text-sm mb-2">
-            <p className="text-sm text-foreground">Drag files on top of each other to make folders</p>
-            <Button
+    <FinderWindow
+      toolbar={
+        <FinderToolbar
+          viewMode={fallbackViewMode}
+          onViewModeChange={setViewMode}
+          iconSize={iconSize}
+          onIconSizeChange={setIconSize}
+          sortBy={sortBy}
+          sortDirection={sortDirection}
+          onSortByChange={setSortBy}
+          onSortDirectionToggle={() =>
+            setSortDirection((p) => (p === 'asc' ? 'desc' : 'asc'))
+          }
+          query={query}
+          onQueryChange={setQuery}
+          onToggleSidebar={() =>
+            isNarrow
+              ? setMobileSidebarOpen((p) => !p)
+              : setSidebarOpen((p) => !p)
+          }
+          isSidebarOpen={effectiveSidebarOpen}
+          showSortControls={sidebarFilter !== 'recents'}
+          leftSlot={brand}
+        />
+      }
+      sidebar={
+        <FinderSidebar
+          filter={sidebarFilter}
+          onFilterChange={setSidebarFilter}
+          folders={foldersWithLiveDocs}
+          counts={counts}
+          onDeleteFolder={handleDeleteFolder}
+          onNewFolder={() => {
+            setNewFolderName('');
+            setManualFolderPrompt(true);
+          }}
+          onClearFolders={() => setClearFoldersPrompt(true)}
+          onDropOnFolder={handleDropOnFolder}
+          width={sidebarWidth}
+          onWidthChange={setSidebarWidth}
+          topSlot={<DocumentUploader variant="compact" onUploadBatchChange={handleUploadBatchChange} />}
+          bottomSlot={(
+            <div className="flex flex-col gap-2">
+              {sidebarUploadState && (
+                <SidebarUploadLoader
+                  totalFiles={sidebarUploadState.totalFiles}
+                  completedFiles={sidebarUploadState.completedFiles}
+                  phase={sidebarUploadState.phase}
+                  currentFileName={sidebarUploadState.currentFileName}
+                />
+              )}
+              {appActions}
+            </div>
+          )}
+          onRowAction={() => {
+            if (isNarrow) setMobileSidebarOpen(false);
+          }}
+        />
+      }
+      statusBar={
+        <FinderStatusBar
+          itemCount={allDocuments.length}
+          selectedCount={visibleSelectedCount}
+          totalSize={totalBytes}
+          summary={summary}
+        />
+      }
+      sidebarOpen={effectiveSidebarOpen}
+      onRequestSidebarClose={() => {
+        if (isNarrow) setMobileSidebarOpen(false);
+      }}
+    >
+      {!isLoading && showHint && allDocuments.length > 1 && (
+        <div className="px-3 pt-3 shrink-0 bg-background">
+          <div className="flex items-center justify-between bg-base border border-offbase rounded-md px-3 py-1 text-[12px]">
+            <p className="text-foreground">
+              Drag files onto each other to make folders. Drop into the sidebar to move.
+            </p>
+            <button
+              type="button"
               onClick={() => setShowHint(false)}
-              className={buttonClass({
-                variant: 'ghost',
-                size: 'icon',
-                className: 'h-7 w-7 hover:bg-base',
-              })}
+              className="h-6 w-6 inline-flex items-center justify-center text-muted hover:text-accent hover:bg-base hover:scale-[1.01] rounded transition-all duration-200 ease-out"
               aria-label="Dismiss hint"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </Button>
+            </button>
           </div>
-        )}
-
-        <div
-          className={
-            viewMode === 'grid'
-              ? 'grid w-full grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5'
-              : 'w-full space-y-1'
-          }
-        >
-
-          {folders.map(folder => (
-            <DocumentFolder
-              key={folder.id}
-              folder={folder}
-              isCollapsed={collapsedFolders.has(folder.id)}
-              onToggleCollapse={toggleFolderCollapse}
-              onDelete={() => setFolders(prev => prev.filter(f => f.id !== folder.id))}
-              sortedDocuments={sortDocuments(folder.documents)}
-              onDocumentDelete={setDocumentToDelete}
-              draggedDoc={draggedDoc}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              onDrop={handleFolderDrop}
-              viewMode={viewMode}
-            />
-          ))}
-
-          {sortDocuments(unfolderedDocuments).map(doc => (
-            <DocumentListItem
-              key={`${doc.type}-${doc.id}`}
-              doc={doc}
-              onDelete={setDocumentToDelete}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              isDropTarget={dropTargetDoc?.id === doc.id}
-              viewMode={viewMode}
-            />
-          ))}
         </div>
+      )}
 
-        <CreateFolderDialog
-          isOpen={pendingFolderDocs !== null}
-          onClose={() => setPendingFolderDocs(null)}
-          folderName={newFolderName}
-          onFolderNameChange={setNewFolderName}
-          onKeyDown={handleFolderNameKeyDown}
-        />
+      {isLoading ? (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <DocumentListSkeleton viewMode={fallbackViewMode} iconSize={iconSize} />
+        </div>
+      ) : allDocuments.length === 0 ? (
+        <div className="flex-1 min-h-0 flex items-center justify-center p-6">
+          <DocumentUploader
+            className="py-12 w-full max-w-2xl"
+            onUploadBatchChange={handleUploadBatchChange}
+          />
+        </div>
+      ) : (
+        <DocumentUploader
+          variant="overlay"
+          className="flex-1 min-h-0 flex flex-col"
+          onUploadBatchChange={handleUploadBatchChange}
+        >
+          {fallbackViewMode === 'icons' && (
+            <IconsView
+              documents={sortedVisible}
+              iconSize={iconSize}
+              onDeleteDoc={handleDeleteDoc}
+              onMergeIntoFolder={handleMergeIntoFolder}
+            />
+          )}
+          {fallbackViewMode === 'list' && (
+            <ListView
+              documents={sortedVisible}
+              sortBy={sortBy}
+              sortDirection={sortDirection}
+              onSortChange={(b, d) => {
+                setSortBy(b);
+                setSortDirection(d);
+              }}
+              onDeleteDoc={handleDeleteDoc}
+              onMergeIntoFolder={handleMergeIntoFolder}
+            />
+          )}
+          {fallbackViewMode === 'gallery' && (
+            <GalleryView
+              documents={sortedVisible}
+              folderNameById={folderNameById}
+              onDeleteDoc={handleDeleteDoc}
+              onMergeIntoFolder={handleMergeIntoFolder}
+            />
+          )}
+        </DocumentUploader>
+      )}
 
-        <ConfirmDialog
-          isOpen={documentToDelete !== null}
-          onClose={() => setDocumentToDelete(null)}
-          onConfirm={handleDelete}
-          title="Delete Document"
-          message={`Are you sure you want to delete ${documentToDelete?.name || 'this document'}?`}
-          confirmText="Delete"
-          isDangerous={true}
-        />
-      </div>
-    </DndProvider>
+      <CreateFolderDialog
+        isOpen={pendingMerge !== null}
+        onClose={() => setPendingMerge(null)}
+        folderName={newFolderName}
+        onFolderNameChange={setNewFolderName}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            createFolderFromPending();
+          } else if (e.key === 'Escape') {
+            setPendingMerge(null);
+            setNewFolderName('');
+          }
+        }}
+      />
+
+      <CreateFolderDialog
+        isOpen={manualFolderPrompt}
+        onClose={() => setManualFolderPrompt(false)}
+        folderName={newFolderName}
+        onFolderNameChange={setNewFolderName}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            createManualFolder();
+          } else if (e.key === 'Escape') {
+            setManualFolderPrompt(false);
+            setNewFolderName('');
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        isOpen={documentToDelete !== null}
+        onClose={() => setDocumentToDelete(null)}
+        onConfirm={handleDelete}
+        title="Delete Document"
+        message={`Are you sure you want to delete ${documentToDelete?.name ?? 'this document'}?`}
+        confirmText="Delete"
+        isDangerous
+      />
+
+      <ConfirmDialog
+        isOpen={clearFoldersPrompt}
+        onClose={() => setClearFoldersPrompt(false)}
+        onConfirm={handleClearFolders}
+        title="Remove All Folders"
+        message="Remove all folders? This will not delete documents."
+        confirmText="Remove Folders"
+        isDangerous
+      />
+    </FinderWindow>
+  );
+}
+
+export function DocumentList({
+  brand,
+  appActions,
+}: {
+  brand?: ReactNode;
+  appActions?: ReactNode;
+} = {}) {
+  return (
+    <DocumentDndProvider>
+      <DocumentSelectionProvider>
+        <DocumentListInner brand={brand} appActions={appActions} />
+      </DocumentSelectionProvider>
+    </DocumentDndProvider>
   );
 }

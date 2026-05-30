@@ -825,6 +825,31 @@ export async function clearHtmlDocuments(): Promise<void> {
   });
 }
 
+export async function getDocumentRecentlyOpenedMap(): Promise<Record<string, number>> {
+  return withDB(async () => {
+    const byId: Record<string, number> = {};
+    const write = (identity: string, ts: unknown) => {
+      const value = toPositiveInt(ts, 0);
+      if (value <= 0) return;
+      if (!byId[identity] || value > byId[identity]) byId[identity] = value;
+    };
+
+    await Promise.all([
+      db[PDF_TABLE]
+        .orderBy('cacheAccessedAt')
+        .eachKey((cacheAccessedAt, cursor) => write(`pdf|${String(cursor.primaryKey)}`, cacheAccessedAt)),
+      db[EPUB_TABLE]
+        .orderBy('cacheAccessedAt')
+        .eachKey((cacheAccessedAt, cursor) => write(`epub|${String(cursor.primaryKey)}`, cacheAccessedAt)),
+      db[HTML_TABLE]
+        .orderBy('cacheAccessedAt')
+        .eachKey((cacheAccessedAt, cursor) => write(`html|${String(cursor.primaryKey)}`, cacheAccessedAt)),
+    ]);
+
+    return byId;
+  });
+}
+
 export async function getAppConfig(): Promise<AppConfigRow | null> {
   return withDB(async () => {
     const row = await db[APP_CONFIG_TABLE].get('singleton');

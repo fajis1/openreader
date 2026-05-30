@@ -12,6 +12,7 @@ import {
   primeDocumentPreviewCache,
   setInMemoryDocumentPreviewUrl,
 } from '@/lib/client/cache/previews';
+import { formatDocumentSize } from './formatSize';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -61,6 +62,7 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
       lowerName.endsWith('.mkd'));
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isImageReady, setIsImageReady] = useState(false);
@@ -205,6 +207,17 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
     setIsImageReady(false);
   }, [imagePreview]);
 
+  // Cached blob/http sources can already be decoded before React's onLoad handler
+  // runs on remount, leaving opacity at 0. Promote already-complete images.
+  useEffect(() => {
+    if (!imagePreview) return;
+    const img = imageRef.current;
+    if (!img) return;
+    if (img.complete && img.naturalWidth > 0) {
+      setIsImageReady(true);
+    }
+  }, [imagePreview]);
+
   const gradientClass = isPDF
     ? 'from-red-500/80 via-red-400/60 to-red-600/80'
     : isEPUB
@@ -245,6 +258,7 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
           ) : null}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
+            ref={imageRef}
             src={imagePreview}
             alt={`${doc.name} preview`}
             className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-150 ${isImageReady ? 'opacity-100' : 'opacity-0'}`}
@@ -329,8 +343,10 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
         </>
       )}
 
-      <div className="absolute left-1 top-1 z-20 rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white">
-        {isGenerating ? '…' : typeLabel}
+      <div className="absolute left-1 bottom-1 z-20 rounded bg-black/45 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-white/90">
+        {isGenerating
+          ? '…'
+          : `${typeLabel} • ${formatDocumentSize(doc.size)}`}
       </div>
     </div>
   );

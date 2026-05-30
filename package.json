@@ -12,6 +12,7 @@
     "start:raw": "next start -p 3003",
     "lint": "next lint",
     "test": "playwright test",
+    "test:ci-env": "CI=true playwright test",
     "migrate": "node drizzle/scripts/migrate.mjs",
     "migrate-fs": "node scripts/migrate-fs-v2.mjs",
     "migrate-fs:dry-run": "node scripts/migrate-fs-v2.mjs --dry-run true",
@@ -25,7 +26,6 @@
     "compute:worker:dev": "pnpm --filter @openreader/compute-worker dev",
     "compute:worker:start": "pnpm --filter @openreader/compute-worker start",
     "compute:dev:compose": "docker compose --env-file compute/worker/.env -f compute/worker/docker-compose.yml up --build",
-    "compute:dev:watch": "docker compose --env-file compute/worker/.env -f compute/worker/docker-compose.yml up --watch",
     "lint:route-errors": "node scripts/check-route-error-responses.mjs"
   },
   "dependencies": {
@@ -64,6 +64,7 @@
     "react": "^19.2.6",
     "react-dnd": "^16.0.1",
     "react-dnd-html5-backend": "^16.0.1",
+    "react-dnd-touch-backend": "^16.0.1",
     "react-dom": "^19.2.6",
     "react-dropzone": "^14.4.1",
     "react-hot-toast": "^2.6.0",

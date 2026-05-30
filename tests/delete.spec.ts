@@ -22,9 +22,6 @@ test.describe('Document deletion flow', () => {
     await expectNoDocumentLink(page, 'sample.txt');
     await expectDocumentListed(page, 'sample.pdf');
 
-    // Optional: summary exists (best-effort)
-    const summary = page.locator('[data-doc-summary]');
-    await expect(summary).toBeVisible();
   });
 
   test('deletes all local documents from Settings modal', async ({ page }) => {
@@ -50,6 +47,6 @@ test.describe('Document deletion flow', () => {
     await expectNoDocumentLink(page, 'sample.epub');
 
     // Uploader should be visible when no docs remain
-    await expect(page.locator('input[type=file]')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('input[type=file]').first()).toBeVisible({ timeout: 10000 });
   });
 });

@@ -130,7 +130,13 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
 
 type AdminSubTab = 'providers' | 'features';
 
-export function SettingsModal({ className = '' }: { className?: string }) {
+export function SettingsModal({
+  className = '',
+  triggerLabel,
+}: {
+  className?: string;
+  triggerLabel?: string;
+}) {
   const runtimeConfig = useRuntimeConfig();
   const enableDestructiveDelete = runtimeConfig.enableDestructiveDeleteActions;
   const showAllProviderModels = runtimeConfig.showAllProviderModels;
@@ -172,7 +178,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
   const { authEnabled, baseUrl: authBaseUrl } = useAuthConfig();
   const { data: session } = useAuthSession();
-  const { requestOpenSettings, registerSettingsController } = useOnboardingFlow();
+  const { changelogOpenSignal } = useOnboardingFlow();
   const router = useRouter();
   const isBusy = isImportingLibrary;
   const {
@@ -205,25 +211,11 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const isSharedSelected = Boolean(selectedSharedProvider);
   const selectedProviderOption = ttsProviders.find((p) => p.id === localProviderRef) ?? ttsProviders[0];
 
-  const closeSettings = useCallback(() => {
-    setIsOpen(false);
-    setIsChangelogOpen(false);
-  }, []);
-
-  const openSettings = useCallback((options?: { changelog?: boolean }) => {
-    setIsOpen(true);
-    setIsChangelogOpen(Boolean(options?.changelog));
-  }, []);
-
   useEffect(() => {
-    registerSettingsController({
-      open: openSettings,
-      close: closeSettings,
-    });
-    return () => {
-      registerSettingsController(null);
-    };
-  }, [closeSettings, openSettings, registerSettingsController]);
+    if (changelogOpenSignal <= 0) return;
+    setIsOpen(true);
+    setIsChangelogOpen(true);
+  }, [changelogOpenSignal]);
 
   useEffect(() => {
     setLocalApiKey(apiKey);
@@ -499,13 +491,15 @@ export function SettingsModal({ className = '' }: { className?: string }) {
     <>
       <Button
         onClick={() => {
-          void requestOpenSettings();
+          setIsOpen(true);
+          setIsChangelogOpen(false);
         }}
-        className={`inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase hover:text-accent transition-transform transition-colors duration-200 ease-out hover:scale-[1.08] ${className}`}
+        className={`inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase hover:text-accent transition-transform transition-colors duration-200 ease-out hover:scale-[1.01] ${className}`}
         aria-label="Settings"
         tabIndex={0}
       >
-        <SettingsIcon className="w-4 h-4 transition-transform duration-200 ease-out hover:scale-[1.08] hover:rotate-45" />
+        <SettingsIcon className="w-4 h-4 transition-transform duration-200 ease-out hover:scale-[1.01] hover:rotate-45" />
+        {triggerLabel && <span className="ml-2">{triggerLabel}</span>}
       </Button>
 
       <Transition appear show={isOpen} as={Fragment}>
@@ -1447,7 +1441,7 @@ function SettingsChangelogPanel({
       <div className="flex items-center gap-3 px-4 py-3 border-b border-offbase bg-background">
         <Button
           onClick={onClose}
-          className="inline-flex items-center justify-center rounded-md text-muted hover:text-accent hover:bg-base transition-all duration-200 ease-in-out transform hover:scale-[1.08]"
+          className="inline-flex items-center justify-center rounded-md text-muted hover:text-accent hover:bg-base transition-all duration-200 ease-in-out transform hover:scale-[1.01]"
           aria-label="Back to settings"
           title="Back"
         >
