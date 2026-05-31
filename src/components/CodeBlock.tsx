@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { CopyIcon, CheckIcon } from '@/components/icons/Icons';
-import { buttonClass } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 
 export function CodeBlock({ children }: { children: string }) {
   const [copied, setCopied] = useState(false);

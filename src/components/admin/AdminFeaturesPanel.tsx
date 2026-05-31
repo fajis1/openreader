@@ -9,12 +9,12 @@ import {
   Badge,
   Section,
   ToggleRow,
-  buttonClass,
   inputClass,
   listboxButtonClass,
   listboxOptionClass,
   listboxOptionsClass,
 } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 import { type TtsProviderId } from '@/lib/shared/tts-provider-catalog';
 import { useSharedProviders, type SharedProviderEntry } from '@/hooks/useSharedProviders';
 

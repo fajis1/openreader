@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { getConsentState, setConsentState } from '@/lib/client/analytics';
 import { Transition } from '@headlessui/react';
-import { buttonClass } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 
 export function CookieConsentBanner() {
   const [show, setShow] = useState(false);
@@ -49,8 +49,8 @@ export function CookieConsentBanner() {
             🍪 We use cookies
           </h3>
           <p className="text-sm leading-relaxed text-foreground/90">
-            We use strictly necessary cookies for authentication and optional cookies for anonymous analytics
-            to improve the app. See our <Link href="/privacy" className="font-medium text-accent hover:underline">Privacy Policy</Link> for details.
+            We use strictly necessary cookies for authentication. Optional analytics is enabled only when you consent.
+            See our <Link href="/privacy" className="font-medium text-accent hover:underline">Privacy Policy</Link> for details.
           </p>
         </div>
 

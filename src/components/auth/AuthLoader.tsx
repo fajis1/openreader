@@ -7,7 +7,7 @@ import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { getAuthClient } from '@/lib/client/auth-client';
 import { LoadingSpinner } from '@/components/Spinner';
-import { buttonClass } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));

@@ -15,7 +15,8 @@ import {
   clampSegmentPreloadSentenceLookahead,
   clampTtsSegmentMaxBlockLength,
 } from '@/types/config';
-import { Section, ToggleRow, CheckItem, buttonClass, segmentedButtonClass, segmentedGroupClass } from '@/components/formPrimitives';
+import { Section, ToggleRow, CheckItem, segmentedButtonClass, segmentedGroupClass } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 import { RefreshIcon, SparkleIcon } from '@/components/icons/Icons';
 import type { ParsedPdfBlockKind, PdfParseStatus } from '@/types/parsed-pdf';
 import { isForceReparseDisabled } from '@/lib/client/pdf/force-reparse';

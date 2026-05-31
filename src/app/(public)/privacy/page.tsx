@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { headers } from 'next/headers';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 
 export const metadata: Metadata = {
-  title: 'Privacy & Data Usage | OpenReader',
+  title: 'Privacy & Data Usage',
   description:
-    'Learn how OpenReader handles your data, what is stored in your browser, and what is sent to the server.',
+    'How OpenReader collects, stores, and processes data, including usage analytics controls and your account rights.',
   alternates: {
     canonical: '/privacy',
   },
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
 export default async function PrivacyPage() {
   const effectiveDate = 'February 17, 2026';
   const isRichardrDevProductionInstance =
-    process.env.RICHARDRDEV_PRODUCTION === 'true';
+    process.env.RICHARDRDEV_PRODUCTION?.trim().toLowerCase() === 'true';
 
   const hdrs = await headers();
   const host = hdrs.get('host') ?? 'this server';
@@ -26,308 +27,184 @@ export default async function PrivacyPage() {
   const origin = `${proto}://${host}`;
 
   return (
-    <>
-      <style>{`
-        /* ── Privacy body ───────────────── */
-        .privacy-body {
-          max-width: 42rem;
-          margin: 0 auto;
-          padding: 3rem 1.5rem 4rem;
-          animation: landing-fade-up 0.7s ease-out 0.15s both;
-        }
-        .privacy-body h1 {
-          font-family: var(--g-display);
-          font-weight: 800;
-          font-size: clamp(1.5rem, 4vw, 2.25rem);
-          letter-spacing: -0.03em;
-          margin: 0 0 0.5rem;
-        }
-        .privacy-body h1 span {
-          background: linear-gradient(135deg, var(--g-accent), var(--g-accent2));
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-        }
-        .privacy-subtitle {
-          font-size: 0.95rem;
-          color: var(--g-muted);
-          margin: 0 0 2.5rem;
-          line-height: 1.6;
-        }
-        .privacy-card {
-          padding: 2rem;
-          margin-bottom: 1.25rem;
-        }
-        .privacy-card-label {
-          font-family: var(--g-display);
-          font-size: 0.68rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.15em;
-          color: var(--g-accent);
-          margin: 0 0 0.75rem;
-        }
-        .privacy-card p,
-        .privacy-card li {
-          font-size: 0.92rem;
-          line-height: 1.65;
-          color: var(--g-fg);
-        }
-        .privacy-card ul {
-          list-style: none;
-          margin: 0;
-          padding: 0;
-        }
-        .privacy-card li {
-          position: relative;
-          padding-left: 1.1rem;
-          margin-bottom: 0.4rem;
-        }
-        .privacy-card li::before {
-          content: '';
-          position: absolute;
-          left: 0;
-          top: 0.55em;
-          width: 5px;
-          height: 5px;
-          border-radius: 50%;
-          background: var(--g-accent);
-          opacity: 0.5;
-        }
-        .privacy-highlight {
-          background: color-mix(in srgb, var(--g-accent), transparent 88%);
-          border: 1px solid color-mix(in srgb, var(--g-accent), transparent 70%);
-          border-radius: 0.75rem;
-          padding: 1rem 1.25rem;
-          margin-bottom: 1.25rem;
-          font-size: 0.88rem;
-          line-height: 1.6;
-          color: var(--g-fg);
-        }
-        .privacy-highlight strong {
-          color: var(--g-accent);
-          font-weight: 600;
-        }
-        .privacy-note {
-          font-size: 0.8rem;
-          color: var(--g-muted);
-          line-height: 1.6;
-          margin-top: 2rem;
-        }
-        .privacy-note a {
-          color: var(--g-accent);
-          text-decoration: underline;
-          text-decoration-style: dotted;
-          text-underline-offset: 3px;
-        }
-        .privacy-back {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.4rem;
-          font-family: var(--g-system);
-          font-size: 0.875rem;
-          font-weight: 500;
-          color: var(--g-accent);
-          text-decoration: none;
-          margin-top: 2rem;
-          transition: opacity 0.2s;
-        }
-        .privacy-back:hover {
-          opacity: 0.75;
-        }
-      `}</style>
-
-      <div className="privacy-body">
-        <h1>Privacy &amp; <span>Data Usage</span></h1>
-        <p className="privacy-subtitle">
-          Effective Date: {effectiveDate}
-        </p>
-
-        <div className="privacy-highlight">
-          This OpenReader instance is hosted at <strong>{origin}</strong>.
-          The operator of this service is responsible for handling your information.
-        </div>
-
-        {isRichardrDevProductionInstance ? (
-          <div className="privacy-highlight">
-            <strong>US-only availability:</strong> This instance is intended for
-            users located in the United States. Requests from outside the US,
-            or requests without reliable country metadata, may be blocked.
+    <main className="public-main policy-main">
+      <div className="public-wrap">
+        <section className="public-panel policy-hero public-reveal-1">
+          <h1>Privacy, data flow, and account controls.</h1>
+          <p>
+            This policy explains what data OpenReader processes, how it is used, and the controls available to you.
+            It applies to the instance currently running at <strong>{origin}</strong>. Effective date: {effectiveDate}.
+          </p>
+          <div className="policy-badges" aria-label="Key policy facts">
+            <span className="policy-badge">No personal data sales</span>
+            <span className="policy-badge">Analytics consent controls</span>
+            <span className="policy-badge">Account export + deletion tools</span>
+            <span className="policy-badge">Encrypted document storage</span>
           </div>
-        ) : null}
-
-        <div className="privacy-highlight">
-          <strong>OpenReader does not sell your personal information.</strong> We do not sell data to data brokers or third parties.
-          We use data solely to provide and improve the reading experience.
-        </div>
-
-        <div className="space-y-8">
-          <section>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-accent"></span>
-              1. Information We Collect (CCPA Categories)
-            </h2>
-            <p className="mb-4 text-sm leading-relaxed text-foreground/90">
-              We collect information that identifies, relates to, describes, references, or is reasonably capable of being associated with you (&quot;<strong>Personal Information</strong>&quot;).
-            </p>
-            <div className="privacy-card landing-panel">
-              <div className="privacy-card-label">Categories Collected</div>
-              <ul className="space-y-3">
-                <li>
-                  <strong className="text-foreground">Identifiers:</strong> Email address, IP address, unique personal identifier (session token), and account name.
-                  <div className="text-xs text-muted-foreground mt-1">Source: Directly from you. Purpose: Authentication, security, providing service.</div>
-                </li>
-                <li>
-                  <strong className="text-foreground">Customer Records:</strong> Uploaded documents (PDF, EPUB), reading progress, bookmarks, and preferences.
-                  <div className="text-xs text-muted-foreground mt-1">Source: Directly from you. Purpose: Providing core reading functionality.</div>
-                </li>
-                <li>
-                  <strong className="text-foreground">Internet Activity:</strong> Browsing history within the app, interaction with features (Analytics).
-                  <div className="text-xs text-muted-foreground mt-1">Source: Automatic collection. Purpose: Debugging, performance optimization.</div>
-                </li>
-              </ul>
+          {isRichardrDevProductionInstance ? (
+            <div className="policy-highlight">
+              <strong>US-only availability:</strong> this official instance is intended for users located in the United States,
+              and requests outside the US may be blocked.
             </div>
-          </section>
+          ) : null}
+        </section>
 
-          <section>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-accent"></span>
-              2. How We Use Your Information
-            </h2>
-            <ul className="list-disc pl-5 space-y-2 text-sm text-foreground/90">
-              <li>To provide, support, and personalize the OpenReader application.</li>
-              <li>To process your uploaded documents for display and text-to-speech conversion.</li>
-              <li>To maintain the safety, security, and integrity of our service.</li>
-              <li>To debug and repair errors that impair existing intended functionality.</li>
+        {/* Claim audit
+            Code-verified: consent/GPC analytics handling, analytics toggle, export/delete controls, US geo-gate, AES256 storage headers.
+            Deployment-dependent: processing/storage region and exact provider infrastructure locations.
+            Operator-statement: OpenReader does not sell personal information.
+        */}
+        <div className="policy-grid public-reveal-2">
+          <aside className="policy-nav" aria-label="Privacy sections">
+            <p className="policy-nav-title">On this page</p>
+            <ul className="policy-nav-list">
+              <li><a href="#info-collected">1. Information collected</a></li>
+              <li><a href="#usage-purpose">2. How data is used</a></li>
+              <li><a href="#sharing">3. Sharing and service providers</a></li>
+              <li><a href="#rights">4. Your rights</a></li>
+              <li><a href="#retention">5. Retention and security</a></li>
+              <li><a href="#processing-location">6. Processing location</a></li>
+              <li><a href="#contact">7. Contact and open source</a></li>
             </ul>
-          </section>
+          </aside>
 
-          <section>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-accent"></span>
-              3. Sharing &amp; Selling
-            </h2>
-            <p className="mb-4 text-sm leading-relaxed text-foreground/90">
-              <strong>We do not sell your personal information.</strong>
-            </p>
-            <p className="mb-4 text-sm leading-relaxed text-foreground/90">
-              We may &quot;share&quot; (as defined by CPRA for cross-context behavioral advertising) anonymous usage data with analytics providers solely to improve our app. You can opt-out of this sharing via the Cookie Banner, and Global Privacy Control (GPC) signals are automatically honored.
-            </p>
-            <div className="privacy-card landing-panel">
-              <div className="privacy-card-label">Service Providers (Sub-processors)</div>
+          <div className="policy-sections public-panel">
+            <section id="info-collected" className="policy-section">
+              <h2>1. Information we collect</h2>
+              <p>
+                OpenReader collects data needed to operate the service and maintain your reading state.
+                Categories include account identifiers, uploaded content, and product usage telemetry.
+              </p>
+              <ul className="policy-fact-list">
+                <li><strong>Identifiers:</strong> Email, session-related identifiers, account name, and IP metadata for authentication and security.</li>
+                <li><strong>Reader content:</strong> Uploaded documents, reading progress, bookmarks, and playback settings required for core functionality.</li>
+                <li><strong>Usage events:</strong> Feature interactions and performance analytics used to debug and improve product reliability.</li>
+              </ul>
+            </section>
+
+            <section id="usage-purpose" className="policy-section">
+              <h2>2. How we use your data</h2>
+              <ul className="policy-list">
+                <li>Deliver and personalize document reading and text-to-speech playback.</li>
+                <li>Process uploaded files for parsing, synchronization, and optional audiobook export.</li>
+                <li>Keep the platform secure and prevent abuse.</li>
+                <li>Diagnose issues and improve performance of existing functionality.</li>
+              </ul>
+            </section>
+
+            <section id="sharing" className="policy-section">
+              <h2>3. Service providers and analytics</h2>
+              <p>
+                OpenReader does not sell personal information. We use service providers only to run product
+                infrastructure and user-initiated features.
+              </p>
+              <div className="policy-highlight">
+                Optional analytics is controlled by your consent choice, and Global Privacy Control (GPC) opt-out
+                signals are honored.
+              </div>
+              <ul className="policy-fact-list">
+                {isRichardrDevProductionInstance ? (
+                  <>
+                    <li><strong>Hosting:</strong> Vercel for application hosting, edge runtime, and performance analytics.</li>
+                    <li><strong>Database:</strong> Neon PostgreSQL for account and document metadata storage.</li>
+                    <li><strong>File storage:</strong> Railway S3-compatible object storage for encrypted uploaded documents and audio artifacts.</li>
+                    <li><strong>TTS processing:</strong> User-initiated TTS is handled by shared providers: Kitten TTS FastAPI (self-hosted on a local Pi cluster) and Replicate.</li>
+                  </>
+                ) : (
+                  <>
+                    <li><strong>Hosting provider:</strong> The deployment host operating this OpenReader instance.</li>
+                    <li><strong>Database + storage:</strong> Configured SQL and object storage services chosen by the instance operator.</li>
+                    <li><strong>TTS provider:</strong> The configured cloud or self-hosted speech provider for generated audio.</li>
+                  </>
+                )}
+              </ul>
+            </section>
+
+            <section id="rights" className="policy-section">
+              <h2>4. Your privacy rights</h2>
+              <p>
+                Depending on your jurisdiction, rights may include access, correction, deletion, and opt-out controls.
+                OpenReader includes in-product controls for exporting and deleting account data.
+              </p>
+              <ul className="policy-list">
+                <li><strong>Right to know:</strong> request details about data categories and usage.</li>
+                <li><strong>Right to delete:</strong> delete your account and associated records in Settings.</li>
+                <li><strong>Right to correct:</strong> update account data where applicable.</li>
+                <li><strong>Right to opt out:</strong> disable non-essential analytics through consent controls.</li>
+                <li><strong>Right to non-discrimination:</strong> exercising privacy rights does not reduce service access.</li>
+              </ul>
+              <div className="policy-highlight">
+                <strong>In-app controls:</strong> Use <em>Export My Data</em> in Settings to download account metadata plus
+                object-storage-backed files, or use <em>Delete Account</em> for permanent account removal.
+              </div>
+            </section>
+
+            <section id="retention" className="policy-section">
+              <h2>5. Retention and security</h2>
+              <p>
+                Account data and uploaded files are retained while your account remains active. Data is encrypted at
+                rest in storage. OpenReader does not currently provide end-to-end encryption.
+              </p>
+              <p>
+                The owner of this instance may be able to access stored metadata and uploaded files needed to operate
+                the service.
+              </p>
+              <p>
+                Passwords are not stored as readable plaintext; the authentication system stores credential values as
+                non-plaintext verification data.
+              </p>
+              <p>
+                Account deletion triggers removal of active account records and associated storage artifacts as part
+                of the deletion flow.
+              </p>
+            </section>
+
+            <section id="processing-location" className="policy-section">
+              <h2>6. Processing location</h2>
               {isRichardrDevProductionInstance ? (
-                <ul className="grid gap-2 sm:grid-cols-2 mt-2">
-                  <li className="text-sm"><strong>Vercel:</strong> Hosting, Edge Functions &amp; Analytics</li>
-                  <li className="text-sm"><strong>Neon (PostgreSQL):</strong> Database Storage</li>
-                  <li className="text-sm"><strong>Railway (S3):</strong> Encrypted Object Storage (Documents)</li>
-                  <li className="text-sm"><strong>DeepInfra:</strong> Text-to-Speech Processing (User-Initiated)</li>
-                </ul>
+                <p>
+                  For the official instance, access is restricted to users in the United States. Processing location
+                  depends on the configured infrastructure and providers used by this deployment.
+                </p>
               ) : (
-                <ul className="grid gap-2 sm:grid-cols-2 mt-2">
-                  <li className="text-sm"><strong>Hosting Provider:</strong> Application Hosting &amp; Logs</li>
-                  <li className="text-sm"><strong>Database Service:</strong> Relational Database Storage</li>
-                  <li className="text-sm"><strong>Object Storage:</strong> Encrypted File Storage (Documents)</li>
-                  <li className="text-sm"><strong>TTS Provider:</strong> Text-to-Speech Processing (Based on your configured provider)</li>
-                </ul>
+                <p>
+                  Data processing location depends on the deployment environment and provider configuration selected by
+                  the instance operator.
+                </p>
               )}
-            </div>
-          </section>
+            </section>
 
-          <section>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-accent"></span>
-              4. Your Rights (CCPA/CPRA)
-            </h2>
-            <p className="mb-4 text-sm leading-relaxed text-foreground/90">
-              You have the following rights regarding your personal information:
-            </p>
-            <div className="privacy-card landing-panel">
-              <ul className="space-y-2">
-                <li><strong>Right to Know:</strong> You may request details about the categories and specific pieces of personal information we have collected.</li>
-                <li><strong>Right to Delete:</strong> You may request deletion of your personal information (via &quot;Delete Account&quot; in Settings).</li>
-                <li><strong>Right to Correct:</strong> You may update your account information in Settings.</li>
-                <li><strong>Right to Opt-Out:</strong> We do not sell data. You may opt-out of analytics &quot;sharing&quot; via our Cookie Banner.</li>
-                <li><strong>Right to Non-Discrimination:</strong> We will not discriminate against you for exercising your privacy rights.</li>
-              </ul>
-            </div>
-            <div className="mt-4">
-              <p className="text-sm text-foreground/90 mb-2">
-                <strong>How to Exercise Your Rights:</strong>
+            <section id="contact" className="policy-section">
+              <h2>7. Contact and open source</h2>
+              <p>
+                Questions or concerns can be raised through the project repository. Self-hosting is available if you
+                want full infrastructure control.
               </p>
-              <ul className="list-disc pl-5 text-sm text-foreground/90">
-                <li><strong>Export Data:</strong> Use the &quot;Export My Data&quot; button in Settings to download your account metadata plus object-storage-backed document and audiobook files.</li>
-                <li><strong>Delete Data:</strong> Use the &quot;Delete Account&quot; button in Settings.</li>
-              </ul>
-            </div>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-accent"></span>
-              5. Data Retention
-            </h2>
-            <p className="mb-4 text-sm leading-relaxed text-foreground/90">
-              We retain your account data and uploaded files only for as long as you maintain an account.
-              Uploaded documents are stored <strong>encrypted at rest (AES-256)</strong>.
-              Upon account deletion, all data is permanently removed from our active databases and storage buckets immediately.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-accent"></span>
-              6. US Processing &amp; Location
-            </h2>
-            {isRichardrDevProductionInstance ? (
-              <p className="mb-4 text-sm leading-relaxed text-foreground/90">
-                For the official OpenReader instance, personal
-                information is processed and stored in the United States.
-                By using this service, you acknowledge that your data is handled
-                in the US and that the service is available only for US users.
-              </p>
-            ) : (
-              <p className="mb-4 text-sm leading-relaxed text-foreground/90">
-                Data processing location depends on your deployment and hosting
-                provider configuration.
-              </p>
-            )}
-          </section>
-
-          <section>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-accent"></span>
-              7. Contact Us
-            </h2>
-            <p className="mb-4 text-sm leading-relaxed text-foreground/90">
-              If you have questions or concerns about this Privacy Policy, please contact the instance administrator via the repository:
-            </p>
-            <a
-              href="https://github.com/richardr1126/openreader/issues"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent hover:underline font-medium"
-            >
-              OpenReader Issues
-            </a>
-          </section>
+              <div className="policy-actions">
+                <a
+                  href="https://github.com/richardr1126/openreader/issues"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonClass({ variant: 'primary', size: 'md' })}
+                >
+                  Open an Issue
+                </a>
+                <a
+                  href="https://github.com/richardr1126/openreader#readme"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonClass({ variant: 'outline', size: 'md' })}
+                >
+                  Self-Hosting Guide
+                </a>
+                <Link href="/?redirect=false" className={buttonClass({ variant: 'ghost', size: 'md' })}>
+                  Back to landing
+                </Link>
+              </div>
+            </section>
+          </div>
         </div>
-
-        <p className="privacy-note mt-12 pt-8 border-t border-border">
-          For maximum privacy, you can self-host OpenReader using the{' '}
-          <a
-            href="https://github.com/richardr1126/openreader#readme"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            open-source repository
-          </a>.
-        </p>
-
-        <Link href="/?redirect=false" className="privacy-back">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 8H3M7 4l-4 4 4 4" /></svg>
-          Back to home
-        </Link>
       </div>
-    </>
+    </main>
   );
 }

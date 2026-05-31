@@ -1,30 +1,32 @@
+import type { CSSProperties } from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getResolvedRuntimeConfigForRsc } from '@/lib/server/runtime-config-rsc';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 
 export const metadata: Metadata = {
-  title: 'Read and Listen to Documents',
+  title: 'Open Source Read-Along Workspace',
   description:
-    'OpenReader lets you upload EPUB, PDF, TXT, MD, and DOCX files for synchronized text-to-speech reading with multi-provider TTS support.',
+    'OpenReader converts EPUB, PDF, TXT, MD, and DOCX files into synchronized read-along audio with multi-provider text-to-speech support.',
   keywords:
-    'PDF reader, EPUB reader, text to speech, tts open ai, kokoro tts, kitten tts, OpenReader, TTS PDF reader, ebook reader, epub tts, document reader',
+    'OpenReader, document reader, PDF read aloud, EPUB read aloud, text to speech, OpenAI compatible TTS, self-hosted reader',
   alternates: {
     canonical: '/',
   },
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://openreader.richardr.dev',
+    url: process.env.BASE_URL || 'https://openreader.richardr.dev',
     siteName: 'OpenReader',
-    title: 'OpenReader | Read and Listen to Documents',
+    title: 'OpenReader | Read documents with synchronized audio',
     description:
-      'Upload EPUB, PDF, TXT, MD, and DOCX files, then listen with synchronized read-along playback using OpenAI-compatible TTS providers.',
+      'Upload documents and turn them into a synchronized listening experience with word-level highlighting and audiobook export.',
     images: [
       {
         url: '/web-app-manifest-512x512.png',
         width: 512,
         height: 512,
-        alt: 'OpenReader Logo',
+        alt: 'OpenReader icon',
       },
     ],
   },
@@ -41,422 +43,332 @@ export const metadata: Metadata = {
   },
 };
 
+// Words that receive the looping read-along highlight sweep in the hero. This
+// is the product's actual word-level highlighting, used as the page's signature.
+const SWEEP = ['highlighted', 'word', 'by', 'word.'];
+
+const PROVIDERS = ['Kokoro', 'KittenTTS', 'Orpheus', 'OpenAI', 'Replicate', 'DeepInfra'];
+
+const FORMATS = ['EPUB', 'PDF', 'TXT', 'MD', 'DOCX'];
+
 export default async function LandingPage() {
   const runtimeConfig = await getResolvedRuntimeConfigForRsc();
   const enableUserSignups = runtimeConfig.enableUserSignups;
 
+  const instanceBadge =
+    process.env.RICHARDRDEV_PRODUCTION === 'true'
+      ? 'Official OpenReader instance'
+      : 'Open-source document reader';
+
   return (
-    <>
-      <style>{`
-        /* ── Hero ────────────────────────── */
-        .landing-hero {
-          max-width: 72rem;
-          margin: 0 auto;
-          padding: 3rem 1.5rem 4rem;
-          text-align: center;
-          animation: landing-fade-up 0.45s ease-out both;
-        }
-        .landing-hero-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.5rem;
-          font-family: var(--g-display);
-          font-size: 0.72rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.15em;
-          color: var(--g-accent);
-          padding: 0.4rem 1rem;
-          border-radius: 2rem;
-          border: 1px solid color-mix(in srgb, var(--g-accent), transparent 70%);
-          background: color-mix(in srgb, var(--g-accent), transparent 92%);
-          margin-bottom: 2rem;
-        }
-        .landing-hero h1 {
-          font-family: var(--g-display);
-          font-weight: 800;
-          font-size: clamp(2rem, 5.5vw, 4rem);
-          line-height: 1.1;
-          letter-spacing: -0.03em;
-          max-width: 18ch;
-          margin: 0 auto 1.5rem;
-        }
-        .landing-hero h1 span {
-          background: linear-gradient(135deg, var(--g-accent), var(--g-accent2));
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-        }
-        .landing-hero-desc {
-          font-family: var(--g-body);
-          font-size: 1.1rem;
-          line-height: 1.7;
-          color: var(--g-muted);
-          max-width: 52ch;
-          margin: 0 auto 2.5rem;
-        }
-        .landing-hero-actions {
-          display: flex;
-          justify-content: center;
-          gap: 0.6rem;
-          flex-wrap: wrap;
-        }
-
-        /* ── Features ────────────────────── */
-        .landing-features {
-          max-width: 72rem;
-          margin: 0 auto;
-          padding: 0 1.5rem 5rem;
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 1.25rem;
-        }
-        @media (min-width: 640px) {
-          .landing-features {
-            grid-template-columns: 1fr 1fr;
-          }
-        }
-        @media (min-width: 1024px) {
-          .landing-features {
-            grid-template-columns: 1fr 1fr 1fr;
-          }
-        }
-        .landing-feature-card {
-          padding: 2rem;
-          animation: landing-scale-in 0.45s ease-out both;
-          transition: transform 0.3s, border-color 0.3s;
-        }
-        .landing-feature-card:hover {
-          transform: translateY(-4px);
-          border-color: color-mix(in srgb, var(--g-accent), transparent 50%);
-        }
-        .landing-feature-icon {
-          width: 3rem; height: 3rem;
-          border-radius: 0.875rem;
-          background: color-mix(in srgb, var(--g-accent), transparent 85%);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin-bottom: 1.25rem;
-          font-size: 1.25rem;
-          color: var(--g-accent);
-          font-weight: 700;
-          font-family: var(--g-display);
-        }
-        .landing-feature-card h3 {
-          font-family: var(--g-display);
-          font-weight: 700;
-          font-size: 1.15rem;
-          margin: 0 0 0.6rem;
-          letter-spacing: -0.01em;
-        }
-        .landing-feature-card p {
-          font-size: 0.92rem;
-          line-height: 1.65;
-          color: var(--g-muted);
-        }
-
-        /* ── TTS spotlight ────────────────── */
-        .landing-tts {
-          max-width: 72rem;
-          margin: 0 auto;
-          padding: 0 1.5rem 5rem;
-          animation: landing-fade-up 0.45s ease-out both;
-        }
-        .landing-tts-inner {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 2.5rem;
-          padding: 2.5rem;
-        }
-        @media (min-width: 768px) {
-          .landing-tts-inner {
-            grid-template-columns: 1fr 1fr;
-          }
-        }
-        .landing-tts-lead h2 {
-          font-family: var(--g-display);
-          font-weight: 700;
-          font-size: clamp(1.4rem, 3vw, 2rem);
-          letter-spacing: -0.02em;
-          margin: 0 0 0.75rem;
-          line-height: 1.2;
-        }
-        .landing-tts-lead h2 span {
-          background: linear-gradient(135deg, var(--g-accent), var(--g-accent2));
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
-        }
-        .landing-tts-lead > p {
-          font-size: 0.95rem;
-          line-height: 1.7;
-          color: var(--g-muted);
-        }
-        .landing-tts-list {
-          list-style: none;
-          margin: 0;
-          padding: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 1.25rem;
-        }
-        .landing-tts-list li {
-          display: flex;
-          gap: 0.75rem;
-          align-items: flex-start;
-        }
-        .landing-tts-list-icon {
-          flex-shrink: 0;
-          width: 2rem;
-          height: 2rem;
-          border-radius: 0.5rem;
-          background: color-mix(in srgb, var(--g-accent), transparent 85%);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--g-accent);
-          font-size: 0.85rem;
-          font-weight: 700;
-          font-family: var(--g-display);
-          margin-top: 0.1rem;
-        }
-        .landing-tts-list h4 {
-          font-family: var(--g-display);
-          font-weight: 600;
-          font-size: 0.92rem;
-          margin: 0 0 0.2rem;
-        }
-        .landing-tts-list p {
-          font-size: 0.84rem;
-          line-height: 1.55;
-          color: var(--g-muted);
-          margin: 0;
-        }
-
-        /* ── Formats ribbon ──────────────── */
-        .landing-formats {
-          max-width: 72rem;
-          margin: 0 auto;
-          padding: 0 1.5rem 5rem;
-          text-align: center;
-          animation: landing-fade-up 0.45s ease-out both;
-        }
-        .landing-formats-label {
-          font-family: var(--g-display);
-          font-size: 0.72rem;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.18em;
-          color: var(--g-muted);
-          margin-bottom: 1.25rem;
-        }
-        .landing-formats-row {
-          display: flex;
-          justify-content: center;
-          gap: 0.6rem;
-          flex-wrap: wrap;
-        }
-        .landing-format-pill {
-          font-family: var(--g-display);
-          font-weight: 600;
-          font-size: 0.82rem;
-          padding: 0.5rem 1.25rem;
-          border-radius: 2rem;
-          background: color-mix(in srgb, var(--g-surface), transparent 30%);
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
-          border: 1px solid color-mix(in srgb, var(--g-border), transparent 50%);
-          transition: border-color 0.25s, transform 0.2s;
-          cursor: default;
-        }
-        .landing-format-pill:hover {
-          border-color: var(--g-accent);
-          transform: translateY(-2px);
-        }
-
-        /* ── CTA section ─────────────────── */
-        .landing-cta {
-          max-width: 48rem;
-          margin: 0 auto;
-          padding: 0 1.5rem 5rem;
-          animation: landing-fade-up 0.45s ease-out both;
-        }
-        .landing-cta-card {
-          padding: 3rem 2rem;
-          text-align: center;
-          position: relative;
-          overflow: hidden;
-        }
-        .landing-cta-glow {
-          position: absolute;
-          width: 200px; height: 200px;
-          border-radius: 50%;
-          background: var(--g-accent);
-          filter: blur(80px);
-          opacity: 0.08;
-          top: -50px; right: -50px;
-          pointer-events: none;
-        }
-        .landing-cta-card h2 {
-          font-family: var(--g-display);
-          font-weight: 700;
-          font-size: clamp(1.4rem, 3vw, 2rem);
-          letter-spacing: -0.02em;
-          margin: 0 0 0.6rem;
-          position: relative;
-        }
-        .landing-cta-card > p {
-          font-size: 0.95rem;
-          color: var(--g-muted);
-          margin-bottom: 2rem;
-          max-width: 40ch;
-          margin-left: auto;
-          margin-right: auto;
-          position: relative;
-        }
-        .landing-cta-actions {
-          display: flex;
-          justify-content: center;
-          gap: 0.5rem;
-          flex-wrap: wrap;
-          position: relative;
-        }
-      `}</style>
-
-      {/* ── HERO ───────────────────── */}
-      <section className="landing-hero">
-        <div className="landing-hero-badge">
-          {process.env.RICHARDRDEV_PRODUCTION === 'true'
-            ? "Official OpenReader Instance"
-            : "Open Source Document Reader"
-          }
-        </div>
-        <h1>
-          Your documents, <span>read&nbsp;aloud</span>
-        </h1>
-        <p className="landing-hero-desc">
-          Upload EPUB, PDF, TXT, MD, and DOCX files, then listen with your
-          preferred OpenAI-compatible TTS provider. Your reading progress
-          syncs across devices automatically.
-        </p>
-        <div className="landing-hero-actions">
-          <Link href="/app" className="landing-btn landing-btn-accent">
-            Open App
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h10M9 4l4 4-4 4" /></svg>
-          </Link>
-          <Link href="/signin" className="landing-btn landing-btn-ghost">Sign In</Link>
-          {enableUserSignups && <Link href="/signup" className="landing-btn landing-btn-ghost">Sign Up</Link>}
-          <Link href="https://docs.openreader.richardr.dev/" className="landing-btn landing-btn-ghost">Docs</Link>
-        </div>
-      </section>
-
-      {/* ── FEATURES ───────────────── */}
-      <section className="landing-features">
-        <div className="landing-feature-card landing-panel">
-          <div className="landing-feature-icon" aria-hidden="true">&uarr;</div>
-          <h3>Upload documents</h3>
-          <p>
-            Drag and drop EPUB, PDF, TXT, Markdown, or DOCX files directly
-            into the app. Documents process instantly for reading and
-            text-to-speech playback.
-          </p>
-        </div>
-        <div className="landing-feature-card landing-panel">
-          <div className="landing-feature-icon" aria-hidden="true">&para;</div>
-          <h3>Your library</h3>
-          <p>
-            Build a personal library with folders. Documents sync
-            automatically so your collection is always within
-            reach.
-          </p>
-        </div>
-        <div className="landing-feature-card landing-panel">
-          <div className="landing-feature-icon" aria-hidden="true">&harr;</div>
-          <h3>Cross-device sync</h3>
-          <p>
-            Reading progress, preferences, and library state sync across
-            devices. Pick up exactly where you left off on any browser.
-          </p>
-        </div>
-      </section>
-
-      {/* ── TTS SPOTLIGHT ──────────── */}
-      <section className="landing-tts">
-        <div className="landing-tts-inner landing-panel">
-          <div className="landing-tts-lead">
-            <h2>
-              <span>Text-to-speech</span> that follows along as you read
-            </h2>
-            <p>
-              OpenReader highlights every word as it&rsquo;s spoken, turning
-              any document into a synchronized read-along experience. Connect
-              any OpenAI-compatible TTS provider &mdash; including Kokoro,
-              KittenTTS, Deepinfra, or your own self-hosted endpoint.
+    <main className="public-main">
+      {/* ───────────────────────────── Hero ───────────────────────────── */}
+      <section className="public-hero">
+        <div className="public-wrap public-hero-grid">
+          <div className="public-hero-lede public-reveal-1">
+            <p className="public-eyebrow">
+              <span className="public-eyebrow-dot" aria-hidden="true" />
+              {instanceBadge}
             </p>
+
+            <h1 className="public-hero-title">
+              Hear every document,
+              <br />
+              <span className="public-sweep" aria-hidden="true">
+                {SWEEP.map((word, i) => (
+                  <span
+                    key={word + i}
+                    className="public-sweep-word"
+                    style={{ '--i': i } as CSSProperties}
+                  >
+                    {word}
+                    {i < SWEEP.length - 1 ? ' ' : ''}
+                  </span>
+                ))}
+              </span>
+              <span className="public-visually-hidden">highlighted word by word.</span>
+            </h1>
+
+            <p className="public-hero-copy">
+              OpenReader turns EPUB, PDF, TXT, Markdown, and DOCX into a
+              synchronized read-along surface, reading your original file in a
+              native viewer with genuine text-to-speech, word-level
+              highlighting, and audiobook export. It&rsquo;s open source, and
+              entirely yours to self-host.
+            </p>
+
+            <div className="public-actions">
+              <Link href="/app" className={buttonClass({ variant: 'primary', size: 'lg' })}>
+                Open the reader
+              </Link>
+              {enableUserSignups ? (
+                <Link href="/signup" className={buttonClass({ variant: 'outline', size: 'lg' })}>
+                  Create account
+                </Link>
+              ) : (
+                <Link href="/signin" className={buttonClass({ variant: 'outline', size: 'lg' })}>
+                  Sign in
+                </Link>
+              )}
+              <Link
+                href="https://docs.openreader.richardr.dev/"
+                className={buttonClass({ variant: 'ghost', size: 'lg' })}
+              >
+                Read the docs →
+              </Link>
+            </div>
+
+            <div className="public-formats" aria-label="Supported formats">
+              <span className="public-formats-label">Reads</span>
+              <div className="public-formats-list">
+                {FORMATS.map((fmt) => (
+                  <span key={fmt} className="public-format-chip">
+                    {fmt}
+                  </span>
+                ))}
+              </div>
+            </div>
           </div>
-          <ul className="landing-tts-list">
-            <li>
-              <span className="landing-tts-list-icon" aria-hidden="true">&bull;</span>
-              <div>
-                <h4>Word-level highlighting</h4>
-                <p>Each word lights up in sync with the audio so you never lose your place.</p>
+
+          {/* Reader mockup: demonstrates the synchronized highlight + playback */}
+          <aside className="public-reader public-reveal-2" aria-hidden="true">
+            <div className="public-reader-glow" aria-hidden="true" />
+            <div className="public-reader-bar">
+              <span className="public-reader-dot" data-tone="a" />
+              <span className="public-reader-dot" data-tone="b" />
+              <span className="public-reader-dot" data-tone="c" />
+              <span className="public-reader-file">wizard-of-oz.epub</span>
+              <span className="public-reader-voice">Kokoro · af_sky</span>
+            </div>
+
+            <div className="public-reader-body">
+              <p className="public-reader-chapter">Chapter 1 · The Cyclone</p>
+              <p className="public-reader-text">
+                Dorothy lived in the midst of the great Kansas prairies, with
+                Uncle Henry, who was a farmer, and Aunt Em, who was the
+                farmer&rsquo;s wife.{' '}
+                <span className="public-reader-sentence">
+                  Their house was small, for the lumber to build it had to be
+                  carried by <span className="public-reader-word">wagon</span>{' '}
+                  many miles.
+                </span>{' '}
+                There were four walls, a floor and a roof, which made one room.
+              </p>
+            </div>
+
+            <div className="public-player">
+              <button type="button" className="public-player-play" aria-label="Playing" tabIndex={-1}>
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                  <path d="M8 5v14l11-7z" fill="currentColor" />
+                </svg>
+              </button>
+              <div className="public-wave" aria-hidden="true">
+                {Array.from({ length: 28 }).map((_, i) => (
+                  <span
+                    key={i}
+                    className="public-wave-bar"
+                    style={{ '--b': i } as CSSProperties}
+                  />
+                ))}
               </div>
-            </li>
-            <li>
-              <span className="landing-tts-list-icon" aria-hidden="true">&bull;</span>
-              <div>
-                <h4>Multiple voices &amp; providers</h4>
-                <p>Choose from dozens of voices across OpenAI, Kokoro, KittenTTS, Deepinfra, or any compatible endpoint.</p>
-              </div>
-            </li>
-            <li>
-              <span className="landing-tts-list-icon" aria-hidden="true">&bull;</span>
-              <div>
-                <h4>Speed controls</h4>
-                <p>Independent model speed and playback speed sliders from 0.5x to 3x.</p>
-              </div>
-            </li>
-            <li>
-              <span className="landing-tts-list-icon" aria-hidden="true">&bull;</span>
-              <div>
-                <h4>Audiobook export</h4>
-                <p>Convert any document to a downloadable MP3 or M4A audiobook with chapter metadata.</p>
-              </div>
-            </li>
-          </ul>
+              <span className="public-player-time">04:12 / 18:30</span>
+              <span className="public-player-speed">1.1×</span>
+            </div>
+          </aside>
+        </div>
+
+        <div className="public-wrap">
+          <div className="public-providers public-reveal-3" aria-label="Supported text-to-speech providers">
+            <span className="public-providers-label">Speaks through</span>
+            <div className="public-providers-track">
+              {PROVIDERS.map((p) => (
+                <span key={p} className="public-provider">
+                  {p}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* ── FORMATS ────────────────── */}
-      <section className="landing-formats">
-        <p className="landing-formats-label">Supported formats</p>
-        <div className="landing-formats-row">
-          <span className="landing-format-pill">EPUB</span>
-          <span className="landing-format-pill">PDF</span>
-          <span className="landing-format-pill">TXT</span>
-          <span className="landing-format-pill">MD</span>
-          <span className="landing-format-pill">DOCX</span>
+      {/* ────────────────────────── How it works ───────────────────────── */}
+      <section className="public-section" aria-labelledby="how-heading">
+        <div className="public-wrap">
+          <div className="public-section-head">
+            <p className="public-kicker">The flow</p>
+            <h2 id="how-heading">From a raw file to a voice in three moves.</h2>
+          </div>
+
+          <ol className="public-steps">
+            <li className="public-step">
+              <span className="public-step-num">01</span>
+              <h3>Upload a document</h3>
+              <p>
+                Drop an EPUB, PDF, TXT, Markdown, or DOCX into your library, or
+                import one straight from the server, and it stays organized for
+                every session after.
+              </p>
+            </li>
+            <li className="public-step">
+              <span className="public-step-num">02</span>
+              <h3>Pick a voice</h3>
+              <p>
+                Choose a provider and model: hosted OpenAI, Replicate, or
+                DeepInfra, or your own self-hosted Kokoro, KittenTTS, or Orpheus
+                server. Set the speed to your pace.
+              </p>
+            </li>
+            <li className="public-step">
+              <span className="public-step-num">03</span>
+              <h3>Read, listen, export</h3>
+              <p>
+                Follow word-level highlighting right on the original page as it
+                plays, pick up where you left off on any device, and export a
+                chaptered m4b or mp3 audiobook for the road.
+              </p>
+            </li>
+          </ol>
         </div>
       </section>
 
-      {/* ── CTA ────────────────────── */}
-      <section className="landing-cta">
-        <div className="landing-cta-card landing-panel">
-          <div className="landing-cta-glow" aria-hidden="true" />
-          <h2>Start reading now</h2>
-          <p>
-            Open the app and upload a document to begin.
-            Your progress syncs across devices automatically.
-          </p>
-          <div className="landing-cta-actions">
-            <Link href="/app" className="landing-btn landing-btn-accent">Open App</Link>
-            <Link href="/signin" className="landing-btn landing-btn-ghost">Sign In</Link>
-            {enableUserSignups && <Link href="/signup" className="landing-btn landing-btn-ghost">Sign Up</Link>}
-            <Link href="https://docs.openreader.richardr.dev/" className="landing-btn landing-btn-ghost">Docs</Link>
+      {/* ──────────────────────────── Features ─────────────────────────── */}
+      <section className="public-section" aria-labelledby="features-heading">
+        <div className="public-wrap">
+          <div className="public-section-head">
+            <p className="public-kicker">Under the hood</p>
+            <h2 id="features-heading">Engineered for deep reading, not playback demos.</h2>
+          </div>
+
+          <div className="public-features">
+            <article className="public-feature public-feature-wide">
+              <span className="public-feature-kicker">Formats</span>
+              <h3>Native EPUB and PDF, kept intact</h3>
+              <p>
+                Your file renders in a built-in EPUB and PDF reader, never
+                flattened to plain text. Layout-aware parsing (PP-DocLayoutV3,
+                ONNX) maps the structure underneath, so read-along highlighting
+                follows the true reading order, even in dense, multi-column
+                PDFs.
+              </p>
+            </article>
+
+            <article className="public-feature">
+              <span className="public-feature-kicker">Alignment</span>
+              <h3>Word-by-word timing</h3>
+              <p>
+                ONNX Whisper alignment through a JetStream-backed compute worker
+                maps each spoken word back to the page, so the cursor tracks
+                speech precisely.
+              </p>
+            </article>
+
+            <article className="public-feature">
+              <span className="public-feature-kicker">Voices</span>
+              <h3>Multi-provider TTS</h3>
+              <p>
+                Mix cloud APIs with OpenAI-compatible local servers. Bring your
+                own keys and endpoints, with no lock-in to a single vendor.
+              </p>
+            </article>
+
+            <article className="public-feature">
+              <span className="public-feature-kicker">Export</span>
+              <h3>Audiobook output</h3>
+              <p>
+                Render chaptered m4b and mp3 files with resumable processing,
+                ready for any offline player you already use.
+              </p>
+            </article>
+
+            <article className="public-feature">
+              <span className="public-feature-kicker">Sync</span>
+              <h3>Progress that follows you</h3>
+              <p>
+                Reading position, queue state, and per-document settings sync
+                across browser sessions and devices through your account.
+              </p>
+            </article>
+
+            <article className="public-feature public-feature-wide">
+              <span className="public-feature-kicker">Backend</span>
+              <h3>A stack you actually control</h3>
+              <p>
+                Run on embedded SeaweedFS or any S3-compatible bucket, back it
+                with SQLite or Postgres, and ship it with Docker on amd64 or
+                arm64, with built-in auth and automatic startup migrations.
+              </p>
+            </article>
           </div>
         </div>
       </section>
-    </>
+
+      {/* ───────────────────────── Self-host CTA ───────────────────────── */}
+      <section className="public-section" aria-labelledby="selfhost-heading">
+        <div className="public-wrap">
+          <div className="public-callout">
+            <div className="public-callout-glow" aria-hidden="true" />
+            <div className="public-callout-copy">
+              <p className="public-kicker">Open source · MIT</p>
+              <h2 id="selfhost-heading">Run your own private reading stack.</h2>
+              <p className="public-callout-text">
+                Deploy OpenReader for yourself or your team in minutes. The docs
+                cover Docker, provider integration, object storage, and the
+                external compute worker. Every piece is yours to host.
+              </p>
+              <div className="public-actions">
+                <a
+                  href="https://github.com/richardr1126/openreader#readme"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonClass({ variant: 'primary', size: 'lg' })}
+                >
+                  View the repository
+                </a>
+                <a
+                  href="https://docs.openreader.richardr.dev/docker-quick-start"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonClass({ variant: 'outline', size: 'lg' })}
+                >
+                  Deployment guides
+                </a>
+              </div>
+            </div>
+
+            <div className="public-terminal" aria-hidden="true">
+              <div className="public-terminal-bar">
+                <span className="public-reader-dot" data-tone="a" />
+                <span className="public-reader-dot" data-tone="b" />
+                <span className="public-reader-dot" data-tone="c" />
+                <span className="public-terminal-title">quick start</span>
+              </div>
+              <pre className="public-terminal-body">
+                <code>
+                  <span className="public-term-comment"># pull and run</span>
+                  {'\n'}
+                  <span className="public-term-prompt">$</span> docker run --name openreader \{'\n'}
+                  {'    '}-p <span className="public-term-accent">3003:3003</span> -p{' '}
+                  <span className="public-term-accent">8333:8333</span> \{'\n'}
+                  {'    '}-v <span className="public-term-accent">openreader_docstore:/app/docstore</span> \{'\n'}
+                  {'    '}-e BASE_URL=
+                  <span className="public-term-accent">http://localhost:3003</span> \{'\n'}
+                  {'    '}-e AUTH_SECRET=
+                  <span className="public-term-accent">$(openssl rand -hex 32)</span> \{'\n'}
+                  {'    '}-e ADMIN_EMAILS=
+                  <span className="public-term-accent">you@example.com</span> \{'\n'}
+                  {'    '}ghcr.io/richardr1126/openreader:latest{'\n'}
+                  {'\n'}
+                  <span className="public-term-comment"># open the reading room</span>
+                  {'\n'}
+                  <span className="public-term-prompt">$</span> open{' '}
+                  <span className="public-term-accent">localhost:3003</span>
+                  <span className="public-term-caret" />
+                </code>
+              </pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
   );
 }

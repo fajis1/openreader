@@ -5,6 +5,7 @@ import { Figtree } from "next/font/google";
 import { ConsentAwareAnalytics } from "@/components/ConsentAwareAnalytics";
 import { CookieConsentBanner } from "@/components/CookieConsentBanner";
 import { getResolvedRuntimeConfig } from "@/lib/server/runtime-config";
+import { tryGetOrigin } from "@/lib/shared/urls";
 import pkg from "../../package.json";
 
 const figtree = Figtree({
@@ -34,13 +35,16 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
+const defaultOrigin = "https://openreader.richardr.dev";
+const validatedOrigin = tryGetOrigin(process.env.BASE_URL) || defaultOrigin;
+
 export const metadata: Metadata = {
   title: {
     default: "OpenReader",
     template: "%s | OpenReader",
   },
   manifest: "/manifest.json",
-  metadataBase: new URL("https://openreader.richardr.dev"),
+  metadataBase: new URL(validatedOrigin),
   verification: {
     google: "MJXyTudn1kgQF8EtGD-tsnAWev7Iawso9hEvqeGHB3U",
   },
