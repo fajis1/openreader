@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://openreader.richardr.dev',
+    url: process.env.BASE_URL || 'https://openreader.richardr.dev',
     siteName: 'OpenReader',
     title: 'OpenReader | Read documents with synchronized audio',
     description:
@@ -131,7 +131,7 @@ export default async function LandingPage() {
           </div>
 
           {/* Reader mockup: demonstrates the synchronized highlight + playback */}
-          <aside className="public-reader public-reveal-2" aria-label="OpenReader playback preview">
+          <aside className="public-reader public-reveal-2" aria-hidden="true">
             <div className="public-reader-glow" aria-hidden="true" />
             <div className="public-reader-bar">
               <span className="public-reader-dot" data-tone="a" />

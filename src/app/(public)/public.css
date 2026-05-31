@@ -94,7 +94,7 @@
   width: 1px;
   height: 1px;
   overflow: hidden;
-  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 
@@ -191,6 +191,11 @@
   .public-nav-link,
   .public-nav-divider {
     display: none;
+  }
+
+  .public-terminal-body {
+    padding: 0.9rem 1rem 1.1rem;
+    font-size: 0.74rem;
   }
 }
 
@@ -747,8 +752,11 @@
   font-size: 0.82rem;
   line-height: 1.7;
   color: var(--pub-soft);
-  white-space: pre-wrap;
-  word-break: break-word;
+  /* Preserve the command's formatting and scroll within the box instead of
+     wrapping mid-token, which breaks the layout on narrow screens. */
+  white-space: pre;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .public-term-comment { color: var(--pub-muted); }

@@ -40,7 +40,7 @@ export const metadata: Metadata = {
     template: "%s | OpenReader",
   },
   manifest: "/manifest.json",
-  metadataBase: new URL("https://openreader.richardr.dev"),
+  metadataBase: new URL(process.env.BASE_URL || "https://openreader.richardr.dev"),
   verification: {
     google: "MJXyTudn1kgQF8EtGD-tsnAWev7Iawso9hEvqeGHB3U",
   },

@@ -18,7 +18,8 @@ export const metadata: Metadata = {
 
 export default async function PrivacyPage() {
   const effectiveDate = 'February 17, 2026';
-  const isRichardrDevProductionInstance = process.env.RICHARDRDEV_PRODUCTION === 'true';
+  const isRichardrDevProductionInstance =
+    process.env.RICHARDRDEV_PRODUCTION?.trim().toLowerCase() === 'true';
 
   const hdrs = await headers();
   const host = hdrs.get('host') ?? 'this server';
