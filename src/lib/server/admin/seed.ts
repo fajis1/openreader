@@ -245,9 +245,8 @@ async function seedAdminProvidersFromJson(providers: SeedProviderInput[]): Promi
       .limit(1);
     if (existing.length > 0) continue;
 
-    const encrypted = encryptSecret(provider.apiKey);
-
     try {
+      const encrypted = encryptSecret(provider.apiKey);
       await db.insert(adminProviders).values({
         id: randomUUID(),
         slug: provider.slug,
@@ -266,9 +265,12 @@ async function seedAdminProvidersFromJson(providers: SeedProviderInput[]): Promi
     } catch (error) {
       logDegraded(serverLogger, {
         event: 'admin.seed.provider_insert.failed',
-        msg: 'Failed to insert provider from JSON seed',
-        step: 'insert_seed_provider',
-        context: { providerSlug: provider.slug },
+        msg: 'Failed to seed provider from JSON seed',
+        step: 'seed_json_provider',
+        context: {
+          providerSlug: provider.slug,
+          providerDisplayName: provider.displayName,
+        },
         error,
       });
     }
