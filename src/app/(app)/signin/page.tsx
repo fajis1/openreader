@@ -31,18 +31,11 @@ function SignInContent() {
   const [rememberMe, setRememberMe] = useState(true);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { authEnabled, baseUrl, allowAnonymousAuthSessions, githubAuthEnabled } = useAuthConfig();
+  const { baseUrl, allowAnonymousAuthSessions, githubAuthEnabled } = useAuthConfig();
   const enableUserSignups = useFeatureFlag('enableUserSignups');
   const { refresh: refreshRateLimit } = useAuthRateLimit();
 
   const isAnyLoading = loadingEmail || loadingGithub || loadingAnonymous;
-
-  // Check if auth is enabled, redirect home if not
-  useEffect(() => {
-    if (!authEnabled) {
-      router.push('/app');
-    }
-  }, [router, authEnabled]);
 
   const validateEmail = (email: string): boolean => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -120,10 +113,6 @@ function SignInContent() {
       setLoadingAnonymous(false);
     }
   };
-
-  if (!authEnabled) {
-    return null;
-  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
@@ -253,7 +242,7 @@ function SignInContent() {
           <p className="text-xs text-muted">
             By signing in, you agree to our{' '}
             <button
-              onClick={() => showPrivacyModal({ authEnabled })}
+              onClick={() => showPrivacyModal()}
               className="underline hover:text-foreground"
             >
               Privacy Policy

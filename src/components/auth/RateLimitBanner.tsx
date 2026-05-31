@@ -9,11 +9,10 @@ interface RateLimitBannerProps {
 }
 
 export function RateLimitBanner({ className = '' }: RateLimitBannerProps) {
-  const { status, isAtLimit, timeUntilReset, authEnabled } = useAuthRateLimit();
+  const { status, isAtLimit, timeUntilReset } = useAuthRateLimit();
   const enableUserSignups = useFeatureFlag('enableUserSignups');
 
-  // Don't show banner if auth is not enabled or if not at limit
-  if (!authEnabled || !status?.authEnabled || !isAtLimit) {
+  if (!status || !isAtLimit) {
     return null;
   }
 
@@ -51,10 +50,9 @@ export function RateLimitBanner({ className = '' }: RateLimitBannerProps) {
  * Compact version for inline display
  */
 export function RateLimitIndicator({ className = '' }: RateLimitBannerProps) {
-  const { status, isAtLimit, authEnabled } = useAuthRateLimit();
+  const { status, isAtLimit } = useAuthRateLimit();
 
-  // Don't show if auth is not enabled
-  if (!authEnabled || !status?.authEnabled) {
+  if (!status) {
     return null;
   }
 

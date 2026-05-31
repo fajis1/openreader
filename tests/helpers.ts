@@ -5,10 +5,6 @@ import { createHash } from 'crypto';
 
 const DIR = './tests/files/';
 
-function isAuthEnabledForTests() {
-  return Boolean(process.env.AUTH_SECRET && process.env.BASE_URL);
-}
-
 // Small util to safely use filenames inside regex patterns
 function escapeRegExp(input: string) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -248,37 +244,6 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
     // Isolate server-side storage per test run (scoped by project/worker/retry/test)
     // to avoid cross-test flake from in-flight server-side writes.
     await page.context().setExtraHTTPHeaders({ 'x-openreader-test-namespace': namespace });
-  }
-
-  // In no-auth mode, all tests in a worker share the same server-side unclaimed identity.
-  // Clear docs at setup to avoid cross-test collisions on duplicate filenames.
-  if (!isAuthEnabledForTests()) {
-    const headers = namespace ? { 'x-openreader-test-namespace': namespace } : undefined;
-    let cleared = false;
-    let authProtected = false;
-    let attempts = 0;
-    while (!cleared && attempts < 3) {
-      attempts += 1;
-      try {
-        const res = await page.request.delete('/api/documents', { ...(headers ? { headers } : {}) });
-        // If this endpoint requires auth, we're not in no-auth mode for this run.
-        // Skip cleanup rather than hard-failing setup.
-        if (res.status() === 401 || res.status() === 403) {
-          authProtected = true;
-          break;
-        }
-        if (res.ok()) {
-          cleared = true;
-          break;
-        }
-      } catch {
-        // retry
-      }
-      await page.waitForTimeout(200);
-    }
-    if (!cleared && !authProtected) {
-      throw new Error('Failed to clear server documents before test setup');
-    }
   }
 
   // Pre-seed consent to prevent the cookie banner from blocking interactions.

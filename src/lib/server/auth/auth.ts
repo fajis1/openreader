@@ -5,7 +5,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { db } from "@/db";
-import { isAuthEnabled, isAnonymousAuthSessionsEnabled } from "@/lib/server/auth/config";
+import { getRequiredAuthEnv, isAnonymousAuthSessionsEnabled } from "@/lib/server/auth/config";
 import { isAdminEmail, syncAdminFlag } from "@/lib/server/admin/email-sync";
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { assertUserSignupAllowed } from '@/lib/server/auth/signup-policy';
@@ -58,6 +58,7 @@ function envFlagEnabled(name: string, defaultValue: boolean): boolean {
 }
 
 const authSchema = process.env.POSTGRES_URL ? authSchemaPostgres : authSchemaSqlite;
+const requiredAuthEnv = getRequiredAuthEnv();
 
 const createAuth = () => betterAuth({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -65,8 +66,8 @@ const createAuth = () => betterAuth({
     provider: process.env.POSTGRES_URL ? "pg" : "sqlite",
     schema: authSchema as Record<string, unknown>,
   }),
-  secret: process.env.AUTH_SECRET!,
-  baseURL: process.env.BASE_URL!,
+  secret: requiredAuthEnv.authSecret,
+  baseURL: requiredAuthEnv.baseUrl,
   trustedOrigins: getTrustedOrigins(),
   emailAndPassword: {
     enabled: true,
@@ -309,7 +310,7 @@ const createAuth = () => betterAuth({
   ],
 });
 
-export const auth = isAuthEnabled() ? createAuth() : null;
+export const auth = createAuth();
 
 type AuthInstance = ReturnType<typeof createAuth>;
 export type Session = AuthInstance["$Infer"]["Session"];
@@ -319,19 +320,12 @@ export type User = AuthSessionUser & {
 };
 
 export type AuthContext = {
-  authEnabled: boolean;
   session: Session | null;
   user: User | null;
   userId: string | null;
 };
 
 export async function getAuthContext(request: Pick<NextRequest, 'headers'>): Promise<AuthContext> {
-  const authEnabled = isAuthEnabled();
-
-  if (!authEnabled || !auth) {
-    return { authEnabled, session: null, user: null, userId: null };
-  }
-
   const session = await auth.api.getSession({ headers: request.headers });
   const user = (session?.user ?? null) as User | null;
   const userId = user?.id ?? null;
@@ -347,7 +341,7 @@ export async function getAuthContext(request: Pick<NextRequest, 'headers'>): Pro
     }
   }
 
-  return { authEnabled, session, user, userId };
+  return { session, user, userId };
 }
 
 export async function requireAuthContext(
@@ -355,10 +349,6 @@ export async function requireAuthContext(
   options?: { requireNonAnonymous?: boolean },
 ): Promise<AuthContext | Response> {
   const ctx = await getAuthContext(request);
-
-  if (!ctx.authEnabled) {
-    return ctx;
-  }
 
   if (!ctx.userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

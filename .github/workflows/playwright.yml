@@ -11,7 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       USE_EMBEDDED_WEED_MINI: true
+      ENABLE_TEST_NAMESPACE: true
       BASE_URL: http://127.0.0.1:3003
+      AUTH_SECRET: ci-auth-secret-change-me
+      USE_ANONYMOUS_AUTH_SESSIONS: true
       S3_ENDPOINT: http://127.0.0.1:8333
     steps:
     - uses: actions/checkout@v5

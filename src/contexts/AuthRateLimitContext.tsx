@@ -11,12 +11,10 @@ export interface RateLimitStatus {
   remainingChars: number;
   resetTimeMs: number;
   userType: 'anonymous' | 'authenticated' | 'unauthenticated';
-  authEnabled: boolean;
 }
 
 interface AuthRateLimitContextType {
   // Auth Config
-  authEnabled: boolean;
   authBaseUrl: string | null;
   allowAnonymousAuthSessions: boolean;
   githubAuthEnabled: boolean;
@@ -45,8 +43,8 @@ export function useAuthRateLimit(): AuthRateLimitContextType {
 }
 
 export function useAuthConfig() {
-  const { authEnabled, authBaseUrl, allowAnonymousAuthSessions, githubAuthEnabled } = useAuthRateLimit();
-  return { authEnabled, baseUrl: authBaseUrl, allowAnonymousAuthSessions, githubAuthEnabled };
+  const { authBaseUrl, allowAnonymousAuthSessions, githubAuthEnabled } = useAuthRateLimit();
+  return { baseUrl: authBaseUrl, allowAnonymousAuthSessions, githubAuthEnabled };
 }
 
 export function useRateLimit() {
@@ -87,7 +85,6 @@ function parseRateLimitStatus(raw: unknown): RateLimitStatus | null {
     remainingChars: Number(data.remainingChars ?? 0),
     resetTimeMs: coerceTimestampMs(data.resetTimeMs ?? data.resetTime, nextUtcMidnightTimestampMs()),
     userType,
-    authEnabled: Boolean(data.authEnabled),
   };
 }
 
@@ -105,7 +102,6 @@ export function formatCharCount(count: number): string {
 
 interface AuthRateLimitProviderProps {
   children: ReactNode;
-  authEnabled: boolean;
   authBaseUrl: string | null;
   allowAnonymousAuthSessions: boolean;
   githubAuthEnabled: boolean;
@@ -115,7 +111,6 @@ const RATE_LIMIT_QUERY_KEY = ['rate-limit-status'] as const;
 
 export function AuthRateLimitProvider({
   children,
-  authEnabled,
   authBaseUrl,
   allowAnonymousAuthSessions,
   githubAuthEnabled,
@@ -140,26 +135,13 @@ export function AuthRateLimitProvider({
       }
       return parseRateLimitStatus(await response.json());
     },
-    enabled: authEnabled,
+    enabled: true,
     retry: 0,
   });
 
-  const status = authEnabled
-    ? (queryStatus ?? null)
-    : {
-      allowed: true,
-      currentCount: 0,
-      // Avoid Infinity to prevent JSON/serialization edge cases elsewhere.
-      limit: Number.MAX_SAFE_INTEGER,
-      remainingChars: Number.MAX_SAFE_INTEGER,
-      resetTimeMs: nextUtcMidnightTimestampMs(),
-      userType: 'unauthenticated' as const,
-      authEnabled: false,
-    };
-  const loading = authEnabled ? (isPending || isFetching) : false;
-  const error = authEnabled
-    ? (queryError instanceof Error ? queryError.message : queryError ? 'Unknown error' : null)
-    : null;
+  const status = queryStatus ?? null;
+  const loading = isPending || isFetching;
+  const error = queryError instanceof Error ? queryError.message : queryError ? 'Unknown error' : null;
 
   useEffect(() => {
     if (!queryError) return;
@@ -167,15 +149,13 @@ export function AuthRateLimitProvider({
   }, [queryError]);
 
   const refresh = useCallback(async () => {
-    if (!authEnabled) return;
     await refetch();
-  }, [authEnabled, refetch]);
+  }, [refetch]);
 
   const timeUntilReset = status ? calculateTimeUntilReset(status.resetTimeMs) : '';
   const isAtLimit = status ? (status.remainingChars <= 0 || !status.allowed) : false;
 
   const incrementCount = useCallback((charCount: number) => {
-    if (!authEnabled) return;
     queryClient.setQueryData<RateLimitStatus | null>(RATE_LIMIT_QUERY_KEY, (prevStatus) => {
       if (!prevStatus) return prevStatus;
 
@@ -189,7 +169,7 @@ export function AuthRateLimitProvider({
         allowed: newRemainingChars > 0
       };
     });
-  }, [authEnabled, queryClient]);
+  }, [queryClient]);
 
   const onTTSStart = useCallback(() => {
     pendingTTSRef.current += 1;
@@ -225,7 +205,6 @@ export function AuthRateLimitProvider({
   }, []);
 
   const contextValue: AuthRateLimitContextType = {
-    authEnabled,
     authBaseUrl,
     allowAnonymousAuthSessions,
     githubAuthEnabled,
@@ -239,7 +218,6 @@ export function AuthRateLimitProvider({
     onTTSStart,
     onTTSComplete,
     triggerRateLimit: () => {
-      if (!authEnabled) return;
       queryClient.setQueryData<RateLimitStatus | null>(RATE_LIMIT_QUERY_KEY, (prev) =>
         prev ? { ...prev, remainingChars: 0, allowed: false } : null,
       );

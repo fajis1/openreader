@@ -9,7 +9,6 @@ import { resolveEffectiveProviderType, resolveProviderDefaults } from '@/lib/sha
 import { scheduleUserPreferencesSync, cancelPendingPreferenceSync, getUserPreferences, putUserPreferences } from '@/lib/client/api/user-state';
 import { SYNCED_PREFERENCE_KEYS, type SyncedPreferenceKey, type SyncedPreferencesPatch } from '@/types/user-state';
 import { useAuthSession } from '@/hooks/useAuthSession';
-import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { buildSyncedPreferencePatch } from '@/lib/client/config/preferences';
 import { applyConfigUpdate } from '@/lib/client/config/updates';
@@ -70,7 +69,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const didRunStartupMigrations = useRef(false);
   const didAttemptInitialPreferenceSeedForSession = useRef<string | null>(null);
   const syncedPreferenceKeys = useMemo(() => new Set<string>(SYNCED_PREFERENCE_KEYS), []);
-  const { authEnabled } = useAuthConfig();
   const { providers: sharedProviders } = useSharedProviders();
   const { data: sessionData, isPending: isSessionPending } = useAuthSession();
   const sessionKey = sessionData?.user?.id ?? 'no-session';
@@ -83,7 +81,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   }, [sharedProviders]);
 
   const queueSyncedPreferencePatch = useCallback((patch: Partial<AppConfigValues>) => {
-    if (!authEnabled || sessionKey === 'no-session') return;
+    if (sessionKey === 'no-session') return;
 
     const syncedPatch: SyncedPreferencesPatch = {};
     for (const key of SYNCED_PREFERENCE_KEYS) {
@@ -94,7 +92,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
     if (Object.keys(syncedPatch).length === 0) return;
     scheduleUserPreferencesSync(syncedPatch, sessionKey);
-  }, [authEnabled, sessionKey]);
+  }, [sessionKey]);
 
   // Cancel pending/in-flight preference syncs whenever the session changes or on unmount.
   useEffect(() => {
@@ -157,7 +155,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   }, [isDBReady]);
 
   const refreshSyncedPreferencesFromServer = useCallback(async (signal?: AbortSignal) => {
-    if (!isDBReady || !authEnabled) return;
+    if (!isDBReady) return;
     try {
       const remote = await getUserPreferences({ signal });
       if (!remote?.hasStoredPreferences) return;
@@ -167,20 +165,20 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       if ((error as Error)?.name === 'AbortError') return;
       console.warn('Failed to load synced preferences:', error);
     }
-  }, [isDBReady, authEnabled]);
+  }, [isDBReady]);
 
   useEffect(() => {
-    if (!isDBReady || !authEnabled || isSessionPending) return;
+    if (!isDBReady || isSessionPending) return;
     const controller = new AbortController();
     refreshSyncedPreferencesFromServer(controller.signal).catch((error) => {
       if ((error as Error)?.name === 'AbortError') return;
       console.warn('Synced preferences refresh failed:', error);
     });
     return () => controller.abort();
-  }, [isDBReady, authEnabled, isSessionPending, sessionKey, refreshSyncedPreferencesFromServer]);
+  }, [isDBReady, isSessionPending, sessionKey, refreshSyncedPreferencesFromServer]);
 
   useEffect(() => {
-    if (!isDBReady || !authEnabled) return;
+    if (!isDBReady) return;
     let activeController: AbortController | null = null;
     const onFocus = () => {
       if (activeController) activeController.abort();
@@ -195,7 +193,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', onFocus);
       if (activeController) activeController.abort();
     };
-  }, [isDBReady, authEnabled, refreshSyncedPreferencesFromServer]);
+  }, [isDBReady, refreshSyncedPreferencesFromServer]);
 
   const appConfig = useLiveQuery(
     async () => {
@@ -301,7 +299,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   }, [showAllProviderModels, isDBReady, appConfig, sharedProviders, providerResetDefaults.providerRef, queueSyncedPreferencePatch]);
 
   useEffect(() => {
-    if (!isDBReady || !authEnabled || !appConfig || isSessionPending) return;
+    if (!isDBReady || !appConfig || isSessionPending) return;
     if (didAttemptInitialPreferenceSeedForSession.current === sessionKey) return;
     didAttemptInitialPreferenceSeedForSession.current = sessionKey;
 
@@ -330,7 +328,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     });
 
     return () => controller.abort();
-  }, [isDBReady, authEnabled, appConfig, isSessionPending, sessionKey]);
+  }, [isDBReady, appConfig, isSessionPending, sessionKey]);
 
   // Destructure for convenience and to match context shape
   const {

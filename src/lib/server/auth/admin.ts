@@ -9,16 +9,13 @@ export type AdminAuthContext = AuthContext & {
 /**
  * Returns the admin auth context, or a 401/403 Response if the requester is
  * not authenticated / not an admin. Mirrors the `requireAuthContext` shape.
- *
- * When auth is disabled, this always returns 403 — there is no notion of
- * "admin" without authentication.
  */
 export async function requireAdminContext(
   request: Pick<NextRequest, 'headers'>,
 ): Promise<AdminAuthContext | Response> {
   const ctx = await getAuthContext(request);
 
-  if (!ctx.authEnabled || !ctx.userId || !ctx.user) {
+  if (!ctx.userId || !ctx.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

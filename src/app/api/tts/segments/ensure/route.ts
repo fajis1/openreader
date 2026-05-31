@@ -468,7 +468,7 @@ export async function POST(request: NextRequest) {
         segmentId: segment.segmentId,
       });
 
-      if (scope.authEnabled && scope.userId && ttsRateLimitEnabled) {
+      if (ttsRateLimitEnabled) {
         const charCount = segment.text.length;
         const ip = getClientIp(request);
         const device = scope.isAnonymousUser ? getOrCreateDeviceId(request) : null;
@@ -641,7 +641,12 @@ export async function POST(request: NextRequest) {
           apiKey: requestCreds.apiKey || 'none',
           baseUrl: requestCreds.baseUrl,
           testNamespace: scope.testNamespace,
-        }, request.signal);
+        }, request.signal, {
+          ttsCacheMaxSizeBytes: runtimeConfig.ttsCacheMaxSizeBytes,
+          ttsCacheTtlMs: runtimeConfig.ttsCacheTtlMs,
+          ttsUpstreamMaxRetries: runtimeConfig.ttsUpstreamMaxRetries,
+          ttsUpstreamTimeoutMs: runtimeConfig.ttsUpstreamTimeoutMs,
+        });
         stageTimings.generateTtsMs = Date.now() - ttsStartedAt;
 
         failedStage = 's3.put_audio';

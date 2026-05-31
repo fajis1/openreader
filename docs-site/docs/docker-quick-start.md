@@ -33,7 +33,7 @@ OpenReader currently pins embedded SeaweedFS to `4.18` in CI and Docker builds.
 <Tabs groupId="docker-start-mode">
 <TabItem value="localhost" label="Localhost" default>
 
-Persistent storage, embedded SeaweedFS `weed mini`, optional auth, optional library mount:
+Persistent storage, embedded SeaweedFS `weed mini`, required auth, optional library mount:
 
 ```bash
 docker run --name openreader \
@@ -57,7 +57,7 @@ What this command enables:
 - `-v openreader_docstore:/app/docstore`: persists SQLite metadata, SeaweedFS blob data, and migration/runtime state.
 - `-v /path/to/your/library:/app/docstore/library:ro`: mounts a read-only importable library source.
 - `-e API_BASE=...` / `-e API_KEY=...`: **first-boot seed only.** On the first container start, these are auto-migrated into a `default-openai` admin shared provider stored in the DB (key encrypted at rest). After that, the running app no longer reads them — manage the provider from **Settings → Admin → Shared providers**. See [Admin Panel](./configure/admin-panel).
-- `-e BASE_URL=...` and `-e AUTH_SECRET=...`: together they turn on auth/session mode for local sign-in flows.
+- `-e BASE_URL=...` and `-e AUTH_SECRET=...`: required for v4+ auth/session startup.
 - `-e ADMIN_EMAILS=...`: (optional, requires auth) comma-separated emails auto-promoted to admin. Admins see the **Admin** tab in Settings.
 
 </TabItem>
@@ -95,21 +95,23 @@ What this command enables:
 </TabItem>
 <TabItem value="minimal" label="Minimal">
 
-Auth disabled, embedded storage ephemeral, no library import:
+Auth required, embedded storage ephemeral, no library import:
 
 ```bash
 docker run --name openreader \
   --restart unless-stopped \
   -p 3003:3003 \
   -p 8333:8333 \
+  -e BASE_URL=http://localhost:3003 \
+  -e AUTH_SECRET=$(openssl rand -hex 32) \
   ghcr.io/richardr1126/openreader:latest
 ```
 
 What this command enables:
 
-- Fastest startup with no extra env vars.
+- Fast startup with only the required auth env vars.
 - No persistent volume (`/app/docstore` stays container-local), so data is ephemeral unless you add a mount.
-- Auth remains disabled because `BASE_URL` and `AUTH_SECRET` are not set. The admin panel requires auth, so it's unavailable in this mode.
+- The app still requires `BASE_URL` + `AUTH_SECRET` in v4+, so include them even in minimal mode.
 - No TTS provider preset by default. Configure `API_BASE`/`API_KEY` on first boot if you want a seeded shared provider, or run auth+admin mode and manage providers from the admin panel.
 
 </TabItem>
@@ -117,9 +119,9 @@ What this command enables:
 
 :::tip Quick Tips
 - Set `API_BASE` on first boot to a TTS endpoint the container can reach (`host.docker.internal` works for host-local services). After first boot, manage providers in **Settings → Admin → Shared providers**.
-- Auth is enabled only when both `BASE_URL` and `AUTH_SECRET` are set. The admin panel requires auth.
+- `BASE_URL` and `AUTH_SECRET` are required in v4+. The admin panel requires auth.
 - Set `ADMIN_EMAILS` to your email if you want the **Admin** tab in Settings.
-- `restrictUserApiKeys` controls shared-provider-only mode. For per-user BYOK in auth-enabled setups, toggle it off in **Settings → Admin → Site features**. Legacy first-boot seed via `RUNTIME_SEED_RESTRICT_USER_API_KEYS=false` is still supported.
+- `restrictUserApiKeys` controls shared-provider-only mode. For per-user BYOK, toggle it off in **Settings → Admin → Site features** or seed `runtimeConfig.restrictUserApiKeys=false` via runtime seed JSON.
 - Use a `/app/docstore` mount if you want data to survive container/image replacement.
 - Startup automatically runs DB/storage migrations via the shared entrypoint.
 :::

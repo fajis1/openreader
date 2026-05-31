@@ -1,6 +1,5 @@
 import { db } from '@/db';
 import { userTtsChars } from '@/db/schema';
-import { isAuthEnabled } from '@/lib/server/auth/config';
 import { eq, and, lt, sql } from 'drizzle-orm';
 import { nextUtcMidnightTimestampMs, nowTimestampMs } from '@/lib/shared/timestamps';
 
@@ -158,7 +157,7 @@ export class RateLimiter {
   ): Promise<RateLimitResult> {
     const limits = resolveRateLimitThresholds(options?.limits);
     const enabled = options?.enabled ?? true;
-    if (!isAuthEnabled() || !enabled) {
+    if (!enabled) {
       return {
         allowed: true,
         currentCount: 0,
@@ -265,7 +264,7 @@ export class RateLimiter {
   ): Promise<RateLimitResult> {
     const limits = resolveRateLimitThresholds(options?.limits);
     const enabled = options?.enabled ?? true;
-    if (!isAuthEnabled() || !enabled) {
+    if (!enabled) {
       return {
         allowed: true,
         currentCount: 0,
@@ -321,8 +320,6 @@ export class RateLimiter {
    * Transfer char counts when anonymous user creates an account
    */
   async transferAnonymousUsage(anonymousUserId: string, authenticatedUserId: string): Promise<void> {
-    if (!isAuthEnabled()) return;
-
     const today = new Date().toISOString().split('T')[0];
     const dateValue = today as unknown as UserTtsCharsDateValue;
     const updatedAt = this.getUpdatedAtValue() as unknown as UserTtsCharsUpdatedAtValue;

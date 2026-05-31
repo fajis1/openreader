@@ -1,7 +1,6 @@
 import { and, eq, gte, lt, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { userJobEvents } from '@/db/schema';
-import { isAuthEnabled } from '@/lib/server/auth/config';
 import { nowTimestampMs } from '@/lib/shared/timestamps';
 import type { RuntimeConfig } from '@/lib/server/admin/settings';
 
@@ -63,7 +62,7 @@ export function getPdfLayoutRateConfig(runtime: Pick<
 const safeDb = () => db as any;
 
 function isActive(config: Pick<JobRateConfig, 'enabled'>, userId: string | null | undefined): userId is string {
-  return isAuthEnabled() && config.enabled && Boolean(userId);
+  return config.enabled && Boolean(userId);
 }
 
 async function countSince(userId: string, action: JobRateAction, since: number): Promise<number> {

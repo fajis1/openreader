@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { getRequiredAuthEnv } from '@/lib/server/auth/config';
 
 /**
  * Better Auth session cookie name (default prefix + session_token).
@@ -34,12 +35,8 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
-function isAuthEnabled(): boolean {
-  return !!(process.env.AUTH_SECRET && process.env.BASE_URL);
-}
-
 function isAnonymousAuthEnabled(): boolean {
-  if (!isAuthEnabled()) return false;
+  getRequiredAuthEnv();
   const raw = process.env.USE_ANONYMOUS_AUTH_SESSIONS;
   return raw?.trim().toLowerCase() === 'true';
 }
@@ -88,10 +85,7 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  // When auth is disabled entirely, let everything through.
-  if (!isAuthEnabled()) {
-    return NextResponse.next();
-  }
+  getRequiredAuthEnv();
 
   const { pathname } = request.nextUrl;
 

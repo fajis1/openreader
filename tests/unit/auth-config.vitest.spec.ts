@@ -1,27 +1,19 @@
 import { describe, expect, test } from 'vitest';
-import { getAuthBaseUrl, isAnonymousAuthSessionsEnabled, isAuthEnabled, isGithubAuthEnabled } from '../../src/lib/server/auth/config';
+import { getAuthBaseUrl, getRequiredAuthEnv, isAnonymousAuthSessionsEnabled, isGithubAuthEnabled } from '../../src/lib/server/auth/config';
 import { withEnv } from './support/env';
 
 describe('auth config contract', () => {
-  test('auth is enabled only when AUTH_SECRET and BASE_URL are both set', async () => {
+  test('reads required AUTH_SECRET and BASE_URL', async () => {
     await withEnv(
       {
-        AUTH_SECRET: undefined,
-        BASE_URL: undefined,
-      },
-      async () => {
-        expect(isAuthEnabled()).toBe(false);
-        expect(getAuthBaseUrl()).toBeNull();
-      },
-    );
-
-    await withEnv(
-      {
-        AUTH_SECRET: 'unit-secret',
+        AUTH_SECRET: 'unit-secret-2',
         BASE_URL: 'http://localhost:3003',
       },
       async () => {
-        expect(isAuthEnabled()).toBe(true);
+        expect(getRequiredAuthEnv()).toEqual({
+          authSecret: 'unit-secret-2',
+          baseUrl: 'http://localhost:3003',
+        });
         expect(getAuthBaseUrl()).toBe('http://localhost:3003');
       },
     );
@@ -49,12 +41,12 @@ describe('auth config contract', () => {
     },
   );
 
-  test('anonymous sessions are always disabled when auth is disabled', async () => {
+  test('anonymous session config returns false for non-true values', async () => {
     await withEnv(
       {
-        AUTH_SECRET: undefined,
-        BASE_URL: undefined,
-        USE_ANONYMOUS_AUTH_SESSIONS: 'true',
+        AUTH_SECRET: 'unit-secret',
+        BASE_URL: 'http://localhost:3003',
+        USE_ANONYMOUS_AUTH_SESSIONS: '1',
       },
       async () => {
         expect(isAnonymousAuthSessionsEnabled()).toBe(false);
@@ -63,16 +55,6 @@ describe('auth config contract', () => {
   });
 
   test.each([
-    {
-      title: 'returns false when auth is disabled',
-      env: {
-        AUTH_SECRET: undefined,
-        BASE_URL: undefined,
-        GITHUB_CLIENT_ID: 'id',
-        GITHUB_CLIENT_SECRET: 'secret',
-      },
-      expected: false,
-    },
     {
       title: 'returns false when GitHub client id is missing',
       env: {
