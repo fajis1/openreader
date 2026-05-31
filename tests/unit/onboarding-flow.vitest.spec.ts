@@ -55,7 +55,7 @@ describe('onboarding flow resolver', () => {
     expect(step).toBe('changelog');
   });
 
-  test('resolves done when no steps are pending (auth and no-auth parity)', () => {
+  test('resolves done when no steps are pending', () => {
     const authStep = resolveNextOnboardingStep({
       privacyRequired: true,
       privacyAccepted: true,

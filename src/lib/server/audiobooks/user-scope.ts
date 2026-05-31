@@ -1,12 +1,7 @@
 export function buildAllowedAudiobookUserIds(
-  authEnabled: boolean,
   userId: string | null,
   unclaimedUserId: string,
 ): { preferredUserId: string; allowedUserIds: string[] } {
-  if (!authEnabled) {
-    return { preferredUserId: unclaimedUserId, allowedUserIds: [unclaimedUserId] };
-  }
-
   const preferredUserId = userId ?? unclaimedUserId;
   const allowedUserIds = Array.from(new Set([preferredUserId, unclaimedUserId]));
   return { preferredUserId, allowedUserIds };

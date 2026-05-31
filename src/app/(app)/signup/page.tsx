@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Button, Input } from '@headlessui/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -23,13 +23,6 @@ export default function SignUpPage() {
   const { authEnabled, baseUrl } = useAuthConfig();
   const enableUserSignups = useFeatureFlag('enableUserSignups');
   const { refresh: refreshRateLimit } = useAuthRateLimit();
-
-  // Check if auth is enabled, redirect home if not
-  useEffect(() => {
-    if (!authEnabled) {
-      router.push('/app');
-    }
-  }, [router, authEnabled]);
 
   const validateEmail = (email: string): boolean => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -108,10 +101,6 @@ export default function SignUpPage() {
       setLoading(false);
     }
   };
-
-  if (!authEnabled) {
-    return null;
-  }
 
   if (!enableUserSignups) {
     return (

@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     const testNamespace = getOpenReaderTestNamespace(req.headers);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
     const storageUserId = ctxOrRes.userId ?? unclaimedUserId;
-    const allowedUserIds = ctxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
+    const allowedUserIds = [storageUserId, unclaimedUserId];
 
     const url = new URL(req.url);
     const id = (url.searchParams.get('id') || '').trim().toLowerCase();

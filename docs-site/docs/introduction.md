@@ -23,7 +23,7 @@ It supports multiple TTS providers including OpenAI, Replicate, DeepInfra, and c
   - Cloud: [**OpenAI**](https://platform.openai.com/docs/pricing#transcription-and-speech) (`tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`), [**Replicate**](https://replicate.com/explore) (built-in catalog + any model ID), [**DeepInfra**](https://deepinfra.com/models/text-to-speech) (Kokoro-82M and others)
 - 🎧 **Audiobook Export** in `m4b`/`mp3` with resumable chapter generation
 - 🗂️ **Flexible Backend** — embedded SeaweedFS or S3-compatible storage, SQLite or Postgres, server library import, and device sync
-- 🔐 **Auth Optional** — run no-auth for local use, or enable full user isolation with a claim flow for multi-user deployments
+- 🔐 **Auth and User Isolation** — auth is required in v4+, with optional anonymous auth sessions for guest flows
 - 🎨 **Customizable** — 13 built-in themes (light and dark palettes), per-user TTS settings, and document handling controls
 
 ## 🧭 Key Docs

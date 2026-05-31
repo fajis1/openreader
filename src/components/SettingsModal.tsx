@@ -199,7 +199,7 @@ export function SettingsModal({
   const [showDeleteDocsConfirm, setShowDeleteDocsConfirm] = useState(false);
   const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
-  const { authEnabled, baseUrl: authBaseUrl } = useAuthConfig();
+  const { baseUrl: authBaseUrl } = useAuthConfig();
   const { data: session } = useAuthSession();
   const { changelogOpenSignal } = useOnboardingFlow();
   const router = useRouter();
@@ -470,11 +470,10 @@ export function SettingsModal({
       if (section.id === 'api' && !enableTTSProvidersTab) {
         return false;
       }
-      if (section.authOnly && !authEnabled) return false;
       if (section.adminOnly && !isAdmin) return false;
       return true;
     }),
-    [authEnabled, isAdmin, enableTTSProvidersTab]
+    [isAdmin, enableTTSProvidersTab]
   );
 
   useEffect(() => {
@@ -556,14 +555,12 @@ export function SettingsModal({
                       </Button>
                     </div>
                     <div className="flex items-center">
-                      {authEnabled && (
-                        <Button
-                          onClick={() => showPrivacyModal({ authEnabled })}
-                          className="text-sm font-medium text-muted hover:text-accent transition-colors"
-                        >
-                          Privacy
-                        </Button>
-                      )}
+                      <Button
+                        onClick={() => showPrivacyModal({ authEnabled: true })}
+                        className="text-sm font-medium text-muted hover:text-accent transition-colors"
+                      >
+                        Privacy
+                      </Button>
                     </div>
                   </div>
 
@@ -1161,15 +1158,6 @@ export function SettingsModal({
                               >
                                 Clear cache
                               </Button>
-                              {enableDestructiveDelete && !authEnabled && (
-                                <Button
-                                  onClick={() => setShowDeleteDocsConfirm(true)}
-                                  disabled={isBusy}
-                                  className={buttonClass({ variant: 'danger', size: 'md' })}
-                                >
-                                  Delete all data
-                                </Button>
-                              )}
                             </div>
                           </div>
                         </div>
@@ -1208,7 +1196,7 @@ export function SettingsModal({
                       )}
 
                       {/* Account Section */}
-                      {activeSection === 'account' && authEnabled && (
+                      {activeSection === 'account' && (
                         <div className="space-y-2">
                           {/* Session info */}
                           <div className="rounded-lg bg-background border border-offbase p-4 space-y-2">

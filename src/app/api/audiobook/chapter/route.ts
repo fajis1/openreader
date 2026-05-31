@@ -286,11 +286,11 @@ export async function POST(request: NextRequest) {
     const ctxOrRes = await requireAuthContext(request);
     if (ctxOrRes instanceof Response) return ctxOrRes;
 
-    const { userId, authEnabled, user } = ctxOrRes;
+    const { userId, user } = ctxOrRes;
     const runtimeConfig = await getResolvedRuntimeConfig();
     const testNamespace = getOpenReaderTestNamespace(request.headers);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(authEnabled, userId, unclaimedUserId);
+    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(userId, unclaimedUserId);
     const bookId = data.bookId || randomUUID();
 
     if (!isSafeId(bookId)) {
@@ -540,7 +540,7 @@ export async function POST(request: NextRequest) {
       ipAuthenticated: runtimeConfig.ttsIpDailyLimitAuthenticated,
     });
 
-    if (authEnabled && userId && ttsRateLimitEnabled) {
+    if (userId && ttsRateLimitEnabled) {
       const isAnonymous = Boolean(user?.isAnonymous);
       const charCount = data.text.length;
       const ip = getClientIp(request);
@@ -809,10 +809,10 @@ export async function GET(request: NextRequest) {
     const ctxOrRes = await requireAuthContext(request);
     if (ctxOrRes instanceof Response) return ctxOrRes;
 
-    const { userId, authEnabled } = ctxOrRes;
+    const { userId } = ctxOrRes;
     const testNamespace = getOpenReaderTestNamespace(request.headers);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(authEnabled, userId, unclaimedUserId);
+    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(userId, unclaimedUserId);
     const existingBookRows = await db
       .select({ userId: audiobooks.userId })
       .from(audiobooks)
@@ -906,10 +906,10 @@ export async function DELETE(request: NextRequest) {
     const ctxOrRes = await requireAuthContext(request);
     if (ctxOrRes instanceof Response) return ctxOrRes;
 
-    const { userId, authEnabled } = ctxOrRes;
+    const { userId } = ctxOrRes;
     const testNamespace = getOpenReaderTestNamespace(request.headers);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(authEnabled, userId, unclaimedUserId);
+    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(userId, unclaimedUserId);
     const existingBookRows = await db
       .select({ userId: audiobooks.userId })
       .from(audiobooks)

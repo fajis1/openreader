@@ -2,20 +2,14 @@ import { describe, expect, test } from 'vitest';
 import { buildAllowedAudiobookUserIds, pickAudiobookOwner } from '../../src/lib/server/audiobooks/user-scope';
 
 describe('audiobook scope selection', () => {
-  test('uses only unclaimed scope when auth is disabled', () => {
-    const result = buildAllowedAudiobookUserIds(false, null, 'unclaimed::ns');
-    expect(result.preferredUserId).toBe('unclaimed::ns');
-    expect(result.allowedUserIds).toEqual(['unclaimed::ns']);
-  });
-
-  test('includes both preferred and unclaimed scopes when auth is enabled', () => {
-    const result = buildAllowedAudiobookUserIds(true, 'user-123', 'unclaimed::ns');
+  test('includes both preferred and unclaimed scopes', () => {
+    const result = buildAllowedAudiobookUserIds('user-123', 'unclaimed::ns');
     expect(result.preferredUserId).toBe('user-123');
     expect(result.allowedUserIds).toEqual(['user-123', 'unclaimed::ns']);
   });
 
   test('deduplicates preferred/unclaimed ids when they are the same', () => {
-    const result = buildAllowedAudiobookUserIds(true, 'unclaimed::ns', 'unclaimed::ns');
+    const result = buildAllowedAudiobookUserIds('unclaimed::ns', 'unclaimed::ns');
     expect(result.allowedUserIds).toEqual(['unclaimed::ns']);
   });
 

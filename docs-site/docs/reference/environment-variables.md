@@ -6,7 +6,7 @@ toc_max_heading_level: 3
 This page is the source-of-truth reference for OpenReader environment variables.
 
 :::note Recommended configuration path
-For auth-enabled deployments, use **Settings → Admin** as the primary source of truth for shared providers and runtime site features.
+Use **Settings → Admin** as the primary source of truth for shared providers and runtime site features.
 `API_BASE` / `API_KEY` are optional one-time provider bootstrap seeds.
 Runtime site features are seeded with `RUNTIME_SEED_JSON` / `RUNTIME_SEED_JSON_PATH`.
 :::
@@ -19,8 +19,8 @@ Runtime site features are seeded with `RUNTIME_SEED_JSON` / `RUNTIME_SEED_JSON_P
 | `LOG_LEVEL` | Runtime logging | `info` | Set app server log level |
 | `API_BASE` | TTS provider bootstrap seed | unset | Optional first-boot base URL for `default-openai` |
 | `API_KEY` | TTS provider bootstrap seed | unset | Optional first-boot API key for `default-openai` |
-| `BASE_URL` | Auth | unset | Required (with `AUTH_SECRET`) to enable auth |
-| `AUTH_SECRET` | Auth | unset | Required (with `BASE_URL`) to enable auth |
+| `BASE_URL` | Auth | unset | Required at startup |
+| `AUTH_SECRET` | Auth | unset | Required at startup |
 | `AUTH_TRUSTED_ORIGINS` | Auth | empty | Add extra allowed origins |
 | `USE_ANONYMOUS_AUTH_SESSIONS` | Auth | `false` | Set `true` to allow anonymous auth sessions |
 | `GITHUB_CLIENT_ID` | Auth/OAuth | unset | Set with `GITHUB_CLIENT_SECRET` to enable GitHub sign-in |
@@ -120,16 +120,16 @@ There are no dedicated env vars for these runtime settings.
 
 ### BASE_URL
 
-External base URL for this OpenReader instance.
+Required external base URL for this OpenReader instance.
 
-- Required with `AUTH_SECRET` to enable auth
+- Required at startup
 - Example: `http://localhost:3003` or `https://reader.example.com`
 
 ### AUTH_SECRET
 
-Secret key used by auth/session handling.
+Required secret key used by auth/session handling.
 
-- Required with `BASE_URL` to enable auth
+- Required at startup
 - Generate with `openssl rand -hex 32`
 
 ### AUTH_TRUSTED_ORIGINS

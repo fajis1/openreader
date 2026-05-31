@@ -11,15 +11,6 @@ import * as dotenv from 'dotenv';
 
 function loadEnvFiles() {
   const cwd = process.cwd();
-  const isCi = isTrue(process.env.CI, false);
-  if (isCi) {
-    const envCiPath = path.join(cwd, '.env.ci');
-    if (fs.existsSync(envCiPath)) {
-      dotenv.config({ path: envCiPath });
-    }
-    return;
-  }
-
   const envPath = path.join(cwd, '.env');
   const envLocalPath = path.join(cwd, '.env.local');
 
@@ -44,6 +35,18 @@ function resolveBooleanEnv(env, key, defaultValue) {
 
 function withDefault(value, fallback) {
   return value && value.trim() ? value.trim() : fallback;
+}
+
+function requireAuthEnv(env) {
+  const missing = [];
+  if (!env.AUTH_SECRET?.trim()) missing.push('AUTH_SECRET');
+  if (!env.BASE_URL?.trim()) missing.push('BASE_URL');
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required auth env vars: ${missing.join(', ')}. `
+      + 'OpenReader v4 requires both AUTH_SECRET and BASE_URL at startup.',
+    );
+  }
 }
 
 function isPrivateIPv4(address) {
@@ -328,6 +331,7 @@ async function main() {
 
   const runtimeEnv = { ...process.env };
   runtimeEnv.LOG_FORMAT = withDefault(runtimeEnv.LOG_FORMAT, 'pretty');
+  requireAuthEnv(runtimeEnv);
   let weedProc = null;
   let weedExitPromise = Promise.resolve();
   let natsProc = null;

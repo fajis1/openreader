@@ -3,7 +3,6 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { db } from '@/db';
 import { ttsSegmentEntries, ttsSegmentVariants } from '@/db/schema';
-import { resolveSegmentDocumentScope } from '@/lib/server/tts/segments-auth';
 
 export type ResolvedSegmentAudio = {
   documentId: string;
@@ -54,6 +53,7 @@ export async function resolveCompletedSegmentAudio(
     return NextResponse.json({ error: 'Missing documentId or segmentId' }, { status: 400 });
   }
 
+  const { resolveSegmentDocumentScope } = await import('@/lib/server/tts/segments-auth');
   const scope = await resolveSegmentDocumentScope(request, documentId);
   if (scope instanceof Response) return scope;
 

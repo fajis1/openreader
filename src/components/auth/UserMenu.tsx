@@ -18,12 +18,12 @@ export function UserMenu({
   className?: string;
   variant?: UserMenuVariant;
 }) {
-  const { authEnabled, baseUrl } = useAuthConfig();
+  const { baseUrl } = useAuthConfig();
   const enableUserSignups = useFeatureFlag('enableUserSignups');
   const { data: session, isPending } = useAuthSession();
   const router = useRouter();
 
-  if (!authEnabled || isPending) return null;
+  if (isPending) return null;
 
   const handleDisconnectAccount = async () => {
     const client = getAuthClient(baseUrl);

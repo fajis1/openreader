@@ -243,18 +243,7 @@ Use the same ownership split:
 Use one of these `.env` mode templates:
 
 <Tabs groupId="local-env-modes">
-  <TabItem value="no-auth" label="No Auth (simple)" default>
-
-```env
-API_BASE=http://host.docker.internal:8880/v1
-API_KEY=none
-# Leave BASE_URL and AUTH_SECRET unset to keep auth disabled.
-# (Admin panel is unavailable without auth.)
-# API_BASE/API_KEY seed a shared default provider if you want shared mode.
-```
-
-  </TabItem>
-  <TabItem value="auth-enabled" label="Auth Enabled">
+  <TabItem value="auth-enabled" label="Auth Enabled" default>
 
 ```env
 API_BASE=http://host.docker.internal:8880/v1
@@ -286,6 +275,8 @@ ADMIN_EMAILS=you@example.com
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
 USE_EMBEDDED_WEED_MINI=false
+BASE_URL=http://localhost:3003
+AUTH_SECRET=<generate-with-openssl-rand-hex-32>
 S3_BUCKET=your-bucket
 S3_REGION=us-east-1
 S3_ACCESS_KEY_ID=your-access-key
@@ -301,6 +292,8 @@ S3_SECRET_ACCESS_KEY=your-secret-key
 ```env
 API_BASE=http://host.docker.internal:8880/v1
 API_KEY=none
+BASE_URL=http://localhost:3003
+AUTH_SECRET=<generate-with-openssl-rand-hex-32>
 COMPUTE_WORKER_URL=http://localhost:8081
 COMPUTE_WORKER_TOKEN=<same-token-used-by-worker>
 USE_EMBEDDED_WEED_MINI=false
@@ -321,7 +314,7 @@ On first boot, `API_KEY` / `API_BASE` can bootstrap `default-openai`, and `RUNTI
 :::
 
 :::note User BYOK restriction default
-If you want each user to enter personal provider credentials, set `restrictUserApiKeys=false` (from **Settings → Admin** when auth/admin is enabled, or by seeding `runtimeConfig.restrictUserApiKeys=false` in runtime seed JSON).
+If you want each user to enter personal provider credentials, set `restrictUserApiKeys=false` (from **Settings → Admin**, or by seeding `runtimeConfig.restrictUserApiKeys=false` in runtime seed JSON).
 :::
 
 :::info

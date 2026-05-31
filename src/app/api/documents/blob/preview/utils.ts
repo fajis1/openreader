@@ -44,7 +44,7 @@ export async function validatePreviewRequest(req: NextRequest): Promise<Validate
 
   // Deduplicate allowedUserIds
   const allowedUserIds = Array.from(new Set(
-    ctxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId]
+    [storageUserId, unclaimedUserId]
   ));
 
   const url = new URL(req.url);

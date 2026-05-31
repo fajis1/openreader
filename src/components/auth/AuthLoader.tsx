@@ -113,7 +113,6 @@ export function AuthLoader({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const checkStatus = async () => {
-      if (!authEnabled) return;
       if (isPending) return;
 
       if (session) {
@@ -236,17 +235,16 @@ export function AuthLoader({ children }: { children: ReactNode }) {
   ]);
 
   useEffect(() => {
-    if (!authEnabled) return;
     if (sessionError) {
       console.warn('[AuthLoader] useSession error', sessionError);
     }
-  }, [authEnabled, sessionError]);
+  }, [sessionError]);
 
   const shouldBlockForProtectedNoSession =
-    authEnabled && !allowAnonymousAuthSessions && !isAuthPage && !session;
+    !allowAnonymousAuthSessions && !isAuthPage && !session;
   const shouldBlockForDisallowedAnonymous =
-    authEnabled && !allowAnonymousAuthSessions && Boolean(session?.user?.isAnonymous);
-  const isLoading = authEnabled && (
+    !allowAnonymousAuthSessions && Boolean(session?.user?.isAnonymous);
+  const isLoading = (
     (allowAnonymousAuthSessions && (isPending || isAutoLoggingIn || !session)) ||
     (!allowAnonymousAuthSessions && !isAuthPage && (
       isPending || isRedirecting || shouldBlockForProtectedNoSession || shouldBlockForDisallowedAnonymous

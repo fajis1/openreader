@@ -1,7 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { adminProviders, adminSettings } from '@/db/schema';
-import { isAuthEnabled } from '@/lib/server/auth/config';
 import { serverLogger } from '@/lib/server/logger';
 import { logDegraded } from '@/lib/server/errors/logging';
 
@@ -136,11 +135,6 @@ function buildDefaults(): RuntimeConfig {
   const out = {} as RuntimeConfig;
   for (const key of RUNTIME_KEYS) {
     (out as Record<string, unknown>)[key] = RUNTIME_CONFIG_SCHEMA[key].default;
-  }
-  // In no-auth mode there is no admin UI to configure shared providers.
-  // Keep legacy BYOK available by default unless explicitly overridden.
-  if (!isAuthEnabled()) {
-    out.restrictUserApiKeys = false;
   }
   return out;
 }

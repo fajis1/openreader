@@ -1,17 +1,12 @@
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/server/auth/auth';
-import { isAuthEnabled } from '@/lib/server/auth/config';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { deleteUserStorageData } from '@/lib/server/user/data-cleanup';
 import { errorToLog, hashForLog, serverLogger } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
 
 export async function DELETE() {
-  if (!isAuthEnabled() || !auth) {
-    return NextResponse.json({ error: 'Authentication disabled' }, { status: 403 });
-  }
-
   const reqHeaders = await headers();
 
   const session = await auth.api.getSession({

@@ -44,7 +44,7 @@ async function resolveDocumentAccess(req: NextRequest, documentId: string): Prom
   const testNamespace = getOpenReaderTestNamespace(req.headers);
   const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
   const storageUserId = authCtxOrRes.userId ?? unclaimedUserId;
-  const allowedUserIds = authCtxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
+  const allowedUserIds = [storageUserId, unclaimedUserId];
 
   const rows = await db
     .select({ userId: documents.userId })

@@ -10,8 +10,6 @@ import {
 } from '../audiobooks/blobstore';
 import { isS3Configured } from '../storage/s3';
 
-import { isAuthEnabled } from '@/lib/server/auth/config';
-
 type AudiobookRow = {
   id: string;
   userId: string;
@@ -89,7 +87,7 @@ async function moveAudiobookBlobScope(
 }
 
 export async function claimAnonymousData(userId: string, unclaimedUserId: string = UNCLAIMED_USER_ID, namespace: string | null = null) {
-  if (!isAuthEnabled() || !userId) {
+  if (!userId) {
     return { documents: 0, audiobooks: 0, preferences: 0, progress: 0 };
   }
 
@@ -122,7 +120,7 @@ export async function transferUserDocuments(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   options?: { db?: any },
 ): Promise<number> {
-  if (!isAuthEnabled() || !fromUserId || !toUserId) return 0;
+  if (!fromUserId || !toUserId) return 0;
   if (fromUserId === toUserId) return 0;
 
   const database = options?.db ?? db;
@@ -150,7 +148,7 @@ export async function transferUserAudiobooks(
   toUserId: string,
   namespace: string | null = null,
 ): Promise<number> {
-  if (!isAuthEnabled() || !fromUserId || !toUserId) return 0;
+  if (!fromUserId || !toUserId) return 0;
   if (fromUserId === toUserId) return 0;
 
   const books = (await db
@@ -188,7 +186,7 @@ export async function transferUserAudiobooks(
 }
 
 export async function transferUserPreferences(fromUserId: string, toUserId: string): Promise<number> {
-  if (!isAuthEnabled() || !fromUserId || !toUserId) return 0;
+  if (!fromUserId || !toUserId) return 0;
   if (fromUserId === toUserId) return 0;
 
   const fromRows = (await db
@@ -226,7 +224,7 @@ export async function transferUserPreferences(fromUserId: string, toUserId: stri
 }
 
 export async function transferUserProgress(fromUserId: string, toUserId: string): Promise<number> {
-  if (!isAuthEnabled() || !fromUserId || !toUserId) return 0;
+  if (!fromUserId || !toUserId) return 0;
   if (fromUserId === toUserId) return 0;
 
   const fromRows = (await db

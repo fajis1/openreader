@@ -93,7 +93,7 @@ If you must pre-seed site features/providers at deploy time, use `RUNTIME_SEED_J
 See [Environment Variables](../reference/environment-variables#runtime-json-seed-v4) for schema and examples.
 
 :::warning Auth recommendation
-For internet-exposed Vercel deployments, set both `BASE_URL` and `AUTH_SECRET` — they are also required for the admin panel and for encrypting admin-stored TTS credentials. Running without auth is possible, but not recommended for public environments.
+Set both `BASE_URL` and `AUTH_SECRET` — they are required in v4+ and also required for the admin panel and for encrypting admin-stored TTS credentials.
 :::
 
 :::warning Rotating AUTH_SECRET invalidates admin-stored keys

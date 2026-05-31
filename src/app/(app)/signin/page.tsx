@@ -37,13 +37,6 @@ function SignInContent() {
 
   const isAnyLoading = loadingEmail || loadingGithub || loadingAnonymous;
 
-  // Check if auth is enabled, redirect home if not
-  useEffect(() => {
-    if (!authEnabled) {
-      router.push('/app');
-    }
-  }, [router, authEnabled]);
-
   const validateEmail = (email: string): boolean => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
@@ -120,10 +113,6 @@ function SignInContent() {
       setLoadingAnonymous(false);
     }
   };
-
-  if (!authEnabled) {
-    return null;
-  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">

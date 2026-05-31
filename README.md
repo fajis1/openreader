@@ -24,7 +24,7 @@ OpenReader is an open source, self-host-friendly text-to-speech document reader 
 - 🎯 **Multi-provider TTS** — self-hosted OpenAI-compatible servers (Kokoro-FastAPI, KittenTTS-FastAPI, Orpheus-FastAPI) or cloud APIs (OpenAI, Replicate, DeepInfra).
 - 🎧 **Audiobook export** in `m4b`/`mp3` with resumable chapter processing.
 - 🗂️ **Flexible backend** — embedded SeaweedFS or S3-compatible storage, SQLite or Postgres, server library import, and device sync.
-- 🐳 **Self-host friendly** — Docker (amd64/arm64), optional auth, and automatic startup migrations.
+- 🐳 **Self-host friendly** — Docker (amd64/arm64), built-in auth/session support, and automatic startup migrations.
 
 ## 🚀 Start Here
 

@@ -54,6 +54,5 @@ For database variable behavior, see [Environment Variables](../reference/environ
 
 ## State sync summary
 
-- With auth enabled, settings and reading progress are stored in SQL and synced from the app.
-- With auth disabled, settings and reading progress remain local in the browser.
+- Settings and reading progress are stored in SQL and synced from the app.
 - Sync is currently request-based (not realtime push invalidation).

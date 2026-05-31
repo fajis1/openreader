@@ -4,7 +4,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import ClaimDataModal, { type ClaimableCounts } from '@/components/auth/ClaimDataModal';
 import { DexieMigrationModal } from '@/components/documents/DexieMigrationModal';
 import { PrivacyModal } from '@/components/PrivacyModal';
-import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useRuntimeConfig } from '@/contexts/RuntimeConfigContext';
 import { getAllEpubDocuments, getAllHtmlDocuments, getAllPdfDocuments, getAppConfig, setFirstVisit } from '@/lib/client/dexie';
@@ -105,7 +104,6 @@ async function readLocalOnboardingSnapshot(): Promise<LocalOnboardingSnapshot> {
 }
 
 export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
-  const { authEnabled } = useAuthConfig();
   const { data: session, isPending: isSessionPending } = useAuthSession();
   const runtimeConfig = useRuntimeConfig();
   const user = session?.user as { id?: string; isAnonymous?: boolean } | undefined;
@@ -136,12 +134,11 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
 
   const runOnceFlow = useCallback(async () => {
     const local = await readLocalOnboardingSnapshot();
-    const privacyRequired = authEnabled;
+    const privacyRequired = true;
     const privacyAccepted = !privacyRequired || local.privacyAccepted;
 
     const isClaimEligible = Boolean(
-      authEnabled
-      && userId
+      userId
       && !isAnonymous
       && !claimDismissedUsersRef.current.has(userId),
     );
@@ -199,7 +196,7 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
       pendingChangelogOpenRef.current = false;
       setChangelogOpenSignal((value) => value + 1);
     }
-  }, [authEnabled, isAnonymous, userId]);
+  }, [isAnonymous, userId]);
 
   runOnceFlowRef.current = runOnceFlow;
 
@@ -223,12 +220,9 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void runFlow();
-  }, [authEnabled, isAnonymous, runFlow, userId]);
+  }, [isAnonymous, runFlow, userId]);
 
   useEffect(() => {
-    if (!authEnabled) {
-      return;
-    }
     const onPrivacyAccepted = () => {
       void runFlow();
     };
@@ -236,15 +230,11 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener('openreader:privacyAccepted', onPrivacyAccepted);
     };
-  }, [authEnabled, runFlow]);
+  }, [runFlow]);
 
   useEffect(() => {
-    if (!authEnabled) {
-      return () => { };
-    }
-
     return scheduleChangelogCheck({
-      authEnabled,
+      authEnabled: true,
       isSessionPending,
       sessionUserId: userId,
       appVersion: runtimeConfig.appVersion,
@@ -258,7 +248,7 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
       delayMs: 120,
       retryDelayMs: 400,
     });
-  }, [authEnabled, isSessionPending, runFlow, runtimeConfig.appVersion, userId]);
+  }, [isSessionPending, runFlow, runtimeConfig.appVersion, userId]);
 
   const contextValue = useMemo<OnboardingFlowContextValue>(() => ({
     changelogOpenSignal,
@@ -267,21 +257,17 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
   return (
     <OnboardingFlowContext.Provider value={contextValue}>
       {children}
-      {authEnabled && (
-        <PrivacyModal
-          isOpen={activeBlockingModal === 'privacy'}
-          onAccept={handlePrivacyAccepted}
-          onDismiss={() => { }}
-        />
-      )}
-      {authEnabled && (
-        <ClaimDataModal
-          isOpen={activeBlockingModal === 'claim'}
-          claimableCounts={claimableCounts}
-          onDismiss={handleClaimComplete}
-          onClaimed={handleClaimComplete}
-        />
-      )}
+      <PrivacyModal
+        isOpen={activeBlockingModal === 'privacy'}
+        onAccept={handlePrivacyAccepted}
+        onDismiss={() => { }}
+      />
+      <ClaimDataModal
+        isOpen={activeBlockingModal === 'claim'}
+        claimableCounts={claimableCounts}
+        onDismiss={handleClaimComplete}
+        onClaimed={handleClaimComplete}
+      />
       <DexieMigrationModal
         isOpen={activeBlockingModal === 'migration'}
         localCount={migrationCounts.localCount}

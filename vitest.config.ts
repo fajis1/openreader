@@ -1,6 +1,14 @@
 import { defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
 
+if (!process.env.AUTH_SECRET?.trim()) {
+  process.env.AUTH_SECRET = 'vitest-auth-secret';
+}
+
+if (!/^https?:\/\//.test(process.env.BASE_URL ?? '')) {
+  process.env.BASE_URL = 'http://localhost:3003';
+}
+
 const srcDir = fileURLToPath(new URL('./src/', import.meta.url));
 const computeCoreIndex = fileURLToPath(new URL('./compute/core/src/index.ts', import.meta.url));
 const computeCoreApiContracts = fileURLToPath(new URL('./compute/core/src/api-contracts/index.ts', import.meta.url));
@@ -33,6 +41,7 @@ export default defineConfig({
           name: 'openreader',
           environment: 'node',
           include: ['tests/unit/**/*.vitest.spec.ts'],
+          setupFiles: ['tests/unit/setup-env.ts'],
         },
       },
       {

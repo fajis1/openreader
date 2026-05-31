@@ -162,7 +162,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
     const storageUserId = authCtxOrRes.userId ?? unclaimedUserId;
     const storageUserIdHash = hashForLog(storageUserId);
-    const allowedUserIds = authCtxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
+    const allowedUserIds = [storageUserId, unclaimedUserId];
 
     const row = await loadPreferredRow({
       documentId: id,

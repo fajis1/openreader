@@ -66,7 +66,7 @@ function parseAudiobookScopeFromKey(
 }
 
 export default async function globalTeardown(): Promise<void> {
-  // Always clear namespaced no-auth SQL rows from prior runs.
+  // Always clear namespaced unclaimed SQL rows from prior runs.
   await db.delete(audiobookChapters).where(like(audiobookChapters.userId, 'unclaimed::%'));
   await db.delete(audiobooks).where(like(audiobooks.userId, 'unclaimed::%'));
   await db.delete(documents).where(like(documents.userId, 'unclaimed::%'));

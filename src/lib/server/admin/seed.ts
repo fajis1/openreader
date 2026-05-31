@@ -301,29 +301,6 @@ async function seedDefaultAdminProviderFromEnvFallback(): Promise<void> {
   try {
     enc = encryptSecret(apiKey);
   } catch (error) {
-    try {
-      await db
-        .insert(adminSettings)
-        .values({
-          key: 'restrictUserApiKeys',
-          valueJson: JSON.stringify(false) as never,
-          source: 'env-seed',
-          updatedAt: now,
-        })
-        .onConflictDoNothing({ target: adminSettings.key });
-      logDegraded(serverLogger, {
-        event: 'admin.seed.restrict_user_api_keys.defaulted',
-        msg: 'API_KEY present but AUTH_SECRET missing; defaulting restrictUserApiKeys=false',
-        step: 'set_restrict_user_api_keys_fallback',
-      });
-    } catch (fallbackError) {
-      logDegraded(serverLogger, {
-        event: 'admin.seed.restrict_user_api_keys.fallback_write_failed',
-        msg: 'Failed to write restrictUserApiKeys fallback after encryption failure',
-        step: 'set_restrict_user_api_keys_fallback',
-        error: fallbackError,
-      });
-    }
     logDegraded(serverLogger, {
       event: 'admin.seed.provider_key_encrypt.failed',
       msg: 'Failed to encrypt default provider API key',

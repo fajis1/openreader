@@ -169,10 +169,10 @@ export async function GET(request: NextRequest) {
     const ctxOrRes = await requireAuthContext(request);
     if (ctxOrRes instanceof Response) return ctxOrRes;
 
-    const { userId, authEnabled } = ctxOrRes;
+    const { userId } = ctxOrRes;
     const testNamespace = getOpenReaderTestNamespace(request.headers);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(authEnabled, userId, unclaimedUserId);
+    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(userId, unclaimedUserId);
     const existingBookRows = await db
       .select({ userId: audiobooks.userId })
       .from(audiobooks)
@@ -404,10 +404,10 @@ export async function DELETE(request: NextRequest) {
 
     const ctxOrRes = await requireAuthContext(request);
     if (ctxOrRes instanceof Response) return ctxOrRes;
-    const { userId, authEnabled } = ctxOrRes;
+    const { userId } = ctxOrRes;
     const testNamespace = getOpenReaderTestNamespace(request.headers);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(authEnabled, userId, unclaimedUserId);
+    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(userId, unclaimedUserId);
     const existingBookRows = await db
       .select({ userId: audiobooks.userId })
       .from(audiobooks)

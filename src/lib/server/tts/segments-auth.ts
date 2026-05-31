@@ -9,7 +9,7 @@ import type { ReaderType } from '@/types/user-state';
 export type ResolvedSegmentDocumentScope = {
   testNamespace: string | null;
   storageUserId: string;
-  authEnabled: boolean;
+  authEnabled: true;
   userId: string | null;
   isAnonymousUser: boolean;
   documentVersion: number;
@@ -32,7 +32,7 @@ export async function resolveSegmentDocumentScope(
   const testNamespace = getOpenReaderTestNamespace(request.headers);
   const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
   const storageUserId = ctxOrRes.userId ?? unclaimedUserId;
-  const allowedUserIds = ctxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
+  const allowedUserIds = [storageUserId, unclaimedUserId];
 
   const rows = (await db
     .select({
@@ -55,7 +55,7 @@ export async function resolveSegmentDocumentScope(
   return {
     testNamespace,
     storageUserId: doc.userId,
-    authEnabled: ctxOrRes.authEnabled,
+    authEnabled: true,
     userId: ctxOrRes.userId,
     isAnonymousUser: Boolean(ctxOrRes.user?.isAnonymous),
     documentVersion: Number(doc.lastModified),

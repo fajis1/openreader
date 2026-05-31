@@ -208,7 +208,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const testNamespace = getOpenReaderTestNamespace(req.headers);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
     const storageUserId = authCtxOrRes.userId ?? unclaimedUserId;
-    const allowedUserIds = authCtxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
+    const allowedUserIds = [storageUserId, unclaimedUserId];
 
     const rows = await loadRows({ documentId: id, allowedUserIds });
     const row = pickPreferredRow(rows, storageUserId);
@@ -365,7 +365,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const testNamespace = getOpenReaderTestNamespace(req.headers);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
     const storageUserId = authCtxOrRes.userId ?? unclaimedUserId;
-    const allowedUserIds = authCtxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
+    const allowedUserIds = [storageUserId, unclaimedUserId];
 
     const rows = await loadRows({ documentId: id, allowedUserIds });
     const row = pickPreferredRow(rows, storageUserId);
