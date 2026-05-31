@@ -16,7 +16,7 @@ test.describe('Landing and app routing', () => {
     });
 
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: /your documents,\s*read aloud/i })).toBeVisible({
+    await expect(page.getByRole('heading', { name: /hear every document/i })).toBeVisible({
       timeout: 10000,
     });
 
