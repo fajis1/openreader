@@ -41,7 +41,6 @@ docker run --name openreader \
   -p 3003:3003 \
   -p 8333:8333 \
   -v openreader_docstore:/app/docstore \
-  -v /path/to/your/library:/app/docstore/library:ro \
   -e API_BASE=http://host.docker.internal:8880/v1 \
   -e API_KEY=none \
   -e BASE_URL=http://localhost:3003 \
@@ -55,7 +54,6 @@ What this command enables:
 - `-p 3003:3003`: exposes the OpenReader web app/API.
 - `-p 8333:8333`: exposes embedded SeaweedFS S3 endpoint for direct browser presigned upload/download.
 - `-v openreader_docstore:/app/docstore`: persists SQLite metadata, SeaweedFS blob data, and migration/runtime state.
-- `-v /path/to/your/library:/app/docstore/library:ro`: mounts a read-only importable library source.
 - `-e API_BASE=...` / `-e API_KEY=...`: **first-boot seed only.** On the first container start, these are auto-migrated into a `default-openai` admin shared provider stored in the DB (key encrypted at rest). After that, the running app no longer reads them — manage the provider from **Settings → Admin → Shared providers**. See [Admin Panel](./configure/admin-panel).
 - `-e BASE_URL=...` and `-e AUTH_SECRET=...`: required for v4+ auth/session startup.
 - `-e ADMIN_EMAILS=...`: (optional, requires auth) comma-separated emails auto-promoted to admin. Admins see the **Admin** tab in Settings.

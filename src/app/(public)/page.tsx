@@ -91,9 +91,10 @@ export default async function LandingPage() {
 
             <p className="public-hero-copy">
               OpenReader turns EPUB, PDF, TXT, Markdown, and DOCX into a
-              synchronized read-along surface, with genuine text-to-speech,
-              word-level highlighting, and audiobook export. It&rsquo;s open
-              source, and entirely yours to self-host.
+              synchronized read-along surface, reading your original file in a
+              native viewer with genuine text-to-speech, word-level
+              highlighting, and audiobook export. It&rsquo;s open source, and
+              entirely yours to self-host.
             </p>
 
             <div className="public-actions">
@@ -221,9 +222,9 @@ export default async function LandingPage() {
               <span className="public-step-num">03</span>
               <h3>Read, listen, export</h3>
               <p>
-                Follow word-level highlighting as it plays, pick up where you
-                left off on any device, and export a chaptered m4b or mp3
-                audiobook for the road.
+                Follow word-level highlighting right on the original page as it
+                plays, pick up where you left off on any device, and export a
+                chaptered m4b or mp3 audiobook for the road.
               </p>
             </li>
           </ol>
@@ -240,12 +241,14 @@ export default async function LandingPage() {
 
           <div className="public-features">
             <article className="public-feature public-feature-wide">
-              <span className="public-feature-kicker">Parsing</span>
-              <h3>Layout-aware PDF understanding</h3>
+              <span className="public-feature-kicker">Formats</span>
+              <h3>Native EPUB and PDF, kept intact</h3>
               <p>
-                PP-DocLayoutV3 (ONNX) detects structured blocks, stitches
-                content across pages, and aligns highlights to real geometry,
-                so even dense, multi-column PDFs read in the right order.
+                Your file renders in a built-in EPUB and PDF reader, never
+                flattened to plain text. Layout-aware parsing (PP-DocLayoutV3,
+                ONNX) maps the structure underneath, so read-along highlighting
+                follows the true reading order, even in dense, multi-column
+                PDFs.
               </p>
             </article>
 
@@ -346,10 +349,13 @@ export default async function LandingPage() {
                   <span className="public-term-prompt">$</span> docker run --name openreader \{'\n'}
                   {'    '}-p <span className="public-term-accent">3003:3003</span> -p{' '}
                   <span className="public-term-accent">8333:8333</span> \{'\n'}
+                  {'    '}-v <span className="public-term-accent">openreader_docstore:/app/docstore</span> \{'\n'}
                   {'    '}-e BASE_URL=
                   <span className="public-term-accent">http://localhost:3003</span> \{'\n'}
                   {'    '}-e AUTH_SECRET=
                   <span className="public-term-accent">$(openssl rand -hex 32)</span> \{'\n'}
+                  {'    '}-e ADMIN_EMAILS=
+                  <span className="public-term-accent">you@example.com</span> \{'\n'}
                   {'    '}ghcr.io/richardr1126/openreader:latest{'\n'}
                   {'\n'}
                   <span className="public-term-comment"># open the reading room</span>
