@@ -31,7 +31,7 @@ function IconsSkeleton({ iconSize }: { iconSize: IconSize }) {
 function ListSkeleton() {
   return (
     <div className="h-full min-h-0 overflow-y-auto">
-      <div className="sticky top-0 z-10 bg-base border-b border-offbase grid grid-cols-[minmax(0,1fr)_72px_88px_120px_28px] sm:grid-cols-[minmax(0,1fr)_88px_96px_140px_32px]">
+      <div className="sticky top-0 z-10 bg-base border-b border-offbase grid grid-cols-[minmax(0,1fr)_44px_72px_104px_28px] sm:grid-cols-[minmax(0,1fr)_56px_96px_140px_32px]">
         <div className="h-8 flex items-center px-2">
           <div className="h-2.5 w-12 rounded bg-offbase" />
         </div>
@@ -50,7 +50,7 @@ function ListSkeleton() {
         {Array.from({ length: 10 }).map((_, index) => (
           <div
             key={index}
-            className="grid grid-cols-[minmax(0,1fr)_72px_88px_120px_28px] sm:grid-cols-[minmax(0,1fr)_88px_96px_140px_32px] items-center border-b border-offbase h-[35px]"
+            className="grid grid-cols-[minmax(0,1fr)_44px_72px_104px_28px] sm:grid-cols-[minmax(0,1fr)_56px_96px_140px_32px] items-center border-b border-offbase h-[35px]"
           >
             <div className="px-2 flex items-center gap-2">
               <div className="h-3.5 w-3.5 rounded bg-offbase" />

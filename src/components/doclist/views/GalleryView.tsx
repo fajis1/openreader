@@ -7,6 +7,7 @@ import type { DocumentListDocument } from '@/types/documents';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
 import { DocumentPreview } from '@/components/doclist/DocumentPreview';
 import { formatDocumentSize } from '@/components/doclist/formatSize';
+import { buttonClass } from '@/components/formPrimitives';
 import { useDocumentSelection } from '../dnd/DocumentSelectionContext';
 import { DND_DOCUMENT, documentIdentityKey, type DocumentDragItem } from '../dnd/dndTypes';
 
@@ -166,18 +167,25 @@ export function GalleryView({
         setActiveIdx((i) => Math.min(documents.length - 1, i + 1));
       } else if (e.key === 'ArrowLeft') {
         setActiveIdx((i) => Math.max(0, i - 1));
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        const doc = documents[activeIdx];
+        if (doc) {
+          e.preventDefault();
+          onDeleteDoc(doc);
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [documents.length]);
+  }, [documents, activeIdx, onDeleteDoc]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <div className="flex-1 min-h-0 flex items-center justify-center p-6 bg-background">
+      <div className="flex-1 min-h-0 overflow-y-auto bg-background">
+        <div className="min-h-full flex items-center justify-center p-3 sm:p-6">
         {activeDoc ? (
           <div className="w-full max-w-[920px] flex flex-col md:flex-row items-center md:items-start justify-center gap-4 md:gap-6">
-            <div className="flex flex-col items-center gap-3 w-[260px] sm:w-[320px] shrink-0">
+            <div className="flex flex-col items-center gap-3 w-[180px] sm:w-[260px] md:w-[320px] shrink-0">
               <div className="w-full aspect-[3/4] rounded-lg overflow-hidden border border-offbase shadow-lg">
                 <DocumentPreview doc={activeDoc} />
               </div>
@@ -193,20 +201,20 @@ export function GalleryView({
                 <Link
                   href={openHref || '/app'}
                   prefetch={false}
-                  className="h-8 px-4 inline-flex items-center justify-center rounded-md bg-accent text-background text-[12px] font-medium hover:bg-secondary-accent hover:scale-[1.01] transition-all duration-200 ease-out"
+                  className={buttonClass({ variant: 'primary', size: 'sm' })}
                 >
                   Open
                 </Link>
                 <button
                   type="button"
                   onClick={() => onDeleteDoc(activeDoc)}
-                  className="h-8 px-3 rounded-md border border-offbase bg-base text-[12px] text-muted hover:text-accent hover:border-accent hover:bg-offbase hover:scale-[1.01] transition-all duration-200 ease-out"
+                  className={buttonClass({ variant: 'secondary', size: 'sm' })}
                 >
                   Delete
                 </button>
               </div>
             </div>
-            <dl className="w-full max-w-[360px] md:max-w-[340px] grid grid-cols-2 gap-x-2 gap-y-1 rounded-md border border-offbase bg-base px-3 py-2 text-[11px] md:self-center">
+            <dl className="w-full max-w-[280px] sm:max-w-[360px] md:max-w-[340px] grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-offbase bg-base px-3 py-2 text-[11px] md:self-center">
               <dt className="text-muted">Type</dt>
               <dd className="text-foreground text-right uppercase tracking-wide">{activeDoc.type}</dd>
               <dt className="text-muted">Size</dt>
@@ -234,6 +242,7 @@ export function GalleryView({
         ) : (
           <p className="text-[12px] text-muted">No documents to show</p>
         )}
+        </div>
       </div>
 
       <div className="shrink-0 border-t border-offbase bg-gradient-to-b from-base to-offbase/30">
