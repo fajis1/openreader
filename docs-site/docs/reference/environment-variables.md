@@ -348,7 +348,9 @@ There are no dedicated env vars for these runtime settings.
 
 ### FFMPEG_BIN
 
-Override ffmpeg binary path used for audiobook processing.
+Override ffmpeg binary path used for audio processing.
+
+- Used by audiobook processing routes and compute worker Whisper audio decode.
 
 ## Testing and CI
 
