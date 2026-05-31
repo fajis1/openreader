@@ -13,6 +13,7 @@ import * as authSchemaSqlite from "@/db/schema_auth_sqlite";
 import * as authSchemaPostgres from "@/db/schema_auth_postgres";
 import { hashForLog, serverLogger } from '@/lib/server/logger';
 import { logDegraded, logServerError } from '@/lib/server/errors/logging';
+import { tryGetOrigin } from "@/lib/shared/urls";
 
 // Heavy modules (S3 SDK, blobstore, rate-limiter, claim-data) are loaded
 // lazily via dynamic import() inside the beforeDelete / onLinkAccount
@@ -20,14 +21,6 @@ import { logDegraded, logServerError } from '@/lib/server/errors/logging';
 
 // ...
 
-function tryGetOrigin(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    return new URL(url).origin;
-  } catch {
-    return null;
-  }
-}
 
 function getTrustedOrigins(): string[] {
   const origins = new Set<string>();
