@@ -13,12 +13,12 @@ import {
   Field,
   Section,
   ToggleRow,
-  buttonClass,
   inputClass,
   listboxButtonClass,
   listboxOptionClass,
   listboxOptionsClass,
 } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 
 type ProviderType = TtsProviderId;
 

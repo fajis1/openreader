@@ -4,13 +4,6 @@ export {
   Field,
   Section,
   ToggleRow,
-  buttonClass,
-  btnBase,
-  btnDanger,
-  btnGhost,
-  btnOutline,
-  btnPrimary,
-  btnSecondary,
   inputClass,
   listboxButtonClass,
   listboxOptionClass,
@@ -18,3 +11,13 @@ export {
   segmentedButtonClass,
   segmentedGroupClass,
 } from '@/components/formPrimitives';
+
+export {
+  buttonClass,
+  btnBase,
+  btnDanger,
+  btnGhost,
+  btnOutline,
+  btnPrimary,
+  btnSecondary,
+} from '@/components/ui/buttonPrimitives';

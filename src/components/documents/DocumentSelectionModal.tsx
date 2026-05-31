@@ -3,7 +3,7 @@
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react';
 import { Fragment, useEffect, useState } from 'react';
 import { BaseDocument } from '@/types/documents';
-import { buttonClass } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 
 interface DocumentSelectionModalProps {
   isOpen: boolean;

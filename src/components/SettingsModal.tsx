@@ -52,7 +52,6 @@ import { AdminFeaturesPanel } from '@/components/admin/AdminFeaturesPanel';
 import { useSharedProviders } from '@/hooks/useSharedProviders';
 import { useLibraryDocumentsQuery } from '@/hooks/useLibraryDocumentsQuery';
 import {
-  buttonClass,
   inputClass,
   listboxButtonClass,
   listboxOptionClass,
@@ -60,6 +59,7 @@ import {
   segmentedButtonClass,
   segmentedGroupClass,
 } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { fetchChangelogManifest, fetchChangelogReleaseBody } from '@/lib/client/changelog';

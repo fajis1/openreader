@@ -9,7 +9,7 @@ import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { LoadingSpinner } from '@/components/Spinner';
-import { buttonClass } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 import toast from 'react-hot-toast';
 
 export default function SignUpPage() {

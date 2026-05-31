@@ -1,6 +1,6 @@
 import { Fragment, KeyboardEvent } from 'react';
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react';
-import { buttonClass } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 
 interface ConfirmDialogProps {
   isOpen: boolean;

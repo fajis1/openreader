@@ -10,7 +10,7 @@ import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { GithubIcon } from '@/components/icons/Icons';
 import { LoadingSpinner } from '@/components/Spinner';
-import { buttonClass } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 
 function SessionExpiredLoader({ setSessionExpired }: { setSessionExpired: (v: boolean) => void }) {
   const searchParams = useSearchParams();

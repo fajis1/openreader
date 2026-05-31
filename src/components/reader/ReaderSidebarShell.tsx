@@ -4,7 +4,7 @@ import { Fragment, type ReactNode } from 'react';
 import { Transition } from '@headlessui/react';
 import { XCircleIcon } from '@/components/icons/Icons';
 import { useReaderSidebarBounds } from '@/hooks/useReaderSidebarBounds';
-import { buttonClass } from '@/components/formPrimitives';
+import { buttonClass } from '@/components/ui/buttonPrimitives';
 
 interface ReaderSidebarShellProps {
   isOpen: boolean;
