@@ -2,15 +2,13 @@
 
 import {
   Listbox,
-  ListboxButton,
-  ListboxOption,
-  ListboxOptions,
 } from '@headlessui/react';
 import { ChevronUpDownIcon, AudioWaveIcon, CheckIcon } from '@/components/icons/Icons';
 import { useEffect, useMemo, useState } from 'react';
 import { buildKokoroVoiceString, parseKokoroVoiceNames } from '@/lib/shared/kokoro';
 import { type TtsProviderType } from '@/lib/shared/tts-provider-catalog';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
+import { SharedListboxButton, SharedListboxOption, SharedListboxOptions, cn } from '@/components/ui';
 
 export function VoicesControlBase({
   availableVoices,
@@ -34,15 +32,16 @@ export function VoicesControlBase({
     : 'bottom-full right-0 mb-1';
 
   const buttonClass = variant === 'field'
-    ? 'relative cursor-pointer rounded-lg bg-base py-1.5 pl-3 pr-10 text-left text-foreground focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent w-full'
-    : 'flex items-center space-x-0.5 sm:space-x-1 bg-transparent text-foreground text-xs sm:text-sm focus:outline-none cursor-pointer hover:bg-offbase rounded pl-1.5 sm:pl-2 pr-0.5 sm:pr-1 py-0.5 sm:py-1 transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent';
+    ? 'bg-surface pr-10'
+    : 'space-x-0.5 px-1.5 py-0.5 text-xs sm:space-x-1 sm:px-2 sm:py-1 sm:text-sm';
+  const buttonTone = variant === 'field' ? 'default' : 'popover';
 
   const iconClass = variant === 'field'
     ? 'h-3.5 w-3.5 shrink-0'
     : 'h-3 w-3 sm:h-3.5 sm:w-3.5';
 
   const chevronClass = variant === 'field'
-    ? 'h-4 w-4 text-muted'
+    ? 'h-4 w-4 text-soft'
     : 'h-2.5 w-2.5 sm:h-3 sm:w-3';
 
   const providerModelPolicy = resolveTtsProviderModelPolicy({
@@ -85,7 +84,7 @@ export function VoicesControlBase({
   if (availableVoices.length === 0) {
     return (
       <div className="relative">
-        <div className="flex items-center space-x-0.5 sm:space-x-1 bg-transparent text-muted text-xs sm:text-sm rounded pl-1.5 sm:pl-2 pr-0.5 sm:pr-1 py-0.5 sm:py-1">
+        <div className="flex items-center space-x-0.5 sm:space-x-1 bg-transparent text-soft text-xs sm:text-sm rounded pl-1.5 sm:pl-2 pr-0.5 sm:pr-1 py-0.5 sm:py-1">
           <AudioWaveIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
           <span>No voices</span>
         </div>
@@ -121,7 +120,7 @@ export function VoicesControlBase({
             }
           }}
         >
-          <ListboxButton className={buttonClass}>
+          <SharedListboxButton tone={buttonTone} className={buttonClass}>
             {variant === 'field' ? (
               <>
                 <span className="flex items-center gap-2 truncate text-sm font-medium">
@@ -139,15 +138,14 @@ export function VoicesControlBase({
                 <ChevronUpDownIcon className={chevronClass} />
               </>
             )}
-          </ListboxButton>
-          <ListboxOptions className={`absolute ${dropdownPosition} z-50 ${dropdownWidth} !h-auto !min-h-0 !max-h-[50vh] overflow-y-auto overscroll-contain rounded-lg bg-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none`}>
+          </SharedListboxButton>
+          <SharedListboxOptions tone="default" className={cn('absolute !h-auto !min-h-0 !max-h-[50vh]', dropdownPosition, dropdownWidth)}>
             {availableVoices.map((voiceId) => (
-              <ListboxOption
+              <SharedListboxOption
                 key={voiceId}
                 value={voiceId}
-                className={({ active, selected }) =>
-                  `relative cursor-pointer select-none py-1 px-2 sm:py-2 sm:px-3 flex items-center gap-2 ${active ? 'bg-offbase' : ''} ${selected ? 'font-medium bg-accent text-background' : ''} ${selected && active ? 'text-foreground' : ''}`
-                }
+                inset="none"
+                itemClassName="flex items-center gap-2 py-1 sm:py-2"
               >
                 {({ selected }) => (
                   <>
@@ -159,13 +157,13 @@ export function VoicesControlBase({
                     <span className="text-xs sm:text-sm">{voiceId}</span>
                   </>
                 )}
-              </ListboxOption>
+              </SharedListboxOption>
             ))}
-          </ListboxOptions>
+          </SharedListboxOptions>
         </Listbox>
       ) : (
         <Listbox value={currentVoice} onChange={onChangeVoice}>
-          <ListboxButton className={buttonClass}>
+          <SharedListboxButton tone={buttonTone} className={buttonClass}>
             {variant === 'field' ? (
               <>
                 <span className="flex items-center gap-2 truncate text-sm font-medium">
@@ -183,20 +181,19 @@ export function VoicesControlBase({
                 <ChevronUpDownIcon className={chevronClass} />
               </>
             )}
-          </ListboxButton>
-          <ListboxOptions className={`absolute ${dropdownPosition} z-50 ${dropdownWidth} !h-auto !min-h-0 !max-h-[50vh] overflow-y-auto overscroll-contain rounded-lg bg-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none`}>
+          </SharedListboxButton>
+          <SharedListboxOptions tone="default" className={cn('absolute !h-auto !min-h-0 !max-h-[50vh]', dropdownPosition, dropdownWidth)}>
             {availableVoices.map((voiceId) => (
-              <ListboxOption
+              <SharedListboxOption
                 key={voiceId}
                 value={voiceId}
-                className={({ active, selected }) =>
-                  `relative cursor-pointer select-none py-1 px-2 sm:py-2 sm:px-3 ${active ? 'bg-offbase' : ''} ${selected ? 'font-medium bg-accent text-background' : ''} ${selected && active ? 'text-foreground' : ''}`
-                }
+                inset="none"
+                itemClassName="py-1 sm:py-2"
               >
                 <span className="text-xs sm:text-sm">{voiceId}</span>
-              </ListboxOption>
+              </SharedListboxOption>
             ))}
-          </ListboxOptions>
+          </SharedListboxOptions>
         </Listbox>
       )}
     </div>

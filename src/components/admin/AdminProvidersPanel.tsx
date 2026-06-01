@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Input, Listbox, ListboxButton, ListboxOption, ListboxOptions, Menu, MenuButton, MenuItem, MenuItems, Transition } from '@headlessui/react';
+import { Listbox, Menu, MenuButton, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -14,11 +14,15 @@ import {
   Section,
   ToggleRow,
   inputClass,
-  listboxButtonClass,
-  listboxOptionClass,
-  listboxOptionsClass,
-} from '@/components/formPrimitives';
-import { buttonClass } from '@/components/ui/buttonPrimitives';
+  SharedListboxButton,
+  SharedListboxOption,
+  SharedListboxOptions,
+  Button,
+  IconButton,
+  Input,
+  MenuItemsSurface,
+  MenuActionItem,
+} from '@/components/ui';
 
 type ProviderType = TtsProviderId;
 
@@ -364,7 +368,8 @@ export function AdminProvidersPanel() {
           {!editingId ? (
             <Button
               onClick={startCreate}
-              className={buttonClass({ variant: 'primary', size: 'icon', className: 'h-7 w-7' })}
+              variant="primary"
+              size="icon"
               aria-label="Add provider"
               title="Add provider"
             >
@@ -419,24 +424,23 @@ export function AdminProvidersPanel() {
                   setCustomModelInput('');
                 }}
               >
-                <ListboxButton className={listboxButtonClass}>
+                <SharedListboxButton>
                   <span className="block truncate">{selectedProviderType.label}</span>
                   <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
                     <ChevronUpDownIcon className="h-4 w-4 text-muted" />
                   </span>
-                </ListboxButton>
+                </SharedListboxButton>
                 <Transition
                   as={Fragment}
                   leave="transition ease-in duration-100"
                   leaveFrom="opacity-100"
                   leaveTo="opacity-0"
                 >
-                  <ListboxOptions anchor="bottom start" className={listboxOptionsClass}>
+                  <SharedListboxOptions anchor="bottom start">
                     {PROVIDER_TYPE_OPTIONS.map((opt) => (
-                      <ListboxOption
+                      <SharedListboxOption
                         key={opt.value}
                         value={opt}
-                        className={({ active }) => listboxOptionClass(active)}
                       >
                         {({ selected }) => (
                           <>
@@ -450,9 +454,9 @@ export function AdminProvidersPanel() {
                             )}
                           </>
                         )}
-                      </ListboxOption>
+                      </SharedListboxOption>
                     ))}
-                  </ListboxOptions>
+                  </SharedListboxOptions>
                 </Transition>
               </Listbox>
             </Field>
@@ -478,26 +482,25 @@ export function AdminProvidersPanel() {
                     setCustomModelInput('');
                   }}
                 >
-                <ListboxButton className={listboxButtonClass}>
+                <SharedListboxButton>
                   <span className="block truncate">
                     {selectedModelDefinition?.name ?? 'Select model'}
                   </span>
                     <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
                       <ChevronUpDownIcon className="h-4 w-4 text-muted" />
                     </span>
-                  </ListboxButton>
+                  </SharedListboxButton>
                   <Transition
                     as={Fragment}
                     leave="transition ease-in duration-100"
                     leaveFrom="opacity-100"
                     leaveTo="opacity-0"
                   >
-                    <ListboxOptions anchor="bottom start" className={listboxOptionsClass}>
+                    <SharedListboxOptions anchor="bottom start">
                       {modelDefinitions.map((model) => (
-                        <ListboxOption
+                        <SharedListboxOption
                           key={model.id}
                           value={model.id}
-                          className={({ active }) => listboxOptionClass(active)}
                         >
                           {({ selected }) => (
                             <>
@@ -516,9 +519,9 @@ export function AdminProvidersPanel() {
                               )}
                             </>
                           )}
-                        </ListboxOption>
+                        </SharedListboxOption>
                       ))}
-                    </ListboxOptions>
+                    </SharedListboxOptions>
                   </Transition>
                 </Listbox>
                 {supportsCustomModel && selectedModelId === 'custom' && (
@@ -589,13 +592,14 @@ export function AdminProvidersPanel() {
           />
 
           <div className="pt-1 flex justify-end gap-2">
-            <Button onClick={cancelEdit} className={buttonClass({ variant: 'secondary', size: 'sm' })}>
+            <Button onClick={cancelEdit} variant="secondary" size="sm">
               Cancel
             </Button>
             <Button
               onClick={submit}
               disabled={submitDisabled}
-              className={buttonClass({ variant: 'primary', size: 'sm' })}
+              variant="primary"
+              size="sm"
             >
               {saveMutation.isPending ? 'Saving…' : isEditingExisting ? 'Save changes' : 'Create'}
             </Button>
@@ -637,7 +641,9 @@ export function AdminProvidersPanel() {
                 </div>
                 <Menu as="div" className="relative shrink-0">
                   <MenuButton
-                    className="inline-flex items-center justify-center h-7 w-7 rounded-md border border-offbase bg-base text-muted hover:text-accent hover:bg-offbase transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                    as={IconButton}
+                    tone="surface"
+                    size="sm"
                     title="Provider actions"
                     aria-label="Provider actions"
                     disabled={!!editingId || deleteMutation.isPending || toggleEnabledMutation.isPending || setDefaultMutation.isPending}
@@ -653,56 +659,26 @@ export function AdminProvidersPanel() {
                     leaveFrom="transform opacity-100 scale-100"
                     leaveTo="transform opacity-0 scale-95"
                   >
-                    <MenuItems
+                    <MenuItemsSurface
                       anchor="bottom end"
-                      className="z-50 mt-2 min-w-[170px] rounded-md bg-base shadow-lg ring-1 ring-black/5 focus:outline-none p-1"
+                      className="z-50 mt-2 min-w-[170px] bg-base focus:outline-none"
                     >
-                      <MenuItem>
-                        {({ active }) => (
-                          <button
-                            type="button"
-                            onClick={() => startEdit(p)}
-                            className={`${active ? 'bg-offbase text-accent' : 'text-foreground'} flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs`}
-                          >
-                            Edit
-                          </button>
-                        )}
-                      </MenuItem>
-                      <MenuItem disabled={!p.enabled || defaultProviderSlug === p.slug}>
-                        {({ active, disabled }) => (
-                          <button
-                            type="button"
-                            onClick={() => setDefault(p.slug)}
-                            disabled={disabled}
-                            className={`${disabled ? 'text-muted/60 cursor-not-allowed' : active ? 'bg-offbase text-accent' : 'text-foreground'} flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs`}
-                          >
-                            Set as default
-                          </button>
-                        )}
-                      </MenuItem>
-                      <MenuItem>
-                        {({ active }) => (
-                          <button
-                            type="button"
-                            onClick={() => toggleEnabled(p)}
-                            className={`${active ? 'bg-offbase text-accent' : 'text-foreground'} flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs`}
-                          >
-                            {p.enabled ? 'Disable' : 'Enable'}
-                          </button>
-                        )}
-                      </MenuItem>
-                      <MenuItem>
-                        {({ active }) => (
-                          <button
-                            type="button"
-                            onClick={() => remove(p.id)}
-                            className={`${active ? 'bg-offbase' : ''} text-red-500 flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs`}
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </MenuItem>
-                    </MenuItems>
+                      <MenuActionItem onClick={() => startEdit(p)}>
+                        Edit
+                      </MenuActionItem>
+                      <MenuActionItem
+                        onClick={() => setDefault(p.slug)}
+                        disabled={!p.enabled || defaultProviderSlug === p.slug}
+                      >
+                        Set as default
+                      </MenuActionItem>
+                      <MenuActionItem onClick={() => toggleEnabled(p)}>
+                        {p.enabled ? 'Disable' : 'Enable'}
+                      </MenuActionItem>
+                      <MenuActionItem tone="danger" onClick={() => remove(p.id)}>
+                        Delete
+                      </MenuActionItem>
+                    </MenuItemsSurface>
                   </Transition>
                 </Menu>
               </div>

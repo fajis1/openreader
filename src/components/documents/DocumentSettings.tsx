@@ -15,8 +15,7 @@ import {
   clampSegmentPreloadSentenceLookahead,
   clampTtsSegmentMaxBlockLength,
 } from '@/types/config';
-import { Section, ToggleRow, CheckItem, segmentedButtonClass, segmentedGroupClass } from '@/components/formPrimitives';
-import { buttonClass } from '@/components/ui/buttonPrimitives';
+import { IconButton, RangeInput, Section, ToggleRow, CheckItem, SegmentedControl } from '@/components/ui';
 import { RefreshIcon, SparkleIcon } from '@/components/icons/Icons';
 import type { ParsedPdfBlockKind, PdfParseStatus } from '@/types/parsed-pdf';
 import { isForceReparseDisabled } from '@/lib/client/pdf/force-reparse';
@@ -51,8 +50,6 @@ const viewTypeTextMapping = [
   { id: 'scroll', name: 'Continuous Scroll' },
 ];
 
-const rangeInputClassName = 'w-full bg-offbase rounded-md appearance-none cursor-pointer accent-accent [&::-webkit-slider-runnable-track]:bg-offbase [&::-webkit-slider-runnable-track]:rounded-md [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-moz-range-track]:bg-offbase [&::-moz-range-track]:rounded-md [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent';
-
 type RangeSettingProps = {
   label: string;
   value: number;
@@ -80,14 +77,13 @@ function RangeSetting({
     <div className="space-y-1.5">
       <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</label>
       <div className="flex items-center gap-3">
-        <input
-          type="range"
+        <RangeInput
           min={min}
           max={max}
           step={step}
           value={value}
           onChange={(event) => onChange(Number(event.target.value))}
-          className={`flex-1 ${rangeInputClassName}`}
+          className="flex-1"
         />
         <span className={`${valueWidth} text-xs font-semibold text-right text-foreground`}>{formatter(value)}</span>
       </div>
@@ -163,27 +159,13 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, pdf }: {
           >
             <div className="space-y-1.5">
               <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">Page mode</label>
-              <div
-                role="radiogroup"
-                aria-label="Page mode"
-                className={`${segmentedGroupClass} grid-cols-3`}
-              >
-                {viewTypeTextMapping.map((view) => {
-                  const active = selectedView.id === view.id;
-                  return (
-                    <button
-                      key={view.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      onClick={() => updateConfigKey('viewType', view.id as ViewType)}
-                      className={segmentedButtonClass(active)}
-                    >
-                      {view.name}
-                    </button>
-                  );
-                })}
-              </div>
+              <SegmentedControl
+                value={selectedView.id as ViewType}
+                options={viewTypeTextMapping.map((view) => ({ value: view.id as ViewType, label: view.name }))}
+                onChange={(nextViewType) => updateConfigKey('viewType', nextViewType)}
+                ariaLabel="Page mode"
+                className="grid-cols-3"
+              />
               {selectedView.id === 'scroll' ? (
                 <p className="text-xs text-warning">Scroll mode may be slower on large PDFs.</p>
               ) : null}
@@ -214,20 +196,20 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, pdf }: {
             action={
               <div className="flex flex-col items-end gap-1">
                 <span className="flex items-center gap-1 text-muted">
-                  <SparkleIcon className="h-3 w-3 text-accent/70" />
+                  <SparkleIcon className="h-3 w-3 text-accent" />
                   <span className="text-xs">PP-DocLayout-V3</span>
                 </span>
                 <span className="flex items-center gap-1 text-xs text-muted">
                   <span>{pdf.parseStatus ?? 'pending'}</span>
-                  <button
-                    type="button"
-                    className={buttonClass({ variant: 'ghost', size: 'icon', className: '!h-5 !w-5 hover:scale-[1.1] shrink-0' })}
+                  <IconButton
+                    size="xs"
+                    className="shrink-0"
                     onClick={pdf.onForceReparse}
                     disabled={isForceReparseDisabled(pdf.parseStatus)}
                     title="Force reparse"
                   >
                     <RefreshIcon className={`h-3 w-3 ${isForceReparseDisabled(pdf.parseStatus) ? 'animate-spin' : ''}`} />
-                  </button>
+                  </IconButton>
                 </span>
               </div>
             }
@@ -240,7 +222,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, pdf }: {
               disabled={pdf.parseStatus !== 'ready'}
               variant="flat"
             />
-            <details className="rounded-md border border-offbase bg-base/50 px-3 py-2">
+            <details className="rounded-md border border-offbase bg-surface-solid px-3 py-2">
               <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-muted">
                 Skip Block Kinds While Reading Aloud
               </summary>

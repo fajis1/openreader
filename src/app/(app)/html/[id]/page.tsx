@@ -1,7 +1,6 @@
 'use client';
 
 import { useParams, useRouter } from "next/navigation";
-import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DocumentSkeleton } from '@/components/documents/DocumentSkeleton';
 import { HTMLViewer } from '@/components/views/HTMLViewer';
@@ -18,6 +17,7 @@ import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { useUnmountCleanupRef } from '@/hooks/useUnmountCleanupRef';
+import { ButtonLink } from '@/components/ui';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import { useHtmlDocument } from './useHtmlDocument';
@@ -157,16 +157,13 @@ export default function HTMLPage() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen">
-        <p className="text-red-500 mb-4">{error}</p>
-        <Link
-          href="/app"
-          className="inline-flex items-center px-3 py-1 bg-base text-foreground rounded-lg hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
-        >
-          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <p className="text-danger mb-4">{error}</p>
+        <ButtonLink href="/app" variant="secondary" size="md" className="gap-2">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
           Back to Documents
-        </Link>
+        </ButtonLink>
       </div>
     );
   }
@@ -175,16 +172,12 @@ export default function HTMLPage() {
     <>
       <Header
         left={
-          <Link
-            href="/app"
-            className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
-            aria-label="Back to documents"
-          >
-            <svg className="w-3 h-3 mr-2" fill="currentColor" stroke="currentColor" viewBox="0 0 24 24">
+          <ButtonLink href="/app" variant="secondary" size="sm" className="gap-2" aria-label="Back to documents">
+            <svg className="w-3 h-3" fill="currentColor" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
             Documents
-          </Link>
+          </ButtonLink>
         }
         title={isLoading ? 'Loading…' : (currDocName || '')}
         right={
@@ -233,7 +226,7 @@ export default function HTMLPage() {
         />
       )}
       {isAtLimit ? (
-        <div className="sticky bottom-0 z-30 w-full border-t border-offbase bg-base" data-app-ttsbar>
+        <div className="sticky bottom-0 z-30 w-full border-t border-line-soft bg-surface" data-app-ttsbar>
           <div className="px-2 md:px-3 pt-1 pb-[max(0.375rem,env(safe-area-inset-bottom))] flex items-center justify-center gap-1 min-h-10">
             <RateLimitPauseButton />
             <RateLimitBanner />

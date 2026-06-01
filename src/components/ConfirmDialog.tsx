@@ -1,6 +1,5 @@
-import { Fragment, KeyboardEvent } from 'react';
-import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react';
-import { buttonClass } from '@/components/ui/buttonPrimitives';
+import { KeyboardEvent } from 'react';
+import { Button, ModalFrame, ModalTitle } from '@/components/ui';
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -31,77 +30,25 @@ export function ConfirmDialog({
   };
 
   return (
-    <Transition appear show={isOpen} as={Fragment}>
-      <Dialog 
-        as="div" 
-        role={undefined}
-        className="relative z-50" 
-        onClose={onClose}
-        onKeyDown={handleKeyDown}
-      >
-        <TransitionChild
-          as={Fragment}
-          enter="ease-out duration-300"
-          enterFrom="opacity-0"
-          enterTo="opacity-100"
-          leave="ease-in duration-200"
-          leaveFrom="opacity-100"
-          leaveTo="opacity-0"
+    <ModalFrame open={isOpen} onClose={onClose} onKeyDown={handleKeyDown} panelTestId="confirm-dialog-panel">
+      <ModalTitle>{title}</ModalTitle>
+      <div className="mt-2">
+        <p className="text-sm text-soft break-words">{message}</p>
+      </div>
+
+      <div className="mt-6 flex justify-end space-x-3">
+        <Button variant="outline" size="sm" onClick={onClose}>
+          {cancelText}
+        </Button>
+        <Button
+          variant={isDangerous ? 'danger' : 'primary'}
+          size="sm"
+          className="text-wrap"
+          onClick={onConfirm}
         >
-          <div className="fixed inset-0 overlay-dim backdrop-blur-sm" />
-        </TransitionChild>
-
-        <div className="fixed inset-0 overflow-y-auto">
-          <div className="flex min-h-full items-start justify-center p-4 pt-6 text-center sm:items-center sm:pt-4">
-            <TransitionChild
-              as={Fragment}
-              enter="ease-out duration-300"
-              enterFrom="opacity-0 scale-95"
-              enterTo="opacity-100 scale-100"
-              leave="ease-in duration-200"
-              leaveFrom="opacity-100 scale-100"
-              leaveTo="opacity-0 scale-95"
-            >
-              <DialogPanel role='dialog' className="w-full max-w-md transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
-                <DialogTitle
-                  as="h3"
-                  className="text-lg font-semibold leading-6 text-foreground"
-                >
-                  {title}
-                </DialogTitle>
-                <div className="mt-2">
-                  <p className="text-sm text-foreground/90 break-words">{message}</p>
-                </div>
-
-                <div className="mt-6 flex justify-end space-x-3">
-                  <button
-                    type="button"
-                    className={buttonClass({
-                      variant: 'outline',
-                      size: 'sm',
-                      className: 'hover:scale-[1.04]',
-                    })}
-                    onClick={onClose}
-                  >
-                    {cancelText}
-                  </button>
-                  <button
-                    type="button"
-                    className={buttonClass({
-                      variant: isDangerous ? 'danger' : 'primary',
-                      size: 'sm',
-                      className: 'text-wrap hover:scale-[1.04]',
-                    })}
-                    onClick={onConfirm}
-                  >
-                    {confirmText}
-                  </button>
-                </div>
-              </DialogPanel>
-            </TransitionChild>
-          </div>
-        </div>
-      </Dialog>
-    </Transition>
+          {confirmText}
+        </Button>
+      </div>
+    </ModalFrame>
   );
 }

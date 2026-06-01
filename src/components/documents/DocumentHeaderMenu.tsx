@@ -1,10 +1,11 @@
 'use client';
 
-import { Menu, MenuButton, MenuItem, MenuItems, Transition } from '@headlessui/react';
+import { Menu, MenuButton, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
 import { DotsVerticalIcon, FileSettingsIcon, DownloadIcon, ListIcon } from '@/components/icons/Icons';
 import { ZoomControl } from '@/components/documents/ZoomControl';
 import { UserMenu } from '@/components/auth/UserMenu';
+import { IconButton, MenuActionItem, MenuItemsSurface, ToolbarButton } from '@/components/ui';
 
 interface DocumentHeaderMenuProps {
   zoomLevel: number;
@@ -47,45 +48,33 @@ export function DocumentHeaderMenu({
         max={maxZoom}
       />
       {onOpenSegments && (
-        <button
+        <ToolbarButton
           onClick={onOpenSegments}
-          className={`inline-flex items-center py-1 px-2 rounded-md border bg-base text-xs transition-all duration-200 ease-in-out hover:scale-[1.09] ${
-            isSegmentsOpen
-              ? 'border-accent text-accent bg-offbase'
-              : 'border-offbase text-foreground hover:bg-offbase hover:text-accent'
-          }`}
+          active={isSegmentsOpen}
           aria-label={isSegmentsOpen ? 'Hide segments sidebar' : 'Open segments sidebar'}
           title={isSegmentsOpen ? 'Hide Segments' : 'Segments'}
         >
-          <ListIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09]" />
-        </button>
+          <ListIcon className="w-4 h-4 transform transition-transform duration-base ease-standard" />
+        </ToolbarButton>
       )}
       {showAudiobookExport && onOpenAudiobook && (
-        <button
+        <ToolbarButton
           onClick={onOpenAudiobook}
-          className={`inline-flex items-center py-1 px-2 rounded-md border bg-base text-xs transition-all duration-200 ease-in-out hover:scale-[1.09] ${
-            isAudiobookOpen
-              ? 'border-accent text-accent bg-offbase'
-              : 'border-offbase text-foreground hover:bg-offbase hover:text-accent'
-          }`}
+          active={isAudiobookOpen}
           aria-label={isAudiobookOpen ? 'Hide audiobook export' : 'Open audiobook export'}
           title={isAudiobookOpen ? 'Hide Export Audiobook' : 'Export Audiobook'}
         >
-          <DownloadIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09]" />
-        </button>
+          <DownloadIcon className="w-4 h-4 transform transition-transform duration-base ease-standard" />
+        </ToolbarButton>
       )}
-      <button
+      <ToolbarButton
         onClick={onOpenSettings}
-        className={`inline-flex items-center py-1 px-2 rounded-md border bg-base text-xs transition-all duration-200 ease-in-out hover:scale-[1.09] ${
-          isSettingsOpen
-            ? 'border-accent text-accent bg-offbase'
-            : 'border-offbase text-foreground hover:bg-offbase hover:text-accent'
-        }`}
+        active={isSettingsOpen}
         aria-label={isSettingsOpen ? 'Hide settings' : 'Open settings'}
         title={isSettingsOpen ? 'Hide Settings' : 'Settings'}
       >
-        <FileSettingsIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09]" />
-      </button>
+        <FileSettingsIcon className="w-4 h-4 transform transition-transform duration-base ease-standard" />
+      </ToolbarButton>
       <UserMenu />
     </div>
   );
@@ -95,35 +84,30 @@ export function DocumentHeaderMenu({
     <div className="sm:hidden flex items-center">
       <Menu as="div" className="relative inline-block text-left">
         <MenuButton
-          className="inline-flex items-center justify-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          as={IconButton}
+          tone="surface"
+          size="sm"
           title="Menu"
         >
-          <DotsVerticalIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent" />
+          <DotsVerticalIcon className="w-4 h-4 transform transition-transform duration-base ease-standard hover:text-accent" />
         </MenuButton>
         <Transition
           as={Fragment}
-          enter="transition ease-out duration-100"
+          enter="transition ease-standard duration-fast"
           enterFrom="transform opacity-0 scale-95"
           enterTo="transform opacity-100 scale-100"
-          leave="transition ease-in duration-75"
+          leave="transition ease-standard duration-fast"
           leaveFrom="transform opacity-100 scale-100"
           leaveTo="transform opacity-0 scale-95"
         >
-          <MenuItems className="absolute right-0 mt-2 min-w-max origin-top-right divide-y divide-offbase rounded-md bg-base shadow-lg ring-1 ring-black/5 focus:outline-none z-50">
+          <MenuItemsSurface className="absolute right-0 z-50 mt-2 min-w-max origin-top-right divide-y divide-line-soft focus:outline-none">
             {/* Zoom Controls Section */}
             <div className="px-4 py-3">
-              <p className="text-xs font-medium text-muted mb-2">Zoom / Padding</p>
+              <p className="text-xs font-medium text-soft mb-2">Zoom / Padding</p>
               <div className="flex justify-center">
                 <ZoomControl
                   value={zoomLevel}
-                  onIncrease={() => {
-                    // We wrap in a handler to stop propagation if needed, 
-                    // but ZoomControl buttons handle their own clicks.
-                    // However, Menu might close on click?
-                    // Headless UI Menu closes on click inside MenuItem, but these are just buttons in a div.
-                    // It should NOT close unless we click a MenuItem.
-                    onZoomIncrease();
-                  }}
+                  onIncrease={onZoomIncrease}
                   onDecrease={onZoomDecrease}
                   min={minZoom}
                   max={maxZoom}
@@ -134,52 +118,28 @@ export function DocumentHeaderMenu({
             {/* Actions Section */}
             <div className="p-1">
               {onOpenSegments && (
-                <MenuItem>
-                  {({ active }) => (
-                    <button
-                      onClick={onOpenSegments}
-                      className={`${active || isSegmentsOpen ? 'bg-offbase text-accent' : 'text-foreground'
-                        } group flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs`}
-                    >
-                      <ListIcon className="h-4 w-4" />
-                      {isSegmentsOpen ? 'Hide Segments' : 'Segments'}
-                    </button>
-                  )}
-                </MenuItem>
+                <MenuActionItem onClick={onOpenSegments} activeOverride={isSegmentsOpen}>
+                  <ListIcon className="h-4 w-4" />
+                  {isSegmentsOpen ? 'Hide Segments' : 'Segments'}
+                </MenuActionItem>
               )}
               {showAudiobookExport && onOpenAudiobook && (
-                <MenuItem>
-                  {({ active }) => (
-                    <button
-                      onClick={onOpenAudiobook}
-                      className={`${active || isAudiobookOpen ? 'bg-offbase text-accent' : 'text-foreground'
-                        } group flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs`}
-                    >
-                      <DownloadIcon className="h-4 w-4" />
-                      {isAudiobookOpen ? 'Hide Audiobook' : 'Export Audiobook'}
-                    </button>
-                  )}
-                </MenuItem>
+                <MenuActionItem onClick={onOpenAudiobook} activeOverride={isAudiobookOpen}>
+                  <DownloadIcon className="h-4 w-4" />
+                  {isAudiobookOpen ? 'Hide Audiobook' : 'Export Audiobook'}
+                </MenuActionItem>
               )}
-              <MenuItem>
-                {({ active }) => (
-                  <button
-                    onClick={onOpenSettings}
-                    className={`${active || isSettingsOpen ? 'bg-offbase text-accent' : 'text-foreground'
-                      } group flex w-full items-center gap-2 rounded-md px-2 py-2 text-xs`}
-                  >
-                    <FileSettingsIcon className="h-4 w-4" />
-                    {isSettingsOpen ? 'Hide Settings' : 'Settings'}
-                  </button>
-                )}
-              </MenuItem>
+              <MenuActionItem onClick={onOpenSettings} activeOverride={isSettingsOpen}>
+                <FileSettingsIcon className="h-4 w-4" />
+                {isSettingsOpen ? 'Hide Settings' : 'Settings'}
+              </MenuActionItem>
             </div>
 
             {/* Auth Section */}
-            <div className="p-2 border-t border-offbase flex justify-center">
+            <div className="p-2 border-t border-line-soft flex justify-center">
               <UserMenu />
             </div>
-          </MenuItems>
+          </MenuItemsSurface>
         </Transition>
       </Menu>
     </div>

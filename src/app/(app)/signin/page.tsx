@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { Button, Input } from '@headlessui/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getAuthClient } from '@/lib/client/auth-client';
@@ -10,7 +9,7 @@ import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { GithubIcon } from '@/components/icons/Icons';
 import { LoadingSpinner } from '@/components/Spinner';
-import { buttonClass } from '@/components/ui/buttonPrimitives';
+import { Button, Field, Input, Surface } from '@/components/ui';
 
 function SessionExpiredLoader({ setSessionExpired }: { setSessionExpired: (v: boolean) => void }) {
   const searchParams = useSearchParams();
@@ -120,11 +119,11 @@ function SignInContent() {
         <SessionExpiredLoader setSessionExpired={setSessionExpired} />
       </Suspense>
 
-        <div className="w-full max-w-md bg-base rounded-2xl shadow-xl p-6">
+        <Surface elevation="3" className="w-full max-w-md p-6">
           <h1 className="text-xl font-semibold text-foreground">
             {sessionExpired ? 'Session Expired' : 'Connect Account'}
           </h1>
-          <p className="text-sm text-muted mt-1">
+          <p className="text-sm text-soft mt-1">
             {sessionExpired
               ? 'Please sign in again to continue'
               : 'Connect an email account to sync your data across devices'}
@@ -132,45 +131,41 @@ function SignInContent() {
 
         {/* Alerts */}
         {sessionExpired && (
-          <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-            <p className="text-sm text-amber-700 dark:text-amber-400">
+          <div className="mt-4 p-3 bg-accent-wash border border-accent-line rounded-lg">
+            <p className="text-sm text-accent ">
               Your session has expired. Please sign in again.
             </p>
           </div>
         )}
 
         {error && (
-          <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-            <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+          <div className="mt-4 p-3 bg-danger-wash border border-danger rounded-lg">
+            <p className="text-sm text-danger">{error}</p>
           </div>
         )}
 
         <div className="mt-6 space-y-4">
           {/* Email */}
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Email</label>
+          <Field label="Email">
             <Input
               type="email"
               value={email}
               onChange={(e) => { setEmail(e.target.value); setError(null); }}
               placeholder="me@example.com"
-              className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm 
-                       focus:outline-none focus:ring-2 focus:ring-accent"
+              controlSize="lg"
             />
-          </div>
+          </Field>
 
           {/* Password */}
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Password</label>
+          <Field label="Password">
             <Input
               type="password"
               value={password}
               onChange={(e) => { setPassword(e.target.value); setError(null); }}
               placeholder="Password"
-              className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm 
-                       focus:outline-none focus:ring-2 focus:ring-accent"
+              controlSize="lg"
             />
-          </div>
+          </Field>
 
           {/* Remember Me */}
           <label className="flex items-center gap-2 cursor-pointer">
@@ -178,7 +173,7 @@ function SignInContent() {
               type="checkbox"
               checked={rememberMe}
               onChange={(e) => setRememberMe(e.target.checked)}
-              className="rounded border-muted text-accent focus:ring-accent"
+              className="rounded border-muted text-accent focus:ring-accent-line"
             />
             <span className="text-sm text-foreground">Remember me</span>
           </label>
@@ -188,7 +183,9 @@ function SignInContent() {
             type="submit"
             disabled={isAnyLoading}
             onClick={handleSignIn}
-            className={buttonClass({ variant: 'primary', size: 'md', className: 'w-full hover:scale-[1.02]' })}
+            variant="primary"
+            size="md"
+            className="w-full"
           >
             {loadingEmail ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Connect'}
           </Button>
@@ -199,11 +196,9 @@ function SignInContent() {
             type="button"
             disabled={isAnyLoading}
             onClick={handleGithubSignIn}
-            className={buttonClass({
-              variant: 'outline',
-              size: 'md',
-              className: 'w-full hover:scale-[1.02] flex items-center justify-center gap-2',
-            })}
+            variant="outline"
+            size="md"
+            className="w-full gap-2"
           >
             {loadingGithub ? (
               <LoadingSpinner className="w-4 h-4" />
@@ -222,7 +217,9 @@ function SignInContent() {
               type="button"
               disabled={isAnyLoading}
               onClick={handleAnonymousContinue}
-              className={buttonClass({ variant: 'outline', size: 'md', className: 'w-full hover:scale-[1.02]' })}
+              variant="outline"
+              size="md"
+              className="w-full"
             >
               {loadingAnonymous ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Continue anonymously'}
             </Button>
@@ -230,16 +227,16 @@ function SignInContent() {
         </div>
 
         {/* Footer */}
-        <div className="mt-6 pt-4 border-t border-offbase text-center space-y-2">
+        <div className="mt-6 pt-4 border-t border-line-soft text-center space-y-2">
           {enableUserSignups && (
-            <p className="text-xs text-muted">
+            <p className="text-xs text-soft">
               Don&apos;t have an account?{' '}
               <Link href="/signup" className="underline hover:text-foreground">
                 Sign up
               </Link>
             </p>
           )}
-          <p className="text-xs text-muted">
+          <p className="text-xs text-soft">
             By signing in, you agree to our{' '}
             <button
               onClick={() => showPrivacyModal()}
@@ -249,7 +246,7 @@ function SignInContent() {
             </button>
           </p>
         </div>
-      </div>
+      </Surface>
     </div>
   );
 }

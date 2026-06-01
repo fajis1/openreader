@@ -1,14 +1,14 @@
 'use client';
 
 import { Fragment, type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Popover, PopoverButton, PopoverPanel, Transition } from '@headlessui/react';
+import { Popover, PopoverButton, Transition } from '@headlessui/react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Book } from 'epubjs';
 import toast from 'react-hot-toast';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { RefreshIcon, InfoIcon } from '@/components/icons/Icons';
-import { buttonClass } from '@/components/ui/buttonPrimitives';
+import { Button, IconButton, PopoverSurface } from '@/components/ui';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { compareSegmentLocators, locatorGroupKey, locatorIdentityKey } from '@/lib/shared/tts-locator';
 import { buildSegmentKey, buildSegmentKeyPrefix } from '@/lib/shared/tts-segment-plan';
@@ -99,7 +99,7 @@ function settingsAreEqual(a: TTSSegmentSettings | null, b: TTSSegmentSettings | 
 
 function statusColor(status: TTSSegmentVariant['status']): string {
   if (status === 'completed') return 'bg-accent';
-  if (status === 'error') return 'bg-red-500';
+  if (status === 'error') return 'bg-danger';
   return 'bg-muted';
 }
 
@@ -632,33 +632,27 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
 
   const headerActions = (
     <>
-      <button
-        type="button"
+      <Button
         onClick={() => void handleClearCache()}
         aria-label="Clear segments cache"
         title="Clear cache for listed segments"
         disabled={isClearingSegments}
-        className={buttonClass({
-          variant: 'secondary',
-          size: 'xs',
-          className: 'h-8 px-2 text-muted',
-        })}
+        variant="secondary"
+        size="xs"
+        className="h-8 px-2 text-soft"
       >
         {isClearingSegments ? 'Clearing…' : 'Clear'}
-      </button>
-      <button
-        type="button"
+      </Button>
+      <IconButton
         onClick={handleRefresh}
         aria-label="Refresh segments"
         title="Refresh"
-        className={buttonClass({
-          variant: 'secondary',
-          size: 'icon',
-          className: 'h-8 w-8 text-muted',
-        })}
+        tone="surface"
+        size="md"
+        className="h-8 w-8 text-soft"
       >
         <RefreshIcon className="w-3.5 h-3.5" />
-      </button>
+      </IconButton>
     </>
   );
 
@@ -672,8 +666,8 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
       headerActions={headerActions}
       bodyClassName="flex-1 overflow-y-auto px-0 py-0"
     >
-      <div className="px-4 py-2 border-b border-offbase">
-        <div className="text-xs text-muted">
+      <div className="px-4 py-2 border-b border-line-soft">
+        <div className="text-xs text-soft">
           {hasLoadedManifest ? (
             <>
               {rowsToRender.length} indexed
@@ -687,9 +681,9 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
               ) : null}
             </>
           ) : isManifestLoading ? (
-            <div className="animate-pulse h-3 w-36 rounded bg-offbase" aria-label="Loading segment summary" aria-busy="true" />
+            <div className="animate-pulse h-3 w-36 rounded bg-surface-sunken" aria-label="Loading segment summary" aria-busy="true" />
           ) : hasManifestError ? (
-            <span className="text-red-500">error</span>
+            <span className="text-danger">error</span>
           ) : (
             <span>—</span>
           )}
@@ -698,23 +692,23 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
 
       <div ref={listRef} className="flex-1 overflow-y-auto">
               {hasManifestError && (
-                <div className="px-4 py-6 text-sm text-red-500">{manifestErrorMessage}</div>
+                <div className="px-4 py-6 text-sm text-danger">{manifestErrorMessage}</div>
               )}
               {isManifestLoading && (
                 <SegmentsListSkeleton />
               )}
               {hasLoadedManifest && rowsToRender.length === 0 && (
                 <div className="px-4 py-10 flex flex-col items-center text-center gap-2">
-                  <div className="text-sm font-medium text-muted">
+                  <div className="text-sm font-medium text-soft">
                     No segments
                   </div>
-                  <p className="text-sm text-muted leading-relaxed max-w-[24ch]">
+                  <p className="text-sm text-soft leading-relaxed max-w-[24ch]">
                     Press play in the reader to generate audio segments.
                   </p>
                 </div>
               )}
               {hasLoadedManifest && rowsToRender.length > 0 && (
-                <ul className="divide-y divide-offbase">
+                <ul className="divide-y divide-line-soft">
                   {rowsToRender.map(({ segmentIndex, sentenceText, row, isCurrentLocation, groupKey, groupLabel, isSynthesized }, rowIndex) => {
                     const previousGroupKey = rowIndex > 0 ? rowsToRender[rowIndex - 1]?.groupKey : null;
                     const showGroupHeader = previousGroupKey !== groupKey;
@@ -741,11 +735,11 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
                       <li
                         key={`${isSynthesized ? 'syn' : 'mfr'}::${groupKey}::${segmentIndex}::${rowIndex}`}
                         data-active-segment={isCurrent ? 'true' : undefined}
-                        className={`relative px-4 py-3 ${isCurrent ? 'bg-offbase/40' : ''}`}
+                        className={`relative px-4 py-3 ${isCurrent ? 'bg-surface-sunken' : ''}`}
                       >
                         {showGroupHeader && (
-                          <div className="mb-2 -mx-4 px-4 py-1.5 bg-offbase/30 border-y border-offbase">
-                            <span className="text-[10px] uppercase tracking-[0.14em] text-muted">
+                          <div className="mb-2 -mx-4 px-4 py-1.5 bg-surface-sunken border-y border-line">
+                            <span className="text-[10px] uppercase tracking-[0.14em] text-soft">
                               {groupLabel}
                             </span>
                           </div>
@@ -758,7 +752,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
                             type="button"
                             onClick={() => { if (canJump) handleJump(segmentIndex, row.locator); }}
                             disabled={!canJump}
-                            className={`text-xs font-medium shrink-0 pt-0.5 ${canJump ? 'text-muted hover:text-accent' : 'text-muted/50 cursor-not-allowed'}`}
+                            className={`text-xs font-medium shrink-0 pt-0.5 ${canJump ? 'text-soft hover:text-accent' : 'text-faint cursor-not-allowed'}`}
                             title={canJump ? (playable ? 'Play this segment' : 'Jump to this segment') : 'Text not loaded yet'}
                             aria-label={`Segment ${segmentIndex + 1}`}
                           >
@@ -772,9 +766,9 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
                               disabled={!canJump}
                               className={`block w-full text-left ${canJump ? '' : 'cursor-not-allowed'}`}
                             >
-                              <p className={`text-sm leading-snug ${isCurrent ? 'text-foreground' : 'text-foreground/90'} line-clamp-2`}>
+                              <p className={`text-sm leading-snug ${isCurrent ? 'text-foreground' : 'text-soft'} line-clamp-2`}>
                                 {sentenceText || (
-                                  <span className="text-muted italic text-xs">
+                                  <span className="text-soft italic text-xs">
                                     [text not loaded — press play to fetch]
                                   </span>
                                 )}
@@ -787,7 +781,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
                                 aria-label={`Status ${status}`}
                                 title={status}
                               />
-                              <span className="text-xs text-muted">
+                              <span className="text-xs text-soft">
                                 {formatDuration(activeVariant?.durationMs)}
                               </span>
                               {isCurrent && isPlaying && (
@@ -796,7 +790,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
                                 </span>
                               )}
                               {!canJump && (
-                                <span className="text-[10px] text-muted/80 border border-offbase rounded px-1 py-0.5">
+                                <span className="text-[10px] text-faint border border-line rounded px-1 py-0.5">
                                   not loaded
                                 </span>
                               )}
@@ -820,10 +814,10 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
                                         className={[
                                           'max-w-full whitespace-normal break-words text-left leading-none text-[10px] px-1 py-0.5 rounded border transition-colors',
                                           isActive
-                                            ? 'border-accent text-accent bg-offbase/60'
+                                            ? 'border-accent text-accent bg-surface-sunken'
                                             : known
-                                              ? 'border-offbase text-muted hover:border-accent hover:text-accent'
-                                              : 'border-offbase text-muted opacity-60 cursor-not-allowed',
+                                              ? 'border-line text-soft hover:border-accent hover:text-accent'
+                                              : 'border-line text-soft opacity-60 cursor-not-allowed',
                                         ].join(' ')}
                                       >
                                         {formatVoiceLabel(variant.settings)}
@@ -854,21 +848,21 @@ function SegmentsListSkeleton() {
   return (
     <div className="px-4 py-3">
       <div className="animate-pulse space-y-3" aria-label="Loading segments" aria-busy="true">
-        <div className="h-3 w-40 rounded bg-offbase" />
+        <div className="h-3 w-40 rounded bg-surface-sunken" />
         {Array.from({ length: 8 }).map((_, index) => (
-          <div key={index} className="rounded-md border border-offbase bg-base px-3 py-2.5">
+          <div key={index} className="rounded-md border border-line bg-surface px-3 py-2.5">
             <div className="flex items-start gap-3">
-              <div className="h-3.5 w-8 rounded bg-offbase mt-0.5 shrink-0" />
+              <div className="h-3.5 w-8 rounded bg-surface-sunken mt-0.5 shrink-0" />
               <div className="min-w-0 flex-1 space-y-2">
-                <div className="h-3.5 w-11/12 rounded bg-offbase" />
-                <div className="h-3.5 w-3/4 rounded bg-offbase" />
+                <div className="h-3.5 w-11/12 rounded bg-surface-sunken" />
+                <div className="h-3.5 w-3/4 rounded bg-surface-sunken" />
                 <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full bg-offbase" />
-                  <div className="h-3 w-12 rounded bg-offbase" />
-                  <div className="h-4 w-20 rounded bg-offbase" />
+                  <div className="h-2 w-2 rounded-full bg-surface-sunken" />
+                  <div className="h-3 w-12 rounded bg-surface-sunken" />
+                  <div className="h-4 w-20 rounded bg-surface-sunken" />
                 </div>
               </div>
-              <div className="h-6 w-6 rounded bg-offbase shrink-0" />
+              <div className="h-6 w-6 rounded bg-surface-sunken shrink-0" />
             </div>
           </div>
         ))}
@@ -882,7 +876,7 @@ function SegmentsListSkeletonRows() {
     <div className="px-4 py-3 animate-pulse" aria-label="Loading more segments" aria-busy="true">
       <div className="space-y-2">
         {Array.from({ length: 3 }).map((_, index) => (
-          <div key={index} className="h-12 rounded-md border border-offbase bg-base" />
+          <div key={index} className="h-12 rounded-md border border-line bg-surface" />
         ))}
       </div>
     </div>
@@ -893,24 +887,25 @@ function SegmentMetadataPopover({ row }: { row: TTSSegmentRow }) {
   return (
     <Popover className="relative shrink-0">
       <PopoverButton
+        as={IconButton}
+        size="sm"
         aria-label="Segment metadata"
         title="Metadata"
-        className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-transparent text-muted hover:bg-offbase hover:border-offbase hover:text-accent transition-colors"
       >
         <InfoIcon className="w-3.5 h-3.5" />
       </PopoverButton>
       <Transition
         as={Fragment}
-        enter="transition ease-out duration-150"
+        enter="transition ease-standard duration-fast"
         enterFrom="opacity-0 translate-y-1"
         enterTo="opacity-100 translate-y-0"
-        leave="transition ease-in duration-100"
+        leave="transition ease-standard duration-fast"
         leaveFrom="opacity-100 translate-y-0"
         leaveTo="opacity-0 translate-y-1"
       >
-        <PopoverPanel
+        <PopoverSurface
           anchor="bottom end"
-          className="z-[60] w-[300px] mt-1 rounded-lg border border-offbase bg-base shadow-xl p-3"
+          className="z-[60] w-[300px] mt-1"
         >
           <dl className="space-y-2">
             <Row label="locator">
@@ -925,7 +920,7 @@ function SegmentMetadataPopover({ row }: { row: TTSSegmentRow }) {
                         : `${row.locator.readerType || '?'} (legacy)`}
                 </span>
               ) : (
-                <span className="text-muted text-[11px]">none</span>
+                <span className="text-soft text-[11px]">none</span>
               )}
             </Row>
             <Row label="variants">
@@ -934,9 +929,9 @@ function SegmentMetadataPopover({ row }: { row: TTSSegmentRow }) {
               </span>
             </Row>
             {row.variants.map((v) => (
-              <div key={v.segmentId} className="border-t border-offbase pt-2">
+              <div key={v.segmentId} className="border-t border-line-soft pt-2">
                 <Row label="segment_id">
-                  <span className="font-mono text-[10px] text-muted break-all">
+                  <span className="font-mono text-[10px] text-soft break-all">
                     {v.segmentId.slice(0, 16)}…
                   </span>
                 </Row>
@@ -963,7 +958,7 @@ function SegmentMetadataPopover({ row }: { row: TTSSegmentRow }) {
               </div>
             ))}
           </dl>
-        </PopoverPanel>
+        </PopoverSurface>
       </Transition>
     </Popover>
   );
@@ -972,7 +967,7 @@ function SegmentMetadataPopover({ row }: { row: TTSSegmentRow }) {
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="grid grid-cols-[80px_1fr] gap-2 items-baseline">
-      <dt className="font-mono uppercase tracking-[0.16em] text-[9px] text-muted">{label}</dt>
+      <dt className="font-mono uppercase tracking-[0.16em] text-[9px] text-soft">{label}</dt>
       <dd className="min-w-0">{children}</dd>
     </div>
   );

@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Button, Listbox, ListboxButton, ListboxOption, ListboxOptions, Transition } from '@headlessui/react';
+import { Listbox, Transition } from '@headlessui/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { ChevronUpDownIcon, CheckIcon } from '@/components/icons/Icons';
@@ -10,11 +10,11 @@ import {
   Section,
   ToggleRow,
   inputClass,
-  listboxButtonClass,
-  listboxOptionClass,
-  listboxOptionsClass,
-} from '@/components/formPrimitives';
-import { buttonClass } from '@/components/ui/buttonPrimitives';
+  SharedListboxButton,
+  SharedListboxOption,
+  SharedListboxOptions,
+  Button,
+} from '@/components/ui';
 import { type TtsProviderId } from '@/lib/shared/tts-provider-catalog';
 import { useSharedProviders, type SharedProviderEntry } from '@/hooks/useSharedProviders';
 
@@ -205,24 +205,23 @@ export function AdminFeaturesPanel() {
           </div>
           {providerOptions.length > 0 ? (
             <Listbox value={selectedProviderOption} onChange={handleProviderChange}>
-              <ListboxButton className={listboxButtonClass}>
+              <SharedListboxButton>
                 <span className="block truncate">{selectedProviderOption?.name ?? 'Select provider'}</span>
                 <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
                   <ChevronUpDownIcon className="h-4 w-4 text-muted" />
                 </span>
-              </ListboxButton>
+              </SharedListboxButton>
               <Transition
                 as={Fragment}
                 leave="transition ease-in duration-100"
                 leaveFrom="opacity-100"
                 leaveTo="opacity-0"
               >
-                <ListboxOptions anchor="bottom start" className={listboxOptionsClass}>
+                <SharedListboxOptions anchor="bottom start">
                   {providerOptions.map((opt) => (
-                    <ListboxOption
+                    <SharedListboxOption
                       key={opt.id}
                       value={opt}
-                      className={({ active }) => listboxOptionClass(active)}
                     >
                       {({ selected }) => (
                         <>
@@ -236,9 +235,9 @@ export function AdminFeaturesPanel() {
                           )}
                         </>
                       )}
-                    </ListboxOption>
+                    </SharedListboxOption>
                   ))}
-                </ListboxOptions>
+                </SharedListboxOptions>
               </Transition>
             </Listbox>
           ) : (
@@ -581,14 +580,16 @@ export function AdminFeaturesPanel() {
           <Button
             onClick={discardAll}
             disabled={dirty.size === 0 || saving}
-            className={buttonClass({ variant: 'secondary', size: 'sm' })}
+            variant="secondary"
+            size="sm"
           >
             Discard
           </Button>
           <Button
             onClick={saveAll}
             disabled={dirty.size === 0 || saving}
-            className={buttonClass({ variant: 'primary', size: 'sm' })}
+            variant="primary"
+            size="sm"
           >
             {saving ? 'Saving…' : dirty.size > 0 ? `Save (${dirty.size})` : 'Save'}
           </Button>
@@ -654,14 +655,16 @@ function SourceBadge({
   return (
     <div className="flex items-center gap-1.5">
       {canReset && !dirty && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={onReset}
           disabled={saving}
-          className="text-[11px] font-medium text-muted hover:text-accent transition-colors disabled:opacity-50"
+          className="h-auto px-1 py-0 text-[11px] font-medium text-muted hover:text-accent"
         >
           Reset
-        </button>
+        </Button>
       )}
       {dirty ? (
         <Badge tone="accent">Modified</Badge>

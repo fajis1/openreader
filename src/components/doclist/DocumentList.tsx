@@ -22,6 +22,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { CreateFolderDialog } from '@/components/doclist/CreateFolderDialog';
 import { DocumentListSkeleton } from '@/components/doclist/DocumentListSkeleton';
 import { DocumentUploader, type UploadBatchState } from '@/components/documents/DocumentUploader';
+import { IconButton } from '@/components/ui';
 import { DocumentDndProvider } from './dnd/DocumentDndProvider';
 import {
   DocumentSelectionProvider,
@@ -139,14 +140,14 @@ function SidebarUploadLoader({
   const dashOffset = circumference - (progress / 100) * circumference;
 
   return (
-    <div className="rounded-md border border-offbase bg-offbase/60 px-2 py-1.5">
+    <div className="rounded-md border border-line bg-surface-sunken px-2 py-1.5">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex items-center gap-1.5 text-[11px] leading-tight">
           <span className="font-medium text-foreground">{label}</span>
-          <span className="shrink-0 tabular-nums text-muted">{completedFiles}/{totalFiles}</span>
+          <span className="shrink-0 tabular-nums text-soft">{completedFiles}/{totalFiles}</span>
         </div>
         <div className="shrink-0 flex items-center gap-1 text-accent" aria-label={`Upload progress ${progress}%`}>
-          <span className="text-[10px] tabular-nums text-muted">{progress}%</span>
+          <span className="text-[10px] tabular-nums text-soft">{progress}%</span>
           <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className={phase === 'converting' ? 'animate-spin' : ''}>
             <circle
               cx={size / 2}
@@ -168,17 +169,27 @@ function SidebarUploadLoader({
               strokeDasharray={`${circumference} ${circumference}`}
               strokeDashoffset={dashOffset}
               transform={`rotate(-90 ${size / 2} ${size / 2})`}
-              style={{ transition: 'stroke-dashoffset 200ms ease-out' }}
+              style={{ transition: 'stroke-dashoffset 200ms ease-standard' }}
             />
           </svg>
         </div>
       </div>
       {currentFileName && (
-        <p className="mt-0.5 truncate text-[10px] text-muted" title={currentFileName}>
+        <p className="mt-0.5 truncate text-[10px] text-soft" title={currentFileName}>
           {currentFileName}
         </p>
       )}
     </div>
+  );
+}
+
+function DocumentListStateLoader() {
+  return (
+    <div
+      className="h-full w-full min-h-0 bg-surface-sunken animate-pulse"
+      aria-label="Loading documents"
+      aria-busy="true"
+    />
   );
 }
 
@@ -649,28 +660,32 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
       }}
     >
       {!isLoading && showHint && allDocuments.length > 1 && (
-        <div className="px-3 pt-3 shrink-0 bg-background">
-          <div className="flex items-center justify-between bg-base border border-offbase rounded-md px-3 py-1 text-[12px]">
+        <div className="px-3 pt-3 shrink-0 bg-surface-sunken">
+          <div className="flex items-center justify-between bg-surface border border-line rounded-md px-3 py-1 text-[12px]">
             <p className="text-foreground">
               Drag files onto each other to make folders. Drop into the sidebar to move.
             </p>
-            <button
-              type="button"
+            <IconButton
               onClick={() => setShowHint(false)}
-              className="h-6 w-6 inline-flex items-center justify-center text-muted hover:text-accent hover:bg-base hover:scale-[1.01] rounded transition-all duration-200 ease-out"
+              size="xs"
+              className="h-6 w-6"
               aria-label="Dismiss hint"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </button>
+            </IconButton>
           </div>
         </div>
       )}
 
       {isLoading ? (
         <div className="flex-1 min-h-0 overflow-hidden">
-          <DocumentListSkeleton viewMode={fallbackViewMode} iconSize={iconSize} />
+          {isInitialized ? (
+            <DocumentListSkeleton viewMode={fallbackViewMode} iconSize={iconSize} />
+          ) : (
+            <DocumentListStateLoader />
+          )}
         </div>
       ) : allDocuments.length === 0 ? (
         <div className="flex-1 min-h-0 flex items-center justify-center p-6">

@@ -19,6 +19,103 @@ const LOGGER_RECEIVER_SELECTOR =
 const SERVER_LOGGER_CALL_SELECTOR = `:matches(${STATIC_LOGGER_CALL_SELECTOR}${LOGGER_RECEIVER_SELECTOR},${DYNAMIC_LOGGER_CALL_SELECTOR}${LOGGER_RECEIVER_SELECTOR})`;
 const NEXT_RESPONSE_ERROR_JSON_SELECTOR =
   "CallExpression[callee.type='MemberExpression'][callee.object.name='NextResponse'][callee.property.name='json'][arguments.0.type='ObjectExpression']:has(Property[key.name='error'])";
+const APP_DESIGN_SYSTEM_FILES = [
+  "src/app/(app)/**/*.{ts,tsx}",
+  "src/components/**/*.{ts,tsx}",
+];
+const UI_ARCHITECTURE_FILES = [
+  "src/app/(app)/**/*.{ts,tsx}",
+  "src/components/auth/**/*.{ts,tsx}",
+  "src/components/doclist/**/*.{ts,tsx}",
+  "src/components/documents/DocumentUploader.tsx",
+  "src/components/documents/DocumentSelectionModal.tsx",
+  "src/components/documents/DexieMigrationModal.tsx",
+  "src/components/documents/ZoomControl.tsx",
+  "src/components/player/**/*.{ts,tsx}",
+  "src/components/reader/**/*.{ts,tsx}",
+];
+const COMPUTE_CORE_IMPORT_PATTERNS = [
+  {
+    group: [
+      "@openreader/compute-core/*",
+      "!@openreader/compute-core/local-runtime",
+      "!@openreader/compute-core/types",
+      "!@openreader/compute-core/api-contracts",
+    ],
+    message:
+      "Use '@openreader/compute-core' root imports for light APIs. Allowed subpaths are '@openreader/compute-core/local-runtime', '@openreader/compute-core/types', and '@openreader/compute-core/api-contracts'.",
+  },
+];
+const UI_ARCHITECTURE_IMPORT_PATHS = [
+  {
+    name: "@/components/formPrimitives",
+    message:
+      "Use '@/components/ui' primitives; formPrimitives has been removed.",
+  },
+  {
+    name: "@/components/ui/buttonPrimitives",
+    message:
+      "Use '@/components/ui' button exports; buttonPrimitives has been removed.",
+  },
+  {
+    name: "@headlessui/react",
+    importNames: ["Button", "Input"],
+    message:
+      "Use app UI Button/Input primitives; Headless UI should be reserved for structural primitives such as Menu, Listbox, Popover, Dialog, and Transition.",
+  },
+];
+const RESTRICTED_APP_CLASS_PATTERNS = [
+  {
+    selector: "Literal[value=/(bg|text|border|ring)-(gray|slate|zinc|neutral|stone|red|orange|yellow|amber|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d/]",
+    message:
+      "Use semantic design-system tokens instead of literal Tailwind palette color classes in app surfaces.",
+  },
+  {
+    selector: "TemplateElement[value.raw=/(bg|text|border|ring)-(gray|slate|zinc|neutral|stone|red|orange|yellow|amber|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d/]",
+    message:
+      "Use semantic design-system tokens instead of literal Tailwind palette color classes in app surfaces.",
+  },
+  {
+    selector: "Literal[value=/transition-all/]",
+    message:
+      "Use scoped transition utilities; transition-all is banned by the app design system.",
+  },
+  {
+    selector: "TemplateElement[value.raw=/transition-all/]",
+    message:
+      "Use scoped transition utilities; transition-all is banned by the app design system.",
+  },
+  {
+    selector: "Literal[value=/(bg|text|border|from|via|to)-(accent|background|foreground|base|offbase|muted|secondary-accent|surface|surface-solid|surface-sunken|line|line-soft|line-strong|soft|faint|accent-wash|accent-line|accent-strong|danger|danger-wash)\\/\\d/]",
+    message:
+      "Do not use Tailwind alpha modifiers on theme-token colors; use dedicated wash/semantic tokens.",
+  },
+  {
+    selector: "TemplateElement[value.raw=/(bg|text|border|from|via|to)-(accent|background|foreground|base|offbase|muted|secondary-accent|surface|surface-solid|surface-sunken|line|line-soft|line-strong|soft|faint|accent-wash|accent-line|accent-strong|danger|danger-wash)\\/\\d/]",
+    message:
+      "Do not use Tailwind alpha modifiers on theme-token colors; use dedicated wash/semantic tokens.",
+  },
+  {
+    selector: "Literal[value=/rounded-\\[[^\\]]*px\\]/]",
+    message:
+      "Use the app radius scale instead of arbitrary rounded-[…px] utilities.",
+  },
+  {
+    selector: "TemplateElement[value.raw=/rounded-\\[[^\\]]*px\\]/]",
+    message:
+      "Use the app radius scale instead of arbitrary rounded-[…px] utilities.",
+  },
+  {
+    selector: "Literal[value=/duration-\\[[^\\]]*ms\\]/]",
+    message:
+      "Use the shared motion duration tokens instead of arbitrary duration-[…ms] utilities.",
+  },
+  {
+    selector: "TemplateElement[value.raw=/duration-\\[[^\\]]*ms\\]/]",
+    message:
+      "Use the shared motion duration tokens instead of arbitrary duration-[…ms] utilities.",
+  },
+];
 
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
@@ -27,18 +124,25 @@ const eslintConfig = [
       "no-restricted-imports": [
         "error",
         {
-          patterns: [
-            {
-              group: [
-                "@openreader/compute-core/*",
-                "!@openreader/compute-core/local-runtime",
-                "!@openreader/compute-core/types",
-                "!@openreader/compute-core/api-contracts",
-              ],
-              message:
-                "Use '@openreader/compute-core' root imports for light APIs. Allowed subpaths are '@openreader/compute-core/local-runtime', '@openreader/compute-core/types', and '@openreader/compute-core/api-contracts'.",
-            },
-          ],
+          patterns: COMPUTE_CORE_IMPORT_PATTERNS,
+        },
+      ],
+    },
+  },
+  {
+    files: APP_DESIGN_SYSTEM_FILES,
+    rules: {
+      "no-restricted-syntax": ["error", ...RESTRICTED_APP_CLASS_PATTERNS],
+    },
+  },
+  {
+    files: UI_ARCHITECTURE_FILES,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: UI_ARCHITECTURE_IMPORT_PATHS,
+          patterns: COMPUTE_CORE_IMPORT_PATTERNS,
         },
       ],
     },

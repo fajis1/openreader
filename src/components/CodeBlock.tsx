@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { CopyIcon, CheckIcon } from '@/components/icons/Icons';
-import { buttonClass } from '@/components/ui/buttonPrimitives';
+import { Button } from '@/components/ui';
 
 export function CodeBlock({ children }: { children: string }) {
   const [copied, setCopied] = useState(false);
@@ -16,20 +16,18 @@ export function CodeBlock({ children }: { children: string }) {
   return (
     <div className="relative group my-2">
       <pre className="bg-background p-3 rounded-md overflow-x-auto text-xs text-left
-                      font-mono text-foreground border border-offbase">
+                      font-mono text-foreground border border-line">
         <code>{children}</code>
       </pre>
-      <button
+      <Button
         onClick={handleCopy}
-        className={buttonClass({
-          variant: 'secondary',
-          size: 'icon',
-          className: 'absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:scale-[1.05]',
-        })}
+        variant="secondary"
+        size="icon"
+        className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 focus:opacity-100"
         title="Copy to clipboard"
       >
         {copied ? <CheckIcon className="w-4 h-4" /> : <CopyIcon className="w-4 h-4" />}
-      </button>
+      </Button>
     </div>
   );
 }

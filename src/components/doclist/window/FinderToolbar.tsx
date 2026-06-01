@@ -1,6 +1,6 @@
 'use client';
 
-import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
+import { Listbox } from '@headlessui/react';
 import type { IconSize, SortBy, SortDirection, ViewMode } from '@/types/documents';
 import {
   IconsViewIcon,
@@ -10,6 +10,7 @@ import {
   HamburgerIcon,
 } from './finderIcons';
 import { ChevronUpDownIcon } from '@/components/icons/Icons';
+import { SearchField, SharedListboxButton, SharedListboxOption, SharedListboxOptions, Toolbar, ToolbarButton, ToolbarGroup, ToolbarSegment } from '@/components/ui';
 import type { ReactNode } from 'react';
 
 interface FinderToolbarProps {
@@ -52,22 +53,6 @@ const ICON_SIZES: Array<{ value: IconSize; label: string }> = [
   { value: 'xl', label: 'XL' },
 ];
 
-// Match SettingsModal / UserMenu trigger sizing exactly so all bar buttons share one rhythm.
-const TOOLBAR_BTN =
-  'inline-flex items-center py-1 px-2 rounded-md border bg-base text-xs transition-all duration-200 ease-out hover:scale-[1.01]';
-const TOOLBAR_BTN_INACTIVE =
-  'border-offbase text-foreground hover:text-accent hover:border-accent hover:bg-offbase';
-const TOOLBAR_BTN_ACTIVE = 'border-accent bg-offbase text-accent';
-
-// Pill-grouped segmented control. Outer pill carries the border; inner segments are
-// borderless and rely on bg/text color to show active/hover. Sized so the whole pill
-// matches the height of a standalone TOOLBAR_BTN.
-const PILL = 'inline-flex items-center rounded-md border border-offbase bg-base p-0.5 gap-0.5 shrink-0';
-const PILL_SEGMENT =
-  'inline-flex items-center justify-center rounded-[5px] text-xs transition-colors duration-200 ease-out';
-const PILL_SEGMENT_INACTIVE = 'text-muted hover:bg-offbase hover:text-accent';
-const PILL_SEGMENT_ACTIVE = 'bg-offbase text-accent';
-
 export function FinderToolbar({
   viewMode,
   onViewModeChange,
@@ -89,26 +74,25 @@ export function FinderToolbar({
   const directionLabel = sortDirection === 'asc' ? currentSort.asc : currentSort.desc;
 
   return (
-    <div className="sticky top-0 z-40 w-full border-b border-offbase bg-base">
-      <div className="px-2 sm:px-3 py-1 min-h-10 flex items-center gap-1.5 sm:gap-2">
+    <Toolbar>
         {leftSlot && (
-          <div className="shrink-0 flex items-center gap-2 pr-1 sm:pr-2 sm:border-r sm:border-offbase">
+          <div className="shrink-0 flex items-center gap-2 pr-1 sm:pr-2 sm:border-r sm:border-line">
             {leftSlot}
           </div>
         )}
 
-        <button
-          type="button"
+        <ToolbarButton
           onClick={onToggleSidebar}
-          className={`${TOOLBAR_BTN} ${isSidebarOpen ? TOOLBAR_BTN_ACTIVE : TOOLBAR_BTN_INACTIVE} shrink-0`}
+          active={isSidebarOpen}
+          className="shrink-0"
           aria-pressed={isSidebarOpen}
           aria-label="Toggle sidebar"
           title="Toggle sidebar"
         >
           <HamburgerIcon className="w-4 h-4" />
-        </button>
+        </ToolbarButton>
 
-        <div className={PILL}>
+        <ToolbarGroup>
           {VIEW_BUTTONS.map(({ value, label, Icon }) => {
             const active = viewMode === value;
             const isIconsToggle = value === 'icons';
@@ -117,110 +101,84 @@ export function FinderToolbar({
                 key={value}
                 className={isIconsToggle ? 'relative group/icons inline-flex items-center' : 'inline-flex items-center'}
               >
-                <button
-                  type="button"
+                <ToolbarSegment
                   onClick={() => onViewModeChange(value)}
+                  active={active}
                   aria-pressed={active}
                   aria-label={`${label} view`}
                   title={`${label} view`}
-                  className={
-                    PILL_SEGMENT +
-                    ' h-6 w-7 ' +
-                    (active ? PILL_SEGMENT_ACTIVE : PILL_SEGMENT_INACTIVE)
-                  }
+                  className="w-7"
                 >
                   <Icon className="w-4 h-4" />
-                </button>
+                </ToolbarSegment>
                 {isIconsToggle && viewMode === 'icons' && (
                   <div
-                    className="absolute top-full left-1/2 z-30 -translate-x-1/2 pt-1 opacity-0 pointer-events-none transition-opacity duration-150 group-hover/icons:opacity-100 group-hover/icons:pointer-events-auto group-focus-within/icons:opacity-100 group-focus-within/icons:pointer-events-auto"
+                    className="absolute top-full left-1/2 z-30 -translate-x-1/2 pt-1 opacity-0 pointer-events-none transition-opacity duration-fast group-hover/icons:opacity-100 group-hover/icons:pointer-events-auto group-focus-within/icons:opacity-100 group-focus-within/icons:pointer-events-auto"
                   >
-                    <div className={`${PILL} shadow-lg`}>
+                    <ToolbarGroup className="shadow-elev-2">
                       {ICON_SIZES.map(({ value: sizeValue, label: sizeLabel }) => {
                         const sizeActive = iconSize === sizeValue;
                         return (
-                          <button
+                          <ToolbarSegment
                             key={sizeValue}
-                            type="button"
                             onClick={() => onIconSizeChange(sizeValue)}
+                            active={sizeActive}
                             aria-pressed={sizeActive}
                             aria-label={`Icon size ${sizeLabel}`}
-                            className={
-                              PILL_SEGMENT +
-                              ' h-6 min-w-[26px] px-1.5 font-semibold tracking-wide ' +
-                              (sizeActive ? PILL_SEGMENT_ACTIVE : PILL_SEGMENT_INACTIVE)
-                            }
+                            className="min-w-[26px] px-1.5 font-semibold tracking-wide"
                           >
                             {sizeLabel}
-                          </button>
+                          </ToolbarSegment>
                         );
                       })}
-                    </div>
+                    </ToolbarGroup>
                   </div>
                 )}
               </div>
             );
           })}
-        </div>
+        </ToolbarGroup>
 
         {showSortControls && (
           <div className="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              onClick={onSortDirectionToggle}
-              className={`${TOOLBAR_BTN} ${TOOLBAR_BTN_INACTIVE} whitespace-nowrap`}
-              title="Toggle sort direction"
-            >
+            <ToolbarButton onClick={onSortDirectionToggle} className="whitespace-nowrap" title="Toggle sort direction">
               {directionLabel}
-            </button>
+            </ToolbarButton>
             <Listbox value={sortBy} onChange={onSortByChange}>
-              <ListboxButton
-                className={`${TOOLBAR_BTN} ${TOOLBAR_BTN_INACTIVE} gap-1 min-w-[90px] justify-between`}
-              >
+              <SharedListboxButton tone="toolbar" className="gap-1 min-w-[86px] justify-between">
                 <span>{currentSort.label}</span>
                 <ChevronUpDownIcon className="h-3 w-3 opacity-60" />
-              </ListboxButton>
-              <ListboxOptions
-                anchor="bottom end"
-                className="z-50 mt-1 rounded-md bg-background border border-offbase shadow-lg p-1 focus:outline-none"
-              >
+              </SharedListboxButton>
+              <SharedListboxOptions anchor="bottom end" tone="compact">
                 {SORT_OPTIONS.map((opt) => (
-                  <ListboxOption
+                  <SharedListboxOption
                     key={opt.value}
                     value={opt.value}
-                    className={({ active, selected }) =>
-                      `cursor-pointer select-none rounded-sm py-1.5 px-2.5 text-xs ${
-                        active ? 'bg-offbase text-accent' : 'text-foreground'
-                      } ${selected ? 'font-semibold' : ''}`
-                    }
+                    tone="compact"
                   >
                     {opt.label}
-                  </ListboxOption>
+                  </SharedListboxOption>
                 ))}
-              </ListboxOptions>
+              </SharedListboxOptions>
             </Listbox>
           </div>
         )}
 
         <div className="flex-1 min-w-0" />
 
-        <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-background border border-offbase hover:border-accent focus-within:ring-1 focus-within:ring-accent focus-within:border-accent transition-colors duration-200 ease-out w-[160px] md:w-[200px]">
-          <SearchIcon className="w-3.5 h-3.5 text-muted shrink-0" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="Search"
-            className="flex-1 min-w-0 bg-transparent outline-none text-xs text-foreground placeholder:text-muted"
-          />
-        </div>
+        <SearchField
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          placeholder="Search"
+          className="hidden w-[160px] md:w-[200px] sm:flex"
+          icon={<SearchIcon className="w-3.5 h-3.5" />}
+        />
 
         {rightSlot && (
-          <div className="shrink-0 flex items-center gap-2 pl-1 sm:pl-2 sm:border-l sm:border-offbase ml-0.5">
+          <div className="shrink-0 flex items-center gap-2 pl-1 sm:pl-2 sm:border-l sm:border-line ml-0.5">
             {rightSlot}
           </div>
         )}
-      </div>
-    </div>
+    </Toolbar>
   );
 }

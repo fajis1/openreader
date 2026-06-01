@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Button, Input } from '@headlessui/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getAuthClient } from '@/lib/client/auth-client';
@@ -9,7 +8,7 @@ import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { LoadingSpinner } from '@/components/Spinner';
-import { buttonClass } from '@/components/ui/buttonPrimitives';
+import { Button, Field, IconButton, Input, Surface } from '@/components/ui';
 import toast from 'react-hot-toast';
 
 export default function SignUpPage() {
@@ -105,77 +104,69 @@ export default function SignUpPage() {
   if (!enableUserSignups) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-        <div className="w-full max-w-md bg-base rounded-2xl shadow-xl p-6">
+        <Surface elevation="3" className="w-full max-w-md p-6">
           <h1 className="text-xl font-semibold text-foreground">Sign-ups unavailable</h1>
-          <p className="text-sm text-muted mt-1">
+          <p className="text-sm text-soft mt-1">
             New account sign-ups are currently disabled by the site administrator.
           </p>
-          <div className="mt-6 pt-4 border-t border-offbase text-center">
-            <p className="text-xs text-muted">
+          <div className="mt-6 pt-4 border-t border-line-soft text-center">
+            <p className="text-xs text-soft">
               Already have an account?{' '}
               <Link href="/signin" className="underline hover:text-foreground">
                 Sign in
               </Link>
             </p>
           </div>
-        </div>
+        </Surface>
       </div>
     );
   }
 
   const { checks, strength } = validatePassword(password);
   const strengthLabels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong'];
-  const strengthColors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-blue-500', 'bg-green-500'];
+  const strengthColors = ['bg-danger', 'bg-danger', 'bg-accent', 'bg-accent', 'bg-accent'];
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <div className="w-full max-w-md bg-base rounded-2xl shadow-xl p-6">
+      <Surface elevation="3" className="w-full max-w-md p-6">
         <h1 className="text-xl font-semibold text-foreground">Sign Up</h1>
-        <p className="text-sm text-muted mt-1">Create your account to get started</p>
+        <p className="text-sm text-soft mt-1">Create your account to get started</p>
 
         {error && (
-          <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-            <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+          <div className="mt-4 p-3 bg-danger-wash border border-danger rounded-lg">
+            <p className="text-sm text-danger">{error}</p>
           </div>
         )}
 
         <div className="mt-6 space-y-4">
           {/* Email */}
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Email</label>
+          <Field label="Email">
             <Input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="me@example.com"
-              className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm 
-                       focus:outline-none focus:ring-2 focus:ring-accent"
+              controlSize="lg"
             />
-          </div>
+          </Field>
 
           {/* Password */}
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Password</label>
+          <Field label="Password">
             <div className="relative">
               <Input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password"
-                className="w-full rounded-lg bg-background py-2 px-3 pr-10 text-foreground shadow-sm 
-                         focus:outline-none focus:ring-2 focus:ring-accent"
+                controlSize="lg"
+                className="pr-10"
               />
-              <button
-                type="button"
+              <IconButton
                 onClick={() => setShowPassword(!showPassword)}
-                className={buttonClass({
-                  variant: 'ghost',
-                  size: 'icon',
-                  className: 'absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 text-muted',
-                })}
+                className="absolute right-2 top-1/2 h-7 w-7 -translate-y-1/2"
               >
                 {showPassword ? '👁️' : '👁️‍🗨️'}
-              </button>
+              </IconButton>
             </div>
 
             {/* Password Strength */}
@@ -185,17 +176,17 @@ export default function SignUpPage() {
                   {[0, 1, 2, 3, 4].map((i) => (
                     <div
                       key={i}
-                      className={`h-1 flex-1 rounded ${i < strength ? strengthColors[strength - 1] : 'bg-offbase'
+                      className={`h-1 flex-1 rounded ${i < strength ? strengthColors[strength - 1] : 'bg-surface-sunken'
                         }`}
                     />
                   ))}
                 </div>
-                <p className={`text-xs ${strength >= 3 ? 'text-green-600' : 'text-red-600'}`}>
+                <p className={`text-xs ${strength >= 3 ? 'text-accent' : 'text-danger'}`}>
                   {strengthLabels[strength - 1] || 'Very Weak'}
                 </p>
-                <div className="text-xs space-y-0.5 text-muted">
+                <div className="text-xs space-y-0.5 text-soft">
                   {Object.entries(checks).map(([key, passed]) => (
-                    <div key={key} className={`flex items-center gap-1 ${passed ? 'text-green-600' : ''}`}>
+                    <div key={key} className={`flex items-center gap-1 ${passed ? 'text-accent' : ''}`}>
                       <span>{passed ? '✓' : '○'}</span>
                       <span>
                         {key === 'length' && 'At least 8 characters'}
@@ -209,46 +200,46 @@ export default function SignUpPage() {
                 </div>
               </div>
             )}
-          </div>
+          </Field>
 
           {/* Confirm Password */}
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1">Confirm Password</label>
+          <Field label="Confirm Password">
             <Input
               type={showPassword ? 'text' : 'password'}
               value={passwordConfirmation}
               onChange={(e) => setPasswordConfirmation(e.target.value)}
               placeholder="Confirm Password"
-              className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm 
-                       focus:outline-none focus:ring-2 focus:ring-accent"
+              controlSize="lg"
             />
             {passwordConfirmation && password && (
-              <p className={`text-xs mt-1 ${password === passwordConfirmation ? 'text-green-600' : 'text-red-600'}`}>
+              <p className={`text-xs mt-1 ${password === passwordConfirmation ? 'text-accent' : 'text-danger'}`}>
                 {password === passwordConfirmation ? '✓ Passwords match' : '✗ Passwords do not match'}
               </p>
             )}
-          </div>
+          </Field>
 
           {/* Sign Up Button */}
           <Button
             type="submit"
             disabled={loading}
             onClick={handleSignUp}
-            className={buttonClass({ variant: 'primary', size: 'md', className: 'w-full hover:scale-[1.02]' })}
+            variant="primary"
+            size="md"
+            className="w-full"
           >
             {loading ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Create Account'}
           </Button>
         </div>
 
         {/* Footer */}
-        <div className="mt-6 pt-4 border-t border-offbase text-center space-y-2">
-          <p className="text-xs text-muted">
+        <div className="mt-6 pt-4 border-t border-line-soft text-center space-y-2">
+          <p className="text-xs text-soft">
             Already have an account?{' '}
             <Link href="/signin" className="underline hover:text-foreground">
               Sign in
             </Link>
           </p>
-          <p className="text-xs text-muted">
+          <p className="text-xs text-soft">
             By creating an account, you agree to our{' '}
             <button
               onClick={() => showPrivacyModal()}
@@ -258,7 +249,7 @@ export default function SignUpPage() {
             </button>
           </p>
         </div>
-      </div>
+      </Surface>
     </div>
   );
 }

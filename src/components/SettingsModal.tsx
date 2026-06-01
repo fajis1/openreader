@@ -2,17 +2,8 @@
 
 import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Dialog,
-  DialogPanel,
-  DialogTitle,
   Transition,
-  TransitionChild,
   Listbox,
-  ListboxButton,
-  ListboxOptions,
-  ListboxOption,
-  Button,
-  Input,
 } from '@headlessui/react';
 import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -52,14 +43,20 @@ import { AdminFeaturesPanel } from '@/components/admin/AdminFeaturesPanel';
 import { useSharedProviders } from '@/hooks/useSharedProviders';
 import { useLibraryDocumentsQuery } from '@/hooks/useLibraryDocumentsQuery';
 import {
+  SidebarNav,
+  SidebarNavItem,
+  SegmentedControl,
+  Button,
+  ChoiceTile,
+  IconButton,
+  Input,
+  ModalFrame,
+  ModalTitle,
   inputClass,
-  listboxButtonClass,
-  listboxOptionClass,
-  listboxOptionsClass,
-  segmentedButtonClass,
-  segmentedGroupClass,
-} from '@/components/formPrimitives';
-import { buttonClass } from '@/components/ui/buttonPrimitives';
+  SharedListboxButton,
+  SharedListboxOption,
+  SharedListboxOptions,
+} from '@/components/ui';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { fetchChangelogManifest, fetchChangelogReleaseBody } from '@/lib/client/changelog';
@@ -110,6 +107,54 @@ const CUSTOM_COLOR_FIELDS: { key: keyof CustomThemeColors; label: string }[] = [
   { key: 'muted', label: 'Muted' },
 ];
 
+function ThemeSwatches({ colors }: { colors: ThemeColorSet }) {
+  return (
+    <div className="flex gap-1 ml-auto">
+      <div className="w-4 h-4 rounded-full border border-line" style={{ backgroundColor: colors.background }} />
+      <div className="w-4 h-4 rounded-full border border-line" style={{ backgroundColor: colors.offbase }} />
+      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.accent }} />
+      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.secondaryAccent }} />
+      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.muted }} />
+    </div>
+  );
+}
+
+function ThemeChoice({
+  label,
+  colors,
+  selected,
+  onClick,
+  className,
+}: {
+  label: string;
+  colors: ThemeColorSet;
+  selected: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <ChoiceTile
+      selected={selected}
+      onClick={onClick}
+      className={className}
+      style={{ backgroundColor: colors.base }}
+    >
+      {selected ? (
+        <CheckIcon className="h-3.5 w-3.5 shrink-0" style={{ color: colors.accent }} />
+      ) : (
+        <span className="w-3.5 shrink-0" />
+      )}
+      <span
+        className="text-xs font-medium w-14 shrink-0"
+        style={{ color: colors.foreground }}
+      >
+        {label}
+      </span>
+      <ThemeSwatches colors={colors} />
+    </ChoiceTile>
+  );
+}
+
 type SectionId = 'api' | 'theme' | 'docs' | 'account' | 'admin';
 
 type SidebarSection = {
@@ -133,20 +178,37 @@ type AdminSubTab = 'providers' | 'features';
 export function SettingsTrigger({
   className = '',
   triggerLabel,
+  variant = 'button',
   onOpen,
 }: {
   className?: string;
   triggerLabel?: string;
+  variant?: 'button' | 'sidebar';
   onOpen: () => void;
 }) {
+  if (variant === 'sidebar') {
+    return (
+      <SidebarNavItem
+        compact
+        onClick={onOpen}
+        className={className}
+        aria-label="Settings"
+        icon={<SettingsIcon className="w-3.5 h-3.5" />}
+        label={triggerLabel ?? 'Settings'}
+      />
+    );
+  }
+
   return (
     <Button
+      variant="secondary"
+      size="sm"
       onClick={onOpen}
-      className={`inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase hover:text-accent transition-transform transition-colors duration-200 ease-out hover:scale-[1.01] ${className}`}
+      className={className}
       aria-label="Settings"
       tabIndex={0}
     >
-      <SettingsIcon className="w-4 h-4 transition-transform duration-200 ease-out hover:scale-[1.01] hover:rotate-45" />
+      <SettingsIcon className="w-4 h-4 transition-transform duration-base ease-standard hover:rotate-45" />
       {triggerLabel && <span className="ml-2">{triggerLabel}</span>}
     </Button>
   );
@@ -483,8 +545,8 @@ export function SettingsModal({
     setActiveSection(visibleSections[0]?.id ?? 'theme');
   }, [activeSection, visibleSections]);
 
-  const fieldLabelClass = 'block text-[11px] font-semibold uppercase tracking-wide text-muted';
-  const sectionShellClass = 'space-y-2 pb-3 border-b border-offbase px-0.5';
+  const fieldLabelClass = 'block text-[11px] font-semibold uppercase tracking-wide text-soft';
+  const sectionShellClass = 'space-y-2 pb-3 border-b border-line-soft px-0.5';
   const sectionHeadingClass = 'text-sm font-semibold text-foreground';
   const effectiveProviderType = resolveEffectiveProviderType({
     providerRef: selectedProviderRef,
@@ -511,53 +573,32 @@ export function SettingsModal({
 
   return (
     <>
-      <Transition appear show={isOpen} as={Fragment}>
-        <Dialog
-          as="div"
-          className={`relative ${isChangelogOpen ? 'z-[90]' : 'z-50'}`}
-          onClose={resetToCurrent}
-        >
-          <TransitionChild
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 overlay-dim backdrop-blur-sm" />
-          </TransitionChild>
-
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-start justify-center p-4 pt-6 text-center sm:items-center sm:pt-4">
-              <TransitionChild
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <DialogPanel data-testid="settings-modal" className="relative w-full max-w-4xl transform rounded-xl bg-base text-left align-middle shadow-xl transition-all overflow-hidden border border-offbase">
+      <ModalFrame
+        open={isOpen}
+        onClose={resetToCurrent}
+        size="xl"
+        panelTestId="settings-modal"
+        className={isChangelogOpen ? 'z-[90]' : 'z-50'}
+      >
                   {/* Header */}
-                  <div className="flex items-center justify-between px-5 py-3 border-b border-offbase">
+                  <div className="flex items-center justify-between px-5 py-3 border-b border-line-soft">
                     <div className="flex items-baseline gap-4">
-                      <DialogTitle as="h3" className="text-lg font-semibold leading-6 text-foreground">
-                        Settings
-                      </DialogTitle>
+                      <ModalTitle>Settings</ModalTitle>
                       <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => setIsChangelogOpen(true)}
-                        className="text-sm font-medium leading-6 text-muted hover:text-accent transition-colors"
+                        className="text-sm font-medium leading-6 text-soft hover:text-accent transition-colors"
                       >
                         {displayVersion ? `v${displayVersion} · Changelog` : 'Changelog'}
                       </Button>
                     </div>
                     <div className="flex items-center">
                       <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => showPrivacyModal()}
-                        className="text-sm font-medium text-muted hover:text-accent transition-colors"
+                        className="text-sm font-medium text-soft hover:text-accent transition-colors"
                       >
                         Privacy
                       </Button>
@@ -572,50 +613,42 @@ export function SettingsModal({
                     />
                   ) : (
                     <>
-                      {/* Mobile: 2x2 grid nav */}
-                      <div className="grid grid-cols-2 gap-1 sm:hidden border-b border-offbase bg-background p-2">
+                      {/* Mobile nav */}
+                      <SidebarNav layout="grid" className="sm:hidden border-b border-line-soft bg-background p-2">
                         {visibleSections.map((section) => {
                           const Icon = section.icon;
                           return (
-                            <button
+                            <SidebarNavItem
+                              compact
                               key={section.id}
                               onClick={() => setActiveSection(section.id)}
-                              className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                                activeSection === section.id
-                                  ? 'bg-accent text-background'
-                                  : 'text-foreground hover:bg-offbase hover:text-accent'
-                              }`}
-                            >
-                              <Icon className="w-3.5 h-3.5" />
-                              {section.label}
-                            </button>
+                              active={activeSection === section.id}
+                              icon={<Icon className="w-3.5 h-3.5" />}
+                              label={section.label}
+                            />
                           );
                         })}
-                      </div>
+                      </SidebarNav>
 
                       <div className="flex flex-row h-[490px]">
                     {/* Desktop: vertical sidebar */}
-                    <nav className="hidden sm:block w-44 shrink-0 border-r border-offbase bg-background p-2">
-                      <div className="flex flex-col gap-1">
+                    <nav className="hidden sm:block w-44 shrink-0 border-r border-line-soft bg-background p-2">
+                      <SidebarNav>
                         {visibleSections.map((section) => {
                           const Icon = section.icon;
                           const active = activeSection === section.id;
                           return (
-                            <button
+                            <SidebarNavItem
                               key={section.id}
                               onClick={() => setActiveSection(section.id)}
-                              className={`w-full flex items-center gap-2.5 text-left px-2.5 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-                                active
-                                  ? 'bg-accent text-background'
-                                  : 'text-foreground hover:bg-base hover:text-accent'
-                              }`}
-                            >
-                              <Icon className="w-4 h-4 shrink-0" />
-                              {section.label}
-                            </button>
+                              active={active}
+                              icon={<Icon className="w-4 h-4" />}
+                              label={section.label}
+                              className="whitespace-nowrap"
+                            />
                           );
                         })}
-                      </div>
+                      </SidebarNav>
                     </nav>
 
                     {/* Content */}
@@ -630,7 +663,7 @@ export function SettingsModal({
                           <div className="space-y-1.5">
                             <label className={fieldLabelClass}>TTS Provider</label>
                             {ttsProviders.length === 0 ? (
-                              <p className="text-xs text-amber-500">
+                              <p className="text-xs text-accent">
                                 User API keys are restricted and no shared provider is configured. Ask an admin to add one.
                               </p>
                             ) : (
@@ -656,28 +689,26 @@ export function SettingsModal({
                                   setCustomModelInput('');
                                 }}
                               >
-                                <ListboxButton className={listboxButtonClass}>
+                                <SharedListboxButton>
                                   <span className="block truncate">
                                     {selectedProviderOption?.name || 'Select Provider'}
                                   </span>
                                   <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                                    <ChevronUpDownIcon className="h-5 w-5 text-muted" />
+                                    <ChevronUpDownIcon className="h-5 w-5 text-soft" />
                                   </span>
-                                </ListboxButton>
+                                </SharedListboxButton>
                                 <Transition
                                   as={Fragment}
-                                  leave="transition ease-in duration-100"
+                                  leave="transition ease-standard duration-fast"
                                   leaveFrom="opacity-100"
                                   leaveTo="opacity-0"
                                 >
-                                  <ListboxOptions
+                                  <SharedListboxOptions
                                     anchor="bottom start"
-                                    className={listboxOptionsClass}
                                   >
                                     {ttsProviders.map((provider) => (
-                                      <ListboxOption
+                                      <SharedListboxOption
                                         key={provider.id}
-                                        className={({ active }) => listboxOptionClass(active)}
                                         value={provider}
                                       >
                                         {({ selected }) => (
@@ -692,15 +723,15 @@ export function SettingsModal({
                                             )}
                                           </>
                                         )}
-                                      </ListboxOption>
+                                      </SharedListboxOption>
                                     ))}
-                                  </ListboxOptions>
+                                  </SharedListboxOptions>
                                 </Transition>
                               </Listbox>
                             )}
                           </div>
                           {restrictUserApiKeys && (
-                            <p className="text-xs text-muted">
+                            <p className="text-xs text-soft">
                               This instance restricts user API keys. TTS runs through admin-configured shared providers only.
                             </p>
                           )}
@@ -737,7 +768,7 @@ export function SettingsModal({
                             </div>
                           )}
                           {isSharedSelected && (
-                            <p className="text-xs text-muted">
+                            <p className="text-xs text-soft">
                               This is a shared provider configured by an admin. API key and base URL are managed server-side.
                             </p>
                           )}
@@ -745,7 +776,7 @@ export function SettingsModal({
                           <div className="space-y-1.5">
                             <label className={fieldLabelClass}>TTS Model</label>
                             {!showAllProviderModels && (
-                              <p className="text-xs text-muted">
+                              <p className="text-xs text-soft">
                                 This instance restricts model selection to each provider&apos;s default model.
                               </p>
                             )}
@@ -761,14 +792,14 @@ export function SettingsModal({
                                   }
                                 }}
                               >
-                                <ListboxButton className={listboxButtonClass}>
+                                <SharedListboxButton>
                                   {selectedModel ? (
                                     <span className="block">
                                       <span className="block truncate">
                                         {selectedModel.name}
                                       </span>
                                       {selectedModelVersion && (
-                                        <span className="block truncate text-xs text-muted">
+                                        <span className="block truncate text-xs text-soft">
                                           {selectedModelVersion}
                                         </span>
                                       )}
@@ -777,23 +808,21 @@ export function SettingsModal({
                                     <span className="block truncate">Select Model</span>
                                   )}
                                   <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                                    <ChevronUpDownIcon className="h-5 w-5 text-muted" />
+                                    <ChevronUpDownIcon className="h-5 w-5 text-soft" />
                                   </span>
-                                </ListboxButton>
+                                </SharedListboxButton>
                                 <Transition
                                   as={Fragment}
-                                  leave="transition ease-in duration-100"
+                                  leave="transition ease-standard duration-fast"
                                   leaveFrom="opacity-100"
                                   leaveTo="opacity-0"
                                 >
-                                  <ListboxOptions
+                                  <SharedListboxOptions
                                     anchor="bottom start"
-                                    className={listboxOptionsClass}
                                   >
                                     {ttsModels.map((model) => (
-                                      <ListboxOption
+                                      <SharedListboxOption
                                         key={model.id}
-                                        className={({ active }) => listboxOptionClass(active)}
                                         value={model}
                                     >
                                       {({ selected }) => (
@@ -801,7 +830,7 @@ export function SettingsModal({
                                           <span className={`block ${selected ? 'font-medium' : 'font-normal'}`}>
                                             <span className="block truncate">{model.name}</span>
                                             {model.id.includes(':') && (
-                                              <span className="block truncate text-xs text-muted">
+                                              <span className="block truncate text-xs text-soft">
                                                 {model.id.slice(model.id.indexOf(':'))}
                                               </span>
                                             )}
@@ -813,9 +842,9 @@ export function SettingsModal({
                                             )}
                                           </>
                                         )}
-                                      </ListboxOption>
+                                      </SharedListboxOption>
                                     ))}
-                                  </ListboxOptions>
+                                  </SharedListboxOptions>
                                 </Transition>
                               </Listbox>
 
@@ -849,7 +878,8 @@ export function SettingsModal({
                           <div className="pt-4 flex justify-end gap-2">
                             <Button
                               type="button"
-                              className={buttonClass({ variant: 'secondary', size: 'md' })}
+                              variant="secondary"
+                              size="md"
                               onClick={async () => {
                                 const defaults = resolveProviderDefaults({
                                   providerRef: runtimeConfig.defaultTtsProvider,
@@ -869,7 +899,8 @@ export function SettingsModal({
                             <Button
                               data-testid="settings-save-button"
                               type="button"
-                              className={buttonClass({ variant: 'primary', size: 'md' })}
+                              variant="primary"
+                              size="md"
                               disabled={!canSubmit}
                               onClick={async () => {
                                 const defaults = resolveProviderDefaults({
@@ -906,88 +937,48 @@ export function SettingsModal({
                               const colors = getThemeColors(systemTheme.id);
                               const isActive = theme === systemTheme.id;
                               return (
-                                <button
+                                <ThemeChoice
+                                  label={systemTheme.name}
+                                  colors={colors}
+                                  selected={isActive}
                                   onClick={() => setTheme(systemTheme.id)}
-                                  className={`flex items-center gap-2 rounded-lg px-2 py-1.5 w-full text-left transition-all duration-200 ease-in-out transform hover:scale-[1.02] border
-                                    ${isActive
-                                      ? 'border-accent'
-                                      : 'border-offbase hover:border-muted'
-                                    }`}
-                                  style={{ backgroundColor: colors.base }}
-                                >
-                                  {isActive ? (
-                                    <CheckIcon className="h-3.5 w-3.5 shrink-0 text-accent" />
-                                  ) : (
-                                    <span className="w-3.5 shrink-0" />
-                                  )}
-                                  <span
-                                    className="text-xs font-medium w-14 shrink-0"
-                                    style={{ color: colors.foreground }}
-                                  >
-                                    {systemTheme.name}
-                                  </span>
-                                  <div className="flex gap-1 ml-auto">
-                                    <div className="w-4 h-4 rounded-full border border-offbase" style={{ backgroundColor: colors.background }} />
-                                    <div className="w-4 h-4 rounded-full border border-offbase" style={{ backgroundColor: colors.offbase }} />
-                                    <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.accent }} />
-                                    <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.secondaryAccent }} />
-                                    <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.muted }} />
-                                  </div>
-                                </button>
+                                  className="w-full"
+                                />
                               );
                             })()}
                           </div>
 
                           {/* Custom theme */}
                           <div className="space-y-1.5">
-                            <label className="block text-xs font-medium text-muted uppercase tracking-wide">Custom</label>
+                            <label className="block text-xs font-medium text-soft uppercase tracking-wide">Custom</label>
                             {(() => {
                               const colors = getThemeColors('custom');
                               const isActive = theme === 'custom';
                               return (
                                 <div className="space-y-1.5">
                                   <div className="flex items-center gap-1">
-                                    <button
+                                    <ThemeChoice
+                                      label="Custom"
+                                      colors={colors}
+                                      selected={isActive}
                                       onClick={() => {
                                         setTheme('custom');
                                         setIsCustomExpanded(true);
                                       }}
-                                      className={`flex items-center gap-2 rounded-lg px-2 py-1.5 flex-1 text-left transition-all duration-200 ease-in-out transform hover:scale-[1.02] border
-                                        ${isActive
-                                          ? 'border-accent'
-                                          : 'border-offbase hover:border-muted'
-                                        }`}
-                                      style={{ backgroundColor: colors.base }}
-                                    >
-                                      {isActive ? (
-                                        <CheckIcon className="h-3.5 w-3.5 shrink-0" style={{ color: colors.accent }} />
-                                      ) : (
-                                        <span className="w-3.5 shrink-0" />
-                                      )}
-                                      <span
-                                        className="text-xs font-medium w-14 shrink-0"
-                                        style={{ color: colors.foreground }}
-                                      >
-                                        Custom
-                                      </span>
-                                      <div className="flex gap-1 ml-auto">
-                                        <div className="w-4 h-4 rounded-full border border-offbase" style={{ backgroundColor: colors.background }} />
-                                        <div className="w-4 h-4 rounded-full border border-offbase" style={{ backgroundColor: colors.offbase }} />
-                                        <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.accent }} />
-                                        <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.secondaryAccent }} />
-                                        <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.muted }} />
-                                      </div>
-                                    </button>
-                                    <button
+                                      className="flex-1"
+                                    />
+                                    <IconButton
                                       onClick={() => setIsCustomExpanded(!isCustomExpanded)}
-                                      className="shrink-0 p-1.5 rounded-lg border border-offbase hover:border-muted transition-colors"
+                                      tone="surface"
+                                      size="sm"
+                                      className="shrink-0"
                                       style={{ color: colors.muted, backgroundColor: colors.base }}
                                       aria-label={isCustomExpanded ? 'Collapse color picker' : 'Expand color picker'}
                                     >
-                                      <svg className={`w-3.5 h-3.5 transition-transform duration-200 ${isCustomExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <svg className={`w-3.5 h-3.5 transition-transform duration-base ${isCustomExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                                       </svg>
-                                    </button>
+                                    </IconButton>
                                   </div>
 
                                   {isCustomExpanded && (
@@ -1043,41 +1034,19 @@ export function SettingsModal({
 
                           {/* Light themes */}
                           <div className="space-y-1.5">
-                            <label className="block text-xs font-medium text-muted uppercase tracking-wide">Light</label>
+                            <label className="block text-xs font-medium text-soft uppercase tracking-wide">Light</label>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                               {lightThemes.map((t) => {
                                 const colors = getThemeColors(t.id);
                                 const isActive = theme === t.id;
                                 return (
-                                  <button
+                                  <ThemeChoice
                                     key={t.id}
+                                    label={t.name}
+                                    colors={colors}
+                                    selected={isActive}
                                     onClick={() => setTheme(t.id)}
-                                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-all duration-200 ease-in-out transform hover:scale-[1.02] border
-                                      ${isActive
-                                        ? 'border-accent'
-                                        : 'border-offbase hover:border-muted'
-                                      }`}
-                                    style={{ backgroundColor: colors.base }}
-                                  >
-                                    {isActive ? (
-                                      <CheckIcon className="h-3.5 w-3.5 shrink-0 text-accent" />
-                                    ) : (
-                                      <span className="w-3.5 shrink-0" />
-                                    )}
-                                    <span
-                                      className="text-xs font-medium w-14 shrink-0"
-                                      style={{ color: colors.foreground }}
-                                    >
-                                      {t.name}
-                                    </span>
-                                    <div className="flex gap-1 ml-auto">
-                                      <div className="w-4 h-4 rounded-full border border-offbase" style={{ backgroundColor: colors.background }} />
-                                      <div className="w-4 h-4 rounded-full border border-offbase" style={{ backgroundColor: colors.offbase }} />
-                                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.accent }} />
-                                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.secondaryAccent }} />
-                                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.muted }} />
-                                    </div>
-                                  </button>
+                                  />
                                 );
                               })}
                             </div>
@@ -1085,41 +1054,19 @@ export function SettingsModal({
 
                           {/* Dark themes */}
                           <div className="space-y-1.5">
-                            <label className="block text-xs font-medium text-muted uppercase tracking-wide">Dark</label>
+                            <label className="block text-xs font-medium text-soft uppercase tracking-wide">Dark</label>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                               {darkThemes.map((t) => {
                                 const colors = getThemeColors(t.id);
                                 const isActive = theme === t.id;
                                 return (
-                                  <button
+                                  <ThemeChoice
                                     key={t.id}
+                                    label={t.name}
+                                    colors={colors}
+                                    selected={isActive}
                                     onClick={() => setTheme(t.id)}
-                                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-all duration-200 ease-in-out transform hover:scale-[1.02] border
-                                      ${isActive
-                                        ? 'border-accent'
-                                        : 'border-offbase hover:border-muted'
-                                      }`}
-                                    style={{ backgroundColor: colors.base }}
-                                  >
-                                    {isActive ? (
-                                      <CheckIcon className="h-3.5 w-3.5 shrink-0 text-accent" />
-                                    ) : (
-                                      <span className="w-3.5 shrink-0" />
-                                    )}
-                                    <span
-                                      className="text-xs font-medium w-14 shrink-0"
-                                      style={{ color: colors.foreground }}
-                                    >
-                                      {t.name}
-                                    </span>
-                                    <div className="flex gap-1 ml-auto">
-                                      <div className="w-4 h-4 rounded-full border border-offbase" style={{ backgroundColor: colors.background }} />
-                                      <div className="w-4 h-4 rounded-full border border-offbase" style={{ backgroundColor: colors.offbase }} />
-                                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.accent }} />
-                                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.secondaryAccent }} />
-                                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: colors.muted }} />
-                                    </div>
-                                  </button>
+                                  />
                                 );
                               })}
                             </div>
@@ -1135,7 +1082,8 @@ export function SettingsModal({
                             <Button
                               onClick={handleImportLibrary}
                               disabled={isBusy}
-                              className={buttonClass({ variant: 'outline', size: 'md' })}
+                              variant="outline"
+                              size="md"
                             >
                               {isImportingLibrary ? `Importing... ${Math.round(progress)}%` : 'Import from library'}
                             </Button>
@@ -1147,14 +1095,16 @@ export function SettingsModal({
                               <Button
                                 onClick={handleRefresh}
                                 disabled={isBusy}
-                                className={buttonClass({ variant: 'outline', size: 'md' })}
+                                variant="outline"
+                                size="md"
                               >
                                 Refresh
                               </Button>
                               <Button
                                 onClick={handleClearCache}
                                 disabled={isBusy}
-                                className={buttonClass({ variant: 'outline', size: 'md' })}
+                                variant="outline"
+                                size="md"
                               >
                                 Clear cache
                               </Button>
@@ -1166,30 +1116,16 @@ export function SettingsModal({
                       {/* Admin Section */}
                       {activeSection === 'admin' && isAdmin && (
                         <div className="space-y-4">
-                          <div
-                            role="radiogroup"
-                            aria-label="Admin tab"
-                            className={`${segmentedGroupClass} grid-cols-2`}
-                          >
-                            {([
-                              { id: 'providers', label: 'Shared providers' },
-                              { id: 'features', label: 'Site features' },
-                            ] as { id: AdminSubTab; label: string }[]).map((tab) => {
-                              const active = adminSubTab === tab.id;
-                              return (
-                                <button
-                                  key={tab.id}
-                                  type="button"
-                                  role="radio"
-                                  aria-checked={active}
-                                  onClick={() => setAdminSubTab(tab.id)}
-                                  className={segmentedButtonClass(active)}
-                                >
-                                  {tab.label}
-                                </button>
-                              );
-                            })}
-                          </div>
+                          <SegmentedControl
+                            value={adminSubTab}
+                            options={[
+                              { value: 'providers', label: 'Shared providers' },
+                              { value: 'features', label: 'Site features' },
+                            ]}
+                            onChange={setAdminSubTab}
+                            ariaLabel="Admin tab"
+                            className="grid-cols-2"
+                          />
                           {adminSubTab === 'providers' && <AdminProvidersPanel />}
                           {adminSubTab === 'features' && <AdminFeaturesPanel />}
                         </div>
@@ -1199,10 +1135,10 @@ export function SettingsModal({
                       {activeSection === 'account' && (
                         <div className="space-y-2">
                           {/* Session info */}
-                          <div className="rounded-lg bg-background border border-offbase p-4 space-y-2">
+                          <div className="rounded-lg bg-background border border-line p-4 space-y-2">
                             <h4 className="text-sm font-medium text-foreground">Current Session</h4>
                             <div className="text-sm space-y-1">
-                              <p className="text-muted">Logged in as:</p>
+                              <p className="text-soft">Logged in as:</p>
                               {session?.user ? (
                                 <>
                                   <p className="font-medium text-foreground">
@@ -1211,7 +1147,7 @@ export function SettingsModal({
                                       : (session.user.name || session.user.email || 'Account')}
                                   </p>
                                   {!session.user.isAnonymous && (
-                                    <p className="text-xs text-muted font-mono">{session.user.email}</p>
+                                    <p className="text-xs text-soft font-mono">{session.user.email}</p>
                                   )}
                                   {session.user.isAnonymous && (
                                     <p className="text-xs text-accent mt-1">Anonymous session</p>
@@ -1225,20 +1161,20 @@ export function SettingsModal({
 
                           {/* Export Data */}
                           {session?.user && (
-                            <button
+                            <ChoiceTile
                               onClick={() => {
                                 window.open('/api/user/export', '_blank');
                               }}
-                              className="w-full rounded-lg border border-offbase bg-background p-4 flex items-center gap-4 hover:bg-offbase transition-colors text-left group"
+                              className="w-full rounded-lg bg-background p-4 text-left hover:bg-accent-wash"
                             >
-                              <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-offbase flex items-center justify-center group-hover:bg-background transition-colors">
+                              <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-surface-sunken flex items-center justify-center">
                                 <DownloadIcon className="w-5 h-5 text-accent" />
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-foreground">Export My Data</p>
-                                <p className="text-xs text-muted">Download all your data as a ZIP file</p>
+                                <p className="text-xs text-soft">Download all your data as a ZIP file</p>
                               </div>
-                            </button>
+                            </ChoiceTile>
                           )}
 
                           {/* Actions */}
@@ -1247,27 +1183,31 @@ export function SettingsModal({
                               <>
                                 <Button
                                   onClick={handleSignOut}
-                                  className={buttonClass({ variant: 'outline', size: 'md', className: 'hover:scale-[1.04]' })}
+                                  variant="outline"
+                                  size="md"
                                 >
                                   Disconnect account
                                 </Button>
 
-                                <div className="pt-4 mt-4 border-t border-offbase">
-                                  <label className="block text-sm font-medium text-red-500 mb-2">Danger Zone</label>
-                                  <Button
-                                    onClick={() => setShowDeleteAccountConfirm(true)}
-                                    className={buttonClass({ variant: 'danger', size: 'md' })}
-                                  >
-                                    Delete Account
-                                  </Button>
-                                  <p className="text-xs text-muted mt-2">
-                                    Permanently deletes your account and all data.
-                                  </p>
-                                </div>
+                                {enableDestructiveDelete && (
+                                  <div className="pt-4 mt-4 border-t border-line-soft">
+                                    <label className="block text-sm font-medium text-danger mb-2">Danger Zone</label>
+                                    <Button
+                                      onClick={() => setShowDeleteAccountConfirm(true)}
+                                      variant="danger"
+                                      size="md"
+                                    >
+                                      Delete Account
+                                    </Button>
+                                    <p className="text-xs text-soft mt-2">
+                                      Permanently deletes your account and all data.
+                                    </p>
+                                  </div>
+                                )}
                               </>
                             ) : (
-                              <div className="pt-2 border-t border-offbase">
-                                <p className="text-sm text-muted mb-3">
+                              <div className="pt-2 border-t border-line-soft">
+                                <p className="text-sm text-soft mb-3">
                                   {session?.user?.isAnonymous
                                     ? (runtimeConfig.enableUserSignups
                                       ? 'You are using an anonymous session. Sign up to save your progress permanently, your current data is automatically transferred.'
@@ -1278,19 +1218,19 @@ export function SettingsModal({
                                 </p>
                                 <div className="flex flex-wrap gap-2">
                                   <Link href="/signin">
-                                    <Button className={buttonClass({ variant: 'outline', size: 'md', className: 'hover:scale-[1.04]' })}>
+                                    <Button variant="outline" size="md">
                                       Connect
                                     </Button>
                                   </Link>
                                   {runtimeConfig.enableUserSignups && (
                                     <Link href="/signup">
-                                      <Button className={buttonClass({ variant: 'primary', size: 'md', className: 'hover:scale-[1.04]' })}>
+                                      <Button variant="primary" size="md">
                                         Create account
                                       </Button>
                                     </Link>
                                   )}
                                   <Link href="/?redirect=false">
-                                    <Button className={buttonClass({ variant: 'outline', size: 'md', className: 'hover:scale-[1.04]' })}>
+                                    <Button variant="outline" size="md">
                                       Back to landing page
                                     </Button>
                                   </Link>
@@ -1304,12 +1244,7 @@ export function SettingsModal({
                       </div>
                     </>
                   )}
-                </DialogPanel>
-              </TransitionChild>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
+      </ModalFrame>
 
       <ConfirmDialog
         isOpen={showDeleteDocsConfirm}
@@ -1435,21 +1370,20 @@ function SettingsChangelogPanel({
   }, [expanded, manifest, manifestUrl, bodies]);
 
   return (
-    <div className="h-[490px] flex flex-col bg-base">
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-offbase bg-background">
-        <Button
+    <div className="h-[490px] flex flex-col bg-surface">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-line-soft bg-background">
+        <IconButton
           onClick={onClose}
-          className="inline-flex items-center justify-center rounded-md text-muted hover:text-accent hover:bg-base transition-all duration-200 ease-in-out transform hover:scale-[1.01]"
           aria-label="Back to settings"
           title="Back"
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
-        </Button>
+        </IconButton>
         <div className="min-w-0">
           <h4 className="text-sm font-semibold text-foreground">Changelog</h4>
-          <p className="text-xs text-muted truncate">
+          <p className="text-xs text-soft truncate">
             {normalizedAppVersion
               ? `Current version: v${normalizedAppVersion}`
               : 'Release history from GitHub'}
@@ -1459,20 +1393,20 @@ function SettingsChangelogPanel({
 
       <div className="flex-1 overflow-y-auto px-3 pb-3">
         {loading && (
-          <div className="py-3 text-sm text-muted">
+          <div className="py-3 text-sm text-soft">
             Loading changelog…
           </div>
         )}
 
         {!loading && error && (
-          <div className="py-3 space-y-2 border-b border-offbase">
+          <div className="py-3 space-y-2 border-b border-line-soft">
             <p className="text-sm text-foreground">Could not load changelog right now.</p>
-            <p className="text-xs text-muted break-words">{error}</p>
+            <p className="text-xs text-soft break-words">{error}</p>
             <a
               href="https://github.com/richardr1126/openreader/releases"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex text-xs font-medium text-accent hover:underline transition-all duration-200 ease-in-out transform hover:scale-[1.02]"
+              className="inline-flex text-xs font-medium text-accent hover:underline transition duration-base ease-standard transform"
             >
               Open GitHub Releases
             </a>
@@ -1480,7 +1414,7 @@ function SettingsChangelogPanel({
         )}
 
         {!loading && !error && manifest.length === 0 && (
-          <div className="py-3 text-sm text-muted">
+          <div className="py-3 text-sm text-soft">
             No releases found.
           </div>
         )}
@@ -1493,35 +1427,35 @@ function SettingsChangelogPanel({
           const normalizedName = normalizeVersion(entry.name || '');
           const showName = Boolean(entry.name) && normalizedName !== normalizedTag;
           return (
-            <div key={entry.tag_name} className="border-b border-offbase">
+            <div key={entry.tag_name} className="border-b border-line-soft">
               <button
                 type="button"
                 onClick={() => setExpanded((prev) => ({ ...prev, [entry.tag_name]: !isExpanded }))}
-                className="w-full text-left py-2 flex items-center gap-2 hover:bg-base transition-all duration-200 ease-in-out transform hover:scale-[1.01]"
+                className="w-full rounded-md border border-transparent px-2 py-2 text-left flex items-center gap-2 transition duration-base ease-standard hover:border-accent-line hover:bg-accent-wash"
               >
                 <ChevronRightIcon
-                  className={`w-3.5 h-3.5 shrink-0 text-muted transition-transform ${
+                  className={`w-3.5 h-3.5 shrink-0 text-soft transition-transform ${
                     isExpanded ? 'rotate-90 text-foreground' : ''
                   }`}
                 />
                 <div className="min-w-0 flex items-center gap-2 text-sm w-full">
                   <span className="font-semibold text-foreground shrink-0">{entry.tag_name}</span>
                   {entry.prerelease && (
-                    <span className="text-[10px] uppercase tracking-wide font-semibold rounded px-1.5 py-0.5 bg-offbase text-muted shrink-0">
+                    <span className="text-[10px] uppercase tracking-wide font-semibold rounded px-1.5 py-0.5 bg-surface-sunken text-soft shrink-0">
                       prerelease
                     </span>
                   )}
                   {isCurrent && (
-                    <span className="text-[10px] uppercase tracking-wide font-semibold rounded px-1.5 py-0.5 bg-offbase text-accent shrink-0">
+                    <span className="text-[10px] uppercase tracking-wide font-semibold rounded px-1.5 py-0.5 bg-surface-sunken text-accent shrink-0">
                       current
                     </span>
                   )}
                   {showName && (
-                    <span className="text-xs text-muted truncate">
+                    <span className="text-xs text-soft truncate">
                       {entry.name}
                     </span>
                   )}
-                  <span className="text-[11px] text-muted shrink-0">
+                  <span className="text-[11px] text-soft shrink-0">
                     {new Date(entry.published_at).toLocaleDateString()}
                   </span>
                 </div>
@@ -1530,19 +1464,19 @@ function SettingsChangelogPanel({
               {isExpanded && (
                 <div className="pl-6 pr-1 pb-3 pt-1 space-y-2">
                   {body ? (
-                    <div className="text-sm text-foreground leading-6 space-y-2 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_ul]:pl-5 [&_ol]:pl-5 [&_code]:bg-offbase [&_code]:rounded [&_code]:px-1 [&_pre]:bg-offbase [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto">
+                    <div className="text-sm text-foreground leading-6 space-y-2 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_ul]:pl-5 [&_ol]:pl-5 [&_code]:bg-surface-sunken [&_code]:rounded [&_code]:px-1 [&_pre]:bg-surface-sunken [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {body.body || '_No release notes provided._'}
                       </ReactMarkdown>
                     </div>
                   ) : (
-                    <p className="text-xs text-muted">Loading release notes…</p>
+                    <p className="text-xs text-soft">Loading release notes…</p>
                   )}
                   <a
                     href={entry.html_url}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex text-xs font-medium text-accent hover:underline transition-all duration-200 ease-in-out transform hover:scale-[1.02]"
+                    className="inline-flex text-xs font-medium text-accent hover:underline transition duration-base ease-standard transform"
                   >
                     View on GitHub
                   </a>

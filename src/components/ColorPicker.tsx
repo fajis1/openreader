@@ -1,9 +1,10 @@
 'use client';
 
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { Popover, PopoverButton, PopoverPanel } from '@headlessui/react';
+import { Popover, PopoverButton } from '@headlessui/react';
 import { isLightColor, type CustomThemeColors } from '@/contexts/ThemeContext';
 import { PaletteIcon } from '@/components/icons/Icons';
+import { IconButton, Input, PopoverSurface } from '@/components/ui';
 
 /**
  * Curated swatch palettes per color role, sourced from existing themes
@@ -78,9 +79,9 @@ export function ColorPicker({ value, field, label, onChange }: ColorPickerProps)
 
   return (
     <Popover className="relative flex items-center">
-      <PopoverButton className="cursor-pointer group focus:outline-none">
+      <PopoverButton as={IconButton} size="sm" className="group rounded-full p-0" aria-label={`Pick ${label} color`}>
         <div
-          className="w-6 h-6 rounded-full border-2 transition-all duration-150 group-hover:scale-110 group-focus-visible:ring-2 group-focus-visible:ring-offset-1"
+          className="w-6 h-6 rounded-full border-2 transition duration-fast group-focus-visible:ring-2 group-focus-visible:ring-offset-1"
           style={{
             backgroundColor: value,
             borderColor: isLightColor(value) ? '#00000022' : '#ffffff22',
@@ -88,11 +89,10 @@ export function ColorPicker({ value, field, label, onChange }: ColorPickerProps)
         />
       </PopoverButton>
 
-      <PopoverPanel
+      <PopoverSurface
         anchor="bottom start"
         transition
-        className="z-[60] mt-2 w-56 rounded-xl shadow-xl border border-offbase bg-background p-3 space-y-3
-          transition duration-150 ease-out data-[closed]:opacity-0 data-[closed]:scale-95"
+        className="z-[60] mt-2 w-56 bg-background space-y-3 transition duration-fast ease-standard data-[closed]:opacity-0 data-[closed]:scale-95"
       >
         {/* Label */}
         <div className="flex items-center justify-between">
@@ -101,14 +101,14 @@ export function ColorPicker({ value, field, label, onChange }: ColorPickerProps)
           </span>
           {/* Eyedropper / native picker */}
           <div className="relative">
-            <button
+            <IconButton
               type="button"
               onClick={() => nativeRef.current?.click()}
-              className="p-1"
+              size="xs"
               aria-label="Open system color picker"
             >
-              <PaletteIcon className="w-4 h-4 text-muted transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent" />
-            </button>
+              <PaletteIcon className="w-4 h-4 transform transition-transform duration-base ease-standard" />
+            </IconButton>
             <input
               ref={nativeRef}
               type="color"
@@ -130,7 +130,7 @@ export function ColorPicker({ value, field, label, onChange }: ColorPickerProps)
                 key={color}
                 type="button"
                 onClick={() => onChange(color)}
-                className="group/swatch relative w-full aspect-square rounded-full transition-transform duration-100 hover:scale-125 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1"
+                className="group/swatch relative w-full aspect-square rounded-full transition-transform duration-fast focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1"
                 style={{
                   backgroundColor: color,
                   boxShadow: selected ? '0 0 0 2px var(--background), 0 0 0 4px var(--foreground)' : undefined,
@@ -156,7 +156,7 @@ export function ColorPicker({ value, field, label, onChange }: ColorPickerProps)
               borderColor: isLightColor(value) ? '#00000018' : '#ffffff18',
             }}
           />
-          <input
+          <Input
             type="text"
             value={hexInput}
             onChange={(e) => setHexInput(e.target.value)}
@@ -166,10 +166,11 @@ export function ColorPicker({ value, field, label, onChange }: ColorPickerProps)
             }}
             spellCheck={false}
             maxLength={7}
-            className="flex-1 rounded-lg px-2 py-1 text-xs font-mono border border-offbase bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+            controlSize="sm"
+            className="flex-1 font-mono"
           />
         </div>
-      </PopoverPanel>
+      </PopoverSurface>
     </Popover>
   );
 }
