@@ -32,7 +32,7 @@ COPY . .
 
 # Build the Next.js application
 RUN pnpm exec next telemetry disable
-RUN pnpm build
+RUN AUTH_SECRET=build-placeholder-secret-value-32chars!! BASE_URL=http://localhost:3003 pnpm build
 # Generate third-party dependency license report plus copied license files.
 RUN mkdir -p /app/THIRD_PARTY_LICENSES && \
     pnpm dlx license-checker-rseidelsohn@4.3.0 \
