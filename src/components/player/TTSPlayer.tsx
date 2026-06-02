@@ -53,6 +53,7 @@ export default function TTSPlayer({ currentPage, numPages }: {
           onClick={skipBackward}
           aria-label="Skip backward"
           disabled={isProcessing}
+          className="relative"
         >
           {isProcessing ? <LoadingSpinner /> : <SkipBackwardIcon className="w-5 h-5" />}
         </IconButton>
@@ -61,6 +62,7 @@ export default function TTSPlayer({ currentPage, numPages }: {
           onClick={togglePlay}
           aria-label={isPlaying ? 'Pause' : 'Play'}
           disabled={isProcessing && !isPlaying}
+          className="relative"
         >
           {isPlaying ? <PauseIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5" />}
         </IconButton>
@@ -69,6 +71,7 @@ export default function TTSPlayer({ currentPage, numPages }: {
           onClick={skipForward}
           aria-label="Skip forward"
           disabled={isProcessing}
+          className="relative"
         >
           {isProcessing ? <LoadingSpinner /> : <SkipForwardIcon className="w-5 h-5" />}
         </IconButton>
