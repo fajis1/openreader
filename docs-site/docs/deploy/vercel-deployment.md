@@ -78,7 +78,6 @@ After the first successful deploy and admin login, open **Settings → Admin** a
 - **Shared providers**: create/edit your provider key(s) here (encrypted at rest).
 - **Site features**:
   - `enableDocxConversion=false` on Vercel (`soffice` unavailable).
-  - `enableDestructiveDeleteActions=false` for safer public deployments.
   - `enableTtsProvidersTab=false` if you want shared-provider-only UX.
   - `enableUserSignups=true` unless you explicitly want an invite-only deployment.
   - `restrictUserApiKeys=true` to block user BYOK through the hosted server.

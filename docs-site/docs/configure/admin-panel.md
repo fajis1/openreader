@@ -76,7 +76,6 @@ Runtime-editable settings, one row per key:
 | `showAllProviderModels` | When `false`, users are restricted to each provider's default model (shared provider `defaultModel` or built-in provider default). |
 | `enableAudiobookExport` | Show the audiobook export entry points on PDF/EPUB pages. |
 | `enableDocxConversion` | Accept .docx uploads (converted to PDF server-side). |
-| `enableDestructiveDeleteActions` | Show "Delete all data" buttons in the Documents tab (auth-disabled mode). |
 
 Word-by-word highlighting and PDF layout parsing capability are controlled by compute-worker server env configuration, not an admin runtime flag.
 

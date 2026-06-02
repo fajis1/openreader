@@ -255,9 +255,8 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
     }
   });
 
-  // If auth is enabled, establish an anonymous session BEFORE navigation.
-  // This keeps each test self-contained (no shared storageState) while ensuring
-  // server routes that require auth don't intermittently 401 during app startup.
+  // If we explicitly choose to bootstrap anonymous sessions for a test run,
+  // do it before navigation so protected startup routes do not intermittently 401.
   // await ensureAnonymousSession(page);
 
   // Navigate to the protected app home before each test
@@ -410,22 +409,6 @@ export async function openSettingsDocumentsTab(page: Page) {
   const settingsDialog = page.locator('[data-testid="settings-modal"]');
   await expect(settingsDialog).toBeVisible({ timeout: 10000 });
   await settingsDialog.getByRole('button', { name: /^Documents$/ }).click();
-}
-
-// Delete all local documents through Settings and close dialogs
-export async function deleteAllLocalDocuments(page: Page) {
-  await openSettingsDocumentsTab(page);
-  await page.getByRole('button', { name: /Delete all data/i }).click();
-
-  const heading = page.getByRole('heading', { name: /Delete All Data/i });
-  await expect(heading).toBeVisible({ timeout: 10000 });
-
-  const confirmBtn = heading.locator('xpath=ancestor::*[@role="dialog"][1]//button[normalize-space()="Delete"]');
-  await confirmBtn.click();
-
-  // Close any remaining modal layers
-  await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
 }
 
 // Open the Voices dropdown from the TTS bar and return the button locator

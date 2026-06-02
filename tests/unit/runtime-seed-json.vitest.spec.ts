@@ -234,7 +234,6 @@ describe('runtime config JSON seeding', () => {
       enableTtsProvidersTab: false,
       enableAudiobookExport: false,
       enableDocxConversion: false,
-      enableDestructiveDeleteActions: false,
       showAllProviderModels: false,
       disableTtsRateLimit: false,
       ttsDailyLimitAnonymous: 12345,

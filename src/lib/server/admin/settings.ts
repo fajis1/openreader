@@ -71,7 +71,6 @@ export const RUNTIME_CONFIG_SCHEMA = {
   enableTtsProvidersTab: booleanFlag(true),
   enableAudiobookExport: booleanFlag(true),
   enableDocxConversion: booleanFlag(true),
-  enableDestructiveDeleteActions: booleanFlag(true),
   showAllProviderModels: runtimeBoolean(true),
   disableTtsRateLimit: booleanFlag(true),
   ttsDailyLimitAnonymous: positiveIntValue(50_000),

@@ -495,14 +495,6 @@ export function AdminFeaturesPanel() {
           right={renderSource('enableDocxConversion')}
           variant="flat"
         />
-        <ToggleRow
-          label="Destructive delete buttons"
-          description='Show "Delete all data" actions (auth-off mode).'
-          checked={Boolean(draft.enableDestructiveDeleteActions)}
-          onChange={(checked) => updateDraft('enableDestructiveDeleteActions', checked)}
-          right={renderSource('enableDestructiveDeleteActions')}
-          variant="flat"
-        />
       </Section>
 
       <Section

@@ -414,7 +414,6 @@ Example:
     "enableTtsProvidersTab": true,
     "enableAudiobookExport": true,
     "enableDocxConversion": true,
-    "enableDestructiveDeleteActions": true,
     "showAllProviderModels": true,
     "disableTtsRateLimit": true,
     "ttsDailyLimitAnonymous": 50000,

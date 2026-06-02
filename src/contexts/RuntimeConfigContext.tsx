@@ -20,7 +20,6 @@ export interface RuntimeConfig {
   enableTtsProvidersTab: boolean;
   enableAudiobookExport: boolean;
   enableDocxConversion: boolean;
-  enableDestructiveDeleteActions: boolean;
   showAllProviderModels: boolean;
   disableTtsRateLimit: boolean;
   ttsDailyLimitAnonymous: number;
@@ -43,7 +42,6 @@ const RUNTIME_DEFAULTS: RuntimeConfig = {
   enableTtsProvidersTab: true,
   enableAudiobookExport: true,
   enableDocxConversion: true,
-  enableDestructiveDeleteActions: true,
   showAllProviderModels: true,
   disableTtsRateLimit: true,
   ttsDailyLimitAnonymous: 50_000,

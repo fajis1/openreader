@@ -2,8 +2,6 @@ import { expect, test } from '@playwright/test';
 
 import { setupTest, uploadAndDisplay } from './helpers';
 
-const AUTH_ENABLED = Boolean(process.env.AUTH_SECRET && process.env.BASE_URL);
-
 test.describe('Landing and app routing', () => {
   test('public landing renders without anonymous auth bootstrap call', async ({ page }) => {
     let anonymousSignInCalls = 0;
@@ -26,8 +24,6 @@ test.describe('Landing and app routing', () => {
   });
 
   test('existing authenticated session visiting / redirects to /app', async ({ page }) => {
-    test.skip(!AUTH_ENABLED);
-
     await page.goto('/app');
     await page.waitForLoadState('networkidle');
     await page.waitForSelector('.fixed.inset-0.bg-base.z-50', { state: 'detached', timeout: 15000 }).catch(() => {});
@@ -46,7 +42,7 @@ test.describe('Landing and app routing', () => {
   });
 
   test('protected app routes redirect to /signin when anonymous auth is disabled', async ({ page }) => {
-    test.skip(!AUTH_ENABLED || process.env.USE_ANONYMOUS_AUTH_SESSIONS !== 'false');
+    test.skip(process.env.USE_ANONYMOUS_AUTH_SESSIONS !== 'false');
 
     await page.goto('/app');
     await expect(page).toHaveURL(/\/signin$/);

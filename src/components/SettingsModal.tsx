@@ -22,7 +22,7 @@ import { useAuthSession } from '@/hooks/useAuthSession';
 import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
 import { useRouter } from 'next/navigation';
 import { showPrivacyModal } from '@/components/PrivacyModal';
-import { deleteDocuments, mimeTypeForDoc, uploadDocuments } from '@/lib/client/api/documents';
+import { mimeTypeForDoc, uploadDocuments } from '@/lib/client/api/documents';
 import { cacheStoredDocumentFromBytes, clearDocumentCache } from '@/lib/client/cache/documents';
 import { clearAllDocumentPreviewCaches, clearInMemoryDocumentPreviewCache } from '@/lib/client/cache/previews';
 import { resolveTtsSettingsViewModel } from '@/lib/client/settings/tts-settings';
@@ -222,7 +222,6 @@ export function SettingsModal({
   onOpenChange: (open: boolean) => void;
 }) {
   const runtimeConfig = useRuntimeConfig();
-  const enableDestructiveDelete = runtimeConfig.enableDestructiveDeleteActions;
   const showAllProviderModels = runtimeConfig.showAllProviderModels;
   const enableTTSProvidersTab = runtimeConfig.enableTtsProvidersTab;
   const restrictUserApiKeys = runtimeConfig.restrictUserApiKeys;
@@ -258,7 +257,6 @@ export function SettingsModal({
   const [showProgress, setShowProgress] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
-  const [showDeleteDocsConfirm, setShowDeleteDocsConfirm] = useState(false);
   const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
   const { baseUrl: authBaseUrl } = useAuthConfig();
@@ -438,17 +436,6 @@ export function SettingsModal({
       setProgress(0);
       setStatusMessage('');
       setAbortController(null);
-    }
-  };
-
-  const handleDeleteDocs = async () => {
-    try {
-      await deleteDocuments();
-      await refreshDocuments().catch(() => { });
-    } catch (error) {
-      console.error('Delete failed:', error);
-    } finally {
-      setShowDeleteDocsConfirm(false);
     }
   };
 
@@ -1189,21 +1176,19 @@ export function SettingsModal({
                                   Disconnect account
                                 </Button>
 
-                                {enableDestructiveDelete && (
-                                  <div className="pt-4 mt-4 border-t border-line-soft">
-                                    <label className="block text-sm font-medium text-danger mb-2">Danger Zone</label>
-                                    <Button
-                                      onClick={() => setShowDeleteAccountConfirm(true)}
-                                      variant="danger"
-                                      size="md"
-                                    >
-                                      Delete Account
-                                    </Button>
-                                    <p className="text-xs text-soft mt-2">
-                                      Permanently deletes your account and all data.
-                                    </p>
-                                  </div>
-                                )}
+                                <div className="pt-4 mt-4 border-t border-line-soft">
+                                  <label className="block text-sm font-medium text-danger mb-2">Danger Zone</label>
+                                  <Button
+                                    onClick={() => setShowDeleteAccountConfirm(true)}
+                                    variant="danger"
+                                    size="md"
+                                  >
+                                    Delete Account
+                                  </Button>
+                                  <p className="text-xs text-soft mt-2">
+                                    Permanently deletes your account and all data.
+                                  </p>
+                                </div>
                               </>
                             ) : (
                               <div className="pt-2 border-t border-line-soft">
@@ -1245,16 +1230,6 @@ export function SettingsModal({
                     </>
                   )}
       </ModalFrame>
-
-      <ConfirmDialog
-        isOpen={showDeleteDocsConfirm}
-        onClose={() => setShowDeleteDocsConfirm(false)}
-        onConfirm={handleDeleteDocs}
-        title="Delete All Data"
-        message="Are you sure you want to delete all documents from the server? This action cannot be undone."
-        confirmText="Delete"
-        isDangerous={true}
-      />
 
       <ConfirmDialog
         isOpen={showDeleteAccountConfirm}

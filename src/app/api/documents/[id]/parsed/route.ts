@@ -5,7 +5,10 @@ import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { createOrReusePdfWorkerOperation } from '@/lib/server/compute/worker-op-create';
-import { snapshotFromWorkerState } from '@/lib/server/compute/worker-parse-state';
+import {
+  documentParseStateFromWorkerState,
+  snapshotFromWorkerState,
+} from '@/lib/server/compute/worker-parse-state';
 import { fetchWorkerOperationState } from '@/lib/server/compute/worker-op-state';
 import {
   documentKey,
@@ -101,8 +104,14 @@ async function finalizeFromWorkerState(input: {
   logger: ServerLogger;
 }): Promise<NextResponse> {
   const snapshot = snapshotFromWorkerState(input.workerState);
+  const workerParseState = documentParseStateFromWorkerState(input.workerState);
 
   if (snapshot.parseStatus === 'pending' || snapshot.parseStatus === 'running') {
+    await writeParseRowState({
+      documentId: input.row.id,
+      userId: input.row.userId,
+      parseState: stringifyDocumentParseState(workerParseState),
+    });
     return NextResponse.json({
       parseStatus: snapshot.parseStatus,
       parseProgress: snapshot.parseProgress,
@@ -114,12 +123,7 @@ async function finalizeFromWorkerState(input: {
     await writeParseRowState({
       documentId: input.row.id,
       userId: input.row.userId,
-      parseState: stringifyDocumentParseState({
-        status: 'failed',
-        progress: null,
-        updatedAt: Date.now(),
-        error: input.workerState.error?.message ?? 'Worker parse failed',
-      }),
+      parseState: stringifyDocumentParseState(workerParseState),
     });
 
     return NextResponse.json({
@@ -152,11 +156,7 @@ async function finalizeFromWorkerState(input: {
   await writeParseRowState({
     documentId: input.row.id,
     userId: input.row.userId,
-    parseState: stringifyDocumentParseState({
-      status: 'ready',
-      progress: null,
-      updatedAt: Date.now(),
-    }),
+    parseState: stringifyDocumentParseState(workerParseState),
     parsedJsonKey,
   });
 
@@ -278,6 +278,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       });
       await recordJobEvent(authCtxOrRes.userId, 'pdf_layout', created.opId, rateConfig);
       const snapshot = snapshotFromWorkerState(created);
+      await writeParseRowState({
+        documentId: row.id,
+        userId: row.userId,
+        parseState: stringifyDocumentParseState(documentParseStateFromWorkerState(created)),
+      });
       return NextResponse.json({
         parseStatus: snapshot.parseStatus,
         parseProgress: snapshot.parseProgress,
@@ -409,6 +414,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     await recordJobEvent(authCtxOrRes.userId, 'pdf_layout', created.opId, rateConfig);
 
     const snapshot = snapshotFromWorkerState(created);
+    await writeParseRowState({
+      documentId: row.id,
+      userId: row.userId,
+      parseState: stringifyDocumentParseState(documentParseStateFromWorkerState(created)),
+    });
 
     return NextResponse.json({
       parseStatus: snapshot.parseStatus,
