@@ -73,6 +73,12 @@ export function isValidDocumentId(id: string): boolean {
   return DOCUMENT_ID_REGEX.test(id);
 }
 
+export function isPreconditionFailed(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const maybe = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return maybe.$metadata?.httpStatusCode === 412 || maybe.name === 'PreconditionFailed';
+}
+
 export function isValidTempUploadToken(token: string): boolean {
   return TEMP_UPLOAD_TOKEN_REGEX.test(token);
 }
@@ -455,6 +461,7 @@ export async function copyTempDocumentBlobToDocument(
   documentId: string,
   namespace: string | null,
   contentType: string,
+  options?: { ifNoneMatch?: boolean },
 ): Promise<void> {
   const cfg = getS3Config();
   const client = getS3ProxyClient();
@@ -466,6 +473,7 @@ export async function copyTempDocumentBlobToDocument(
       ContentType: contentType,
       MetadataDirective: 'REPLACE',
       ServerSideEncryption: 'AES256',
+      ...(options?.ifNoneMatch ? { IfNoneMatch: '*' } : {}),
     }),
   );
 }

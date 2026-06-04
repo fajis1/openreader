@@ -27,6 +27,14 @@ export async function registerUploadedDocument(input: RegisterUploadedDocumentIn
   const reusableParsedPdf = input.type === 'pdf'
     ? await findReusableParsedPdfResult(input.documentId)
     : null;
+  const parsedJsonKey = reusableParsedPdf?.parsedJsonKey ?? null;
+  const parseState = input.type === 'pdf'
+    ? stringifyDocumentParseState(
+      reusableParsedPdf
+        ? { status: 'ready', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION }
+        : { status: 'pending', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION },
+    )
+    : null;
 
   await db
     .insert(documents)
@@ -38,14 +46,8 @@ export async function registerUploadedDocument(input: RegisterUploadedDocumentIn
       size: input.size,
       lastModified: input.lastModified,
       filePath: input.documentId,
-      parseState: input.type === 'pdf'
-        ? stringifyDocumentParseState(
-          reusableParsedPdf
-            ? { status: 'ready', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION }
-            : { status: 'pending', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION },
-        )
-        : null,
-      parsedJsonKey: reusableParsedPdf?.parsedJsonKey ?? null,
+      parseState,
+      parsedJsonKey,
     })
     .onConflictDoUpdate({
       target: [documents.id, documents.userId],
@@ -55,14 +57,8 @@ export async function registerUploadedDocument(input: RegisterUploadedDocumentIn
         size: input.size,
         lastModified: input.lastModified,
         filePath: input.documentId,
-        parseState: input.type === 'pdf'
-          ? stringifyDocumentParseState(
-            reusableParsedPdf
-              ? { status: 'ready', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION }
-              : { status: 'pending', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION },
-          )
-          : null,
-        parsedJsonKey: reusableParsedPdf?.parsedJsonKey ?? null,
+        parseState,
+        parsedJsonKey,
       },
     });
 

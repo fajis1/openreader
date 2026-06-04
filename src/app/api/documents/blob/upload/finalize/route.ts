@@ -10,6 +10,7 @@ import {
   headDocumentBlob,
   headTempDocumentBlob,
   isMissingBlobError,
+  isPreconditionFailed,
   isValidTempUploadToken,
   putTempDocumentFinalizeReceipt,
 } from '@/lib/server/documents/blobstore';
@@ -138,13 +139,18 @@ async function finalizeOne(input: {
     await headDocumentBlob(documentId, input.namespace);
   } catch (error) {
     if (!isMissingBlobError(error)) throw error;
-    await copyTempDocumentBlobToDocument(
-      input.upload.token,
-      input.userId,
-      documentId,
-      input.namespace,
-      temp.contentType,
-    );
+    try {
+      await copyTempDocumentBlobToDocument(
+        input.upload.token,
+        input.userId,
+        documentId,
+        input.namespace,
+        temp.contentType,
+        { ifNoneMatch: true },
+      );
+    } catch (copyError) {
+      if (!isPreconditionFailed(copyError)) throw copyError;
+    }
   }
 
   const canonicalHead = await headDocumentBlob(documentId, input.namespace);
@@ -194,14 +200,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No valid uploads provided' }, { status: 400 });
     }
 
-    const stored: BaseDocument[] = [];
-    for (const upload of uploads) {
-      stored.push(await finalizeOne({
+    const stored = await Promise.all(
+      uploads.map((upload) => finalizeOne({
         upload,
         userId,
         namespace,
-      }));
-    }
+      })),
+    );
 
     return NextResponse.json({ stored });
   } catch (error) {
