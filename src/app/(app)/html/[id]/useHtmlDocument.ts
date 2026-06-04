@@ -94,14 +94,18 @@ export function useHtmlDocument(): HtmlDocumentState {
   const lastFedDocRef = useRef<string | null>(null);
   useEffect(() => {
     if (currDocData === undefined) {
+      lastFedDocRef.current = null;
+      setTTSText('');
       setIsPlaybackReady(false);
       return;
     }
     if (!currDocText) {
+      lastFedDocRef.current = null;
+      setTTSText('');
       setIsPlaybackReady(true);
       return;
     }
-    const key = `${currDocData ?? ''}::${currDocText.length}`;
+    const key = `${currDocName ?? ''}::${currDocData ?? ''}::${currDocText.length}`;
     if (lastFedDocRef.current === key) {
       setIsPlaybackReady(true);
       return;
@@ -110,19 +114,22 @@ export function useHtmlDocument(): HtmlDocumentState {
     lastFedDocRef.current = key;
     setTTSText(currDocText);
     setIsPlaybackReady(true);
-  }, [currDocText, currDocData, setTTSText]);
+  }, [currDocName, currDocText, currDocData, setTTSText]);
 
   const clearCurrDoc = useCallback(() => {
     setCurrDocData(undefined);
     setCurrDocName(undefined);
     setIsPlaybackReady(false);
     lastFedDocRef.current = null;
+    setTTSText('');
     stop();
-  }, [stop]);
+  }, [setTTSText, stop]);
 
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
       setIsPlaybackReady(false);
+      lastFedDocRef.current = null;
+      setTTSText('');
       const meta = await getDocumentMetadata(id);
       if (!meta) {
         console.error('Document not found on server');
@@ -141,7 +148,7 @@ export function useHtmlDocument(): HtmlDocumentState {
       console.error('Failed to get HTML document:', error);
       clearCurrDoc();
     }
-  }, [clearCurrDoc]);
+  }, [clearCurrDoc, setTTSText]);
 
   const audiobookAdapter = useMemo(
     () =>
