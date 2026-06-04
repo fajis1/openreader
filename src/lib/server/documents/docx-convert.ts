@@ -7,6 +7,7 @@ import { pathToFileURL } from 'url';
 
 const DOCSTORE_DIR = path.join(process.cwd(), 'docstore');
 const TEMP_DIR = path.join(DOCSTORE_DIR, 'tmp');
+const DEFAULT_DOCX_CONVERSION_TIMEOUT_MS = 60_000;
 
 async function ensureTempDir(): Promise<void> {
   if (!existsSync(DOCSTORE_DIR)) {
@@ -25,9 +26,24 @@ async function convertDocxToPdf(inputPath: string, outputDir: string, profileDir
     }
     args.push('--headless', '--nologo', '--convert-to', 'pdf', '--outdir', outputDir, inputPath);
     const proc = spawn('soffice', args);
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      proc.kill();
+      reject(new Error(`LibreOffice conversion timed out after ${DEFAULT_DOCX_CONVERSION_TIMEOUT_MS}ms`));
+    }, DEFAULT_DOCX_CONVERSION_TIMEOUT_MS);
 
-    proc.on('error', (error) => reject(error));
+    proc.on('error', (error) => {
+      clearTimeout(timeout);
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
     proc.on('close', (code) => {
+      clearTimeout(timeout);
+      if (settled) return;
+      settled = true;
       if (code === 0) resolve();
       else reject(new Error(`LibreOffice conversion failed with code ${code}`));
     });

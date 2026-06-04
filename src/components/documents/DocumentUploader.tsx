@@ -58,19 +58,8 @@ export function DocumentUploader({
     });
 
     try {
-      const uploadableFiles = acceptedFiles.filter((file) =>
-        file.type === 'application/pdf'
-        || file.type === 'application/epub+zip'
-        || file.type === 'text/plain'
-        || file.type === 'text/markdown'
-        || file.name.endsWith('.md')
-        || (enableDocx && file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
-      );
-
-      if (uploadableFiles.length > 0) {
-        await uploadDocuments(uploadableFiles);
-        completedFiles = uploadableFiles.length;
-      }
+      await uploadDocuments(acceptedFiles);
+      completedFiles = acceptedFiles.length;
     } catch (err) {
       setError('Failed to upload file. Please try again.');
       console.error('Upload error:', err);
@@ -84,7 +73,7 @@ export function DocumentUploader({
         currentFileName: null,
       });
     }
-  }, [uploadDocuments, enableDocx, emitBatchState]);
+  }, [uploadDocuments, emitBatchState]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
