@@ -213,31 +213,42 @@ export function usePdfDocument(): PdfDocumentState {
     setActiveParseOpId(initialOpId?.trim() || null);
     const controller = new AbortController();
     parseStreamAbortRef.current = controller;
+    let isResolvingTerminalState = false;
 
     const closeSse = subscribeParsedPdfDocumentEvents(documentId, {
       opId: initialOpId?.trim() || null,
     }, {
       onSnapshot: (snapshot) => {
         if (controller.signal.aborted) return;
+        if (isResolvingTerminalState) return;
         if (typeof snapshot.opId === 'string' && snapshot.opId.trim()) {
           setActiveParseOpId(snapshot.opId.trim());
         }
         setParseStatus(snapshot.parseStatus);
         setParseProgress(snapshot.parseProgress);
         if (snapshot.parseStatus === 'ready') {
-          closeSse();
-          parseSseCloseRef.current = null;
-          if (parseStreamAbortRef.current === controller) {
-            parseStreamAbortRef.current = null;
-          }
-          void loadParsedDocumentOnce(documentId, controller.signal).catch((error) => {
-            if (error instanceof DOMException && error.name === 'AbortError') return;
-            console.error('Failed to load parsed PDF after ready status:', error);
-            resetParsedDocumentState();
-          });
+          isResolvingTerminalState = true;
+          void (async () => {
+            try {
+              await loadParsedDocumentOnce(documentId, controller.signal);
+            } catch (error) {
+              if (error instanceof DOMException && error.name === 'AbortError') return;
+              console.error('Failed to load parsed PDF after ready status:', error);
+              resetParsedDocumentState();
+            } finally {
+              if (parseSseCloseRef.current === closeSse) {
+                closeSse();
+                parseSseCloseRef.current = null;
+              }
+              if (parseStreamAbortRef.current === controller) {
+                parseStreamAbortRef.current = null;
+              }
+            }
+          })();
           return;
         }
         if (snapshot.parseStatus === 'failed') {
+          isResolvingTerminalState = true;
           closeSse();
           parseSseCloseRef.current = null;
           if (parseStreamAbortRef.current === controller) {

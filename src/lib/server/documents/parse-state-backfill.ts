@@ -23,13 +23,15 @@ export async function backfillPendingPdfParseOperation(input: {
     userId: input.userId,
     namespace: input.namespace,
   });
-  enqueueParsePdfJob({
-    documentId: input.documentId,
-    userId: input.userId,
-    namespace: input.namespace,
-    initialOpId: startedParse.workerState.opId,
-    initialJobId: startedParse.workerState.jobId,
-    initialStatus: startedParse.parseState.status === 'running' ? 'running' : 'pending',
-  });
+  if (startedParse.parseState.status === 'pending' || startedParse.parseState.status === 'running') {
+    enqueueParsePdfJob({
+      documentId: input.documentId,
+      userId: input.userId,
+      namespace: input.namespace,
+      initialOpId: startedParse.workerState.opId,
+      initialJobId: startedParse.workerState.jobId,
+      initialStatus: startedParse.parseState.status,
+    });
+  }
   return startedParse.workerState;
 }

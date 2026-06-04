@@ -8,6 +8,7 @@ import { pathToFileURL } from 'url';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
+import { findReusableParsedPdfResult } from '@/lib/server/documents/parsed-pdf-reuse';
 import { safeDocumentName } from '@/lib/server/documents/utils';
 import { enqueueDocumentPreview } from '@/lib/server/documents/previews';
 import { startPdfParseOperation } from '@/lib/server/documents/pdf-parse-operation';
@@ -18,6 +19,7 @@ import { isS3Configured } from '@/lib/server/storage/s3';
 import { putDocumentBlob } from '@/lib/server/documents/blobstore';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
+import { PDF_PARSER_VERSION } from '@openreader/compute-core';
 
 const DOCSTORE_DIR = path.join(process.cwd(), 'docstore');
 const TEMP_DIR = path.join(DOCSTORE_DIR, 'tmp');
@@ -130,11 +132,19 @@ export async function POST(req: NextRequest) {
 
       const derivedName = safeDocumentName(`${path.parse(file.name).name}.pdf`, `${id}.pdf`);
       const lastModified = Number.isFinite(file.lastModified) ? file.lastModified : Date.now();
-      const startedParse = await startPdfParseOperation({
-        documentId: id,
-        userId: storageUserId,
-        namespace: testNamespace,
-      });
+      const reusableParsedPdf = await findReusableParsedPdfResult(id);
+      const startedParse = reusableParsedPdf
+        ? null
+        : await startPdfParseOperation({
+          documentId: id,
+          userId: storageUserId,
+          namespace: testNamespace,
+        });
+      const parseState = stringifyDocumentParseState(
+        reusableParsedPdf
+          ? { status: 'ready', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION }
+          : startedParse!.parseState,
+      );
 
       await db
         .insert(documents)
@@ -146,8 +156,8 @@ export async function POST(req: NextRequest) {
           size: pdfContent.length,
           lastModified,
           filePath: id,
-          parseState: stringifyDocumentParseState(startedParse.parseState),
-          parsedJsonKey: null,
+          parseState,
+          parsedJsonKey: reusableParsedPdf?.parsedJsonKey ?? null,
         })
         .onConflictDoUpdate({
           target: [documents.id, documents.userId],
@@ -157,8 +167,8 @@ export async function POST(req: NextRequest) {
             size: pdfContent.length,
             lastModified,
             filePath: id,
-            parseState: stringifyDocumentParseState(startedParse.parseState),
-            parsedJsonKey: null,
+            parseState,
+            parsedJsonKey: reusableParsedPdf?.parsedJsonKey ?? null,
           },
         });
 
@@ -179,14 +189,16 @@ export async function POST(req: NextRequest) {
         }, 'Failed to enqueue preview for converted DOCX');
       });
 
-      enqueueParsePdfJob({
-        documentId: id,
-        userId: storageUserId,
-        namespace: testNamespace,
-        initialOpId: startedParse.workerState.opId,
-        initialJobId: startedParse.workerState.jobId,
-        initialStatus: startedParse.parseState.status === 'running' ? 'running' : 'pending',
-      });
+      if (startedParse) {
+        enqueueParsePdfJob({
+          documentId: id,
+          userId: storageUserId,
+          namespace: testNamespace,
+          initialOpId: startedParse.workerState.opId,
+          initialJobId: startedParse.workerState.jobId,
+          initialStatus: startedParse.parseState.status === 'running' ? 'running' : 'pending',
+        });
+      }
 
       return NextResponse.json({
         stored: {

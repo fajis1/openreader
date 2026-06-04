@@ -47,6 +47,14 @@ function documentTypeForName(name: string): DocumentType {
   return 'html';
 }
 
+function documentTypeForMime(contentType: string): DocumentType | null {
+  const normalized = contentType.trim().toLowerCase();
+  if (normalized === 'application/pdf') return 'pdf';
+  if (normalized === 'application/epub+zip') return 'epub';
+  if (normalized === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx';
+  return null;
+}
+
 export function mimeTypeForDoc(doc: Pick<BaseDocument, 'type' | 'name'>): string {
   if (doc.type === 'pdf') return 'application/pdf';
   if (doc.type === 'epub') return 'application/epub+zip';
@@ -314,11 +322,14 @@ export async function uploadDocuments(files: File[], options?: UploadOptions): P
 
   const sources: UploadSource[] = [];
   for (const file of files) {
-    const type = documentTypeForName(file.name);
-    const name = file.name || `upload.${type}`;
-    const contentType = file.type || mimeTypeForDoc({ name, type });
+    const name = file.name || '';
+    const type = name
+      ? documentTypeForName(name)
+      : (documentTypeForMime(file.type) ?? 'html');
+    const resolvedName = name || `upload.${type}`;
+    const contentType = file.type || mimeTypeForDoc({ name: resolvedName, type });
     sources.push({
-      name,
+      name: resolvedName,
       type,
       size: file.size,
       lastModified: Number.isFinite(file.lastModified) ? file.lastModified : Date.now(),

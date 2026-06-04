@@ -14,8 +14,9 @@ const hoisted = vi.hoisted(() => ({
   },
   requireAuthContext: vi.fn(),
   fetchWorkerOperationState: vi.fn(),
-  backfillPendingPdfParseOperation: vi.fn(),
   healStaleDocumentParseState: vi.fn(async ({ state }) => state),
+  startPdfParseOperation: vi.fn(),
+  enqueueParsePdfJob: vi.fn(),
 }));
 
 vi.mock('@/db', () => ({
@@ -32,12 +33,16 @@ vi.mock('@/lib/server/compute/worker-op-state', () => ({
   fetchWorkerOperationState: hoisted.fetchWorkerOperationState,
 }));
 
-vi.mock('@/lib/server/documents/parse-state-backfill', () => ({
-  backfillPendingPdfParseOperation: hoisted.backfillPendingPdfParseOperation,
-}));
-
 vi.mock('@/lib/server/documents/parse-state-healing', () => ({
   healStaleDocumentParseState: hoisted.healStaleDocumentParseState,
+}));
+
+vi.mock('@/lib/server/documents/pdf-parse-operation', () => ({
+  startPdfParseOperation: hoisted.startPdfParseOperation,
+}));
+
+vi.mock('@/lib/server/jobs/user-pdf-layout-job', () => ({
+  enqueueParsePdfJob: hoisted.enqueueParsePdfJob,
 }));
 
 vi.mock('@/lib/server/documents/blobstore', () => ({
@@ -104,8 +109,9 @@ describe('GET /api/documents/[id]/parsed pure data fetch', () => {
     hoisted.requireAuthContext.mockResolvedValue({ userId: 'user-1' });
     hoisted.fetchWorkerOperationState.mockReset();
     hoisted.fetchWorkerOperationState.mockResolvedValue(null);
-    hoisted.backfillPendingPdfParseOperation.mockReset();
     hoisted.healStaleDocumentParseState.mockClear();
+    hoisted.startPdfParseOperation.mockReset();
+    hoisted.enqueueParsePdfJob.mockReset();
   });
 
   test('returns non-ready status without creating a worker op for legacy pending PDFs without opId', async () => {
@@ -120,7 +126,8 @@ describe('GET /api/documents/[id]/parsed pure data fetch', () => {
       parseStatus: 'pending',
       opId: null,
     });
-    expect(hoisted.backfillPendingPdfParseOperation).not.toHaveBeenCalled();
+    expect(hoisted.startPdfParseOperation).not.toHaveBeenCalled();
+    expect(hoisted.enqueueParsePdfJob).not.toHaveBeenCalled();
     expect(hoisted.row.parseState).toBeNull();
   });
 });
