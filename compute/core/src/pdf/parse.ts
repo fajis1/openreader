@@ -4,6 +4,7 @@ import { ensureModel } from './model';
 import { runLayoutModel } from './runLayoutModel';
 import { mergeTextWithRegions } from './merge';
 import { resolvePdfjsStandardFontDataUrl } from './pdfjs-runtime';
+import { PDF_PARSER_VERSION } from './parser-version';
 import { stitchCrossPageBlocks } from './stitch';
 import { renderPage } from './render';
 import { normalizeTextItemsForLayout } from './normalize-text';
@@ -143,7 +144,7 @@ export async function parsePdf(input: ParsePdfInput): Promise<ParsedPdfDocument>
     const doc: ParsedPdfDocument = {
       schemaVersion: 1,
       documentId: input.documentId,
-      parserVersion: 'pp-doclayoutv3-onnx@800+pdfjs@4.8.69',
+      parserVersion: PDF_PARSER_VERSION,
       parsedAt: Date.now(),
       pages,
     };

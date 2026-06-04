@@ -1,11 +1,14 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
-import { documentKey, putParsedDocumentBlob } from '@/lib/server/documents/blobstore';
+import { documentKey, getParsedDocumentBlobByKey, putParsedDocumentBlob } from '@/lib/server/documents/blobstore';
+import { findReusableParsedPdfResult } from '@/lib/server/documents/parsed-pdf-reuse';
 import { serverLogger } from '@/lib/server/logger';
 import { logDegraded, logServerError } from '@/lib/server/errors/logging';
 import {
+  normalizeDocumentParseStateForCurrentParserVersion,
   parseDocumentParseState,
+  resolveParsedPdfParserVersion,
   stringifyDocumentParseState,
   type DocumentParseState,
 } from '@/lib/server/documents/parse-state';
@@ -13,11 +16,13 @@ import { getCompute } from '@/lib/server/compute';
 import { clearTtsSegmentCache } from '@/lib/server/tts/segments-cache';
 import { UNCLAIMED_USER_ID } from '@/lib/server/storage/docstore-legacy';
 import type {
+  ParsedPdfDocument,
   PdfLayoutJobBase,
   PdfLayoutJobResult,
   PdfLayoutProgress,
   WorkerOperationState,
 } from '@openreader/compute-core/api-contracts';
+import { PDF_PARSER_VERSION } from '@openreader/compute-core';
 
 type UserPdfLayoutJobRequest = PdfLayoutJobBase & {
   userId: string;
@@ -41,7 +46,7 @@ function keyFor(input: UserPdfLayoutJobRequest): string {
   if (forceToken) {
     return `force:${input.documentId}:${input.namespace || ''}:${forceToken}`;
   }
-  return `shared:${input.documentId}:${input.namespace || ''}`;
+  return `shared:${input.documentId}`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -84,7 +89,7 @@ async function loadScopedRows(input: UserPdfLayoutJobRequest): Promise<ParseRow[
 
 function isReadyRow(row: ParseRow): row is ParseRow & { parsedJsonKey: string } {
   if (!row.parsedJsonKey) return false;
-  return parseDocumentParseState(row.parseState).status === 'ready';
+  return normalizeDocumentParseStateForCurrentParserVersion(parseDocumentParseState(row.parseState)).status === 'ready';
 }
 
 function userIdsFromRows(rows: ParseRow[]): string[] {
@@ -93,6 +98,20 @@ function userIdsFromRows(rows: ParseRow[]): string[] {
 
 function parseStateMatchCondition(expected: string | null) {
   return expected === null ? isNull(documents.parseState) : eq(documents.parseState, expected);
+}
+
+async function loadParsedDocumentForResult(
+  parsed: ParsedPdfDocument | undefined,
+  parsedJsonKey: string,
+): Promise<ParsedPdfDocument | null> {
+  if (parsed) return parsed;
+
+  try {
+    const json = await getParsedDocumentBlobByKey(parsedJsonKey);
+    return JSON.parse(Buffer.from(json).toString('utf8')) as ParsedPdfDocument;
+  } catch {
+    return null;
+  }
 }
 
 async function updateParseStateForUsers(input: {
@@ -125,6 +144,23 @@ async function syncCallerToSharedResult(input: UserPdfLayoutJobRequest): Promise
   const deadline = Date.now() + FOLLOWER_WAIT_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
+    const reusableParsed = await findReusableParsedPdfResult(input.documentId);
+    if (reusableParsed) {
+      const readyState: DocumentParseState = {
+        status: 'ready',
+        progress: null,
+        updatedAt: Date.now(),
+        parserVersion: PDF_PARSER_VERSION,
+      };
+      await updateParseStateForUsers({
+        documentId: input.documentId,
+        userIds: [input.userId],
+        parseState: stringifyDocumentParseState(readyState),
+        parsedJsonKey: reusableParsed.parsedJsonKey,
+      });
+      return;
+    }
+
     const rows = await loadScopedRows(input);
     const ready = rows.find(isReadyRow);
     if (ready) {
@@ -132,6 +168,7 @@ async function syncCallerToSharedResult(input: UserPdfLayoutJobRequest): Promise
         status: 'ready',
         progress: null,
         updatedAt: Date.now(),
+        parserVersion: PDF_PARSER_VERSION,
       };
       await updateParseStateForUsers({
         documentId: input.documentId,
@@ -142,7 +179,7 @@ async function syncCallerToSharedResult(input: UserPdfLayoutJobRequest): Promise
       return;
     }
 
-    const statuses = rows.map((row) => parseDocumentParseState(row.parseState));
+    const statuses = rows.map((row) => normalizeDocumentParseStateForCurrentParserVersion(parseDocumentParseState(row.parseState)));
     const hasInFlight = statuses.some((state) => state.status === 'pending' || state.status === 'running');
     const failedState = statuses.find((state) => state.status === 'failed');
     if (failedState && !hasInFlight) {
@@ -151,6 +188,7 @@ async function syncCallerToSharedResult(input: UserPdfLayoutJobRequest): Promise
         progress: null,
         updatedAt: Date.now(),
         ...(failedState.error ? { error: failedState.error } : {}),
+        ...(failedState.parserVersion ? { parserVersion: failedState.parserVersion } : {}),
       };
       await updateParseStateForUsers({
         documentId: input.documentId,
@@ -181,12 +219,30 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
     // Non-force jobs can short-circuit by reusing existing ready output from
     // any row in the same document scope.
     if (!input.forceToken?.trim()) {
+      const reusableParsed = await findReusableParsedPdfResult(input.documentId);
+      if (reusableParsed) {
+        const readyState: DocumentParseState = {
+          status: 'ready',
+          progress: null,
+          updatedAt: Date.now(),
+          parserVersion: PDF_PARSER_VERSION,
+        };
+        await updateParseStateForUsers({
+          documentId: input.documentId,
+          userIds: [input.userId],
+          parseState: stringifyDocumentParseState(readyState),
+          parsedJsonKey: reusableParsed.parsedJsonKey,
+        });
+        return;
+      }
+
       const ready = scopedRows.find(isReadyRow);
       if (ready) {
         const readyState: DocumentParseState = {
           status: 'ready',
           progress: null,
           updatedAt: Date.now(),
+          parserVersion: PDF_PARSER_VERSION,
         };
         await updateParseStateForUsers({
           documentId: input.documentId,
@@ -205,6 +261,7 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
       status: 'running',
       progress: null,
       updatedAt: Date.now(),
+      parserVersion: PDF_PARSER_VERSION,
     };
     const runningState = stringifyDocumentParseState(runningStateData);
 
@@ -279,6 +336,7 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
         status: mappedStatus,
         progress: snapshot.progress ?? null,
         updatedAt: now,
+        parserVersion: PDF_PARSER_VERSION,
         ...(activeOpId ? { opId: activeOpId } : {}),
         ...(activeJobId ? { jobId: activeJobId } : {}),
       };
@@ -305,6 +363,7 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
           phase: progress.phase,
         },
         updatedAt: Date.now(),
+        parserVersion: PDF_PARSER_VERSION,
         ...(activeOpId ? { opId: activeOpId } : {}),
         ...(activeJobId ? { jobId: activeJobId } : {}),
       };
@@ -327,12 +386,15 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
       parsedJsonKey = await putParsedDocumentBlob(input.documentId, parsedJson, input.namespace);
     }
 
+    const parsedDoc = await loadParsedDocumentForResult(layout.parsed, parsedJsonKey);
+
     const finalScopedRows = await loadScopedRows(input);
     const finalUserIds = userIdsFromRows(finalScopedRows);
     const readyState: DocumentParseState = {
       status: 'ready',
       progress: null,
       updatedAt: Date.now(),
+      parserVersion: resolveParsedPdfParserVersion(parsedDoc),
     };
     const readyUserIds = finalUserIds.length > 0 ? finalUserIds : cohortUserIds;
     await updateParseStateForUsers({
@@ -385,6 +447,7 @@ export async function parsePdfJob(input: UserPdfLayoutJobRequest): Promise<void>
         progress: null,
         updatedAt: Date.now(),
         error: message,
+        parserVersion: PDF_PARSER_VERSION,
       };
       const failedUserIds = scopedUserIds.length > 0 ? scopedUserIds : [input.userId];
       await updateParseStateForUsers({

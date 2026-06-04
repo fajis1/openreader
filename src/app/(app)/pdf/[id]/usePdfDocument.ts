@@ -66,6 +66,7 @@ export interface PdfDocumentState {
   currDocPages: number | undefined;
   currDocPage: number;
   currDocText: string | undefined;
+  isPlaybackReady: boolean;
   pdfDocument: PDFDocumentProxy | undefined;
   parsedDocument: ParsedPdfDocument | null;
   parseStatus: PdfParseStatus | null;
@@ -142,6 +143,7 @@ export function usePdfDocument(): PdfDocumentState {
   const [currDocData, setCurrDocData] = useState<ArrayBuffer>();
   const [currDocName, setCurrDocName] = useState<string>();
   const [currDocText, setCurrDocText] = useState<string>();
+  const [isPlaybackReady, setIsPlaybackReady] = useState(false);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy>();
   const [parsedDocument, setParsedDocument] = useState<ParsedPdfDocument | null>(null);
   const [parseStatus, setParseStatus] = useState<PdfParseStatus | null>(null);
@@ -169,6 +171,7 @@ export function usePdfDocument(): PdfDocumentState {
   const docLoadAbortRef = useRef<AbortController | null>(null);
   const parsePollAbortRef = useRef<AbortController | null>(null);
   const parseSseCloseRef = useRef<(() => void) | null>(null);
+  const lastPreparedPlaybackPageRef = useRef<number | null>(null);
 
   const fetchParsedDocument = useCallback(async (
     documentId: string,
@@ -248,6 +251,8 @@ export function usePdfDocument(): PdfDocumentState {
         if (snapshot.parseStatus === 'ready' || snapshot.parseStatus === 'failed') {
           if (snapshot.parseStatus === 'failed') {
             setParsedDocument(null);
+            setIsPlaybackReady(false);
+            lastPreparedPlaybackPageRef.current = null;
             setActiveParseOpId(null);
           } else {
             void fetchParsedDocument(
@@ -297,6 +302,7 @@ export function usePdfDocument(): PdfDocumentState {
 
   useEffect(() => {
     setCurrDocPage(currDocPageNumber);
+    setIsPlaybackReady(false);
   }, [currDocPageNumber]);
 
   /**
@@ -324,11 +330,13 @@ export function usePdfDocument(): PdfDocumentState {
       if (!currentPdf) return;
       const seq = ++loadSeqRef.current;
       const pageNumber = currDocPageNumber;
+      setIsPlaybackReady(false);
 
       const pageFromParsed = (pageNum: number): ParsedPdfPage | undefined =>
         parsedDocument?.pages.find((page) => page.pageNumber === pageNum);
 
       if (parseStatus !== 'ready' || !parsedDocument) {
+        lastPreparedPlaybackPageRef.current = null;
         setCurrDocText(undefined);
         setTTSText('', { location: currDocPageNumber });
         return;
@@ -401,7 +409,8 @@ export function usePdfDocument(): PdfDocumentState {
         return;
       }
 
-      if (text !== currDocText || text === '') {
+      const shouldPreparePlayback = text === '' || text !== currDocText || lastPreparedPlaybackPageRef.current !== currDocPageNumber;
+      if (shouldPreparePlayback) {
         setCurrDocText(text);
         const sourceUnits = sourceUnitsFromParsedPage(currDocPageNumber);
         setTTSText(text, {
@@ -414,6 +423,8 @@ export function usePdfDocument(): PdfDocumentState {
           ...(sourceUnits.length > 0 ? { sourceUnits } : {}),
         });
       }
+      lastPreparedPlaybackPageRef.current = currDocPageNumber;
+      setIsPlaybackReady(true);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         return;
@@ -469,6 +480,8 @@ export function usePdfDocument(): PdfDocumentState {
       setPdfDocument(undefined);
       setCurrDocPages(undefined);
       setCurrDocText(undefined);
+      setIsPlaybackReady(false);
+      lastPreparedPlaybackPageRef.current = null;
       setCurrDocId(id);
       setCurrDocName(undefined);
       setCurrDocData(undefined);
@@ -546,6 +559,8 @@ export function usePdfDocument(): PdfDocumentState {
       pageTextCacheRef.current.clear();
       setParsedDocument(null);
       setCurrDocText(undefined);
+      setIsPlaybackReady(false);
+      lastPreparedPlaybackPageRef.current = null;
       setParseStatus(forced.status);
       setParseProgress(null);
       setActiveParseOpId(forced.opId ?? null);
@@ -575,6 +590,7 @@ export function usePdfDocument(): PdfDocumentState {
     setCurrDocName(undefined);
     setCurrDocData(undefined);
     setCurrDocText(undefined);
+    setIsPlaybackReady(false);
     setCurrDocPages(undefined);
     setPdfDocument(undefined);
     setParsedDocument(null);
@@ -582,6 +598,7 @@ export function usePdfDocument(): PdfDocumentState {
     setParseProgress(null);
     setActiveParseOpId(null);
     setDocumentSettings(DEFAULT_DOCUMENT_SETTINGS);
+    lastPreparedPlaybackPageRef.current = null;
     pageTextCacheRef.current.clear();
     stop();
   }, [setCurrDocId, setCurrDocName, setCurrDocData, setCurrDocPages, setCurrDocText, setPdfDocument, stop]);
@@ -681,6 +698,7 @@ export function usePdfDocument(): PdfDocumentState {
       currDocPages,
       currDocPage,
       currDocText,
+      isPlaybackReady,
       parsedDocument,
       parseStatus,
       parseProgress,
@@ -708,6 +726,7 @@ export function usePdfDocument(): PdfDocumentState {
       currDocPages,
       currDocPage,
       currDocText,
+      isPlaybackReady,
       parsedDocument,
       parseStatus,
       parseProgress,

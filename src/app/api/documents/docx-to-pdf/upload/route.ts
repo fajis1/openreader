@@ -19,6 +19,7 @@ import { isS3Configured } from '@/lib/server/storage/s3';
 import { putDocumentBlob } from '@/lib/server/documents/blobstore';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
+import { PDF_PARSER_VERSION } from '@openreader/compute-core';
 
 const DOCSTORE_DIR = path.join(process.cwd(), 'docstore');
 const TEMP_DIR = path.join(DOCSTORE_DIR, 'tmp');
@@ -142,7 +143,12 @@ export async function POST(req: NextRequest) {
           size: pdfContent.length,
           lastModified,
           filePath: id,
-          parseState: stringifyDocumentParseState({ status: 'pending', progress: null, updatedAt: Date.now() }),
+          parseState: stringifyDocumentParseState({
+            status: 'pending',
+            progress: null,
+            updatedAt: Date.now(),
+            parserVersion: PDF_PARSER_VERSION,
+          }),
           parsedJsonKey: null,
         })
         .onConflictDoUpdate({
@@ -153,7 +159,12 @@ export async function POST(req: NextRequest) {
             size: pdfContent.length,
             lastModified,
             filePath: id,
-            parseState: stringifyDocumentParseState({ status: 'pending', progress: null, updatedAt: Date.now() }),
+            parseState: stringifyDocumentParseState({
+              status: 'pending',
+              progress: null,
+              updatedAt: Date.now(),
+              parserVersion: PDF_PARSER_VERSION,
+            }),
             parsedJsonKey: null,
           },
         });

@@ -22,6 +22,7 @@ export interface HtmlDocumentState {
   currDocData: string | undefined;
   currDocName: string | undefined;
   currDocText: string | undefined;
+  isPlaybackReady: boolean;
   blocks: HtmlBlock[];
   isTxt: boolean;
   setCurrentDocument: (id: string) => Promise<void>;
@@ -73,6 +74,7 @@ export function useHtmlDocument(): HtmlDocumentState {
 
   const [currDocData, setCurrDocData] = useState<string>();
   const [currDocName, setCurrDocName] = useState<string>();
+  const [isPlaybackReady, setIsPlaybackReady] = useState(false);
 
   const isTxt = useMemo(() => isTxtName(currDocName), [currDocName]);
   const blocks = useMemo(
@@ -91,22 +93,36 @@ export function useHtmlDocument(): HtmlDocumentState {
   // sentence splitting + sequential advancement from there.
   const lastFedDocRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!currDocText) return;
+    if (currDocData === undefined) {
+      setIsPlaybackReady(false);
+      return;
+    }
+    if (!currDocText) {
+      setIsPlaybackReady(true);
+      return;
+    }
     const key = `${currDocData ?? ''}::${currDocText.length}`;
-    if (lastFedDocRef.current === key) return;
+    if (lastFedDocRef.current === key) {
+      setIsPlaybackReady(true);
+      return;
+    }
+    setIsPlaybackReady(false);
     lastFedDocRef.current = key;
     setTTSText(currDocText);
+    setIsPlaybackReady(true);
   }, [currDocText, currDocData, setTTSText]);
 
   const clearCurrDoc = useCallback(() => {
     setCurrDocData(undefined);
     setCurrDocName(undefined);
+    setIsPlaybackReady(false);
     lastFedDocRef.current = null;
     stop();
   }, [stop]);
 
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
+      setIsPlaybackReady(false);
       const meta = await getDocumentMetadata(id);
       if (!meta) {
         console.error('Document not found on server');
@@ -207,6 +223,7 @@ export function useHtmlDocument(): HtmlDocumentState {
       currDocData,
       currDocName,
       currDocText,
+      isPlaybackReady,
       blocks,
       isTxt,
       setCurrentDocument,
@@ -218,6 +235,7 @@ export function useHtmlDocument(): HtmlDocumentState {
       currDocData,
       currDocName,
       currDocText,
+      isPlaybackReady,
       blocks,
       isTxt,
       setCurrentDocument,

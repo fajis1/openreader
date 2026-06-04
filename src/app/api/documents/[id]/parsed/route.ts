@@ -20,8 +20,10 @@ import {
   putParsedDocumentBlob,
 } from '@/lib/server/documents/blobstore';
 import {
+  normalizeDocumentParseStateForCurrentParserVersion,
   normalizeParseStatus,
   parseDocumentParseState,
+  resolveParsedPdfParserVersion,
   stringifyDocumentParseState,
 } from '@/lib/server/documents/parse-state';
 import { backfillPendingPdfParseOperation } from '@/lib/server/documents/parse-state-backfill';
@@ -156,13 +158,6 @@ async function finalizeFromWorkerState(input: {
     });
   }
 
-  await writeParseRowState({
-    documentId: input.row.id,
-    userId: input.row.userId,
-    parseState: stringifyDocumentParseState(workerParseState),
-    parsedJsonKey,
-  });
-
   const json = await getParsedDocumentBlobByKey(parsedJsonKey);
   let parsedDoc: ParsedPdfDocument | null = null;
   try {
@@ -170,6 +165,16 @@ async function finalizeFromWorkerState(input: {
   } catch {
     parsedDoc = null;
   }
+
+  await writeParseRowState({
+    documentId: input.row.id,
+    userId: input.row.userId,
+    parseState: stringifyDocumentParseState({
+      ...workerParseState,
+      parserVersion: resolveParsedPdfParserVersion(parsedDoc),
+    }),
+    parsedJsonKey,
+  });
 
   if (!hasAnyParsedBlocks(parsedDoc)) {
     input.logger.warn({
@@ -246,7 +251,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       });
     }
 
-    let state = parseDocumentParseState(row.parseState);
+    let state = normalizeDocumentParseStateForCurrentParserVersion(parseDocumentParseState(row.parseState));
     state = await healStaleDocumentParseState({
       documentId: id,
       userId: row.userId,
@@ -409,7 +414,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    let state = parseDocumentParseState(row.parseState);
+    let state = normalizeDocumentParseStateForCurrentParserVersion(parseDocumentParseState(row.parseState));
     state = await healStaleDocumentParseState({
       documentId: id,
       userId: row.userId,

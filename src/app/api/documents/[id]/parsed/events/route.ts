@@ -9,6 +9,7 @@ import { isWorkerOperationStateStale, snapshotFromWorkerState } from '@/lib/serv
 import { fetchWorkerOperationState } from '@/lib/server/compute/worker-op-state';
 import { isValidDocumentId } from '@/lib/server/documents/blobstore';
 import {
+  normalizeDocumentParseStateForCurrentParserVersion,
   normalizeParseStatus,
   parseDocumentParseState,
   stringifyDocumentParseState,
@@ -67,7 +68,7 @@ async function toSnapshotState(row: ParseRow, preferredOpId?: string | null): Pr
   const state = await healStaleDocumentParseState({
     documentId: row.id,
     userId: row.userId,
-    state: parseDocumentParseState(row.parseState),
+    state: normalizeDocumentParseStateForCurrentParserVersion(parseDocumentParseState(row.parseState)),
   });
   const parseStatus = normalizeParseStatus(state.status);
   const dbOpId = typeof state.opId === 'string' && state.opId.trim() ? state.opId.trim() : null;
@@ -199,7 +200,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
     let initialState = await toSnapshotState(row, requestedOpId);
     if (!requestedOpId && !initialState.opId && initialState.snapshot.parseStatus !== 'ready' && initialState.snapshot.parseStatus !== 'failed') {
-      const state = parseDocumentParseState(row.parseState);
+      const state = normalizeDocumentParseStateForCurrentParserVersion(parseDocumentParseState(row.parseState));
       const created = await backfillPendingPdfParseOperation({
         documentId: id,
         userId: row.userId,

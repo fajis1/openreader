@@ -17,12 +17,15 @@ import { recordJobEvent, getPdfLayoutRateConfig } from '@/lib/server/rate-limit/
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { deleteDocumentBlob, headDocumentBlob, isMissingBlobError, isValidDocumentId } from '@/lib/server/documents/blobstore';
 import {
+  normalizeDocumentParseStateForCurrentParserVersion,
   normalizeParseStatus,
   parseDocumentParseState,
   stringifyDocumentParseState,
 } from '@/lib/server/documents/parse-state';
+import { findReusableParsedPdfResult } from '@/lib/server/documents/parsed-pdf-reuse';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
+import { PDF_PARSER_VERSION } from '@openreader/compute-core';
 import type { BaseDocument, DocumentType } from '@/types/documents';
 
 export const dynamic = 'force-dynamic';
@@ -100,6 +103,9 @@ export async function POST(req: NextRequest) {
 
     for (const doc of documentsData) {
       let headSize = doc.size;
+      const reusableParsedPdf = doc.type === 'pdf'
+        ? await findReusableParsedPdfResult(doc.id)
+        : null;
 
       // Retry HEAD check to handle S3 read-after-write propagation delays.
       // The client uploads bytes directly to S3 via presigned URL, then
@@ -146,9 +152,13 @@ export async function POST(req: NextRequest) {
           lastModified: doc.lastModified,
           filePath: doc.id,
           parseState: doc.type === 'pdf'
-            ? stringifyDocumentParseState({ status: 'pending', progress: null, updatedAt: Date.now() })
+            ? stringifyDocumentParseState(
+              reusableParsedPdf
+                ? { status: 'ready', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION }
+                : { status: 'pending', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION },
+            )
             : null,
-          parsedJsonKey: null,
+          parsedJsonKey: reusableParsedPdf?.parsedJsonKey ?? null,
         })
         .onConflictDoUpdate({
           target: [documents.id, documents.userId],
@@ -159,9 +169,13 @@ export async function POST(req: NextRequest) {
             lastModified: doc.lastModified,
             filePath: doc.id,
             parseState: doc.type === 'pdf'
-              ? stringifyDocumentParseState({ status: 'pending', progress: null, updatedAt: Date.now() })
+              ? stringifyDocumentParseState(
+                reusableParsedPdf
+                  ? { status: 'ready', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION }
+                  : { status: 'pending', progress: null, updatedAt: Date.now(), parserVersion: PDF_PARSER_VERSION },
+              )
               : null,
-            parsedJsonKey: null,
+            parsedJsonKey: reusableParsedPdf?.parsedJsonKey ?? null,
           },
         });
 
@@ -191,7 +205,7 @@ export async function POST(req: NextRequest) {
         }, 'Failed to enqueue document preview');
       });
 
-      if (doc.type === 'pdf') {
+      if (doc.type === 'pdf' && !reusableParsedPdf) {
         // Account for upload-driven parse load in the same ledger the explicit
         // re-parse limiter reads. We record (not reject) here so a legitimate
         // bulk upload always parses; the recorded load still throttles
@@ -260,13 +274,16 @@ export async function GET(req: NextRequest) {
 
     const results: BaseDocument[] = rows.map((doc) => {
       const type = normalizeDocumentType(doc.type, doc.name);
+      const parseState = type === 'pdf'
+        ? normalizeDocumentParseStateForCurrentParserVersion(parseDocumentParseState(doc.parseState))
+        : null;
       return {
         id: doc.id,
         name: doc.name,
         size: Number(doc.size),
         lastModified: Number(doc.lastModified),
         type,
-        parseStatus: type === 'pdf' ? normalizeParseStatus(parseDocumentParseState(doc.parseState).status) : null,
+        parseStatus: type === 'pdf' && parseState ? normalizeParseStatus(parseState.status) : null,
         parsedJsonKey: doc.parsedJsonKey,
         scope: 'user',
       };

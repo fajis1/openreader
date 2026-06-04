@@ -624,6 +624,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const [currentWordIndex, setCurrentWordIndex] = useState<number | null>(null);
   const isPlayingRef = useRef(false);
   const pauseEpochRef = useRef(0);
+  const pendingPlaybackStartRef = useRef(false);
   const sentencesRef = useRef<string[]>([]);
   const currentIndexRef = useRef(0);
   const plannedSegmentsByLocationRef = useRef<Map<string, CanonicalTtsSegment[]>>(new Map());
@@ -939,6 +940,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const recordManualPause = useCallback(() => {
     // Cancel any queued auto-resume intent and mark an explicit user pause.
     resumeAfterLocationChangeRef.current = false;
+    pendingPlaybackStartRef.current = false;
     pauseEpochRef.current += 1;
   }, []);
 
@@ -947,6 +949,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * Used for external control of playback state
    */
   const pause = useCallback(() => {
+    pendingPlaybackStartRef.current = false;
     recordManualPause();
     clearPendingEpubJump();
     abortPendingTtsRequests(true);
@@ -1248,10 +1251,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     const shouldPause = normalizedOptions.shouldPause ?? false;
     const pauseEpochAtStart = pauseEpochRef.current;
     const pendingAutoResume = resumeAfterLocationChangeRef.current;
-    const shouldResumePlayback = !shouldPause && (isPlaying || pendingAutoResume);
-    if (shouldPause || pendingAutoResume) {
-      resumeAfterLocationChangeRef.current = false;
-    }
+    const pendingPlaybackStart = pendingPlaybackStartRef.current;
+    const shouldResumePlayback = !shouldPause && (isPlaying || pendingAutoResume || pendingPlaybackStart);
 
     // Keep track of previous state and pause playback
     invalidatePlaybackRun();
@@ -1262,8 +1263,21 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     try {
       if (newSentences.length === 0) {
         console.warn('No sentences found in text');
+        if (shouldPause || pendingAutoResume) {
+          resumeAfterLocationChangeRef.current = false;
+        }
+        if (pendingPlaybackStart) {
+          pendingPlaybackStartRef.current = false;
+        }
         setIsProcessing(false);
         return;
+      }
+
+      if (shouldPause || pendingAutoResume) {
+        resumeAfterLocationChangeRef.current = false;
+      }
+      if (pendingPlaybackStart) {
+        pendingPlaybackStartRef.current = false;
       }
 
       if (!isEPUB && typeof resolvedLocation === 'number') {
@@ -1388,6 +1402,13 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     // Ensure audio is unlocked while we're still in the click/tap handler.
     unlockPlaybackOnUserGesture();
 
+    const hasPreparedSentence = Boolean(playbackSegments[currentIndex]?.text ?? sentences[currentIndex]);
+    if (!activeHowl && !hasPreparedSentence) {
+      pendingPlaybackStartRef.current = true;
+      setIsProcessing(true);
+      return;
+    }
+
     // Resume current sentence if we already have a paused Howl.
     if (activeHowl) {
       applyPlaybackRateToHowl(activeHowl);
@@ -1406,12 +1427,15 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     setIsPlaying(true);
   }, [
     activeHowl,
+    currentIndex,
     applyPlaybackRateToHowl,
     isPlaying,
     pauseActiveHowl,
+    playbackSegments,
     recordManualPause,
     clearPendingEpubJump,
     abortPendingTtsRequests,
+    sentences,
     unlockPlaybackOnUserGesture,
   ]);
 
@@ -2878,6 +2902,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     abortAudio();
     clearWarmAudioCache();
     playbackInFlightRef.current = false;
+    pendingPlaybackStartRef.current = false;
     pendingJumpTargetRef.current = null;
     clearPendingEpubJump();
     bumpEpubPreloadGeneration();

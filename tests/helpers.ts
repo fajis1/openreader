@@ -188,10 +188,11 @@ async function dismissOnboardingModals(page: Page): Promise<void> {
  * Wait for the play button to be clickable and click it
  */
 export async function waitAndClickPlay(page: Page) {
-  // Wait for play button selector without disabled attribute
-  await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
+  const playButton = page.getByRole('button', { name: 'Play' });
+  await expect(playButton).toBeVisible();
+  await expect(playButton).toBeEnabled({ timeout: 15000 });
   // Play the TTS by clicking the button
-  await page.getByRole('button', { name: 'Play' }).click();
+  await playButton.click();
   // Use resilient processing transition helper (tolerates fast completion)
   await expectProcessingTransition(page);
 }

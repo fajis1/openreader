@@ -31,6 +31,7 @@ export default function EPUBPage() {
   const {
     setCurrentDocument,
     currDocName,
+    isPlaybackReady,
     clearCurrDoc,
     createFullAudioBook: createEPUBAudioBook,
     regenerateChapter: regenerateEPUBChapter,
@@ -242,7 +243,7 @@ export default function EPUBPage() {
           </div>
         </div>
       ) : (
-        <TTSPlayer />
+        <TTSPlayer isPlaybackReady={isPlaybackReady} />
       )}
       <DocumentSettings
         epub
