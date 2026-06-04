@@ -228,13 +228,11 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
 
   const {
     pdfDocs,
-    removePDFDocument,
     isPDFLoading,
     epubDocs,
-    removeEPUBDocument,
     isEPUBLoading,
     htmlDocs,
-    removeHTMLDocument,
+    deleteDocument,
     isHTMLLoading,
   } = useDocuments();
 
@@ -436,9 +434,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const handleDelete = useCallback(async () => {
     if (!documentToDelete) return;
     try {
-      if (documentToDelete.type === 'pdf') await removePDFDocument(documentToDelete.id);
-      else if (documentToDelete.type === 'epub') await removeEPUBDocument(documentToDelete.id);
-      else if (documentToDelete.type === 'html') await removeHTMLDocument(documentToDelete.id);
+      await deleteDocument(documentToDelete.id);
       setFolders((prev) =>
         prev.map((f) => ({
           ...f,
@@ -451,7 +447,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     } catch (err) {
       console.error('Failed to remove document:', err);
     }
-  }, [documentToDelete, removePDFDocument, removeEPUBDocument, removeHTMLDocument]);
+  }, [deleteDocument, documentToDelete]);
 
   const handleDeleteDoc = useCallback((doc: DocumentListDocument) => {
     setDocumentToDelete({ id: doc.id, name: doc.name, type: doc.type });

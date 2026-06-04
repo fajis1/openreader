@@ -33,9 +33,7 @@ export function DocumentUploader({
   const uploaderId = useId();
   const enableDocx = useFeatureFlag('enableDocxConversion');
   const {
-    addPDFDocument: addPDF,
-    addEPUBDocument: addEPUB,
-    addHTMLDocument: addHTML,
+    uploadDocuments,
     refreshDocuments,
   } = useDocuments();
   const [isUploading, setIsUploading] = useState(false);
@@ -63,57 +61,60 @@ export function DocumentUploader({
     });
 
     try {
+      const docxFiles: File[] = [];
+      const regularFiles: File[] = [];
+
       for (const file of acceptedFiles) {
-        if (file.type === 'application/pdf') {
-          emitBatchState({
-            isActive: true,
-            totalFiles,
-            completedFiles,
-            phase: 'uploading',
-            currentFileName: file.name,
-          });
-          await addPDF(file);
-          completedFiles += 1;
-        } else if (file.type === 'application/epub+zip') {
-          emitBatchState({
-            isActive: true,
-            totalFiles,
-            completedFiles,
-            phase: 'uploading',
-            currentFileName: file.name,
-          });
-          await addEPUB(file);
-          completedFiles += 1;
-        } else if (file.type === 'text/plain' || file.type === 'text/markdown' || file.name.endsWith('.md')) {
-          emitBatchState({
-            isActive: true,
-            totalFiles,
-            completedFiles,
-            phase: 'uploading',
-            currentFileName: file.name,
-          });
-          await addHTML(file);
-          completedFiles += 1;
-        } else if (enableDocx && file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-          // Preserve prior UX: show "Converting DOCX..." state rather than generic uploading.
-          setIsUploading(false);
-          setIsConverting(true);
-          emitBatchState({
-            isActive: true,
-            totalFiles,
-            completedFiles,
-            phase: 'converting',
-            currentFileName: file.name,
-          });
-          // Convert+upload directly on the server. Use sha(docx) as stable ID to avoid duplicates.
-          await uploadDocxAsPdf(file);
-          await refreshDocuments();
-          setIsConverting(false);
-          setIsUploading(true);
-          completedFiles += 1;
-        } else {
+        if (enableDocx && file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          docxFiles.push(file);
           continue;
         }
+        if (
+          file.type === 'application/pdf'
+          || file.type === 'application/epub+zip'
+          || file.type === 'text/plain'
+          || file.type === 'text/markdown'
+          || file.name.endsWith('.md')
+        ) {
+          regularFiles.push(file);
+        }
+      }
+
+      if (regularFiles.length > 0) {
+        emitBatchState({
+          isActive: true,
+          totalFiles,
+          completedFiles,
+          phase: 'uploading',
+          currentFileName: regularFiles[0]?.name ?? null,
+        });
+        await uploadDocuments(regularFiles);
+        completedFiles += regularFiles.length;
+        emitBatchState({
+          isActive: true,
+          totalFiles,
+          completedFiles,
+          phase: 'uploading',
+          currentFileName: null,
+        });
+      }
+
+      for (const file of docxFiles) {
+        // Preserve prior UX: show "Converting DOCX..." state rather than generic uploading.
+        setIsUploading(false);
+        setIsConverting(true);
+        emitBatchState({
+          isActive: true,
+          totalFiles,
+          completedFiles,
+          phase: 'converting',
+          currentFileName: file.name,
+        });
+        await uploadDocxAsPdf(file);
+        await refreshDocuments();
+        setIsConverting(false);
+        setIsUploading(true);
+        completedFiles += 1;
 
         emitBatchState({
           isActive: true,
@@ -137,7 +138,7 @@ export function DocumentUploader({
         currentFileName: null,
       });
     }
-  }, [addHTML, addPDF, addEPUB, refreshDocuments, enableDocx, emitBatchState]);
+  }, [uploadDocuments, refreshDocuments, enableDocx, emitBatchState]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
