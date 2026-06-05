@@ -17,9 +17,6 @@ type RegisterUploadedDocumentInput = {
 };
 
 export async function registerUploadedDocument(input: RegisterUploadedDocumentInput): Promise<BaseDocument> {
-  const parseState = null;
-  const parsedJsonKey = null;
-
   await db
     .insert(documents)
     .values({
@@ -30,8 +27,6 @@ export async function registerUploadedDocument(input: RegisterUploadedDocumentIn
       size: input.size,
       lastModified: input.lastModified,
       filePath: input.documentId,
-      parseState,
-      parsedJsonKey,
     })
     .onConflictDoUpdate({
       target: [documents.id, documents.userId],
@@ -41,8 +36,6 @@ export async function registerUploadedDocument(input: RegisterUploadedDocumentIn
         size: input.size,
         lastModified: input.lastModified,
         filePath: input.documentId,
-        parseState,
-        parsedJsonKey,
       },
     });
 
