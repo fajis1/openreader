@@ -22,6 +22,7 @@ export interface HtmlDocumentState {
   currDocData: string | undefined;
   currDocName: string | undefined;
   currDocText: string | undefined;
+  isPlaybackReady: boolean;
   blocks: HtmlBlock[];
   isTxt: boolean;
   setCurrentDocument: (id: string) => Promise<void>;
@@ -73,6 +74,7 @@ export function useHtmlDocument(): HtmlDocumentState {
 
   const [currDocData, setCurrDocData] = useState<string>();
   const [currDocName, setCurrDocName] = useState<string>();
+  const [isPlaybackReady, setIsPlaybackReady] = useState(false);
 
   const isTxt = useMemo(() => isTxtName(currDocName), [currDocName]);
   const blocks = useMemo(
@@ -91,22 +93,43 @@ export function useHtmlDocument(): HtmlDocumentState {
   // sentence splitting + sequential advancement from there.
   const lastFedDocRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!currDocText) return;
-    const key = `${currDocData ?? ''}::${currDocText.length}`;
-    if (lastFedDocRef.current === key) return;
+    if (currDocData === undefined) {
+      lastFedDocRef.current = null;
+      setTTSText('');
+      setIsPlaybackReady(false);
+      return;
+    }
+    if (!currDocText) {
+      lastFedDocRef.current = null;
+      setTTSText('');
+      setIsPlaybackReady(true);
+      return;
+    }
+    const key = `${currDocName ?? ''}::${currDocData ?? ''}::${currDocText.length}`;
+    if (lastFedDocRef.current === key) {
+      setIsPlaybackReady(true);
+      return;
+    }
+    setIsPlaybackReady(false);
     lastFedDocRef.current = key;
     setTTSText(currDocText);
-  }, [currDocText, currDocData, setTTSText]);
+    setIsPlaybackReady(true);
+  }, [currDocName, currDocText, currDocData, setTTSText]);
 
   const clearCurrDoc = useCallback(() => {
     setCurrDocData(undefined);
     setCurrDocName(undefined);
+    setIsPlaybackReady(false);
     lastFedDocRef.current = null;
+    setTTSText('');
     stop();
-  }, [stop]);
+  }, [setTTSText, stop]);
 
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
+      setIsPlaybackReady(false);
+      lastFedDocRef.current = null;
+      setTTSText('');
       const meta = await getDocumentMetadata(id);
       if (!meta) {
         console.error('Document not found on server');
@@ -125,7 +148,7 @@ export function useHtmlDocument(): HtmlDocumentState {
       console.error('Failed to get HTML document:', error);
       clearCurrDoc();
     }
-  }, [clearCurrDoc]);
+  }, [clearCurrDoc, setTTSText]);
 
   const audiobookAdapter = useMemo(
     () =>
@@ -207,6 +230,7 @@ export function useHtmlDocument(): HtmlDocumentState {
       currDocData,
       currDocName,
       currDocText,
+      isPlaybackReady,
       blocks,
       isTxt,
       setCurrentDocument,
@@ -218,6 +242,7 @@ export function useHtmlDocument(): HtmlDocumentState {
       currDocData,
       currDocName,
       currDocText,
+      isPlaybackReady,
       blocks,
       isTxt,
       setCurrentDocument,

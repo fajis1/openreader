@@ -52,6 +52,7 @@ export default function PDFViewerPage() {
     clearCurrDoc,
     currDocPage,
     currDocPages,
+    isPlaybackReady,
     parseStatus,
     parseProgress,
     documentSettings,
@@ -487,7 +488,7 @@ export default function PDFViewerPage() {
           </div>
         </div>
       ) : isParseReady ? (
-        <TTSPlayer currentPage={currDocPage} numPages={currDocPages} />
+        <TTSPlayer currentPage={currDocPage} numPages={currDocPages} isPlaybackReady={isPlaybackReady} />
       ) : null}
       <DocumentSettings
         isOpen={activeSidebar === 'settings'}

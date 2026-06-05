@@ -1,4 +1,5 @@
-import type { PdfParseProgress, PdfParseStatus } from '@/types/parsed-pdf';
+import { PDF_PARSER_VERSION } from '@openreader/compute-core';
+import type { ParsedPdfDocument, PdfParseProgress, PdfParseStatus } from '@/types/parsed-pdf';
 
 export interface DocumentParseState {
   status: PdfParseStatus;
@@ -7,6 +8,7 @@ export interface DocumentParseState {
   error?: string | null;
   opId?: string;
   jobId?: string;
+  parserVersion?: string;
 }
 
 export function isInProgressParseStatus(status: PdfParseStatus): status is 'pending' | 'running' {
@@ -30,6 +32,31 @@ export function normalizeParseStatus(status: string | null | undefined): PdfPars
     return status;
   }
   return 'pending';
+}
+
+export function hasCurrentPdfParserVersion(parserVersion: string | null | undefined): boolean {
+  return typeof parserVersion === 'string' && parserVersion.trim() === PDF_PARSER_VERSION;
+}
+
+export function normalizeDocumentParseStateForCurrentParserVersion(
+  state: DocumentParseState,
+  nowMs = Date.now(),
+): DocumentParseState {
+  const status = normalizeParseStatus(state.status);
+  if (status === 'failed' || hasCurrentPdfParserVersion(state.parserVersion)) {
+    return state;
+  }
+
+  return {
+    status: 'pending',
+    progress: null,
+    updatedAt: nowMs,
+  };
+}
+
+export function resolveParsedPdfParserVersion(parsed: ParsedPdfDocument | null | undefined): string {
+  const parserVersion = parsed?.parserVersion?.trim();
+  return parserVersion || PDF_PARSER_VERSION;
 }
 
 function normalizeProgress(progress: unknown): PdfParseProgress | null {
@@ -63,6 +90,7 @@ export function parseDocumentParseState(value: string | null): DocumentParseStat
     const error = typeof parsed.error === 'string' ? parsed.error : null;
     const opId = typeof parsed.opId === 'string' ? parsed.opId : undefined;
     const jobId = typeof parsed.jobId === 'string' ? parsed.jobId : undefined;
+    const parserVersion = typeof parsed.parserVersion === 'string' ? parsed.parserVersion : undefined;
     return {
       status,
       progress,
@@ -70,6 +98,7 @@ export function parseDocumentParseState(value: string | null): DocumentParseStat
       ...(error ? { error } : {}),
       ...(opId ? { opId } : {}),
       ...(jobId ? { jobId } : {}),
+      ...(parserVersion ? { parserVersion } : {}),
     };
   } catch {
     return { status: 'pending', progress: null };
@@ -84,5 +113,6 @@ export function stringifyDocumentParseState(state: DocumentParseState): string {
     ...(state.error ? { error: state.error } : {}),
     ...(state.opId ? { opId: state.opId } : {}),
     ...(state.jobId ? { jobId: state.jobId } : {}),
+    ...(state.parserVersion ? { parserVersion: state.parserVersion } : {}),
   });
 }

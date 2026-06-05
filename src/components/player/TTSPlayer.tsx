@@ -13,9 +13,10 @@ import { SpeedControl } from '@/components/player/SpeedControl';
 import { Navigator } from '@/components/player/Navigator';
 import { IconButton } from '@/components/ui';
 
-export default function TTSPlayer({ currentPage, numPages }: {
+export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = true }: {
   currentPage?: number;
   numPages?: number | undefined;
+  isPlaybackReady?: boolean;
 }) {
   const {
     isPlaying,
@@ -52,7 +53,7 @@ export default function TTSPlayer({ currentPage, numPages }: {
         <IconButton
           onClick={skipBackward}
           aria-label="Skip backward"
-          disabled={isProcessing}
+          disabled={isProcessing || !isPlaybackReady}
           className="relative"
         >
           {isProcessing ? <LoadingSpinner /> : <SkipBackwardIcon className="w-5 h-5" />}
@@ -61,16 +62,18 @@ export default function TTSPlayer({ currentPage, numPages }: {
         <IconButton
           onClick={togglePlay}
           aria-label={isPlaying ? 'Pause' : 'Play'}
-          disabled={isProcessing && !isPlaying}
+          disabled={!isPlaying && (!isPlaybackReady || isProcessing)}
           className="relative"
         >
-          {isPlaying ? <PauseIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5" />}
+          {!isPlaying && !isPlaybackReady
+            ? <LoadingSpinner />
+            : (isPlaying ? <PauseIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5" />)}
         </IconButton>
 
         <IconButton
           onClick={skipForward}
           aria-label="Skip forward"
-          disabled={isProcessing}
+          disabled={isProcessing || !isPlaybackReady}
           className="relative"
         >
           {isProcessing ? <LoadingSpinner /> : <SkipForwardIcon className="w-5 h-5" />}

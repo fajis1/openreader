@@ -1,3 +1,4 @@
+import { PDF_PARSER_VERSION } from '@openreader/compute-core';
 import type { PdfLayoutJobResult, WorkerOperationState } from '@openreader/compute-core/api-contracts';
 import type { PdfParseProgress, PdfParseStatus } from '@/types/parsed-pdf';
 import type { DocumentParseState } from '@/lib/server/documents/parse-state';
@@ -42,6 +43,7 @@ export function documentParseStateFromWorkerState(
       ? parseProgress
       : null,
     updatedAt: nowMs,
+    parserVersion: PDF_PARSER_VERSION,
     ...(typeof state.opId === 'string' && state.opId.trim() ? { opId: state.opId } : {}),
     ...(typeof state.jobId === 'string' && state.jobId.trim() ? { jobId: state.jobId } : {}),
     ...(parseStatus === 'failed' && state.error?.message ? { error: state.error.message } : {}),

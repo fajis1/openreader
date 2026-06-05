@@ -3,31 +3,52 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BaseDocument } from '@/types/documents';
-import { listDocuments, uploadDocuments, deleteDocuments } from '@/lib/client/api/documents';
-import { putCachedEpub, putCachedHtml, putCachedPdf, evictCachedEpub, evictCachedHtml, evictCachedPdf } from '@/lib/client/cache/documents';
+import {
+  deleteDocuments as deleteServerDocuments,
+  listDocuments,
+  uploadDocuments as uploadServerDocuments,
+} from '@/lib/client/api/documents';
+import { cacheStoredDocumentFromBytes, evictCachedDocument } from '@/lib/client/cache/documents';
 import { useAuthSession } from '@/hooks/useAuthSession';
 
 interface DocumentContextType {
   pdfDocs: Array<BaseDocument & { type: 'pdf' }>;
-  addPDFDocument: (file: File) => Promise<string>;
-  removePDFDocument: (id: string) => Promise<void>;
   isPDFLoading: boolean;
 
   epubDocs: Array<BaseDocument & { type: 'epub' }>;
-  addEPUBDocument: (file: File) => Promise<string>;
-  removeEPUBDocument: (id: string) => Promise<void>;
   isEPUBLoading: boolean;
 
   htmlDocs: Array<BaseDocument & { type: 'html' }>;
-  addHTMLDocument: (file: File) => Promise<string>;
-  removeHTMLDocument: (id: string) => Promise<void>;
   isHTMLLoading: boolean;
 
+  uploadDocuments: (files: File[]) => Promise<BaseDocument[]>;
+  deleteDocument: (id: string) => Promise<void>;
   refreshDocuments: () => Promise<void>;
 }
 
 const DocumentContext = createContext<DocumentContextType | undefined>(undefined);
 const DOCUMENTS_QUERY_KEY = 'documents';
+
+type SupportedDocument = BaseDocument & { type: 'pdf' | 'epub' | 'html' };
+
+function mergeStoredDocuments(
+  previous: SupportedDocument[] | undefined,
+  uploaded: BaseDocument[],
+): SupportedDocument[] {
+  const next = [...(previous ?? [])];
+
+  for (let index = uploaded.length - 1; index >= 0; index -= 1) {
+    const stored = uploaded[index];
+    if (stored.type !== 'pdf' && stored.type !== 'epub' && stored.type !== 'html') {
+      continue;
+    }
+    const supportedStored = stored as SupportedDocument;
+    const withoutExisting = next.filter((document) => document.id !== supportedStored.id);
+    next.splice(0, next.length, supportedStored, ...withoutExisting);
+  }
+
+  return next;
+}
 
 export function DocumentProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -81,67 +102,63 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     return { pdfDocs, epubDocs, htmlDocs };
   }, [docs]);
 
-  const cacheUploaded = useCallback(async (stored: BaseDocument, file: File) => {
-    try {
-      if (stored.type === 'pdf') {
-        await putCachedPdf(stored, await file.arrayBuffer());
-      } else if (stored.type === 'epub') {
-        await putCachedEpub(stored, await file.arrayBuffer());
-      } else if (stored.type === 'html') {
-        const buf = await file.arrayBuffer();
-        const decoded = new TextDecoder().decode(new Uint8Array(buf));
-        await putCachedHtml(stored, decoded);
-      }
-    } catch (err) {
-      // Cache failures should not block uploads.
-      console.warn('Failed to cache uploaded document:', stored.id, err);
-    }
-  }, []);
+  const uploadDocuments = useCallback(async (files: File[]): Promise<BaseDocument[]> => {
+    if (files.length === 0) return [];
 
-  const addDocument = useCallback(async (file: File): Promise<string> => {
-    const [stored] = await uploadDocuments([file]);
-    if (!stored) throw new Error('Upload succeeded but returned no document');
-    await cacheUploaded(stored, file);
-    const isSupported = stored.type === 'pdf' || stored.type === 'epub' || stored.type === 'html';
-    if (!isSupported) return stored.id;
-    const supportedStored = stored as BaseDocument & { type: 'pdf' | 'epub' | 'html' };
-    queryClient.setQueryData<Array<BaseDocument & { type: 'pdf' | 'epub' | 'html' }>>(documentsQueryKey, (prev = []) => {
-      const next = prev.filter((d) => d.id !== supportedStored.id);
-      return [supportedStored, ...next];
-    });
-    return stored.id;
-  }, [cacheUploaded, queryClient, documentsQueryKey]);
-
-  const addPDFDocument = useCallback(async (file: File) => addDocument(file), [addDocument]);
-  const addEPUBDocument = useCallback(async (file: File) => addDocument(file), [addDocument]);
-  const addHTMLDocument = useCallback(async (file: File) => addDocument(file), [addDocument]);
-
-  const removeById = useCallback(async (id: string) => {
-    await deleteDocuments({ ids: [id] });
-    await Promise.allSettled([evictCachedPdf(id), evictCachedEpub(id), evictCachedHtml(id)]);
-    queryClient.setQueryData<Array<BaseDocument & { type: 'pdf' | 'epub' | 'html' }>>(documentsQueryKey, (prev = []) =>
-      prev.filter((d) => d.id !== id),
+    const stored = await uploadServerDocuments(files);
+    await Promise.allSettled(
+      stored.map(async (document, index) => {
+        const file = files[index];
+        if (!file) return;
+        const sourceType = file.name
+          ? (
+            file.name.toLowerCase().endsWith('.pdf')
+              ? 'pdf'
+              : file.name.toLowerCase().endsWith('.epub')
+                ? 'epub'
+                : file.name.toLowerCase().endsWith('.docx')
+                  ? 'docx'
+                  : 'html'
+          )
+          : (
+            file.type === 'application/pdf'
+              ? 'pdf'
+              : file.type === 'application/epub+zip'
+                ? 'epub'
+                : file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                  ? 'docx'
+                  : 'html'
+          );
+        if (document.type !== sourceType) return;
+        await cacheStoredDocumentFromBytes(document, await file.arrayBuffer());
+      }),
     );
-  }, [queryClient, documentsQueryKey]);
 
-  const removePDFDocument = useCallback(async (id: string) => removeById(id), [removeById]);
-  const removeEPUBDocument = useCallback(async (id: string) => removeById(id), [removeById]);
-  const removeHTMLDocument = useCallback(async (id: string) => removeById(id), [removeById]);
+    queryClient.setQueryData<SupportedDocument[]>(documentsQueryKey, (previous) =>
+      mergeStoredDocuments(previous, stored),
+    );
+
+    return stored;
+  }, [documentsQueryKey, queryClient]);
+
+  const deleteDocument = useCallback(async (id: string) => {
+    await deleteServerDocuments({ ids: [id] });
+    await evictCachedDocument(id);
+    queryClient.setQueryData<SupportedDocument[]>(documentsQueryKey, (previous = []) =>
+      previous.filter((document) => document.id !== id),
+    );
+  }, [documentsQueryKey, queryClient]);
 
   return (
     <DocumentContext.Provider value={{
       pdfDocs: docsByType.pdfDocs,
-      addPDFDocument,
-      removePDFDocument,
       isPDFLoading: isLoading,
       epubDocs: docsByType.epubDocs,
-      addEPUBDocument,
-      removeEPUBDocument,
       isEPUBLoading: isLoading,
       htmlDocs: docsByType.htmlDocs,
-      addHTMLDocument,
-      removeHTMLDocument,
       isHTMLLoading: isLoading,
+      uploadDocuments,
+      deleteDocument,
       refreshDocuments,
 
     }}>

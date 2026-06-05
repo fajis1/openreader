@@ -1,10 +1,8 @@
-import { sha256HexFromArrayBuffer } from '@/lib/client/sha256';
 import type { BaseDocument, DocumentType } from '@/types/documents';
 import type { ParsedPdfDocument, PdfParseProgress, PdfParseStatus } from '@/types/parsed-pdf';
 import type { DocumentSettings } from '@/types/document-settings';
 
 export type UploadSource = {
-  id: string;
   name: string;
   type: DocumentType;
   size: number;
@@ -23,8 +21,12 @@ function toUploadBody(body: UploadSource['body']): BodyInit {
   return body as unknown as BodyInit;
 }
 
-async function uploadDocumentSourceViaProxy(source: UploadSource, options?: UploadOptions): Promise<void> {
-  const res = await fetch(`/api/documents/blob/upload/fallback?id=${encodeURIComponent(source.id)}`, {
+async function uploadDocumentSourceViaProxy(
+  source: UploadSource,
+  token: string,
+  options?: UploadOptions,
+): Promise<void> {
+  const res = await fetch(`/api/documents/blob/upload/fallback?token=${encodeURIComponent(token)}`, {
     method: 'PUT',
     headers: { 'Content-Type': source.contentType || 'application/octet-stream' },
     body: toUploadBody(source.body),
@@ -43,6 +45,14 @@ function documentTypeForName(name: string): DocumentType {
   if (lower.endsWith('.epub')) return 'epub';
   if (lower.endsWith('.docx')) return 'docx';
   return 'html';
+}
+
+function documentTypeForMime(contentType: string): DocumentType | null {
+  const normalized = contentType.trim().toLowerCase();
+  if (normalized === 'application/pdf') return 'pdf';
+  if (normalized === 'application/epub+zip') return 'epub';
+  if (normalized === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx';
+  return null;
 }
 
 export function mimeTypeForDoc(doc: Pick<BaseDocument, 'type' | 'name'>): string {
@@ -80,31 +90,20 @@ export async function getDocumentMetadata(id: string, options?: { signal?: Abort
 
 export async function getParsedPdfDocument(
   id: string,
-  options?: { signal?: AbortSignal; retryFailed?: boolean; opId?: string },
-): Promise<
-  | { status: 'ready'; parsed: ParsedPdfDocument }
-  | { status: 'pending' | 'running' | 'failed'; parseProgress?: PdfParseProgress | null; opId?: string | null }
-> {
-  const params = new URLSearchParams();
-  if (options?.retryFailed) params.set('retry', '1');
-  if (options?.opId) params.set('opId', options.opId);
-  const query = params.size > 0 ? `?${params.toString()}` : '';
-  const res = await fetch(`/api/documents/${encodeURIComponent(id)}/parsed${query}`, {
+  options?: { signal?: AbortSignal },
+): Promise<ParsedPdfDocument> {
+  const res = await fetch(`/api/documents/${encodeURIComponent(id)}/parsed`, {
     signal: options?.signal,
     cache: 'no-store',
   });
 
-  if (res.status === 202) {
+  if (res.status === 409) {
     const data = (await res.json().catch(() => null)) as {
       parseStatus?: string;
       parseProgress?: PdfParseProgress | null;
       opId?: string | null;
     } | null;
-    const parseStatus = data?.parseStatus;
-    if (parseStatus === 'pending' || parseStatus === 'running' || parseStatus === 'failed') {
-      return { status: parseStatus, parseProgress: data?.parseProgress ?? null, opId: data?.opId ?? null };
-    }
-    return { status: 'pending', parseProgress: data?.parseProgress ?? null, opId: data?.opId ?? null };
+    throw new Error(data?.parseStatus ? `Parsed PDF is not ready (${data.parseStatus})` : 'Parsed PDF is not ready');
   }
 
   if (!res.ok) {
@@ -112,8 +111,7 @@ export async function getParsedPdfDocument(
     throw new Error(data?.error || 'Failed to load parsed PDF');
   }
 
-  const parsed = (await res.json()) as ParsedPdfDocument;
-  return { status: 'ready', parsed };
+  return (await res.json()) as ParsedPdfDocument;
 }
 
 export function subscribeParsedPdfDocumentEvents(
@@ -241,7 +239,6 @@ export async function uploadDocumentSources(sources: UploadSource[], options?: U
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       uploads: sources.map((source) => ({
-        id: source.id,
         contentType: source.contentType,
         size: source.size,
       })),
@@ -255,14 +252,18 @@ export async function uploadDocumentSources(sources: UploadSource[], options?: U
   }
 
   const presigned = (await presignRes.json()) as {
-    uploads?: Array<{ id: string; url: string; headers?: Record<string, string> }>;
+    uploads?: Array<{ token: string; url: string; headers?: Record<string, string> }>;
   };
-  const byId = new Map((presigned.uploads || []).map((upload) => [upload.id, upload]));
+  const uploads = presigned.uploads || [];
+  if (uploads.length !== sources.length) {
+    throw new Error('Upload preparation returned an unexpected number of temp uploads');
+  }
 
-  for (const source of sources) {
-    const upload = byId.get(source.id);
-    if (!upload?.url) {
-      throw new Error(`Missing presigned upload for document ${source.id}`);
+  for (let index = 0; index < sources.length; index += 1) {
+    const source = sources[index];
+    const upload = uploads[index];
+    if (!upload?.url || !upload.token) {
+      throw new Error(`Missing presigned upload for document ${source.name}`);
     }
 
     let putError: unknown = null;
@@ -285,7 +286,7 @@ export async function uploadDocumentSources(sources: UploadSource[], options?: U
     }
 
     try {
-      await uploadDocumentSourceViaProxy(source, options);
+      await uploadDocumentSourceViaProxy(source, upload.token, options);
     } catch (proxyError) {
       const directMessage = putError instanceof Error ? putError.message : 'unknown direct upload error';
       const proxyMessage = proxyError instanceof Error ? proxyError.message : 'unknown proxy upload error';
@@ -293,27 +294,26 @@ export async function uploadDocumentSources(sources: UploadSource[], options?: U
     }
   }
 
-  const registerRes = await fetch('/api/documents', {
+  const finalizeRes = await fetch('/api/documents/blob/upload/finalize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      documents: sources.map((source) => ({
-        id: source.id,
+      uploads: sources.map((source, index) => ({
+        token: uploads[index]?.token,
         name: source.name,
         type: source.type,
-        size: source.size,
         lastModified: source.lastModified,
       })),
     }),
     signal: options?.signal,
   });
 
-  if (!registerRes.ok) {
-    const data = (await registerRes.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(data?.error || 'Failed to register uploaded documents');
+  if (!finalizeRes.ok) {
+    const data = (await finalizeRes.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(data?.error || 'Failed to finalize uploaded documents');
   }
 
-  const data = (await registerRes.json()) as { stored: BaseDocument[] };
+  const data = (await finalizeRes.json()) as { stored: BaseDocument[] };
   return data.stored || [];
 }
 
@@ -322,14 +322,14 @@ export async function uploadDocuments(files: File[], options?: UploadOptions): P
 
   const sources: UploadSource[] = [];
   for (const file of files) {
-    const bytes = await file.arrayBuffer();
-    const id = await sha256HexFromArrayBuffer(bytes);
-    const type = documentTypeForName(file.name);
-    const name = file.name || `${id}.${type}`;
-    const contentType = file.type || mimeTypeForDoc({ name, type });
+    const name = file.name || '';
+    const type = name
+      ? documentTypeForName(name)
+      : (documentTypeForMime(file.type) ?? 'html');
+    const resolvedName = name || `upload.${type}`;
+    const contentType = file.type || mimeTypeForDoc({ name: resolvedName, type });
     sources.push({
-      id,
-      name,
+      name: resolvedName,
       type,
       size: file.size,
       lastModified: Number.isFinite(file.lastModified) ? file.lastModified : Date.now(),
@@ -503,24 +503,4 @@ export async function getDocumentPreviewStatus(
   }
 
   throw new Error(`Failed to load preview status (status ${res.status})`);
-}
-
-export async function uploadDocxAsPdf(file: File, options?: { signal?: AbortSignal }): Promise<BaseDocument> {
-  const form = new FormData();
-  form.append('file', file);
-
-  const res = await fetch('/api/documents/docx-to-pdf/upload', {
-    method: 'POST',
-    body: form,
-    signal: options?.signal,
-  });
-
-  if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(data?.error || 'Failed to convert DOCX');
-  }
-
-  const data = (await res.json()) as { stored: BaseDocument };
-  if (!data?.stored) throw new Error('DOCX conversion succeeded but returned no document');
-  return data.stored;
 }

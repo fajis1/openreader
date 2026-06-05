@@ -31,6 +31,7 @@ export default function HTMLPage() {
     setCurrentDocument,
     currDocData,
     currDocName,
+    isPlaybackReady,
     blocks,
     isTxt,
     clearCurrDoc,
@@ -233,7 +234,7 @@ export default function HTMLPage() {
           </div>
         </div>
       ) : (
-        <TTSPlayer />
+        <TTSPlayer isPlaybackReady={isPlaybackReady} />
       )}
       <DocumentSettings
         html

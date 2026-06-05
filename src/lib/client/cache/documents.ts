@@ -107,6 +107,10 @@ export async function evictCachedHtml(id: string): Promise<void> {
   await removeHtmlDocument(id);
 }
 
+export async function evictCachedDocument(id: string): Promise<void> {
+  await Promise.allSettled([evictCachedPdf(id), evictCachedEpub(id), evictCachedHtml(id)]);
+}
+
 export async function clearDocumentCache(): Promise<void> {
   const { clearPdfDocuments, clearEpubDocuments, clearHtmlDocuments } = await import('@/lib/client/dexie');
   await Promise.all([clearPdfDocuments(), clearEpubDocuments(), clearHtmlDocuments()]);

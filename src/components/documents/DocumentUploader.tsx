@@ -4,7 +4,6 @@ import { useState, useCallback, useId, type ReactNode } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { UploadIcon } from '@/components/icons/Icons';
 import { useDocuments } from '@/contexts/DocumentContext';
-import { uploadDocxAsPdf } from '@/lib/client/api/documents';
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { dropzoneSurfaceClass } from '@/components/ui';
 
@@ -20,7 +19,7 @@ export interface UploadBatchState {
   isActive: boolean;
   totalFiles: number;
   completedFiles: number;
-  phase: 'uploading' | 'converting';
+  phase: 'uploading';
   currentFileName: string | null;
 }
 
@@ -33,13 +32,9 @@ export function DocumentUploader({
   const uploaderId = useId();
   const enableDocx = useFeatureFlag('enableDocxConversion');
   const {
-    addPDFDocument: addPDF,
-    addEPUBDocument: addEPUB,
-    addHTMLDocument: addHTML,
-    refreshDocuments,
+    uploadDocuments,
   } = useDocuments();
   const [isUploading, setIsUploading] = useState(false);
-  const [isConverting, setIsConverting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const emitBatchState = useCallback((state: Omit<UploadBatchState, 'uploaderId'>) => {
@@ -63,72 +58,13 @@ export function DocumentUploader({
     });
 
     try {
-      for (const file of acceptedFiles) {
-        if (file.type === 'application/pdf') {
-          emitBatchState({
-            isActive: true,
-            totalFiles,
-            completedFiles,
-            phase: 'uploading',
-            currentFileName: file.name,
-          });
-          await addPDF(file);
-          completedFiles += 1;
-        } else if (file.type === 'application/epub+zip') {
-          emitBatchState({
-            isActive: true,
-            totalFiles,
-            completedFiles,
-            phase: 'uploading',
-            currentFileName: file.name,
-          });
-          await addEPUB(file);
-          completedFiles += 1;
-        } else if (file.type === 'text/plain' || file.type === 'text/markdown' || file.name.endsWith('.md')) {
-          emitBatchState({
-            isActive: true,
-            totalFiles,
-            completedFiles,
-            phase: 'uploading',
-            currentFileName: file.name,
-          });
-          await addHTML(file);
-          completedFiles += 1;
-        } else if (enableDocx && file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-          // Preserve prior UX: show "Converting DOCX..." state rather than generic uploading.
-          setIsUploading(false);
-          setIsConverting(true);
-          emitBatchState({
-            isActive: true,
-            totalFiles,
-            completedFiles,
-            phase: 'converting',
-            currentFileName: file.name,
-          });
-          // Convert+upload directly on the server. Use sha(docx) as stable ID to avoid duplicates.
-          await uploadDocxAsPdf(file);
-          await refreshDocuments();
-          setIsConverting(false);
-          setIsUploading(true);
-          completedFiles += 1;
-        } else {
-          continue;
-        }
-
-        emitBatchState({
-          isActive: true,
-          totalFiles,
-          completedFiles,
-          phase: 'uploading',
-          currentFileName: null,
-        });
-      }
+      await uploadDocuments(acceptedFiles);
+      completedFiles = acceptedFiles.length;
     } catch (err) {
       setError('Failed to upload file. Please try again.');
       console.error('Upload error:', err);
     } finally {
       setIsUploading(false);
-      setIsConverting(false);
       emitBatchState({
         isActive: false,
         totalFiles,
@@ -137,7 +73,7 @@ export function DocumentUploader({
         currentFileName: null,
       });
     }
-  }, [addHTML, addPDF, addEPUB, refreshDocuments, enableDocx, emitBatchState]);
+  }, [uploadDocuments, emitBatchState]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -151,12 +87,12 @@ export function DocumentUploader({
       } : {})
     },
     multiple: true,
-    disabled: isUploading || isConverting,
+    disabled: isUploading,
     noClick: variant === 'overlay',
     noKeyboard: variant === 'overlay'
   });
 
-  const isDisabled = isUploading || isConverting;
+  const isDisabled = isUploading;
 
   if (variant === 'overlay') {
     const rootProps = getRootProps();
@@ -209,8 +145,6 @@ export function DocumentUploader({
           <UploadIcon className="w-3.5 h-3.5 text-soft group-hover:text-accent shrink-0 transition-colors duration-base" />
           {isUploading ? (
             <p className="text-[12px] font-medium truncate flex-1">Uploading…</p>
-          ) : isConverting ? (
-            <p className="text-[12px] font-medium truncate flex-1">Converting DOCX…</p>
           ) : (
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <p className="text-[12px] truncate flex-1">
@@ -225,8 +159,6 @@ export function DocumentUploader({
           <UploadIcon className="w-7 h-7 sm:w-10 sm:h-10 mb-2 text-soft" />
           {isUploading ? (
             <p className="text-sm sm:text-lg font-semibold text-foreground">Uploading file...</p>
-          ) : isConverting ? (
-            <p className="text-sm sm:text-lg font-semibold text-foreground">Converting DOCX to PDF...</p>
           ) : (
             <>
               <p className="mb-2 text-sm sm:text-lg font-semibold text-foreground">

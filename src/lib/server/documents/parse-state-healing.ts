@@ -24,6 +24,7 @@ export async function healStaleDocumentParseState(input: {
     error: `Parse state stale for more than ${staleMs}ms; marked failed for retry`,
     ...(input.state.opId ? { opId: input.state.opId } : {}),
     ...(input.state.jobId ? { jobId: input.state.jobId } : {}),
+    ...(input.state.parserVersion ? { parserVersion: input.state.parserVersion } : {}),
   }));
 
   await db

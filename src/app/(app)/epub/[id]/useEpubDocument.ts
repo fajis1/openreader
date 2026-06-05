@@ -51,6 +51,7 @@ export interface EpubDocumentState {
   currDocPages: number | undefined;
   currDocPage: number | string;
   currDocText: string | undefined;
+  isPlaybackReady: boolean;
   setCurrentDocument: (id: string) => Promise<void>;
   clearCurrDoc: () => void;
   extractPageText: (book: Book, rendition: Rendition, shouldPause?: boolean) => Promise<string>;
@@ -106,6 +107,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
   const [currDocData, setCurrDocData] = useState<ArrayBuffer>();
   const [currDocName, setCurrDocName] = useState<string>();
   const [currDocText, setCurrDocText] = useState<string>();
+  const [isPlaybackReady, setIsPlaybackReady] = useState(false);
   // Mirror state into a ref so resolveEpubLocator (registered once with
   // TTSContext via a stable callback) can always read the latest page text
   // without forcing re-registration on every page turn.
@@ -160,6 +162,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
     setCurrDocData(undefined);
     setCurrDocName(undefined);
     setCurrDocText(undefined);
+    setIsPlaybackReady(false);
     setCurrDocPages(undefined);
     isEPUBSetOnce.current = false;
     shouldPauseRef.current = true;
@@ -179,6 +182,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
    */
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
+      setIsPlaybackReady(false);
       const meta = await getDocumentMetadata(id);
       if (!meta) {
         clearCurrDoc();
@@ -215,6 +219,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
    */
   const extractPageText = useCallback(async (book: Book, rendition: Rendition, shouldPause = false): Promise<string> => {
     try {
+      setIsPlaybackReady(false);
       const location = rendition?.location;
       if (!location) return '';
       const { start, end } = location;
@@ -244,6 +249,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
         nextText: continuationPreview
       });
       setCurrDocText(textContent);
+      setIsPlaybackReady(true);
 
       return textContent;
     } catch (error) {
@@ -390,6 +396,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
       currDocPages,
       currDocPage,
       currDocText,
+      isPlaybackReady,
       clearCurrDoc,
       extractPageText,
       walkUpcomingRenderedLocations,
@@ -415,6 +422,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
       currDocPages,
       currDocPage,
       currDocText,
+      isPlaybackReady,
       clearCurrDoc,
       extractPageText,
       walkUpcomingRenderedLocations,

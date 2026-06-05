@@ -122,16 +122,14 @@ interface DocumentListInnerProps {
 function SidebarUploadLoader({
   totalFiles,
   completedFiles,
-  phase,
   currentFileName,
 }: {
   totalFiles: number;
   completedFiles: number;
-  phase: 'uploading' | 'converting';
+  phase: 'uploading';
   currentFileName: string | null;
 }) {
   const progress = totalFiles > 0 ? Math.min(100, Math.round((completedFiles / totalFiles) * 100)) : 0;
-  const label = phase === 'converting' ? 'Converting' : 'Uploading';
   const radius = 7;
   const stroke = 2;
   const size = 18;
@@ -143,12 +141,12 @@ function SidebarUploadLoader({
     <div className="rounded-md border border-line bg-surface-sunken px-2 py-1.5">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex items-center gap-1.5 text-[11px] leading-tight">
-          <span className="font-medium text-foreground">{label}</span>
+          <span className="font-medium text-foreground">Uploading</span>
           <span className="shrink-0 tabular-nums text-soft">{completedFiles}/{totalFiles}</span>
         </div>
         <div className="shrink-0 flex items-center gap-1 text-accent" aria-label={`Upload progress ${progress}%`}>
           <span className="text-[10px] tabular-nums text-soft">{progress}%</span>
-          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className={phase === 'converting' ? 'animate-spin' : ''}>
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
             <circle
               cx={size / 2}
               cy={size / 2}
@@ -228,13 +226,11 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
 
   const {
     pdfDocs,
-    removePDFDocument,
     isPDFLoading,
     epubDocs,
-    removeEPUBDocument,
     isEPUBLoading,
     htmlDocs,
-    removeHTMLDocument,
+    deleteDocument,
     isHTMLLoading,
   } = useDocuments();
 
@@ -436,9 +432,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const handleDelete = useCallback(async () => {
     if (!documentToDelete) return;
     try {
-      if (documentToDelete.type === 'pdf') await removePDFDocument(documentToDelete.id);
-      else if (documentToDelete.type === 'epub') await removeEPUBDocument(documentToDelete.id);
-      else if (documentToDelete.type === 'html') await removeHTMLDocument(documentToDelete.id);
+      await deleteDocument(documentToDelete.id);
       setFolders((prev) =>
         prev.map((f) => ({
           ...f,
@@ -451,7 +445,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     } catch (err) {
       console.error('Failed to remove document:', err);
     }
-  }, [documentToDelete, removePDFDocument, removeEPUBDocument, removeHTMLDocument]);
+  }, [deleteDocument, documentToDelete]);
 
   const handleDeleteDoc = useCallback((doc: DocumentListDocument) => {
     setDocumentToDelete({ id: doc.id, name: doc.name, type: doc.type });
@@ -577,10 +571,8 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     if (batches.length === 0) return null;
     const totalFiles = batches.reduce((sum, batch) => sum + batch.totalFiles, 0);
     const completedFiles = batches.reduce((sum, batch) => sum + batch.completedFiles, 0);
-    const convertingBatch = batches.find((batch) => batch.phase === 'converting');
-    const phase: 'uploading' | 'converting' = convertingBatch ? 'converting' : 'uploading';
-    const currentFileName = convertingBatch?.currentFileName ?? batches.find((batch) => batch.currentFileName)?.currentFileName ?? null;
-    return { totalFiles, completedFiles, phase, currentFileName };
+    const currentFileName = batches.find((batch) => batch.currentFileName)?.currentFileName ?? null;
+    return { totalFiles, completedFiles, phase: 'uploading' as const, currentFileName };
   }, [activeUploadBatches]);
 
   const fallbackViewMode: ViewMode = viewMode;

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import { PDF_PARSER_VERSION } from '@openreader/compute-core';
 import type { PdfLayoutJobResult, WorkerOperationState } from '@openreader/compute-core/api-contracts';
 import {
   documentParseStateFromWorkerState,
@@ -11,7 +12,7 @@ function makeWorkerState(
 ): WorkerOperationState<PdfLayoutJobResult> {
   return {
     opId: 'op-123',
-    opKey: 'pdf_layout|v1|doc-1',
+    opKey: `pdf_layout|v1|${PDF_PARSER_VERSION}|doc-1`,
     kind: 'pdf_layout',
     jobId: 'job-123',
     status: 'queued',
@@ -41,6 +42,7 @@ describe('worker parse state mapping', () => {
       status: 'pending',
       progress: null,
       updatedAt: 1234,
+      parserVersion: PDF_PARSER_VERSION,
       opId: 'op-123',
       jobId: 'job-123',
     });
@@ -66,6 +68,7 @@ describe('worker parse state mapping', () => {
         phase: 'infer',
       },
       updatedAt: 5678,
+      parserVersion: PDF_PARSER_VERSION,
       opId: 'op-123',
       jobId: 'job-123',
     });
@@ -84,6 +87,7 @@ describe('worker parse state mapping', () => {
       status: 'failed',
       progress: null,
       updatedAt: 9999,
+      parserVersion: PDF_PARSER_VERSION,
       opId: 'op-123',
       jobId: 'job-123',
       error: 'layout model crashed',

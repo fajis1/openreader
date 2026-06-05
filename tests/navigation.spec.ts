@@ -115,10 +115,12 @@ test.describe('EPUB resize pauses TTS', () => {
     await page.waitForTimeout(750);
 
     // After resize, playback should have paused (Play button visible)
-    await expect(page.getByRole('button', { name: 'Play' })).toBeVisible({ timeout: 15000 });
+    const playButton = page.getByRole('button', { name: 'Play' });
+    await expect(playButton).toBeVisible({ timeout: 15000 });
+    await expect(playButton).toBeEnabled({ timeout: 15000 });
 
     // Resume playback and ensure processing -> playing
-    await page.getByRole('button', { name: 'Play' }).click();
+    await playButton.click();
     await expectProcessingTransition(page);
   });
 });
