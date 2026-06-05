@@ -4,7 +4,7 @@ import { createHash } from 'crypto';
 const DIR = './tests/files/';
 
 // Small util to safely use filenames inside regex patterns
-function escapeRegExp(input: string) {
+export function escapeRegExp(input: string) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 

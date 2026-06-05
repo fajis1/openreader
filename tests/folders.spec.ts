@@ -7,6 +7,7 @@ import {
   dragAndDrop,
   expectDocumentListed,
   expectNoDocumentLink,
+  escapeRegExp,
 } from './helpers';
 
 test.describe('Document folders and hint persistence', () => {
@@ -16,7 +17,7 @@ test.describe('Document folders and hint persistence', () => {
 
   // Utility to get the draggable tile for a given filename (by link).
   const rowFor = (page: Page, fileName: string) => {
-    const link = page.getByRole('link', { name: new RegExp(fileName, 'i') }).first();
+    const link = page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).first();
     // The drag source is the tile container ancestor, marked with data-doc-tile.
     return link.locator('xpath=ancestor::*[@data-doc-tile][1]');
   };
