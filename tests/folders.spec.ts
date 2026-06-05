@@ -4,9 +4,10 @@ import {
   uploadFiles,
   ensureDocumentsListed,
   waitForDocumentListHintPersist,
-  dispatchHtml5DragAndDrop,
+  dragAndDrop,
   expectDocumentListed,
   expectNoDocumentLink,
+  escapeRegExp,
 } from './helpers';
 
 test.describe('Document folders and hint persistence', () => {
@@ -14,11 +15,11 @@ test.describe('Document folders and hint persistence', () => {
     await setupTest(page, testInfo);
   });
 
-  // Utility to get the draggable row for a given filename (by link)
+  // Utility to get the draggable tile for a given filename (by link).
   const rowFor = (page: Page, fileName: string) => {
-    const link = page.getByRole('link', { name: new RegExp(fileName, 'i') }).first();
-    // The draggable attribute lives on the row container ancestor
-    return link.locator('xpath=ancestor::*[@draggable="true"][1]');
+    const link = page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).first();
+    // The drag source is the tile container ancestor, marked with data-doc-tile.
+    return link.locator('xpath=ancestor::*[@data-doc-tile][1]');
   };
 
   const folderRow = (page: Page, folderName: string) =>
@@ -35,7 +36,7 @@ test.describe('Document folders and hint persistence', () => {
     // Drag PDF onto EPUB to create a folder
     const pdfRow = rowFor(page, 'sample.pdf');
     const epubRow = rowFor(page, 'sample.epub');
-    await dispatchHtml5DragAndDrop(page, pdfRow, epubRow);
+    await dragAndDrop(page, pdfRow, epubRow);
 
     // Folder name dialog appears
     await expect(page.getByRole('heading', { name: 'Create New Folder' })).toBeVisible();
@@ -55,7 +56,7 @@ test.describe('Document folders and hint persistence', () => {
     // Switch to all documents and drag TXT into sidebar folder row
     await allDocumentsRow(page).click();
     const txtRow = rowFor(page, 'sample.txt');
-    await dispatchHtml5DragAndDrop(page, txtRow, myFolderRow);
+    await dragAndDrop(page, txtRow, myFolderRow);
     await expectDocumentListed(page, 'sample.txt');
     await expectNoDocumentLink(page, 'sample.md');
 

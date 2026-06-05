@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
 import type {
   DocumentListDocument,
@@ -88,6 +88,7 @@ function DocRow({
   const isSelected = selection.isSelected(doc);
   const isInFolder = Boolean(doc.folderId);
   const href = `/${doc.type}/${encodeURIComponent(doc.id)}`;
+  const didDragRef = useRef(false);
 
   const [{ isDragging }, dragRef] = useDrag<DocumentDragItem, void, { isDragging: boolean }>(() => ({
     type: DND_DOCUMENT,
@@ -100,6 +101,13 @@ function DocRow({
         docs: dragging,
         fromFolderId: doc.folderId,
       };
+    },
+    // A mouse drag ending on the same row is followed by a click that would open
+    // the doc. Flag the drag so handleClick can swallow that click; clear on the
+    // next macrotask in case the drag ended elsewhere (no click fires).
+    end: () => {
+      didDragRef.current = true;
+      setTimeout(() => { didDragRef.current = false; }, 0);
     },
     collect: (m) => ({ isDragging: m.isDragging() }),
   }), [doc, isSelected, selection]);
@@ -119,6 +127,11 @@ function DocRow({
   const isTarget = isOver && canDrop;
 
   const handleClick: React.MouseEventHandler = (e) => {
+    if (didDragRef.current) {
+      didDragRef.current = false;
+      e.preventDefault();
+      return;
+    }
     if (e.shiftKey || e.metaKey || e.ctrlKey) {
       e.preventDefault();
       selection.select(doc, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
@@ -132,6 +145,9 @@ function DocRow({
       aria-selected={isSelected}
       className={
         'grid grid-cols-[minmax(0,1fr)_44px_72px_104px_28px] sm:grid-cols-[minmax(0,1fr)_56px_96px_140px_32px] items-center text-[12px] border-b border-line-soft transition-colors duration-base ease-standard ' +
+        // iOS: suppress the long-press link preview/callout and selection magnifier so the
+        // long-press is handed to the touch DnD backend instead of the native preview.
+        'select-none [-webkit-touch-callout:none] ' +
         (isSelected
           ? 'bg-surface-sunken text-accent'
           : 'text-foreground hover:bg-accent-wash') +

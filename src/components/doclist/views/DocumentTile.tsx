@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRef } from 'react';
 import { useDrag, useDrop, type DragSourceMonitor } from 'react-dnd';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
 import type { DocumentListDocument, IconSize } from '@/types/documents';
@@ -73,6 +74,7 @@ export function DocumentTile({
   const showDeleteButton = true;
   const isSelected = selection.isSelected(doc);
   const isInFolder = Boolean(doc.folderId);
+  const didDragRef = useRef(false);
 
   const [{ isDragging }, dragRef, previewRef] = useDrag<
     DocumentDragItem,
@@ -94,6 +96,13 @@ export function DocumentTile({
           docs: dragging,
           fromFolderId: doc.folderId,
         };
+      },
+      // A mouse drag ending on the same tile is followed by a click that would
+      // open the doc. Flag the drag so handleClick can swallow that click; clear
+      // on the next macrotask in case the drag ended elsewhere (no click fires).
+      end: () => {
+        didDragRef.current = true;
+        setTimeout(() => { didDragRef.current = false; }, 0);
       },
       collect: (monitor: DragSourceMonitor) => ({ isDragging: monitor.isDragging() }),
     };
@@ -126,6 +135,11 @@ export function DocumentTile({
   };
 
   const handleClick: React.MouseEventHandler = (e) => {
+    if (didDragRef.current) {
+      didDragRef.current = false;
+      e.preventDefault();
+      return;
+    }
     if (e.shiftKey || e.metaKey || e.ctrlKey) {
       e.preventDefault();
       selection.select(doc, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
@@ -139,6 +153,9 @@ export function DocumentTile({
       aria-selected={isSelected}
       className={
         'group relative flex flex-col rounded-md overflow-hidden border transition duration-base ease-standard ' +
+        // iOS: suppress the long-press link preview/callout and selection magnifier so the
+        // long-press is handed to the touch DnD backend instead of the native preview.
+        'select-none [-webkit-touch-callout:none] ' +
         (isSelected
           ? 'border-accent-line bg-surface-sunken'
           : 'border-line bg-surface hover:bg-accent-wash hover:border-accent-line') +
