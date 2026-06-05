@@ -56,6 +56,7 @@ function GalleryThumb({
   const selection = useDocumentSelection();
   const isSelected = selection.isSelected(doc);
   const isInFolder = Boolean(doc.folderId);
+  const didDragRef = useRef(false);
 
   const [{ isDragging }, dragRef] = useDrag<DocumentDragItem, void, { isDragging: boolean }>(() => ({
     type: DND_DOCUMENT,
@@ -68,6 +69,13 @@ function GalleryThumb({
         docs: dragging,
         fromFolderId: doc.folderId,
       };
+    },
+    // A mouse drag ending on the same thumb is followed by a click. Flag the drag
+    // so the click handler can ignore it; clear on the next macrotask in case the
+    // drag ended elsewhere (no click fires).
+    end: () => {
+      didDragRef.current = true;
+      setTimeout(() => { didDragRef.current = false; }, 0);
     },
     collect: (m) => ({ isDragging: m.isDragging() }),
   }), [doc, isSelected, selection]);
@@ -88,10 +96,19 @@ function GalleryThumb({
     <div
       ref={setRefs}
       data-doc-tile
-      onClick={onClick}
+      onClick={() => {
+        if (didDragRef.current) {
+          didDragRef.current = false;
+          return;
+        }
+        onClick();
+      }}
       aria-current={active ? 'true' : undefined}
       className={
         'group relative w-[98px] sm:w-[110px] shrink-0 cursor-pointer rounded-lg overflow-hidden border bg-surface snap-start transition duration-base ease-standard ' +
+        // iOS: suppress the long-press link preview/callout and selection magnifier so the
+        // long-press is handed to the touch DnD backend instead of the native preview.
+        'select-none [-webkit-touch-callout:none] ' +
         (active
           ? 'border-accent-line shadow-elev-2 -translate-y-px'
           : 'border-line hover:border-accent-line hover:-translate-y-px hover:shadow-elev-2') +

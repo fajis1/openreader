@@ -265,37 +265,37 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
 }
 
 /**
- * More reliable than Playwright's `locator.dragTo` when a drop immediately opens a modal
- * (which can intercept pointer events mid-gesture and cause flakiness).
+ * Simulate a pointer drag-and-drop for the doc list's touch DnD backend.
  *
- * This uses DOM drag events directly; our app's doc list DnD logic only needs the events,
- * not a real OS-level drag interaction.
+ * The list uses react-dnd's TouchBackend (with `enableMouseEvents`), which
+ * listens to mouse/touch events rather than the HTML5 DragEvent API — so we
+ * drive it with a real pointer gesture: press the source, move past the drag
+ * threshold to the target in steps (so hover/drop hit-testing registers), and
+ * release.
  */
-export async function dispatchHtml5DragAndDrop(page: Page, source: Locator, target: Locator): Promise<void> {
-  const sourceHandle = await source.elementHandle();
-  const targetHandle = await target.elementHandle();
-  if (!sourceHandle) throw new Error('drag source element not found');
-  if (!targetHandle) throw new Error('drag target element not found');
+export async function dragAndDrop(page: Page, source: Locator, target: Locator): Promise<void> {
+  const src = await source.boundingBox();
+  const dst = await target.boundingBox();
+  if (!src) throw new Error('drag source element not found');
+  if (!dst) throw new Error('drag target element not found');
 
-  await page.evaluate(
-    async ([src, dst]) => {
-      const dt = typeof DataTransfer !== 'undefined' ? new DataTransfer() : ({} as DataTransfer);
-      const fire = (el: Element, type: string) => {
-        const event = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
-        el.dispatchEvent(event);
-      };
+  const sx = src.x + src.width / 2;
+  const sy = src.y + src.height / 2;
+  const tx = dst.x + dst.width / 2;
+  const ty = dst.y + dst.height / 2;
 
-      fire(src, 'dragstart');
-      // Let React flush state updates (draggedDoc) before dispatching drop events.
-      await Promise.resolve();
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      fire(dst, 'dragenter');
-      fire(dst, 'dragover');
-      fire(dst, 'drop');
-      fire(src, 'dragend');
-    },
-    [sourceHandle, targetHandle],
-  );
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  // The touch backend arms a mouse drag on a delayed-start timer; give it a beat
+  // to fire before moving, otherwise the first move cancels it un-armed.
+  await page.waitForTimeout(60);
+  // Move clear of the touchSlop threshold to begin the drag, then travel to the
+  // target in steps and settle on it so its hover (drop target) registers.
+  await page.mouse.move(sx + 16, sy + 16, { steps: 8 });
+  await page.mouse.move(tx, ty, { steps: 20 });
+  await page.mouse.move(tx, ty);
+  await page.waitForTimeout(60);
+  await page.mouse.up();
 }
 
 
