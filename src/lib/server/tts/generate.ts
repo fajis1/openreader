@@ -6,12 +6,16 @@ import {
   REPLICATE_KOKORO_82M_VERSIONED_MODEL,
 } from '@/lib/shared/tts-provider-catalog';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
-import { resolveReplicateVoiceInputKey } from '@/lib/server/tts/voice-resolution';
+import {
+  resolveReplicateLanguageInput,
+  resolveReplicateVoiceInputKey,
+} from '@/lib/server/tts/voice-resolution';
 import { getUpstreamRetryAfterSeconds, getUpstreamStatus } from '@/lib/server/tts/upstream-response';
 import { LRUCache } from 'lru-cache';
 import { createHash } from 'crypto';
 import { access, readFile } from 'fs/promises';
 import { resolve } from 'path';
+import { getLanguageDisplayName, toBaseLanguageCode } from '@/lib/shared/language';
 
 export interface ServerTTSRequest {
   text: string;
@@ -20,6 +24,7 @@ export interface ServerTTSRequest {
   format?: string;
   model?: string | null;
   instructions?: string;
+  language?: string;
   provider: string;
   apiKey: string;
   baseUrl?: string;
@@ -30,6 +35,7 @@ type CustomVoice = string;
 type ExtendedSpeechParams = Omit<SpeechCreateParams, 'voice'> & {
   voice: SpeechCreateParams['voice'] | CustomVoice;
   instructions?: string;
+  language?: string;
 };
 
 type ResolvedServerTTSRequest = {
@@ -39,6 +45,7 @@ type ResolvedServerTTSRequest = {
   format: string;
   model: SpeechCreateParams['model'];
   instructions?: string;
+  language?: string;
   provider: string;
   apiKey: string;
   baseUrl?: string;
@@ -55,6 +62,7 @@ const REPLICATE_COOLDOWN_SCOPE_CACHE_MAX_ENTRIES = 512;
 const replicateBlockedUntilByScope = new LRUCache<string, number>({
   max: REPLICATE_COOLDOWN_SCOPE_CACHE_MAX_ENTRIES,
 });
+const openAiCompatibleLanguageUnsupported = new LRUCache<string, true>({ max: 256 });
 
 const DEFAULT_TTS_CACHE_MAX_SIZE_BYTES = 256 * 1024 * 1024;
 const DEFAULT_TTS_CACHE_TTL_MS = 1000 * 60 * 30;
@@ -323,6 +331,7 @@ function resolveTTSRequest(input: ServerTTSRequest): ResolvedServerTTSRequest {
     format,
     model,
     instructions,
+    language: input.language,
     provider,
     apiKey: input.apiKey,
     baseUrl: input.baseUrl,
@@ -338,6 +347,7 @@ function makeCacheKey(input: {
   format: string;
   text: string;
   instructions?: string;
+  language?: string;
   testNamespace?: string | null;
 }) {
   const canonical = {
@@ -348,6 +358,7 @@ function makeCacheKey(input: {
     format: input.format,
     text: input.text,
     instructions: input.instructions || undefined,
+    language: input.language || undefined,
     testNamespace: input.testNamespace || undefined,
   };
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
@@ -363,6 +374,7 @@ export function buildTTSCacheKey(request: ServerTTSRequest): string {
     format: resolved.format,
     text: resolved.text,
     instructions: resolved.instructions,
+    language: resolved.language,
     testNamespace: resolved.testNamespace,
   });
 }
@@ -433,7 +445,7 @@ async function buildReplicateInput(request: ResolvedServerTTSRequest): Promise<R
     if (request.instructions) {
       input.prompt = request.instructions;
     }
-    return input;
+    return addReplicateLanguageInput(input, request);
   }
 
   if (model === 'minimax/speech-2.8-turbo') {
@@ -445,7 +457,7 @@ async function buildReplicateInput(request: ResolvedServerTTSRequest): Promise<R
     if (request.speed !== 1) {
       input.speed = Math.max(0.5, Math.min(2.0, request.speed));
     }
-    return input;
+    return addReplicateLanguageInput(input, request);
   }
 
   if (model === 'qwen/qwen3-tts') {
@@ -457,7 +469,7 @@ async function buildReplicateInput(request: ResolvedServerTTSRequest): Promise<R
     if (request.instructions) {
       input.style_instruction = request.instructions;
     }
-    return input;
+    return addReplicateLanguageInput(input, request);
   }
 
   if (model === 'inworld/tts-1.5-mini') {
@@ -469,7 +481,7 @@ async function buildReplicateInput(request: ResolvedServerTTSRequest): Promise<R
     if (request.speed !== 1) {
       input.speaking_rate = request.speed;
     }
-    return input;
+    return addReplicateLanguageInput(input, request);
   }
 
   const input: Record<string, unknown> = { text: request.text };
@@ -498,7 +510,44 @@ async function buildReplicateInput(request: ResolvedServerTTSRequest): Promise<R
     input.instructions = request.instructions;
   }
 
+  return addReplicateLanguageInput(input, request);
+}
+
+async function addReplicateLanguageInput(
+  input: Record<string, unknown>,
+  request: ResolvedServerTTSRequest,
+): Promise<Record<string, unknown>> {
+  if (!request.language) return input;
+  const languageInput = await resolveReplicateLanguageInput({
+    provider: 'replicate',
+    model: request.model as string,
+    apiKey: request.apiKey,
+  });
+  if (languageInput) {
+    const resolvedValue = resolveReplicateLanguageValue(request.language, languageInput.allowedValues);
+    if (resolvedValue) {
+      input[languageInput.key] = resolvedValue;
+    }
+  }
   return input;
+}
+
+export function resolveReplicateLanguageValue(language: string, allowedValues: string[]): string | null {
+  if (allowedValues.length === 0) return language;
+
+  const baseLanguage = toBaseLanguageCode(language);
+  const candidates = [
+    language,
+    baseLanguage,
+    getLanguageDisplayName(language),
+    getLanguageDisplayName(baseLanguage),
+  ];
+  const allowedByLowercase = new Map(
+    allowedValues.map((value) => [value.toLocaleLowerCase(), value]),
+  );
+  return candidates
+    .map((candidate) => allowedByLowercase.get(candidate.toLocaleLowerCase()))
+    .find((candidate): candidate is string => Boolean(candidate)) ?? null;
 }
 
 async function runReplicateRequest(
@@ -594,6 +643,31 @@ async function runProviderRequest(
     createParams.instructions = request.instructions;
   }
 
+  if (request.provider !== 'openai' && request.language) {
+    const supportKey = `${request.baseUrl || ''}|${request.model as string}`;
+    if (!openAiCompatibleLanguageUnsupported.has(supportKey)) {
+      try {
+        return await fetchTTSBufferWithRetry(
+          openai,
+          { ...createParams, language: request.language },
+          signal,
+          upstreamSettings.ttsUpstreamMaxRetries,
+        );
+      } catch (error) {
+        const status = getUpstreamStatus(error);
+        if (status !== 400 && status !== 422) throw error;
+        const fallback = await fetchTTSBufferWithRetry(
+          openai,
+          createParams,
+          signal,
+          upstreamSettings.ttsUpstreamMaxRetries,
+        );
+        openAiCompatibleLanguageUnsupported.set(supportKey, true);
+        return fallback;
+      }
+    }
+  }
+
   return fetchTTSBufferWithRetry(openai, createParams, signal, upstreamSettings.ttsUpstreamMaxRetries);
 }
 
@@ -614,6 +688,7 @@ export async function generateTTSBuffer(
     format: resolved.format,
     text: resolved.text,
     instructions: resolved.instructions,
+    language: resolved.language,
     testNamespace: resolved.testNamespace,
   });
 

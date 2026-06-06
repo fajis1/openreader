@@ -642,6 +642,7 @@ export async function POST(request: NextRequest) {
           format: 'mp3',
           model: effectiveSettings.ttsModel,
           instructions: effectiveSettings.ttsInstructions,
+          language: effectiveSettings.language,
           provider: requestCreds.provider,
           apiKey: requestCreds.apiKey || 'none',
           baseUrl: requestCreds.baseUrl,

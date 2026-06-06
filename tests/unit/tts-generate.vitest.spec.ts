@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'vitest';
 
-import { extractReplicateAudioUrl } from '../../src/lib/server/tts/generate';
+import {
+  buildTTSCacheKey,
+  extractReplicateAudioUrl,
+  resolveReplicateLanguageValue,
+} from '../../src/lib/server/tts/generate';
 
 describe('replicate output URL extraction', () => {
   test('returns direct URL string output', () => {
@@ -39,5 +43,31 @@ describe('replicate output URL extraction', () => {
   test('returns null for non-url outputs', () => {
     const output = { status: 'ok', value: 123 };
     expect(extractReplicateAudioUrl(output)).toBeNull();
+  });
+});
+
+describe('TTS upstream cache identity', () => {
+  test('includes language in the upstream audio cache key', () => {
+    const request = {
+      text: '同じ文章です。',
+      voice: 'jf_alpha',
+      speed: 1,
+      format: 'mp3',
+      model: 'kokoro',
+      provider: 'custom-openai',
+      apiKey: 'test',
+    };
+
+    expect(buildTTSCacheKey({ ...request, language: 'ja' }))
+      .not.toBe(buildTTSCacheKey({ ...request, language: 'en' }));
+  });
+});
+
+describe('Replicate language schema values', () => {
+  test('uses language codes or advertised display names without a model table', () => {
+    expect(resolveReplicateLanguageValue('ja-JP', [])).toBe('ja-JP');
+    expect(resolveReplicateLanguageValue('ja-JP', ['en', 'ja', 'zh'])).toBe('ja');
+    expect(resolveReplicateLanguageValue('ja-JP', ['English', 'Japanese'])).toBe('Japanese');
+    expect(resolveReplicateLanguageValue('ja-JP', ['English', 'French'])).toBeNull();
   });
 });

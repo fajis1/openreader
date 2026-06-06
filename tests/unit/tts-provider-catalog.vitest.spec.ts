@@ -9,7 +9,11 @@ import {
   supportsTtsInstructions,
 } from '../../src/lib/shared/tts-provider-catalog';
 import { normalizeLegacyProviderRef, resolveProviderDefaults, resolveTtsModelForProvider } from '../../src/lib/shared/tts-provider-policy';
-import { resolveReplicateVoiceInputKey, resolveVoices } from '../../src/lib/server/tts/voice-resolution';
+import {
+  resolveReplicateLanguageInputKey,
+  resolveReplicateVoiceInputKey,
+  resolveVoices,
+} from '../../src/lib/server/tts/voice-resolution';
 import { applyConfigUpdate, getVoicePreferenceKey } from '../../src/lib/client/config/updates';
 import { buildSyncedPreferencePatch } from '../../src/lib/client/config/preferences';
 
@@ -382,6 +386,50 @@ describe('tts provider catalog', () => {
         apiKey: 'r8_token',
       })).resolves.toBe('voice');
 
+      expect(calls).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('discovers Replicate language input key from model schema', async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          latest_version: {
+            openapi_schema: {
+              components: {
+                schemas: {
+                  Input: {
+                    type: 'object',
+                    properties: {
+                      text: { type: 'string' },
+                      language_code: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      } as Response;
+    };
+
+    try {
+      await expect(resolveReplicateLanguageInputKey({
+        provider: 'replicate',
+        model: 'acme/schema-language-model',
+        apiKey: 'r8_token',
+      })).resolves.toBe('language_code');
+      await expect(resolveReplicateLanguageInputKey({
+        provider: 'replicate',
+        model: 'acme/schema-language-model',
+        apiKey: 'r8_token',
+      })).resolves.toBe('language_code');
       expect(calls).toBe(1);
     } finally {
       globalThis.fetch = originalFetch;

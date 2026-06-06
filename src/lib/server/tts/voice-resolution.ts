@@ -102,6 +102,19 @@ function walkRecordGraph(root: unknown, visit: (node: Record<string, unknown>) =
 }
 
 const REPLICATE_VOICE_KEYS = ['voice', 'voice_id', 'speaker'] as const satisfies readonly ReplicateVoiceInputKey[];
+const REPLICATE_LANGUAGE_KEYS = [
+  'language',
+  'lang',
+  'language_code',
+  'locale',
+  'language_id',
+  'language_boost',
+] as const;
+export type ReplicateLanguageInputKey = typeof REPLICATE_LANGUAGE_KEYS[number];
+export type ReplicateLanguageInput = {
+  key: ReplicateLanguageInputKey;
+  allowedValues: string[];
+};
 const REPLICATE_BUILT_IN_MODELS = new Set(
   resolveProviderModels('replicate')
     .map((model) => model.id)
@@ -142,6 +155,26 @@ function extractReplicateVoiceInputKeyFromOpenApiSchema(openApiSchema: unknown):
     for (const key of REPLICATE_VOICE_KEYS) {
       if (key in properties) {
         found = key;
+        return true;
+      }
+    }
+  });
+
+  return found;
+}
+
+function extractReplicateLanguageInputFromOpenApiSchema(openApiSchema: unknown): ReplicateLanguageInput | null {
+  let found: ReplicateLanguageInput | null = null;
+
+  walkRecordGraph(openApiSchema, (node) => {
+    const properties = node.properties;
+    if (!isRecord(properties)) return;
+    for (const key of REPLICATE_LANGUAGE_KEYS) {
+      if (key in properties) {
+        found = {
+          key,
+          allowedValues: extractSchemaStringEnums(properties[key]),
+        };
         return true;
       }
     }
@@ -207,10 +240,14 @@ async function fetchReplicateOpenApiSchema(apiKey: string, model: string): Promi
 }
 
 const REPLICATE_VOICE_INPUT_KEY_CACHE_MAX_ENTRIES = 128;
+const REPLICATE_LANGUAGE_INPUT_KEY_CACHE_MAX_ENTRIES = 128;
 const REPLICATE_OPENAPI_SCHEMA_PROMISE_CACHE_MAX_ENTRIES = 128;
 
 const replicateVoiceInputKeyCache = new LRUCache<string, ReplicateVoiceInputKey>({
   max: REPLICATE_VOICE_INPUT_KEY_CACHE_MAX_ENTRIES,
+});
+const replicateLanguageInputCache = new LRUCache<string, ReplicateLanguageInput>({
+  max: REPLICATE_LANGUAGE_INPUT_KEY_CACHE_MAX_ENTRIES,
 });
 const replicateOpenApiSchemaPromiseCache = new LRUCache<string, Promise<unknown | null>>({
   max: REPLICATE_OPENAPI_SCHEMA_PROMISE_CACHE_MAX_ENTRIES,
@@ -258,6 +295,33 @@ export async function resolveReplicateVoiceInputKey({
     replicateVoiceInputKeyCache.set(model, inputKey);
   }
   return inputKey;
+}
+
+export async function resolveReplicateLanguageInputKey({
+  provider,
+  model,
+  apiKey = '',
+}: ResolveVoicesOptions): Promise<ReplicateLanguageInputKey | null> {
+  const input = await resolveReplicateLanguageInput({ provider, model, apiKey });
+  return input?.key ?? null;
+}
+
+export async function resolveReplicateLanguageInput({
+  provider,
+  model,
+  apiKey = '',
+}: ResolveVoicesOptions): Promise<ReplicateLanguageInput | null> {
+  if (provider !== 'replicate' || !apiKey) return null;
+
+  const cached = replicateLanguageInputCache.get(model);
+  if (cached) return cached;
+
+  const openApiSchema = await getReplicateOpenApiSchemaCached(apiKey, model);
+  const input = extractReplicateLanguageInputFromOpenApiSchema(openApiSchema);
+  if (input) {
+    replicateLanguageInputCache.set(model, input);
+  }
+  return input;
 }
 
 async function fetchDeepinfraVoices(apiKey: string): Promise<string[]> {

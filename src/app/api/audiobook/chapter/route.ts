@@ -597,6 +597,7 @@ export async function POST(request: NextRequest) {
         format: 'mp3',
         model,
         instructions,
+        language: mergedSettings?.language,
         provider,
         apiKey: openApiKey,
         baseUrl: openApiBaseUrl,
