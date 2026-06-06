@@ -5,11 +5,11 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, initDB, migrateLegacyDexieDocumentIdsToSha, updateAppConfig } from '@/lib/client/dexie';
 import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigValues, type AppConfigRow } from '@/types/config';
 import { isBuiltInTtsProviderId } from '@/lib/shared/tts-provider-catalog';
-import { resolveEffectiveProviderType, resolveProviderDefaults } from '@/lib/shared/tts-provider-policy';
+import { resolveProviderDefaults } from '@/lib/shared/tts-provider-policy';
 import { scheduleUserPreferencesSync, cancelPendingPreferenceSync, getUserPreferences, putUserPreferences } from '@/lib/client/api/user-state';
 import { SYNCED_PREFERENCE_KEYS, type SyncedPreferenceKey, type SyncedPreferencesPatch } from '@/types/user-state';
 import { useAuthSession } from '@/hooks/useAuthSession';
-import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
+import { useFeatureFlag, useRuntimeConfig } from '@/contexts/RuntimeConfigContext';
 import { buildSyncedPreferencePatch } from '@/lib/client/config/preferences';
 import { applyConfigUpdate } from '@/lib/client/config/updates';
 import { useSharedProviders } from '@/hooks/useSharedProviders';
@@ -69,16 +69,12 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const didRunStartupMigrations = useRef(false);
   const didAttemptInitialPreferenceSeedForSession = useRef<string | null>(null);
   const syncedPreferenceKeys = useMemo(() => new Set<string>(SYNCED_PREFERENCE_KEYS), []);
-  const { providers: sharedProviders } = useSharedProviders();
+  const { providers: sharedProviders, isLoading: sharedProvidersLoading } = useSharedProviders();
   const { data: sessionData, isPending: isSessionPending } = useAuthSession();
   const sessionKey = sessionData?.user?.id ?? 'no-session';
-  const providerResetDefaults = useMemo(() => {
-    return resolveProviderDefaults({
-      providerRef: APP_CONFIG_DEFAULTS.providerRef,
-      providerType: APP_CONFIG_DEFAULTS.providerType,
-      sharedProviders,
-    });
-  }, [sharedProviders]);
+  // The instance/admin default provider. An empty user providerRef "inherits"
+  // this, resolved (admin slug -> concrete provider) where the value is used.
+  const adminDefaultProviderRef = useRuntimeConfig().defaultTtsProvider;
 
   const queueSyncedPreferencePatch = useCallback((patch: Partial<AppConfigValues>) => {
     if (sessionKey === 'no-session') return;
@@ -213,81 +209,66 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   }, [appConfig]);
 
   useEffect(() => {
-    if (!ttsProvidersTabDisabled || !isDBReady || !appConfig) return;
+    if (ttsProvidersTabDisabled && isDBReady && appConfig && !sharedProvidersLoading) {
+      const resetPatch: Partial<AppConfigRow> = {};
 
-    const resetPatch: Partial<AppConfigRow> = {};
+      // When the provider tab is hidden, clear any user-set provider config back to
+      // "inherit the admin default" (empty) rather than baking in a concrete value.
+      if (appConfig.apiKey !== '') resetPatch.apiKey = '';
+      if (appConfig.baseUrl !== '') resetPatch.baseUrl = '';
+      if (appConfig.providerRef !== '') resetPatch.providerRef = '';
+      if (appConfig.providerType !== 'unknown') resetPatch.providerType = 'unknown';
+      if (appConfig.ttsModel !== '') resetPatch.ttsModel = '';
+      if (appConfig.ttsInstructions !== '') resetPatch.ttsInstructions = '';
+      // Keep voice selection state intact so player/Audiobook voice pickers still
+      // work when the TTS providers tab is hidden. This reset is only for provider
+      // configuration fields.
 
-    if (appConfig.apiKey !== APP_CONFIG_DEFAULTS.apiKey) {
-      resetPatch.apiKey = APP_CONFIG_DEFAULTS.apiKey;
-    }
-    if (appConfig.baseUrl !== APP_CONFIG_DEFAULTS.baseUrl) {
-      resetPatch.baseUrl = APP_CONFIG_DEFAULTS.baseUrl;
-    }
-    if (appConfig.providerRef !== providerResetDefaults.providerRef) {
-      resetPatch.providerRef = providerResetDefaults.providerRef;
-    }
-    if (appConfig.providerType !== providerResetDefaults.providerType) {
-      resetPatch.providerType = providerResetDefaults.providerType;
-    }
-    if (appConfig.ttsModel !== providerResetDefaults.defaultModel) {
-      resetPatch.ttsModel = providerResetDefaults.defaultModel;
-    }
-    if (appConfig.ttsInstructions !== providerResetDefaults.defaultInstructions) {
-      resetPatch.ttsInstructions = providerResetDefaults.defaultInstructions;
-    }
-    // Keep voice selection state intact so player/Audiobook voice pickers still
-    // work when the TTS providers tab is hidden. This reset is only for provider
-    // configuration fields.
+      if (Object.keys(resetPatch).length === 0) return;
 
-    if (Object.keys(resetPatch).length === 0) return;
-
-    updateAppConfig(resetPatch).catch((error) => {
-      console.warn('Failed to clear hidden TTS provider settings:', error);
-    });
-    queueSyncedPreferencePatch(resetPatch);
-  }, [ttsProvidersTabDisabled, isDBReady, appConfig, queueSyncedPreferencePatch, providerResetDefaults]);
+      updateAppConfig(resetPatch).catch((error) => {
+        console.warn('Failed to clear hidden TTS provider settings:', error);
+      });
+      queueSyncedPreferencePatch(resetPatch);
+    }
+  }, [ttsProvidersTabDisabled, isDBReady, appConfig, queueSyncedPreferencePatch, sharedProvidersLoading]);
 
   useEffect(() => {
-    if (!restrictUserApiKeys || !isDBReady || !appConfig) return;
+    if (restrictUserApiKeys && isDBReady && appConfig && !sharedProvidersLoading) {
+      const resetPatch: Partial<AppConfigRow> = {};
 
-    const resetPatch: Partial<AppConfigRow> = {};
+      if (appConfig.apiKey !== '') resetPatch.apiKey = '';
+      if (appConfig.baseUrl !== '') resetPatch.baseUrl = '';
+      // Built-in providers aren't selectable in restricted mode. Clear any stale
+      // built-in selection (including the old 'custom-openai' default that used to
+      // be baked into every config) back to "inherit the admin default" so the
+      // user follows whatever shared provider the admin has configured.
+      if (isBuiltInTtsProviderId(appConfig.providerRef)) {
+        resetPatch.providerRef = '';
+        resetPatch.providerType = 'unknown';
+        resetPatch.ttsModel = '';
+        resetPatch.ttsInstructions = '';
+      }
 
-    if (appConfig.apiKey !== APP_CONFIG_DEFAULTS.apiKey) {
-      resetPatch.apiKey = APP_CONFIG_DEFAULTS.apiKey;
+      if (Object.keys(resetPatch).length === 0) return;
+
+      updateAppConfig(resetPatch).catch((error) => {
+        console.warn('Failed to enforce restricted user API key mode:', error);
+      });
+      queueSyncedPreferencePatch(resetPatch);
     }
-    if (appConfig.baseUrl !== APP_CONFIG_DEFAULTS.baseUrl) {
-      resetPatch.baseUrl = APP_CONFIG_DEFAULTS.baseUrl;
-    }
-    if (isBuiltInTtsProviderId(appConfig.providerRef)) {
-      if (appConfig.providerRef !== providerResetDefaults.providerRef) {
-        resetPatch.providerRef = providerResetDefaults.providerRef;
-      }
-      if (appConfig.providerType !== providerResetDefaults.providerType) {
-        resetPatch.providerType = providerResetDefaults.providerType;
-      }
-      if (appConfig.ttsModel !== providerResetDefaults.defaultModel) {
-        resetPatch.ttsModel = providerResetDefaults.defaultModel;
-      }
-      if (appConfig.ttsInstructions !== providerResetDefaults.defaultInstructions) {
-        resetPatch.ttsInstructions = providerResetDefaults.defaultInstructions;
-      }
-    }
-
-    if (Object.keys(resetPatch).length === 0) return;
-
-    updateAppConfig(resetPatch).catch((error) => {
-      console.warn('Failed to enforce restricted user API key mode:', error);
-    });
-    queueSyncedPreferencePatch(resetPatch);
-  }, [restrictUserApiKeys, isDBReady, appConfig, queueSyncedPreferencePatch, providerResetDefaults]);
+  }, [restrictUserApiKeys, isDBReady, appConfig, queueSyncedPreferencePatch, sharedProvidersLoading]);
 
   useEffect(() => {
-    if (showAllProviderModels || !isDBReady || !appConfig) return;
+    if (showAllProviderModels || !isDBReady || !appConfig || sharedProvidersLoading) return;
+    // Inheriting (empty providerRef): the effective model is resolved at read
+    // time, so there is nothing to persist/enforce here.
+    if (!appConfig.providerRef) return;
     const providerDefaults = resolveProviderDefaults({
       providerRef: appConfig.providerRef,
       providerType: appConfig.providerType,
       sharedProviders,
-      fallbackProviderRef: providerResetDefaults.providerRef,
+      fallbackProviderRef: adminDefaultProviderRef,
     });
     if (!providerDefaults.defaultModel) return;
     if (appConfig.ttsModel === providerDefaults.defaultModel) return;
@@ -296,7 +277,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       console.warn('Failed to enforce provider default model restriction:', error);
     });
     queueSyncedPreferencePatch(patch);
-  }, [showAllProviderModels, isDBReady, appConfig, sharedProviders, providerResetDefaults.providerRef, queueSyncedPreferencePatch]);
+  }, [showAllProviderModels, isDBReady, appConfig, sharedProviders, adminDefaultProviderRef, queueSyncedPreferencePatch, sharedProvidersLoading]);
 
   useEffect(() => {
     if (!isDBReady || !appConfig || isSessionPending) return;
@@ -359,33 +340,48 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     htmlHighlightEnabled,
     htmlWordHighlightEnabled,
   } = config || APP_CONFIG_DEFAULTS;
-  const providerType = useMemo(
-    () => resolveEffectiveProviderType({
+  // Resolve the effective provider for consumers. An empty stored providerRef
+  // means "inherit the admin default", which we resolve here so the reader,
+  // voice pickers, and settings UI all see a concrete, usable provider without
+  // mutating the stored ("inherit") value.
+  const effectiveProvider = useMemo(
+    () => resolveProviderDefaults({
       providerRef,
       providerType: _persistedProviderType,
       sharedProviders,
+      fallbackProviderRef: adminDefaultProviderRef,
     }),
-    [providerRef, _persistedProviderType, sharedProviders],
+    [providerRef, _persistedProviderType, sharedProviders, adminDefaultProviderRef],
   );
+  const effectiveProviderRef = effectiveProvider.providerRef;
+  const providerType = effectiveProvider.providerType;
+  const effectiveTtsModel = ttsModel || effectiveProvider.defaultModel;
+  const effectiveTtsInstructions = ttsInstructions || effectiveProvider.defaultInstructions;
 
   useEffect(() => {
-    if (!isDBReady || !appConfig) return;
+    if (!isDBReady || !appConfig || sharedProvidersLoading) return;
+    // Only persist a resolved providerType for an explicitly chosen provider.
+    // While inheriting (empty providerRef) the type stays unset in storage.
+    if (!appConfig.providerRef) return;
     if (appConfig.providerType === providerType) return;
     const patch: Partial<AppConfigRow> = { providerType };
     updateAppConfig(patch).catch((error) => {
       console.warn('Failed to persist resolved providerType:', error);
     });
     queueSyncedPreferencePatch(patch);
-  }, [isDBReady, appConfig, providerType, queueSyncedPreferencePatch]);
+  }, [isDBReady, appConfig, providerType, queueSyncedPreferencePatch, sharedProvidersLoading]);
   void _persistedProviderType;
 
   useEffect(() => {
-    if (!isDBReady || !appConfig) return;
+    if (!isDBReady || !appConfig || sharedProvidersLoading) return;
+    // Inheriting (empty providerRef): the effective model is resolved at read
+    // time; don't write a concrete model into the "inherit" state.
+    if (!appConfig.providerRef) return;
     const providerDefaults = resolveProviderDefaults({
       providerRef: appConfig.providerRef,
       providerType: appConfig.providerType,
       sharedProviders,
-      fallbackProviderRef: providerResetDefaults.providerRef,
+      fallbackProviderRef: adminDefaultProviderRef,
     });
     if (!providerDefaults.defaultModel) return;
     if (appConfig.ttsModel === providerDefaults.defaultModel) return;
@@ -398,7 +394,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       console.warn('Failed to normalize shared-provider default model:', error);
     });
     queueSyncedPreferencePatch(patch);
-  }, [isDBReady, appConfig, sharedProviders, queueSyncedPreferencePatch, providerResetDefaults.providerRef]);
+  }, [isDBReady, appConfig, sharedProviders, queueSyncedPreferencePatch, adminDefaultProviderRef, sharedProvidersLoading]);
 
   /**
    * Updates multiple configuration values simultaneously
@@ -436,9 +432,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       const { storagePatch, syncPatch } = applyConfigUpdate({
-        providerRef,
+        providerRef: effectiveProviderRef,
         providerType,
-        ttsModel,
+        ttsModel: effectiveTtsModel,
         savedVoices,
       }, key, value);
 
@@ -478,10 +474,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       footerMargin,
       leftMargin,
       rightMargin,
-      providerRef,
+      providerRef: effectiveProviderRef,
       providerType,
-      ttsModel,
-      ttsInstructions,
+      ttsModel: effectiveTtsModel,
+      ttsInstructions: effectiveTtsInstructions,
       savedVoices,
       updateConfig,
       updateConfigKey,

@@ -1,21 +1,5 @@
 import type { DocumentListState } from '@/types/documents';
-import { isBuiltInTtsProviderId, type TtsProviderType } from '@/lib/shared/tts-provider-catalog';
-import { defaultModelForProviderType } from '@/lib/shared/tts-provider-policy';
-
-// Runtime config (admin-controlled) is layered on top of the static defaults
-// below. We resolve it lazily so this module stays importable from non-React
-// contexts (Dexie, server routes). The actual values come from
-// `window.__RUNTIME_CONFIG__` (SSR-injected) on the client, and
-// from the built-in defaults during SSR.
-
-function readRuntimeString(key: string, defaultValue: string): string {
-  if (typeof window === 'undefined') return defaultValue;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const injected = (window as any).__RUNTIME_CONFIG__;
-  if (!injected || typeof injected !== 'object') return defaultValue;
-  const value = injected[key];
-  return typeof value === 'string' && value ? value : defaultValue;
-}
+import type { TtsProviderType } from '@/lib/shared/tts-provider-catalog';
 
 export type ViewType = 'single' | 'dual' | 'scroll';
 
@@ -78,20 +62,18 @@ export interface AppConfigValues {
 }
 
 /**
- * Build defaults lazily so we can read SSR-injected admin overrides
- * (`window.__RUNTIME_CONFIG__`). Modules that need the defaults
- * statically should call `getAppConfigDefaults()` at use time. The exported
- * `APP_CONFIG_DEFAULTS` is a Proxy that re-resolves on each access so
- * mutations to the runtime config (admin edits) are picked up by anything
- * that reads through it.
+ * Build the static app-config defaults. These no longer read any SSR/admin
+ * runtime config: the user's TTS provider defaults to empty ("inherit the
+ * admin default"), which is resolved to a concrete provider where it is used
+ * (ConfigContext on the client, credential resolution on the server).
  */
 export function getAppConfigDefaults(): AppConfigValues {
-  const runtimeProviderRef = readRuntimeString('defaultTtsProvider', 'custom-openai');
-  const defaultProviderRef = runtimeProviderRef.trim();
-  const defaultProviderType = isBuiltInTtsProviderId(defaultProviderRef) ? defaultProviderRef : 'unknown';
-  const defaultModel = isBuiltInTtsProviderId(defaultProviderType)
-    ? defaultModelForProviderType(defaultProviderType)
-    : 'kokoro';
+  // The user's TTS provider is intentionally left empty by default. An empty
+  // providerRef means "inherit the instance/admin default" and is resolved to a
+  // concrete provider at read time (see ConfigContext) and at generation time
+  // (server-side credential resolution). We no longer bake a placeholder
+  // provider id (the old 'custom-openai') into every user's config, since that
+  // value isn't actually selectable in shared-provider mode.
   return {
     apiKey: '',
     baseUrl: '',
@@ -105,9 +87,9 @@ export function getAppConfigDefaults(): AppConfigValues {
     footerMargin: 0,
     leftMargin: 0,
     rightMargin: 0,
-    providerRef: defaultProviderRef,
-    providerType: defaultProviderType,
-    ttsModel: defaultModel,
+    providerRef: '',
+    providerType: 'unknown',
+    ttsModel: '',
     ttsInstructions: '',
     savedVoices: {},
     segmentPreloadDepthPages: 1,
@@ -134,17 +116,13 @@ export function getAppConfigDefaults(): AppConfigValues {
 }
 
 /**
- * Static defaults snapshot resolved at first access. For callers that need
- * fresh values after admin edits, prefer `getAppConfigDefaults()` directly.
- * Most consumers just need a stable defaults object for spreads, so this is
- * resolved once per process — admin overrides take effect on next page load
- * (which is the SSR-injected behavior we want anyway).
+ * Static defaults snapshot, resolved once at first access. The values are
+ * constant (no SSR/admin overrides are read here anymore), so the lazy Proxy
+ * just avoids building the object until something first reads it.
  */
 let cachedDefaults: AppConfigValues | null = null;
 export const APP_CONFIG_DEFAULTS: AppConfigValues = (() => {
-  // Return a getter-backed object that resolves on first access. On the
-  // server, this resolves to built-in defaults; on the client, to the
-  // SSR-injected admin values.
+  // Getter-backed object that builds the defaults lazily on first access.
   const handler: ProxyHandler<AppConfigValues> = {
     get(_target, prop) {
       if (!cachedDefaults) cachedDefaults = getAppConfigDefaults();

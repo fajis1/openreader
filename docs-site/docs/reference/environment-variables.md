@@ -85,7 +85,7 @@ App server log level.
 Optional first-boot bootstrap base URL for the auto-created `default-openai` shared provider.
 
 - Example: `http://host.docker.internal:8880/v1`
-- Read only for provider bootstrap when shared providers are empty and `API_KEY` is set.
+- Read only for provider bootstrap when shared providers are empty. Setting `API_BASE` is sufficient; `API_KEY` may be blank.
 - After bootstrap, provider configuration is DB-backed and managed in **Settings → Admin → Shared providers**.
 
 ### API_KEY
@@ -95,27 +95,6 @@ Optional first-boot bootstrap API key for the auto-created `default-openai` shar
 - Read only for provider bootstrap when shared providers are empty.
 - Stored encrypted at rest after bootstrap.
 - After bootstrap, provider configuration is DB-backed and managed in **Settings → Admin → Shared providers**.
-
-### TTS Daily Rate Limiting (Runtime Settings)
-
-Managed as runtime config in **Settings → Admin → Site features**.
-
-- `disableTtsRateLimit` default: `true` (daily TTS limits disabled)
-- `ttsDailyLimitAnonymous` default: `50000`
-- `ttsDailyLimitAuthenticated` default: `500000`
-- `ttsIpDailyLimitAnonymous` default: `100000`
-- `ttsIpDailyLimitAuthenticated` default: `1000000`
-
-### TTS Upstream Settings (Runtime Settings)
-
-Managed as runtime config in **Settings → Admin → Site features → TTS upstream**.
-
-- `ttsUpstreamMaxRetries` default: `2`
-- `ttsUpstreamTimeoutMs` default: `285000`
-- `ttsCacheMaxSizeBytes` default: `268435456` (256 MB)
-- `ttsCacheTtlMs` default: `1800000` (30 minutes)
-
-There are no dedicated env vars for these runtime settings.
 
 ## Auth and Identity
 
@@ -339,19 +318,6 @@ External compute worker URL.
 
 Shared token for app-to-external-worker requests.
 
-## Compute PDF Parsing Rate Limiting (Runtime Settings)
-
-Managed as runtime config in **Settings → Admin → Site features**.
-
-- `disableComputeRateLimit` default: `true`
-- `computeParseBurstMax` default: `8`
-- `computeParseBurstWindowSec` default: `60`
-- `computeParseSustainedMax` default: `24`
-- `computeParseSustainedWindowSec` default: `600`
-- `maxUploadMb` default: `200`
-
-There are no dedicated env vars for these runtime settings.
-
 ## Audio Runtime
 
 ### FFMPEG_BIN
@@ -446,7 +412,6 @@ Example:
       "displayName": "Default (seeded)",
       "providerType": "custom-openai",
       "baseUrl": "http://localhost:8880/v1",
-      "apiKey": "api_key_optional",
       "defaultModel": "kokoro",
       "enabled": true
     }
@@ -457,7 +422,7 @@ Example:
 Provider fallback behavior:
 
 - If the JSON seed includes `providers` (including an empty array), `API_BASE` / `API_KEY` fallback is skipped.
-- If the JSON seed does not include a `providers` key, the legacy `API_BASE` / `API_KEY` bootstrap fallback can still create `default-openai` when provider rows are empty.
+- If the JSON seed does not include a `providers` key, the legacy `API_BASE` / `API_KEY` bootstrap fallback can still create `default-openai` when provider rows are empty. `API_BASE` alone is sufficient for an upstream that does not require authentication.
 
 Precedence summary:
 

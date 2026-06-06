@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { asc, desc, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { adminProviders, adminSettings } from '@/db/schema';
 import { serverLogger } from '@/lib/server/logger';
@@ -116,9 +116,19 @@ async function resolveImplicitDefaultTtsProvider(): Promise<string | undefined> 
     const rows = await db
       .select({ slug: adminProviders.slug })
       .from(adminProviders)
-      .where(and(eq(adminProviders.slug, 'default-openai'), eq(adminProviders.enabled, 1)))
-      .limit(1);
-    return rows[0]?.slug;
+      .where(eq(adminProviders.enabled, 1))
+      .orderBy(
+        desc(adminProviders.updatedAt),
+        desc(adminProviders.createdAt),
+        asc(adminProviders.slug),
+      );
+    const slugs = (rows as Array<{ slug: string }>).map((row) => row.slug);
+    // Prefer the conventional 'default-openai' slug when present, otherwise fall
+    // back to the first enabled shared provider so a fresh instance with any
+    // configured provider resolves to a real, usable provider rather than the
+    // built-in 'custom-openai' placeholder.
+    if (slugs.includes('default-openai')) return 'default-openai';
+    return slugs[0];
   } catch (error) {
     logDegraded(serverLogger, {
       event: 'admin.runtime_config.default_provider_lookup.failed',

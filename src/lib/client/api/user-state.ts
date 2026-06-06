@@ -148,6 +148,32 @@ export function scheduleUserPreferencesSync(
   }, debounceMs);
 }
 
+/**
+ * Immediately send any pending debounced preference patch and await the result.
+ * Use this when the user explicitly saves: we want the server write to complete
+ * (and surface failures) instead of silently relying on the debounce timer, which
+ * can be lost if the page is reloaded inside the debounce window.
+ */
+export async function flushUserPreferencesSync(): Promise<void> {
+  if (pendingPreferenceSync.timer) {
+    clearTimeout(pendingPreferenceSync.timer);
+    pendingPreferenceSync.timer = null;
+  }
+
+  const payload = { ...pendingPreferenceSync.patch };
+  pendingPreferenceSync.patch = {};
+  if (Object.keys(payload).length === 0) return;
+
+  if (activeSyncController) activeSyncController.abort();
+  activeSyncController = new AbortController();
+
+  try {
+    await putUserPreferences(payload, { signal: activeSyncController.signal });
+  } finally {
+    activeSyncController = null;
+  }
+}
+
 export async function getDocumentProgress(
   documentId: string,
   options?: { signal?: AbortSignal },

@@ -8,6 +8,7 @@ import {
   keepKokoroVoicesInOneLanguage,
   normalizeOptionalLanguageTag,
   normalizeUnicodeToken,
+  resolveReplicateKokoroLanguageCode,
   resolveTtsLanguage,
   segmentSentences,
   segmentWords,
@@ -93,6 +94,13 @@ describe('multilingual language utilities', () => {
     expect(resolveTtsLanguage({ configuredLanguage: 'pt-BR', voice: 'jf_alpha' })).toBe('pt-BR');
     expect(resolveTtsLanguage({ configuredLanguage: 'auto', voice: 'jf_alpha' })).toBe('ja');
     expect(toBaseLanguageCode('zh-CN')).toBe('zh');
+  });
+
+  test('maps Kokoro voices and normalized language tags to Replicate language codes', () => {
+    expect(resolveReplicateKokoroLanguageCode({ language: 'en', voice: 'af_sarah' })).toBe('a');
+    expect(resolveReplicateKokoroLanguageCode({ language: 'en', voice: 'bf_emma' })).toBe('b');
+    expect(resolveReplicateKokoroLanguageCode({ language: 'ja-JP', voice: 'jf_alpha' })).toBe('j');
+    expect(resolveReplicateKokoroLanguageCode({ language: 'zh-TW', voice: 'zf_xiaobei' })).toBe('z');
   });
 
   test('normalizes Unicode tokens without dropping non-Latin scripts', () => {

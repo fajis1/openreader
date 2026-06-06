@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  buildReplicateInput,
   buildTTSCacheKey,
   extractReplicateAudioUrl,
   resolveReplicateLanguageValue,
 } from '../../src/lib/server/tts/generate';
+import { REPLICATE_KOKORO_82M_VERSIONED_MODEL } from '../../src/lib/shared/tts-provider-catalog';
 
 describe('replicate output URL extraction', () => {
   test('returns direct URL string output', () => {
@@ -69,5 +71,54 @@ describe('Replicate language schema values', () => {
     expect(resolveReplicateLanguageValue('ja-JP', ['en', 'ja', 'zh'])).toBe('ja');
     expect(resolveReplicateLanguageValue('ja-JP', ['English', 'Japanese'])).toBe('Japanese');
     expect(resolveReplicateLanguageValue('ja-JP', ['English', 'French'])).toBeNull();
+  });
+
+  test('includes language_code for the built-in Replicate Kokoro model', async () => {
+    await expect(buildReplicateInput({
+      text: 'Hello world',
+      voice: 'af_sarah',
+      speed: 1,
+      format: 'mp3',
+      model: REPLICATE_KOKORO_82M_VERSIONED_MODEL,
+      language: 'en',
+      provider: 'replicate',
+      apiKey: 'r8_token',
+      testNamespace: null,
+    })).resolves.toEqual({
+      text: 'Hello world',
+      voice: 'af_sarah',
+      language_code: 'a',
+    });
+
+    await expect(buildReplicateInput({
+      text: 'Hello world',
+      voice: 'bf_emma',
+      speed: 1,
+      format: 'mp3',
+      model: REPLICATE_KOKORO_82M_VERSIONED_MODEL,
+      language: 'en',
+      provider: 'replicate',
+      apiKey: 'r8_token',
+      testNamespace: null,
+    })).resolves.toEqual({
+      text: 'Hello world',
+      voice: 'bf_emma',
+      language_code: 'b',
+    });
+
+    await expect(buildReplicateInput({
+      text: 'Hello world',
+      voice: 'af_sarah',
+      speed: 1,
+      format: 'mp3',
+      model: REPLICATE_KOKORO_82M_VERSIONED_MODEL,
+      provider: 'replicate',
+      apiKey: 'r8_token',
+      testNamespace: null,
+    })).resolves.toEqual({
+      text: 'Hello world',
+      voice: 'af_sarah',
+      language_code: 'a',
+    });
   });
 });
