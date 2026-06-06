@@ -18,6 +18,7 @@ import type {
   TTSSegmentsManifestResponse,
 } from '@/types/client';
 import { isTtsProviderType } from '@/lib/shared/tts-provider-catalog';
+import { normalizeLanguageTag } from '@/lib/shared/language';
 import { resolveEffectiveProviderType } from '@/lib/shared/tts-provider-policy';
 import { resolveSegmentAudioUrls } from '@/lib/server/tts/segment-audio-urls';
 import { createRequestLogger } from '@/lib/server/logger';
@@ -71,7 +72,7 @@ function parseSettingsValue(value: unknown): TTSSegmentSettings | null {
   const nativeSpeed = Number.isFinite(Number(speedSource)) ? Number(speedSource) : 1;
   const instructionsSource = rec.ttsInstructions ?? rec.instructions;
   const ttsInstructions = typeof instructionsSource === 'string' ? instructionsSource : '';
-  const language = typeof rec.language === 'string' ? rec.language : 'en';
+  const language = typeof rec.language === 'string' ? normalizeLanguageTag(rec.language, 'en') : 'en';
 
   if (!providerRef || !providerType || !ttsModel || !voice) return null;
   return { providerRef, providerType, ttsModel, voice, nativeSpeed, ttsInstructions, language };

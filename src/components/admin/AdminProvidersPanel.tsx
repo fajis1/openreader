@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { DotsHorizontalIcon, PlusIcon } from '@/components/icons/Icons';
-import { providerSupportsCustomModel, resolveProviderModels, type TtsModelDefinition, type TtsProviderId } from '@/lib/shared/tts-provider-catalog';
+import { providerSupportsCustomModel, resolveProviderModels, type TtsModelDefinition, type TtsProviderId, type TtsProviderType } from '@/lib/shared/tts-provider-catalog';
 import { defaultBaseUrlForProviderType, defaultModelForProviderType, resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import {
   Badge,
@@ -327,9 +327,9 @@ export function AdminProvidersPanel() {
       ? 'custom'
       : modelDefinitions[0]?.id ?? '';
   const selectedModelDefinition = modelDefinitions.find((model) => model.id === selectedModelId);
-  const modelSupportsInstructions = useCallback((model: string) => resolveTtsProviderModelPolicy({
+  const modelSupportsInstructions = useCallback((model: string, providerType: TtsProviderType = form.providerType) => resolveTtsProviderModelPolicy({
     providerRef: form.slug,
-    providerType: form.providerType,
+    providerType,
     model,
   }).supportsInstructions, [form.slug, form.providerType]);
   const baseUrlPlaceholder = form.providerType === 'custom-openai'
@@ -425,7 +425,7 @@ export function AdminProvidersPanel() {
                     providerType: opt.value,
                     baseUrl: opt.value === 'custom-openai' ? form.baseUrl : '',
                     defaultModel: nextModel,
-                    defaultInstructions: modelSupportsInstructions(nextModel) ? form.defaultInstructions : '',
+                    defaultInstructions: modelSupportsInstructions(nextModel, opt.value) ? form.defaultInstructions : '',
                   });
                   setCustomModelInput('');
                 }}

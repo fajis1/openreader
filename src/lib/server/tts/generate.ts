@@ -644,7 +644,7 @@ async function runProviderRequest(
   }
 
   if (request.provider !== 'openai' && request.language) {
-    const supportKey = `${request.baseUrl || ''}|${request.model as string}`;
+    const supportKey = `${request.provider}|${request.baseUrl || ''}|${request.model as string}|${request.language}`;
     if (!openAiCompatibleLanguageUnsupported.has(supportKey)) {
       try {
         return await fetchTTSBufferWithRetry(

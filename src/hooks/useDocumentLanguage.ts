@@ -31,19 +31,22 @@ export function useDocumentLanguage(documentId: string | undefined): {
 
   const updateLanguage = useCallback(async (language: string): Promise<void> => {
     if (!documentId) return;
-    const next = mergeDocumentSettings(DEFAULT_DOCUMENT_SETTINGS, {
-      ...settings,
-      schemaVersion: 1,
-      language,
+    let next = DEFAULT_DOCUMENT_SETTINGS;
+    setSettings((prev) => {
+      next = mergeDocumentSettings(DEFAULT_DOCUMENT_SETTINGS, {
+        ...prev,
+        schemaVersion: 1,
+        language,
+      });
+      return next;
     });
-    setSettings(next);
     try {
       const response = await putDocumentSettings(documentId, next);
       setSettings(mergeDocumentSettings(DEFAULT_DOCUMENT_SETTINGS, response.settings));
     } catch (error) {
       console.warn('Failed to persist document language:', error);
     }
-  }, [documentId, settings]);
+  }, [documentId]);
 
   return {
     language: settings.language ?? 'auto',

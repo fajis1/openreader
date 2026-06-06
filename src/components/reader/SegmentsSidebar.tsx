@@ -188,6 +188,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     activeReaderType,
     clearSegmentCaches,
     resolvedLanguage,
+    setDocumentLanguage,
   } = useTTS();
   const {
     providerRef,
@@ -421,7 +422,8 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
       updateConfigKey('voiceSpeed', Number.isFinite(Number(settings.nativeSpeed)) ? Number(settings.nativeSpeed) : 1),
       updateConfigKey('ttsInstructions', settings.ttsInstructions || ''),
     ]);
-  }, [updateConfigKey]);
+    if (settings.language) setDocumentLanguage(settings.language);
+  }, [updateConfigKey, setDocumentLanguage]);
 
   const handleRefresh = useCallback(() => {
     didAutoScrollOnOpenRef.current = false;

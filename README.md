@@ -10,7 +10,7 @@
 
 # 📄🔊 OpenReader
 
-OpenReader is an open source, self-host-friendly text-to-speech document reader built with Next.js for **EPUB, PDF, TXT, MD, and DOCX** with multilingual, synchronized read-along playback.
+OpenReader is an open-source, self-host-friendly text-to-speech document reader built with Next.js for **EPUB, PDF, TXT, MD, and DOCX** with multilingual, synchronized read-along playback.
 
 > Previously named **OpenReader-WebUI**.
 

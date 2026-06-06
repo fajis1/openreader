@@ -2,7 +2,7 @@ English
 OpenReader should split this sentence correctly. This is the second sentence.
 
 French
-OpenReader doit correctement segmenter cette phrase. Voici la deuxieme phrase.
+OpenReader doit correctement segmenter cette phrase. Voici la deuxième phrase.
 
 Spanish
 OpenReader debe segmentar correctamente esta frase. Esta es la segunda frase.
