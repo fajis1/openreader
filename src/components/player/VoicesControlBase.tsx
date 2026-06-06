@@ -6,6 +6,7 @@ import {
 import { ChevronUpDownIcon, AudioWaveIcon, CheckIcon } from '@/components/icons/Icons';
 import { useEffect, useMemo, useState } from 'react';
 import { buildKokoroVoiceString, parseKokoroVoiceNames } from '@/lib/shared/kokoro';
+import { keepKokoroVoicesInOneLanguage } from '@/lib/shared/language';
 import { type TtsProviderType } from '@/lib/shared/tts-provider-catalog';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import { SharedListboxButton, SharedListboxOption, SharedListboxOptions, cn } from '@/components/ui';
@@ -70,8 +71,13 @@ export function VoicesControlBase({
     if (initial.length > maxVoices) {
       initial = initial.slice(0, maxVoices);
     }
+    initial = keepKokoroVoicesInOneLanguage(initial);
     setSelectedVoices(initial);
-  }, [isKokoro, maxVoices, voice, availableVoices]);
+    const combined = buildKokoroVoiceString(initial);
+    if (combined && combined !== voice) {
+      onChangeVoice(combined);
+    }
+  }, [isKokoro, maxVoices, voice, availableVoices, onChangeVoice]);
 
   const currentVoice = useMemo(() => {
     if (isKokoro && maxVoices > 1) {
@@ -101,15 +107,19 @@ export function VoicesControlBase({
           onChange={(vals: string[]) => {
             if (!vals || vals.length === 0) return;
 
-            let next = vals;
-            if (vals.length > maxVoices) {
-              const newlyAdded = vals.find((v) => !selectedVoices.includes(v));
+            const newlyAdded = vals.find((v) => !selectedVoices.includes(v));
+            let next = keepKokoroVoicesInOneLanguage(vals, newlyAdded);
+            if (next.length > maxVoices) {
               if (newlyAdded) {
-                const lastPrev = selectedVoices[selectedVoices.length - 1] ?? selectedVoices[0] ?? '';
-                const pair = Array.from(new Set([lastPrev, newlyAdded])).filter(Boolean);
-                next = pair.slice(0, maxVoices);
+                const compatiblePrevious = selectedVoices.filter(
+                  (voiceId) => voiceId !== newlyAdded && next.includes(voiceId),
+                );
+                next = [
+                  ...compatiblePrevious.slice(-(maxVoices - 1)),
+                  newlyAdded,
+                ];
               } else {
-                next = vals.slice(-maxVoices);
+                next = next.slice(-maxVoices);
               }
             }
 

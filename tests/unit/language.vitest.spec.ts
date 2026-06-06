@@ -5,6 +5,7 @@ import { resolve } from 'path';
 import {
   getTtsLanguageCompatibilityWarnings,
   inferKokoroLanguageFromVoice,
+  keepKokoroVoicesInOneLanguage,
   normalizeOptionalLanguageTag,
   normalizeUnicodeToken,
   resolveTtsLanguage,
@@ -25,6 +26,23 @@ describe('multilingual language utilities', () => {
     expect(inferKokoroLanguageFromVoice('jf_alpha')).toBe('ja');
     expect(inferKokoroLanguageFromVoice('zf_xiaobei(0.5)+zm_yunxi(0.5)')).toBe('zh-CN');
     expect(inferKokoroLanguageFromVoice('ff_siwis+jf_alpha')).toBeNull();
+  });
+
+  test('keeps Kokoro multi-voice selections within the newly selected language', () => {
+    expect(keepKokoroVoicesInOneLanguage(
+      ['af_sarah', 'bf_emma', 'jf_alpha'],
+      'jf_alpha',
+    )).toEqual(['jf_alpha']);
+
+    expect(keepKokoroVoicesInOneLanguage(
+      ['zf_xiaobei', 'zm_yunxi', 'af_sarah'],
+      'zm_yunxi',
+    )).toEqual(['zf_xiaobei', 'zm_yunxi']);
+
+    expect(keepKokoroVoicesInOneLanguage(
+      ['af_sarah', 'bf_emma'],
+      'bf_emma',
+    )).toEqual(['af_sarah', 'bf_emma']);
   });
 
   test('normalizes valid EPUB metadata language tags and rejects invalid metadata', () => {
@@ -53,9 +71,7 @@ describe('multilingual language utilities', () => {
       model: 'kokoro',
       voice: 'ff_siwis+jf_alpha',
       documentLanguage: 'fr',
-    })).toEqual([
-      'Selected Kokoro voices use multiple languages (French, Japanese).',
-    ]);
+    })).toEqual([]);
 
     expect(getTtsLanguageCompatibilityWarnings({
       model: 'kokoro',

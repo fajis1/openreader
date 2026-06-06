@@ -90,6 +90,21 @@ export function getKokoroVoiceLanguages(voice: string | null | undefined): strin
   ));
 }
 
+export function keepKokoroVoicesInOneLanguage(
+  voices: string[],
+  preferredVoice?: string | null,
+): string[] {
+  const preferredLanguage = getKokoroVoiceLanguages(preferredVoice)[0]
+    ?? voices.flatMap((voice) => getKokoroVoiceLanguages(voice))[0];
+  if (!preferredLanguage) return voices;
+
+  const preferredBaseLanguage = toBaseLanguageCode(preferredLanguage);
+  return voices.filter((voice) => {
+    const voiceLanguage = getKokoroVoiceLanguages(voice)[0];
+    return !voiceLanguage || toBaseLanguageCode(voiceLanguage) === preferredBaseLanguage;
+  });
+}
+
 export function resolveTtsLanguage(input: {
   configuredLanguage?: string | null;
   voice?: string | null;
@@ -130,14 +145,7 @@ export function getTtsLanguageCompatibilityWarnings(input: {
     );
   }
 
-  if (voiceBaseLanguages.size > 1) {
-    warnings.push(
-      `Selected Kokoro voices use multiple languages (${voiceLanguages.map(getLanguageDisplayName).join(', ')}).`,
-    );
-    return warnings;
-  }
-
-  const voiceLanguage = voiceLanguages[0];
+  const voiceLanguage = voiceBaseLanguages.size === 1 ? voiceLanguages[0] : undefined;
   if (voiceLanguage && toBaseLanguageCode(voiceLanguage) !== documentBaseLanguage) {
     warnings.push(
       `Selected Kokoro voice is ${getLanguageDisplayName(voiceLanguage)}, but the document is ${getLanguageDisplayName(documentLanguage)}.`,
