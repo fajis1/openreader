@@ -311,7 +311,7 @@ export async function resolveReplicateLanguageInput({
   model,
   apiKey = '',
 }: ResolveVoicesOptions): Promise<ReplicateLanguageInput | null> {
-  if (provider !== 'replicate' || REPLICATE_BUILT_IN_MODELS.has(model) || !apiKey) return null;
+  if (provider !== 'replicate' || !apiKey) return null;
 
   const cached = replicateLanguageInputCache.get(model);
   if (cached) return cached;

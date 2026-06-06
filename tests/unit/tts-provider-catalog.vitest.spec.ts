@@ -435,6 +435,50 @@ describe('tts provider catalog', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test('discovers Replicate language input key for built-in models too', async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          latest_version: {
+            openapi_schema: {
+              components: {
+                schemas: {
+                  Input: {
+                    type: 'object',
+                    properties: {
+                      text: { type: 'string' },
+                      language: { type: 'string', enum: ['auto', 'en', 'ja'] },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      } as Response;
+    };
+
+    try {
+      await expect(resolveReplicateLanguageInputKey({
+        provider: 'replicate',
+        model: 'minimax/speech-2.8-turbo',
+        apiKey: 'r8_token',
+      })).resolves.toBe('language');
+      await expect(resolveReplicateLanguageInputKey({
+        provider: 'replicate',
+        model: 'minimax/speech-2.8-turbo',
+        apiKey: 'r8_token',
+      })).resolves.toBe('language');
+      expect(calls).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe('config helpers', () => {

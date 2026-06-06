@@ -15,7 +15,11 @@ import { LRUCache } from 'lru-cache';
 import { createHash } from 'crypto';
 import { access, readFile } from 'fs/promises';
 import { resolve } from 'path';
-import { getLanguageDisplayName, toBaseLanguageCode } from '@/lib/shared/language';
+import {
+  getLanguageDisplayName,
+  resolveReplicateKokoroLanguageCode,
+  toBaseLanguageCode,
+} from '@/lib/shared/language';
 
 export interface ServerTTSRequest {
   text: string;
@@ -434,7 +438,7 @@ async function fetchTTSBufferWithRetry(
   }
 }
 
-async function buildReplicateInput(request: ResolvedServerTTSRequest): Promise<Record<string, unknown>> {
+export async function buildReplicateInput(request: ResolvedServerTTSRequest): Promise<Record<string, unknown>> {
   const model = request.model as string;
 
   if (model === 'google/gemini-3.1-flash-tts') {
@@ -518,6 +522,16 @@ async function addReplicateLanguageInput(
   request: ResolvedServerTTSRequest,
 ): Promise<Record<string, unknown>> {
   if (!request.language) return input;
+  if (request.model === REPLICATE_KOKORO_82M_VERSIONED_MODEL) {
+    const languageCode = resolveReplicateKokoroLanguageCode({
+      language: request.language,
+      voice: request.voice,
+    });
+    if (languageCode) {
+      input.language_code = languageCode;
+    }
+    return input;
+  }
   const languageInput = await resolveReplicateLanguageInput({
     provider: 'replicate',
     model: request.model as string,
