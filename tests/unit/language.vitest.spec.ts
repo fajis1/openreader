@@ -3,7 +3,9 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 import {
+  getTtsLanguageCompatibilityWarnings,
   inferKokoroLanguageFromVoice,
+  normalizeOptionalLanguageTag,
   normalizeUnicodeToken,
   resolveTtsLanguage,
   segmentSentences,
@@ -23,6 +25,52 @@ describe('multilingual language utilities', () => {
     expect(inferKokoroLanguageFromVoice('jf_alpha')).toBe('ja');
     expect(inferKokoroLanguageFromVoice('zf_xiaobei(0.5)+zm_yunxi(0.5)')).toBe('zh-CN');
     expect(inferKokoroLanguageFromVoice('ff_siwis+jf_alpha')).toBeNull();
+  });
+
+  test('normalizes valid EPUB metadata language tags and rejects invalid metadata', () => {
+    expect(normalizeOptionalLanguageTag(' ja-jp ')).toBe('ja-JP');
+    expect(normalizeOptionalLanguageTag('fr, en')).toBe('fr');
+    expect(normalizeOptionalLanguageTag('not_a_language')).toBeNull();
+    expect(normalizeOptionalLanguageTag(undefined)).toBeNull();
+  });
+
+  test('warns only for provable Kokoro language compatibility problems', () => {
+    expect(getTtsLanguageCompatibilityWarnings({
+      model: 'kokoro',
+      voice: 'jf_alpha',
+      documentLanguage: 'ja',
+    })).toEqual([]);
+
+    expect(getTtsLanguageCompatibilityWarnings({
+      model: 'kokoro',
+      voice: 'af_sarah',
+      documentLanguage: 'ja',
+    })).toEqual([
+      'Selected Kokoro voice is American English, but the document is Japanese.',
+    ]);
+
+    expect(getTtsLanguageCompatibilityWarnings({
+      model: 'kokoro',
+      voice: 'ff_siwis+jf_alpha',
+      documentLanguage: 'fr',
+    })).toEqual([
+      'Selected Kokoro voices use multiple languages (French, Japanese).',
+    ]);
+
+    expect(getTtsLanguageCompatibilityWarnings({
+      model: 'kokoro',
+      voice: 'af_sarah',
+      documentLanguage: 'ar',
+    })).toEqual([
+      "Kokoro's built-in voice catalog does not include Arabic.",
+      'Selected Kokoro voice is American English, but the document is Arabic.',
+    ]);
+
+    expect(getTtsLanguageCompatibilityWarnings({
+      model: 'custom-unknown-model',
+      voice: 'af_sarah',
+      documentLanguage: 'ja',
+    })).toEqual([]);
   });
 
   test('prefers an explicit language and resolves regional tags for Whisper', () => {

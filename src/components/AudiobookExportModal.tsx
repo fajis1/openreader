@@ -12,7 +12,7 @@ import { useTTS } from '@/contexts/TTSContext';
 import { VoicesControlBase } from '@/components/player/VoicesControlBase';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
-import { resolveTtsLanguage } from '@/lib/shared/language';
+import { getTtsLanguageCompatibilityWarnings, resolveTtsLanguage } from '@/lib/shared/language';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, RangeInput, SharedListboxButton, SharedListboxOption, SharedListboxOptions } from '@/components/ui';
 import { 
@@ -132,6 +132,11 @@ export function AudiobookExportModal({
       }),
     };
   }, [savedSettings, audiobookVoice, configVoice, availableVoices, providerRef, providerType, ttsModel, ttsInstructions, effectiveNativeSpeed, postSpeed, format, providerModelPolicy.supportsInstructions, documentLanguage]);
+  const languageWarnings = useMemo(() => getTtsLanguageCompatibilityWarnings({
+    model: effectiveSettings?.ttsModel,
+    voice: effectiveSettings?.voice,
+    documentLanguage: effectiveSettings?.language,
+  }), [effectiveSettings]);
 
   const fetchExistingChapters = useCallback(async (soft: boolean = false) => {
     if (soft) {
@@ -610,6 +615,11 @@ export function AudiobookExportModal({
 			                                      )}
 			                                    </div>
 			                                  </div>
+                                  {languageWarnings.map((warning) => (
+                                    <p key={warning} className="text-xs text-warning">
+                                      {warning}
+                                    </p>
+                                  ))}
 
                                   {/* Speed controls */}
                                   <Card className="p-3 space-y-3">

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useConfig, ViewType } from '@/contexts/ConfigContext';
+import { useTTS } from '@/contexts/TTSContext';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import {
   SEGMENT_PRELOAD_DEPTH_MIN,
@@ -19,6 +20,7 @@ import { IconButton, RangeInput, Section, ToggleRow, CheckItem, SegmentedControl
 import { RefreshIcon, SparkleIcon } from '@/components/icons/Icons';
 import type { ParsedPdfBlockKind, PdfParseStatus } from '@/types/parsed-pdf';
 import { isForceReparseDisabled } from '@/lib/client/pdf/force-reparse';
+import { getLanguageDisplayName, getTtsLanguageCompatibilityWarnings } from '@/lib/shared/language';
 
 const PDF_SKIP_KIND_OPTIONS: Array<{ kind: ParsedPdfBlockKind; label: string }> = [
   { kind: 'header', label: 'Header' },
@@ -106,12 +108,13 @@ function RangeSetting({
   );
 }
 
-export function DocumentSettings({ isOpen, setIsOpen, epub, html, language, onLanguageChange, pdf }: {
+export function DocumentSettings({ isOpen, setIsOpen, epub, html, language, detectedLanguage, onLanguageChange, pdf }: {
   isOpen: boolean,
   setIsOpen: (isOpen: boolean) => void,
   epub?: boolean,
   html?: boolean,
   language?: string,
+  detectedLanguage?: string | null,
   onLanguageChange?: (language: string) => void,
   pdf?: {
     parseStatus: PdfParseStatus | null;
@@ -137,7 +140,14 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, language, onLa
     epubWordHighlightEnabled,
     htmlHighlightEnabled,
     htmlWordHighlightEnabled,
+    ttsModel,
   } = useConfig();
+  const { voice, resolvedLanguage } = useTTS();
+  const languageWarnings = getTtsLanguageCompatibilityWarnings({
+    model: ttsModel,
+    voice,
+    documentLanguage: resolvedLanguage,
+  });
   const selectedView = viewTypeTextMapping.find(v => v.id === viewType) || viewTypeTextMapping[0];
   const isPdfMode = !epub && !html && !!pdf;
   const [localPreloadDepth, setLocalPreloadDepth] = useState(segmentPreloadDepthPages);
@@ -189,6 +199,16 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, language, onLa
                 ))}
               </select>
             </label>
+            {language === 'auto' && detectedLanguage ? (
+              <p className="text-xs text-soft">
+                Detected from document metadata: {getLanguageDisplayName(detectedLanguage)}
+              </p>
+            ) : null}
+            {languageWarnings.map((warning) => (
+              <p key={warning} className="text-xs text-warning">
+                {warning}
+              </p>
+            ))}
           </Section>
         ) : null}
         {isPdfMode && pdf && (

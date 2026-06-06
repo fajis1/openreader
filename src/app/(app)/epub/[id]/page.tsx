@@ -37,6 +37,7 @@ export default function EPUBPage() {
     createFullAudioBook: createEPUBAudioBook,
     regenerateChapter: regenerateEPUBChapter,
     bookRef,
+    metadataLanguage,
   } = epubState;
   const { stop, setDocumentLanguage } = useTTS();
   const { language, updateLanguage } = useDocumentLanguage(routeDocumentId);
@@ -109,8 +110,8 @@ export default function EPUBPage() {
   useUnmountCleanupRef(clearCurrDoc);
 
   useEffect(() => {
-    setDocumentLanguage(language);
-  }, [language, setDocumentLanguage]);
+    setDocumentLanguage(language === 'auto' ? metadataLanguage ?? 'auto' : language);
+  }, [language, metadataLanguage, setDocumentLanguage]);
 
   // Compute available height = viewport - (header height + tts bar height)
   useEffect(() => {
@@ -256,6 +257,7 @@ export default function EPUBPage() {
         isOpen={activeSidebar === 'settings'}
         setIsOpen={(isOpen) => setActiveSidebar((prev) => isOpen ? 'settings' : (prev === 'settings' ? null : prev))}
         language={language}
+        detectedLanguage={metadataLanguage}
         onLanguageChange={(nextLanguage) => {
           void updateLanguage(nextLanguage);
         }}

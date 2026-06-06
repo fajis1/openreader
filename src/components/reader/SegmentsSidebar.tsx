@@ -94,6 +94,7 @@ function settingsAreEqual(a: TTSSegmentSettings | null, b: TTSSegmentSettings | 
     && a.voice === b.voice
     && Number(a.nativeSpeed) === Number(b.nativeSpeed)
     && (a.ttsInstructions || '') === (b.ttsInstructions || '')
+    && (a.language || 'en') === (b.language || 'en')
   );
 }
 
@@ -186,6 +187,7 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     playFromSegment,
     activeReaderType,
     clearSegmentCaches,
+    resolvedLanguage,
   } = useTTS();
   const {
     providerRef,
@@ -348,7 +350,8 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     voice,
     nativeSpeed: Number.isFinite(Number(voiceSpeed)) ? Number(voiceSpeed) : 1,
     ttsInstructions: ttsInstructions || '',
-  }), [providerRef, providerType, ttsModel, voice, voiceSpeed, ttsInstructions]);
+    language: resolvedLanguage,
+  }), [providerRef, providerType, ttsModel, voice, voiceSpeed, ttsInstructions, resolvedLanguage]);
 
   const handleClearCache = useCallback(async () => {
     if (!documentId || isClearingSegments) return;
