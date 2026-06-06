@@ -16,7 +16,15 @@ import {
   clampSegmentPreloadSentenceLookahead,
   clampTtsSegmentMaxBlockLength,
 } from '@/types/config';
-import { IconButton, RangeInput, Section, ToggleRow, CheckItem, SegmentedControl } from '@/components/ui';
+import {
+  IconButton,
+  RangeInput,
+  Section,
+  ToggleRow,
+  CheckItem,
+  SegmentedControl,
+  Select,
+} from '@/components/ui';
 import { RefreshIcon, SparkleIcon } from '@/components/icons/Icons';
 import type { ParsedPdfBlockKind, PdfParseStatus } from '@/types/parsed-pdf';
 import { isForceReparseDisabled } from '@/lib/client/pdf/force-reparse';
@@ -148,6 +156,8 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, language, dete
     voice,
     documentLanguage: resolvedLanguage,
   });
+  const selectedLanguage = DOCUMENT_LANGUAGE_OPTIONS.find((option) => option.value === language)
+    ?? DOCUMENT_LANGUAGE_OPTIONS[0];
   const selectedView = viewTypeTextMapping.find(v => v.id === viewType) || viewTypeTextMapping[0];
   const isPdfMode = !epub && !html && !!pdf;
   const [localPreloadDepth, setLocalPreloadDepth] = useState(segmentPreloadDepthPages);
@@ -183,22 +193,16 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, language, dete
             subtitle="Controls sentence splitting and synchronized word alignment."
             variant="flat"
           >
-            <label className="block space-y-1.5">
+            <div className="space-y-1.5">
               <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
                 Document language
               </span>
-              <select
-                value={language}
-                onChange={(event) => onLanguageChange(event.target.value)}
-                className="w-full rounded-md border border-offbase bg-surface-solid px-3 py-2 text-sm text-foreground"
-              >
-                {DOCUMENT_LANGUAGE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <Select
+                value={selectedLanguage}
+                onChange={(option) => onLanguageChange(option.value)}
+                options={DOCUMENT_LANGUAGE_OPTIONS}
+              />
+            </div>
             {language === 'auto' && detectedLanguage ? (
               <p className="text-xs text-soft">
                 Detected from document metadata: {getLanguageDisplayName(detectedLanguage)}

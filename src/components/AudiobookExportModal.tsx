@@ -1,11 +1,11 @@
 'use client';
 
 import { Fragment, useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { Transition, Listbox, Menu, MenuButton } from '@headlessui/react';
+import { Transition, Menu, MenuButton } from '@headlessui/react';
 import { useTimeEstimation } from '@/hooks/useTimeEstimation';
 import { ProgressPopup } from '@/components/ProgressPopup';
 import { ProgressCard } from '@/components/ProgressCard';
-import { DownloadIcon, CheckCircleIcon, XCircleIcon, ClockIcon, ChevronUpDownIcon, RefreshIcon, DotsVerticalIcon } from '@/components/icons/Icons';
+import { DownloadIcon, CheckCircleIcon, XCircleIcon, ClockIcon, RefreshIcon, DotsVerticalIcon } from '@/components/icons/Icons';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTTS } from '@/contexts/TTSContext';
@@ -14,7 +14,7 @@ import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import { getTtsLanguageCompatibilityWarnings, resolveTtsLanguage } from '@/lib/shared/language';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
-import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, RangeInput, SharedListboxButton, SharedListboxOption, SharedListboxOptions } from '@/components/ui';
+import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, RangeInput, Select } from '@/components/ui';
 import { 
   getAudiobookStatus, 
   deleteAudiobookChapter, 
@@ -565,51 +565,25 @@ export function AudiobookExportModal({
 			                                    <div className="space-y-1.5">
 			                                      <label className="text-[11px] uppercase tracking-wider font-medium text-soft">Format</label>
 			                                      {chapters.length === 0 ? (
-			                                        <Listbox
+			                                        <Select
 			                                          value={format}
 			                                          onChange={(newFormat) => setFormat(newFormat)}
+			                                          options={['m4b', 'mp3'] as const}
 			                                          disabled={chapters.length > 0 || settingsLocked}
-			                                        >
-			                                          <div className="relative">
-			                                            <SharedListboxButton className="bg-surface">
-			                                              <span className="block truncate text-sm font-medium">{format.toUpperCase()}</span>
-			                                              <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-			                                                <ChevronUpDownIcon className="h-4 w-4 text-soft" />
-			                                              </span>
-			                                            </SharedListboxButton>
-			                                            <Transition
-			                                              as={Fragment}
-			                                              leave="transition ease-standard duration-fast"
-			                                              leaveFrom="opacity-100"
-			                                              leaveTo="opacity-0"
-			                                            >
-			                                              <SharedListboxOptions className="absolute left-0 mt-1 w-full">
-			                                                <SharedListboxOption
-			                                                  value="m4b"
-			                                                  inset="none"
-			                                                  itemClassName="py-2"
-			                                                >
-			                                                  {({ selected }) => (
-			                                                    <span className={`block truncate text-sm ${selected ? 'font-medium' : 'font-normal'}`}>
-			                                                      M4B
-			                                                    </span>
-			                                                  )}
-			                                                </SharedListboxOption>
-			                                                <SharedListboxOption
-			                                                  value="mp3"
-			                                                  inset="none"
-			                                                  itemClassName="py-2"
-			                                                >
-			                                                  {({ selected }) => (
-			                                                    <span className={`block truncate text-sm ${selected ? 'font-medium' : 'font-normal'}`}>
-			                                                      MP3
-			                                                    </span>
-			                                                  )}
-			                                                </SharedListboxOption>
-			                                              </SharedListboxOptions>
-			                                            </Transition>
-			                                          </div>
-			                                        </Listbox>
+			                                          renderValue={(option) => (
+			                                            <span className="text-sm font-medium">{option.toUpperCase()}</span>
+			                                          )}
+			                                          renderOption={(option, { selected }) => (
+			                                            <span className={`block truncate text-sm ${selected ? 'font-medium' : 'font-normal'}`}>
+			                                              {option.toUpperCase()}
+			                                            </span>
+			                                          )}
+			                                          buttonClassName="bg-surface"
+			                                          chevronClassName="h-4 w-4 text-soft"
+			                                          optionInset="none"
+			                                          optionItemClassName="py-2"
+			                                          showCheckmark={false}
+			                                        />
 			                                      ) : (
 			                                        <div className="text-sm font-medium text-foreground py-1.5 pl-3">{format.toUpperCase()}</div>
 			                                      )}

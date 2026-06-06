@@ -1,11 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Listbox, Menu, MenuButton, Transition } from '@headlessui/react';
+import { Menu, MenuButton, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ChevronUpDownIcon, CheckIcon, DotsHorizontalIcon, PlusIcon } from '@/components/icons/Icons';
+import { DotsHorizontalIcon, PlusIcon } from '@/components/icons/Icons';
 import { providerSupportsCustomModel, resolveProviderModels, type TtsModelDefinition, type TtsProviderId } from '@/lib/shared/tts-provider-catalog';
 import { defaultBaseUrlForProviderType, defaultModelForProviderType, resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import {
@@ -14,9 +14,7 @@ import {
   Section,
   ToggleRow,
   inputClass,
-  SharedListboxButton,
-  SharedListboxOption,
-  SharedListboxOptions,
+  Select,
   Button,
   IconButton,
   Input,
@@ -410,8 +408,17 @@ export function AdminProvidersPanel() {
               />
             </Field>
             <Field label="Provider type">
-              <Listbox
+              <Select
                 value={selectedProviderType}
+                options={PROVIDER_TYPE_OPTIONS}
+                getOptionKey={(option) => option.value}
+                renderValue={(option) => option.label}
+                renderOption={(option, { selected }) => (
+                  <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
+                    {option.label}
+                  </span>
+                )}
+                chevronClassName="h-4 w-4 text-muted"
                 onChange={(opt) => {
                   const nextModel = providerDefaultModel(opt.value);
                   setForm({
@@ -423,49 +430,29 @@ export function AdminProvidersPanel() {
                   });
                   setCustomModelInput('');
                 }}
-              >
-                <SharedListboxButton>
-                  <span className="block truncate">{selectedProviderType.label}</span>
-                  <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                    <ChevronUpDownIcon className="h-4 w-4 text-muted" />
-                  </span>
-                </SharedListboxButton>
-                <Transition
-                  as={Fragment}
-                  leave="transition ease-in duration-100"
-                  leaveFrom="opacity-100"
-                  leaveTo="opacity-0"
-                >
-                  <SharedListboxOptions anchor="bottom start">
-                    {PROVIDER_TYPE_OPTIONS.map((opt) => (
-                      <SharedListboxOption
-                        key={opt.value}
-                        value={opt}
-                      >
-                        {({ selected }) => (
-                          <>
-                            <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
-                              {opt.label}
-                            </span>
-                            {selected && (
-                              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
-                                <CheckIcon className="h-5 w-5" />
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </SharedListboxOption>
-                    ))}
-                  </SharedListboxOptions>
-                </Transition>
-              </Listbox>
+              />
             </Field>
             <Field label="Default model" hint="Pre-selected for users picking this provider.">
               <div className="space-y-2">
-                <Listbox
-                  value={selectedModelId}
-                  onChange={(modelId: string) => {
-                    if (modelId === 'custom') {
+                <Select
+                  value={selectedModelDefinition}
+                  options={modelDefinitions}
+                  getOptionKey={(model) => model.id}
+                  renderValue={(model) => model.name}
+                  renderOption={(model, { selected }) => (
+                    <span className={`block ${selected ? 'font-medium' : 'font-normal'}`}>
+                      <span className="block truncate">{model.name}</span>
+                      {model.id.includes(':') ? (
+                        <span className="block truncate text-xs text-muted">
+                          {model.id.slice(model.id.indexOf(':'))}
+                        </span>
+                      ) : null}
+                    </span>
+                  )}
+                  placeholder="Select model"
+                  chevronClassName="h-4 w-4 text-muted"
+                  onChange={(model) => {
+                    if (model.id === 'custom') {
                       const nextModel = customModelInput.trim();
                       setForm({
                         ...form,
@@ -476,54 +463,12 @@ export function AdminProvidersPanel() {
                     }
                     setForm({
                       ...form,
-                      defaultModel: modelId,
-                      defaultInstructions: modelSupportsInstructions(modelId) ? form.defaultInstructions : '',
+                      defaultModel: model.id,
+                      defaultInstructions: modelSupportsInstructions(model.id) ? form.defaultInstructions : '',
                     });
                     setCustomModelInput('');
                   }}
-                >
-                <SharedListboxButton>
-                  <span className="block truncate">
-                    {selectedModelDefinition?.name ?? 'Select model'}
-                  </span>
-                    <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                      <ChevronUpDownIcon className="h-4 w-4 text-muted" />
-                    </span>
-                  </SharedListboxButton>
-                  <Transition
-                    as={Fragment}
-                    leave="transition ease-in duration-100"
-                    leaveFrom="opacity-100"
-                    leaveTo="opacity-0"
-                  >
-                    <SharedListboxOptions anchor="bottom start">
-                      {modelDefinitions.map((model) => (
-                        <SharedListboxOption
-                          key={model.id}
-                          value={model.id}
-                        >
-                          {({ selected }) => (
-                            <>
-                              <span className={`block ${selected ? 'font-medium' : 'font-normal'}`}>
-                                <span className="block truncate">{model.name}</span>
-                                {model.id.includes(':') && (
-                                  <span className="block truncate text-xs text-muted">
-                                    {model.id.slice(model.id.indexOf(':'))}
-                                  </span>
-                                )}
-                              </span>
-                              {selected && (
-                                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
-                                  <CheckIcon className="h-5 w-5" />
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </SharedListboxOption>
-                      ))}
-                    </SharedListboxOptions>
-                  </Transition>
-                </Listbox>
+                />
                 {supportsCustomModel && selectedModelId === 'custom' && (
                   <Input
                     type="text"
