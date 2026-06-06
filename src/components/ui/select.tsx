@@ -1,9 +1,9 @@
 'use client';
 
-import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
-import type { ComponentProps } from 'react';
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions, Transition } from '@headlessui/react';
+import { Fragment, type ComponentProps, type Key, type ReactNode } from 'react';
 import { cn } from './cn';
-import { CheckIcon, ChevronRightIcon } from '@/components/icons/Icons';
+import { CheckIcon, ChevronUpDownIcon } from '@/components/icons/Icons';
 
 const listboxButtonClass =
   'relative w-full cursor-pointer rounded-md bg-surface-sunken border border-line py-1.5 pl-2.5 pr-9 text-left text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent-line hover:bg-accent-wash transition-colors duration-fast ease-standard';
@@ -104,39 +104,92 @@ export function SharedListboxOption({
   );
 }
 
-export function Select({
+export type SelectOption = {
+  value: string;
+  label: string;
+};
+
+export function Select<T = SelectOption>({
   value,
   onChange,
   options,
+  getOptionKey,
+  renderValue,
+  renderOption,
+  placeholder = 'Select',
+  disabled,
+  buttonClassName,
+  optionsClassName,
+  optionInset = 'check',
+  optionItemClassName,
+  showCheckmark = true,
+  chevronClassName = 'h-5 w-5 text-soft',
 }: {
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
+  value: T | undefined;
+  onChange: (value: T) => void;
+  options: readonly T[];
+  getOptionKey?: (option: T) => Key;
+  renderValue?: (option: T) => ReactNode;
+  renderOption?: (option: T, state: { selected: boolean }) => ReactNode;
+  placeholder?: ReactNode;
+  disabled?: boolean;
+  buttonClassName?: string;
+  optionsClassName?: string;
+  optionInset?: 'check' | 'none';
+  optionItemClassName?: string;
+  showCheckmark?: boolean;
+  chevronClassName?: string;
 }) {
-  const activeOption = options.find((option) => option.value === value) ?? options[0];
+  const defaultKey = (option: T): Key => {
+    if (typeof option === 'string' || typeof option === 'number') return option;
+    const record = option as Record<string, unknown>;
+    return String(record.value ?? record.id ?? record.label);
+  };
+  const defaultRender = (option: T): ReactNode => {
+    if (typeof option === 'string' || typeof option === 'number') return String(option);
+    const record = option as Record<string, unknown>;
+    return String(record.label ?? record.name ?? record.value ?? record.id ?? '');
+  };
+  const optionKey = getOptionKey ?? defaultKey;
+  const valueRenderer = renderValue ?? defaultRender;
+  const optionRenderer = renderOption ?? ((option: T) => valueRenderer(option));
 
   return (
-    <Listbox value={value} onChange={onChange}>
-      <SharedListboxButton>
-        <span>{activeOption?.label ?? 'Select'}</span>
-        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-soft">
-          <ChevronRightIcon className="h-4 w-4 rotate-90" aria-hidden="true" />
+    <Listbox value={value} onChange={onChange} disabled={disabled}>
+      <SharedListboxButton className={buttonClassName}>
+        <span className="block truncate">{value === undefined ? placeholder : valueRenderer(value)}</span>
+        <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+          <ChevronUpDownIcon className={chevronClassName} aria-hidden="true" />
         </span>
       </SharedListboxButton>
-      <SharedListboxOptions anchor="bottom">
-        {options.map((option) => (
-          <SharedListboxOption key={option.value} value={option.value}>
-            {({ selected }) => (
-              <>
-                <span className="absolute left-2 flex items-center text-accent">
-                  {selected ? <CheckIcon className="h-4 w-4" aria-hidden="true" /> : null}
-                </span>
-                <span>{option.label}</span>
-              </>
-            )}
-          </SharedListboxOption>
-        ))}
-      </SharedListboxOptions>
+      <Transition
+        as={Fragment}
+        leave="transition ease-standard duration-fast"
+        leaveFrom="opacity-100"
+        leaveTo="opacity-0"
+      >
+        <SharedListboxOptions anchor="bottom start" className={optionsClassName}>
+          {options.map((option) => (
+            <SharedListboxOption
+              key={optionKey(option)}
+              value={option}
+              inset={optionInset}
+              itemClassName={optionItemClassName}
+            >
+              {({ selected }) => (
+                <>
+                  {optionRenderer(option, { selected })}
+                  {showCheckmark && selected ? (
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
+                      <CheckIcon className="h-5 w-5" aria-hidden="true" />
+                    </span>
+                  ) : null}
+                </>
+              )}
+            </SharedListboxOption>
+          ))}
+        </SharedListboxOptions>
+      </Transition>
     </Listbox>
   );
 }

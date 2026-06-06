@@ -1,27 +1,26 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Listbox, Menu, MenuButton, Transition } from '@headlessui/react';
-import { Fragment } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ChevronUpDownIcon, CheckIcon, DotsHorizontalIcon, PlusIcon } from '@/components/icons/Icons';
-import { providerSupportsCustomModel, resolveProviderModels, type TtsModelDefinition, type TtsProviderId } from '@/lib/shared/tts-provider-catalog';
+import { DotsHorizontalIcon, PlusIcon } from '@/components/icons/Icons';
+import { providerSupportsCustomModel, resolveProviderModels, type TtsModelDefinition, type TtsProviderId, type TtsProviderType } from '@/lib/shared/tts-provider-catalog';
 import { defaultBaseUrlForProviderType, defaultModelForProviderType, resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import {
   Badge,
   Field,
   Section,
   ToggleRow,
-  inputClass,
-  SharedListboxButton,
-  SharedListboxOption,
-  SharedListboxOptions,
+  Select,
   Button,
   IconButton,
   Input,
+  Textarea,
   MenuItemsSurface,
   MenuActionItem,
+  MenuRoot,
+  MenuTrigger,
+  MenuTransition,
 } from '@/components/ui';
 
 type ProviderType = TtsProviderId;
@@ -328,9 +327,9 @@ export function AdminProvidersPanel() {
       ? 'custom'
       : modelDefinitions[0]?.id ?? '';
   const selectedModelDefinition = modelDefinitions.find((model) => model.id === selectedModelId);
-  const modelSupportsInstructions = useCallback((model: string) => resolveTtsProviderModelPolicy({
+  const modelSupportsInstructions = useCallback((model: string, providerType: TtsProviderType = form.providerType) => resolveTtsProviderModelPolicy({
     providerRef: form.slug,
-    providerType: form.providerType,
+    providerType,
     model,
   }).supportsInstructions, [form.slug, form.providerType]);
   const baseUrlPlaceholder = form.providerType === 'custom-openai'
@@ -396,7 +395,6 @@ export function AdminProvidersPanel() {
                 value={form.slug}
                 onChange={(e) => setForm({ ...form, slug: e.target.value })}
                 placeholder="kokoro-prod"
-                className={inputClass}
                 disabled={isEditingExisting}
               />
             </Field>
@@ -406,12 +404,20 @@ export function AdminProvidersPanel() {
                 value={form.displayName}
                 onChange={(e) => setForm({ ...form, displayName: e.target.value })}
                 placeholder="Kokoro (production)"
-                className={inputClass}
               />
             </Field>
             <Field label="Provider type">
-              <Listbox
+              <Select
                 value={selectedProviderType}
+                options={PROVIDER_TYPE_OPTIONS}
+                getOptionKey={(option) => option.value}
+                renderValue={(option) => option.label}
+                renderOption={(option, { selected }) => (
+                  <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
+                    {option.label}
+                  </span>
+                )}
+                chevronClassName="h-4 w-4 text-muted"
                 onChange={(opt) => {
                   const nextModel = providerDefaultModel(opt.value);
                   setForm({
@@ -419,53 +425,33 @@ export function AdminProvidersPanel() {
                     providerType: opt.value,
                     baseUrl: opt.value === 'custom-openai' ? form.baseUrl : '',
                     defaultModel: nextModel,
-                    defaultInstructions: modelSupportsInstructions(nextModel) ? form.defaultInstructions : '',
+                    defaultInstructions: modelSupportsInstructions(nextModel, opt.value) ? form.defaultInstructions : '',
                   });
                   setCustomModelInput('');
                 }}
-              >
-                <SharedListboxButton>
-                  <span className="block truncate">{selectedProviderType.label}</span>
-                  <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                    <ChevronUpDownIcon className="h-4 w-4 text-muted" />
-                  </span>
-                </SharedListboxButton>
-                <Transition
-                  as={Fragment}
-                  leave="transition ease-in duration-100"
-                  leaveFrom="opacity-100"
-                  leaveTo="opacity-0"
-                >
-                  <SharedListboxOptions anchor="bottom start">
-                    {PROVIDER_TYPE_OPTIONS.map((opt) => (
-                      <SharedListboxOption
-                        key={opt.value}
-                        value={opt}
-                      >
-                        {({ selected }) => (
-                          <>
-                            <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
-                              {opt.label}
-                            </span>
-                            {selected && (
-                              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
-                                <CheckIcon className="h-5 w-5" />
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </SharedListboxOption>
-                    ))}
-                  </SharedListboxOptions>
-                </Transition>
-              </Listbox>
+              />
             </Field>
             <Field label="Default model" hint="Pre-selected for users picking this provider.">
               <div className="space-y-2">
-                <Listbox
-                  value={selectedModelId}
-                  onChange={(modelId: string) => {
-                    if (modelId === 'custom') {
+                <Select
+                  value={selectedModelDefinition}
+                  options={modelDefinitions}
+                  getOptionKey={(model) => model.id}
+                  renderValue={(model) => model.name}
+                  renderOption={(model, { selected }) => (
+                    <span className={`block ${selected ? 'font-medium' : 'font-normal'}`}>
+                      <span className="block truncate">{model.name}</span>
+                      {model.id.includes(':') ? (
+                        <span className="block truncate text-xs text-muted">
+                          {model.id.slice(model.id.indexOf(':'))}
+                        </span>
+                      ) : null}
+                    </span>
+                  )}
+                  placeholder="Select model"
+                  chevronClassName="h-4 w-4 text-muted"
+                  onChange={(model) => {
+                    if (model.id === 'custom') {
                       const nextModel = customModelInput.trim();
                       setForm({
                         ...form,
@@ -476,54 +462,12 @@ export function AdminProvidersPanel() {
                     }
                     setForm({
                       ...form,
-                      defaultModel: modelId,
-                      defaultInstructions: modelSupportsInstructions(modelId) ? form.defaultInstructions : '',
+                      defaultModel: model.id,
+                      defaultInstructions: modelSupportsInstructions(model.id) ? form.defaultInstructions : '',
                     });
                     setCustomModelInput('');
                   }}
-                >
-                <SharedListboxButton>
-                  <span className="block truncate">
-                    {selectedModelDefinition?.name ?? 'Select model'}
-                  </span>
-                    <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                      <ChevronUpDownIcon className="h-4 w-4 text-muted" />
-                    </span>
-                  </SharedListboxButton>
-                  <Transition
-                    as={Fragment}
-                    leave="transition ease-in duration-100"
-                    leaveFrom="opacity-100"
-                    leaveTo="opacity-0"
-                  >
-                    <SharedListboxOptions anchor="bottom start">
-                      {modelDefinitions.map((model) => (
-                        <SharedListboxOption
-                          key={model.id}
-                          value={model.id}
-                        >
-                          {({ selected }) => (
-                            <>
-                              <span className={`block ${selected ? 'font-medium' : 'font-normal'}`}>
-                                <span className="block truncate">{model.name}</span>
-                                {model.id.includes(':') && (
-                                  <span className="block truncate text-xs text-muted">
-                                    {model.id.slice(model.id.indexOf(':'))}
-                                  </span>
-                                )}
-                              </span>
-                              {selected && (
-                                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
-                                  <CheckIcon className="h-5 w-5" />
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </SharedListboxOption>
-                      ))}
-                    </SharedListboxOptions>
-                  </Transition>
-                </Listbox>
+                />
                 {supportsCustomModel && selectedModelId === 'custom' && (
                   <Input
                     type="text"
@@ -538,7 +482,6 @@ export function AdminProvidersPanel() {
                       });
                     }}
                     placeholder="Enter custom model id"
-                    className={inputClass}
                   />
                 )}
               </div>
@@ -549,11 +492,11 @@ export function AdminProvidersPanel() {
                 className="sm:col-span-2"
                 hint="Optional. Applied by default when this shared provider is selected."
               >
-                <textarea
+                <Textarea
                   value={form.defaultInstructions}
                   onChange={(e) => setForm({ ...form, defaultInstructions: e.target.value })}
                   placeholder="Enter instructions for this model"
-                  className={`${inputClass} min-h-24 resize-y`}
+                  className="min-h-24 resize-y"
                 />
               </Field>
             )}
@@ -564,7 +507,6 @@ export function AdminProvidersPanel() {
                   value={form.baseUrl}
                   onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
                   placeholder={baseUrlPlaceholder}
-                  className={inputClass}
                 />
               </Field>
             )}
@@ -578,7 +520,6 @@ export function AdminProvidersPanel() {
                 value={form.apiKey}
                 onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
                 placeholder={isEditingExisting ? `keep existing (${editingProvider?.apiKeyMask ?? ''})` : 'Optional'}
-                className={inputClass}
               />
             </Field>
           </div>
@@ -639,8 +580,8 @@ export function AdminProvidersPanel() {
                     {p.baseUrl ? p.baseUrl : 'provider base URL default'} · key {p.apiKeyMask}
                   </div>
                 </div>
-                <Menu as="div" className="relative shrink-0">
-                  <MenuButton
+                <MenuRoot as="div" className="relative shrink-0">
+                  <MenuTrigger
                     as={IconButton}
                     tone="surface"
                     size="sm"
@@ -649,16 +590,8 @@ export function AdminProvidersPanel() {
                     disabled={!!editingId || deleteMutation.isPending || toggleEnabledMutation.isPending || setDefaultMutation.isPending}
                   >
                     <DotsHorizontalIcon className="h-3 w-4" />
-                  </MenuButton>
-                  <Transition
-                    as={Fragment}
-                    enter="transition ease-out duration-100"
-                    enterFrom="transform opacity-0 scale-95"
-                    enterTo="transform opacity-100 scale-100"
-                    leave="transition ease-in duration-75"
-                    leaveFrom="transform opacity-100 scale-100"
-                    leaveTo="transform opacity-0 scale-95"
-                  >
+                  </MenuTrigger>
+                  <MenuTransition>
                     <MenuItemsSurface
                       anchor="bottom end"
                       className="z-50 mt-2 min-w-[170px] bg-base focus:outline-none"
@@ -679,8 +612,8 @@ export function AdminProvidersPanel() {
                         Delete
                       </MenuActionItem>
                     </MenuItemsSurface>
-                  </Transition>
-                </Menu>
+                  </MenuTransition>
+                </MenuRoot>
               </div>
             </div>
           ))

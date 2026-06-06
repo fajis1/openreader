@@ -432,7 +432,8 @@ export async function POST(request: NextRequest) {
         normalizedExistingSettings.nativeSpeed !== normalizedIncomingSettings.nativeSpeed ||
         normalizedExistingSettings.postSpeed !== normalizedIncomingSettings.postSpeed ||
         normalizedExistingSettings.format !== normalizedIncomingSettings.format ||
-        (normalizedExistingSettings.ttsInstructions || '') !== (normalizedIncomingSettings.ttsInstructions || '');
+        (normalizedExistingSettings.ttsInstructions || '') !== (normalizedIncomingSettings.ttsInstructions || '') ||
+        (normalizedExistingSettings.language || '') !== (normalizedIncomingSettings.language || '');
       if (mismatch) {
         return NextResponse.json({ error: 'Audiobook settings mismatch', settings: normalizedExistingSettings }, { status: 409 });
       }
@@ -596,6 +597,7 @@ export async function POST(request: NextRequest) {
         format: 'mp3',
         model,
         instructions,
+        language: mergedSettings?.language,
         provider,
         apiKey: openApiKey,
         baseUrl: openApiBaseUrl,

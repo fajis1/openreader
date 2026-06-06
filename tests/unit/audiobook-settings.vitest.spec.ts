@@ -15,6 +15,7 @@ describe('coerceAudiobookGenerationSettings', () => {
       postSpeed: 1,
       format: 'mp3',
       ttsInstructions: 'keep calm',
+      language: 'ja-jp',
     });
 
     expect(result.migrated).toBe(false);
@@ -27,6 +28,7 @@ describe('coerceAudiobookGenerationSettings', () => {
       postSpeed: 1,
       format: 'mp3',
       ttsInstructions: 'keep calm',
+      language: 'ja-JP',
     });
   });
 
@@ -93,6 +95,7 @@ describe('coerceAudiobookGenerationSettings', () => {
         postSpeed: 1,
         format: 'mp3',
         ttsInstructions: '',
+        language: 'en',
       },
       restrictUserApiKeys: true,
       fallbackProviderRef: 'shared-openai',
@@ -111,5 +114,6 @@ describe('coerceAudiobookGenerationSettings', () => {
     expect(settings.providerType).toBe('openai');
     expect(settings.ttsModel).toBe('gpt-4o-mini-tts');
     expect(settings.ttsInstructions).toBe('Speak with warmth.');
+    expect(settings.language).toBe('en');
   });
 });

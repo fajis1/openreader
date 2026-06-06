@@ -4,8 +4,9 @@ import {
   Listbox,
 } from '@headlessui/react';
 import { ChevronUpDownIcon, AudioWaveIcon, CheckIcon } from '@/components/icons/Icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { buildKokoroVoiceString, parseKokoroVoiceNames } from '@/lib/shared/kokoro';
+import { keepKokoroVoicesInOneLanguage } from '@/lib/shared/language';
 import { type TtsProviderType } from '@/lib/shared/tts-provider-catalog';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import { SharedListboxButton, SharedListboxOption, SharedListboxOptions, cn } from '@/components/ui';
@@ -55,10 +56,15 @@ export function VoicesControlBase({
   const isKokoro = providerModelPolicy.isKokoroModel;
   const maxVoices = providerModelPolicy.maxVoices;
 
-  const [selectedVoices, setSelectedVoices] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (!(isKokoro && maxVoices > 1)) return;
+  // Selected voices are derived from the `voice` prop for display only. The
+  // control is fully controlled: it never writes back to config as a side
+  // effect, only in direct response to a user selection (see onChange below).
+  // A write-back effect here would re-fire during the availableVoices refetch
+  // churn that a voice change triggers and, under a slow/contended backend,
+  // push a transiently-collapsed selection back as the voice — resetting it to
+  // the first option.
+  const selectedVoices = useMemo(() => {
+    if (!(isKokoro && maxVoices > 1)) return [];
     let initial: string[] = [];
     if (voice && voice.includes('+')) {
       initial = parseKokoroVoiceNames(voice);
@@ -70,7 +76,7 @@ export function VoicesControlBase({
     if (initial.length > maxVoices) {
       initial = initial.slice(0, maxVoices);
     }
-    setSelectedVoices(initial);
+    return keepKokoroVoicesInOneLanguage(initial);
   }, [isKokoro, maxVoices, voice, availableVoices]);
 
   const currentVoice = useMemo(() => {
@@ -101,19 +107,22 @@ export function VoicesControlBase({
           onChange={(vals: string[]) => {
             if (!vals || vals.length === 0) return;
 
-            let next = vals;
-            if (vals.length > maxVoices) {
-              const newlyAdded = vals.find((v) => !selectedVoices.includes(v));
+            const newlyAdded = vals.find((v) => !selectedVoices.includes(v));
+            let next = keepKokoroVoicesInOneLanguage(vals, newlyAdded);
+            if (next.length > maxVoices) {
               if (newlyAdded) {
-                const lastPrev = selectedVoices[selectedVoices.length - 1] ?? selectedVoices[0] ?? '';
-                const pair = Array.from(new Set([lastPrev, newlyAdded])).filter(Boolean);
-                next = pair.slice(0, maxVoices);
+                const compatiblePrevious = selectedVoices.filter(
+                  (voiceId) => voiceId !== newlyAdded && next.includes(voiceId),
+                );
+                next = [
+                  ...compatiblePrevious.slice(-(maxVoices - 1)),
+                  newlyAdded,
+                ];
               } else {
-                next = vals.slice(-maxVoices);
+                next = next.slice(-maxVoices);
               }
             }
 
-            setSelectedVoices(next);
             const combined = buildKokoroVoiceString(next);
             if (combined) {
               onChangeVoice(combined);

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useConfig, ViewType } from '@/contexts/ConfigContext';
+import { useTTS } from '@/contexts/TTSContext';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import {
   SEGMENT_PRELOAD_DEPTH_MIN,
@@ -15,10 +16,19 @@ import {
   clampSegmentPreloadSentenceLookahead,
   clampTtsSegmentMaxBlockLength,
 } from '@/types/config';
-import { IconButton, RangeInput, Section, ToggleRow, CheckItem, SegmentedControl } from '@/components/ui';
+import {
+  IconButton,
+  RangeInput,
+  Section,
+  ToggleRow,
+  CheckItem,
+  SegmentedControl,
+  Select,
+} from '@/components/ui';
 import { RefreshIcon, SparkleIcon } from '@/components/icons/Icons';
 import type { ParsedPdfBlockKind, PdfParseStatus } from '@/types/parsed-pdf';
 import { isForceReparseDisabled } from '@/lib/client/pdf/force-reparse';
+import { getLanguageDisplayName, getTtsLanguageCompatibilityWarnings } from '@/lib/shared/language';
 
 const PDF_SKIP_KIND_OPTIONS: Array<{ kind: ParsedPdfBlockKind; label: string }> = [
   { kind: 'header', label: 'Header' },
@@ -48,6 +58,20 @@ const viewTypeTextMapping = [
   { id: 'single', name: 'Single Page' },
   { id: 'dual', name: 'Two Pages' },
   { id: 'scroll', name: 'Continuous Scroll' },
+];
+
+const DOCUMENT_LANGUAGE_OPTIONS = [
+  { value: 'auto', label: 'Automatic (voice or metadata)' },
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'fr', label: 'French' },
+  { value: 'hi', label: 'Hindi' },
+  { value: 'it', label: 'Italian' },
+  { value: 'ja', label: 'Japanese' },
+  { value: 'pt-BR', label: 'Portuguese (Brazil)' },
+  { value: 'zh-CN', label: 'Chinese (Simplified)' },
+  { value: 'ar', label: 'Arabic' },
+  { value: 'th', label: 'Thai' },
 ];
 
 type RangeSettingProps = {
@@ -92,11 +116,14 @@ function RangeSetting({
   );
 }
 
-export function DocumentSettings({ isOpen, setIsOpen, epub, html, pdf }: {
+export function DocumentSettings({ isOpen, setIsOpen, epub, html, language, detectedLanguage, onLanguageChange, pdf }: {
   isOpen: boolean,
   setIsOpen: (isOpen: boolean) => void,
   epub?: boolean,
   html?: boolean,
+  language?: string,
+  detectedLanguage?: string | null,
+  onLanguageChange?: (language: string) => void,
   pdf?: {
     parseStatus: PdfParseStatus | null;
     parsedOverlayEnabled: boolean;
@@ -121,7 +148,16 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, pdf }: {
     epubWordHighlightEnabled,
     htmlHighlightEnabled,
     htmlWordHighlightEnabled,
+    ttsModel,
   } = useConfig();
+  const { voice, resolvedLanguage } = useTTS();
+  const languageWarnings = getTtsLanguageCompatibilityWarnings({
+    model: ttsModel,
+    voice,
+    documentLanguage: resolvedLanguage,
+  });
+  const selectedLanguage = DOCUMENT_LANGUAGE_OPTIONS.find((option) => option.value === language)
+    ?? DOCUMENT_LANGUAGE_OPTIONS[0];
   const selectedView = viewTypeTextMapping.find(v => v.id === viewType) || viewTypeTextMapping[0];
   const isPdfMode = !epub && !html && !!pdf;
   const [localPreloadDepth, setLocalPreloadDepth] = useState(segmentPreloadDepthPages);
@@ -151,6 +187,34 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html, pdf }: {
       panelClassName="w-full sm:w-[30rem]"
     >
       <div className="space-y-4">
+        {language && onLanguageChange ? (
+          <Section
+            title="Language"
+            subtitle="Controls sentence splitting and synchronized word alignment."
+            variant="flat"
+          >
+            <div className="space-y-1.5">
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Document language
+              </span>
+              <Select
+                value={selectedLanguage}
+                onChange={(option) => onLanguageChange(option.value)}
+                options={DOCUMENT_LANGUAGE_OPTIONS}
+              />
+            </div>
+            {language === 'auto' && detectedLanguage ? (
+              <p className="text-xs text-soft">
+                Detected from document metadata: {getLanguageDisplayName(detectedLanguage)}
+              </p>
+            ) : null}
+            {languageWarnings.map((warning) => (
+              <p key={warning} className="text-xs text-warning">
+                {warning}
+              </p>
+            ))}
+          </Section>
+        ) : null}
         {isPdfMode && pdf && (
           <Section
             title="PDF Essentials"

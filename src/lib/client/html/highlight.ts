@@ -11,13 +11,18 @@
  *    sentence
  *  - `WORD` — saturated background on the currently-spoken word
  *
- * Word-to-DOM alignment is done via Needleman-Wunsch (same approach the PDF
- * reader uses) so DOM token counts that diverge from whisper's word count
- * still produce a smooth, monotonic word highlight rather than a proportional
- * approximation that snaps around when the counts disagree.
+ * Word-to-DOM alignment uses the shared viewer token-range mapper so DOM token
+ * counts that diverge from the timed alignment still produce a smooth,
+ * monotonic highlight across languages.
  */
-import { CmpStr } from 'cmpstr';
 import type { TTSSentenceAlignment } from '@/types/tts';
+import { segmentWords } from '@/lib/shared/language';
+import {
+  buildAlignmentTokenRanges,
+  findBestHighlightTokenMatch,
+  normalizeHighlightToken,
+  type HighlightTokenRange,
+} from '@/lib/client/highlight-token-alignment';
 
 export const HTML_SENTENCE_CLASS = 'openreader-html-highlight-sentence';
 export const HTML_WORD_CLASS = 'openreader-html-highlight-word';
@@ -28,8 +33,6 @@ interface DomToken {
   endOffset: number;
   norm: string;
 }
-
-const cmp = CmpStr.create().setMetric('dice').setFlags('itw');
 
 let sentenceWraps: HTMLSpanElement[] = [];
 let wordWraps: HTMLSpanElement[] = [];
@@ -45,29 +48,19 @@ interface SentenceState {
   // is in place. Stable across word wrap/unwrap cycles because clear() calls
   // `parent.normalize()` which restores the original text-node structure.
   wordTokens: DomToken[];
-  // For an alignment we've already seen, the cached wordIndex → tokenIndex map.
+  // For an alignment we've already seen, the cached wordIndex → token range map.
   alignment: TTSSentenceAlignment | null;
-  wordToToken: number[] | null;
+  wordToTokenRange: Array<HighlightTokenRange | null> | null;
 }
 
 let sentenceState: SentenceState | null = null;
 
 function normalizeWord(word: string): string {
-  return word
-    .toLowerCase()
-    .replace(/[\p{P}\p{S}]+/gu, '')
-    .trim();
+  return normalizeHighlightToken(word);
 }
 
-function tokenizePattern(pattern: string): string[] {
-  const out: string[] = [];
-  const wordRe = /\S+/g;
-  let m: RegExpExecArray | null;
-  while ((m = wordRe.exec(pattern)) !== null) {
-    const norm = normalizeWord(m[0]);
-    if (norm) out.push(norm);
-  }
-  return out;
+function tokenizePattern(pattern: string, language?: string): string[] {
+  return segmentWords(pattern, language).map((token) => normalizeWord(token.text)).filter(Boolean);
 }
 
 function unwrap(span: HTMLSpanElement): void {
@@ -108,7 +101,11 @@ function isHighlightWrapper(node: Node | null): node is HTMLSpanElement {
   return el.classList.contains(HTML_SENTENCE_CLASS) || el.classList.contains(HTML_WORD_CLASS);
 }
 
-function collectDomTokens(root: HTMLElement, opts: { skipHighlightWraps: boolean } = { skipHighlightWraps: true }): DomToken[] {
+function collectDomTokens(
+  root: HTMLElement,
+  language?: string,
+  opts: { skipHighlightWraps: boolean } = { skipHighlightWraps: true },
+): DomToken[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement;
@@ -131,15 +128,13 @@ function collectDomTokens(root: HTMLElement, opts: { skipHighlightWraps: boolean
   while (current) {
     const textNode = current as Text;
     const text = textNode.nodeValue || '';
-    const wordRe = /\S+/g;
-    let m: RegExpExecArray | null;
-    while ((m = wordRe.exec(text)) !== null) {
-      const norm = normalizeWord(m[0]);
+    for (const token of segmentWords(text, language)) {
+      const norm = normalizeWord(token.text);
       if (!norm) continue;
       tokens.push({
         textNode,
-        startOffset: m.index,
-        endOffset: m.index + m[0].length,
+        startOffset: token.start,
+        endOffset: token.end,
         norm,
       });
     }
@@ -153,7 +148,7 @@ function collectDomTokens(root: HTMLElement, opts: { skipHighlightWraps: boolean
  * wrap is applied; lets us index just the words *within* the highlighted
  * sentence rather than the whole document).
  */
-function collectTokensInsideWraps(wraps: HTMLSpanElement[]): DomToken[] {
+function collectTokensInsideWraps(wraps: HTMLSpanElement[], language?: string): DomToken[] {
   const tokens: DomToken[] = [];
   for (const wrap of wraps) {
     const walker = document.createTreeWalker(wrap, NodeFilter.SHOW_TEXT);
@@ -161,15 +156,13 @@ function collectTokensInsideWraps(wraps: HTMLSpanElement[]): DomToken[] {
     while (current) {
       const t = current as Text;
       const text = t.nodeValue || '';
-      const wordRe = /\S+/g;
-      let m: RegExpExecArray | null;
-      while ((m = wordRe.exec(text)) !== null) {
-        const norm = normalizeWord(m[0]);
+      for (const token of segmentWords(text, language)) {
+        const norm = normalizeWord(token.text);
         if (!norm) continue;
         tokens.push({
           textNode: t,
-          startOffset: m.index,
-          endOffset: m.index + m[0].length,
+          startOffset: token.start,
+          endOffset: token.end,
           norm,
         });
       }
@@ -180,43 +173,9 @@ function collectTokensInsideWraps(wraps: HTMLSpanElement[]): DomToken[] {
 }
 
 function findBestWindow(tokens: DomToken[], patternTokens: string[]): { start: number; end: number } | null {
-  if (!tokens.length || !patternTokens.length) return null;
-  const pLen = patternTokens.length;
-
-  let bestStart = -1;
-  let bestEnd = -1;
-  let bestScore = 0;
-
-  for (let i = 0; i + Math.max(1, Math.ceil(pLen * 0.5)) - 1 < tokens.length; i += 1) {
-    if (tokens[i].norm !== patternTokens[0]) continue;
-    let matches = 1;
-    let domCursor = i + 1;
-    for (let p = 1; p < pLen && domCursor < tokens.length; p += 1) {
-      let stepped = false;
-      for (let k = 0; k < 3 && domCursor + k < tokens.length; k += 1) {
-        if (tokens[domCursor + k].norm === patternTokens[p]) {
-          matches += 1;
-          domCursor += k + 1;
-          stepped = true;
-          break;
-        }
-      }
-      if (!stepped) domCursor += 1;
-    }
-    const end = Math.min(tokens.length - 1, domCursor - 1);
-    const score = matches / pLen;
-    if (score > bestScore) {
-      bestScore = score;
-      bestStart = i;
-      bestEnd = end;
-      if (score >= 0.95) break;
-    }
-  }
-
-  if (bestScore >= 0.5 && bestStart !== -1) {
-    return { start: bestStart, end: bestEnd };
-  }
-  return null;
+  const match = findBestHighlightTokenMatch(patternTokens, tokens.map((token) => token.norm));
+  if (match.start === -1 || match.rating < 0.5) return null;
+  return { start: match.start, end: match.end };
 }
 
 function wrapTokenRange(tokens: DomToken[], start: number, end: number, className: string): HTMLSpanElement[] {
@@ -260,14 +219,15 @@ function wrapTokenRange(tokens: DomToken[], start: number, end: number, classNam
 export function highlightHtmlSentence(
   container: HTMLElement | null | undefined,
   sentence: string | null | undefined,
+  language?: string,
 ): boolean {
   clearHtmlSentenceHighlight();
   if (!container || !sentence?.trim()) return false;
 
-  const patternTokens = tokenizePattern(sentence);
+  const patternTokens = tokenizePattern(sentence, language);
   if (!patternTokens.length) return false;
 
-  const domTokens = collectDomTokens(container);
+  const domTokens = collectDomTokens(container, language);
   if (!domTokens.length) return false;
 
   const win = findBestWindow(domTokens, patternTokens);
@@ -280,116 +240,11 @@ export function highlightHtmlSentence(
   // can look up individual word tokens without re-walking the doc.
   sentenceState = {
     sentence,
-    wordTokens: collectTokensInsideWraps(sentenceWraps),
+    wordTokens: collectTokensInsideWraps(sentenceWraps, language),
     alignment: null,
-    wordToToken: null,
+    wordToTokenRange: null,
   };
   return true;
-}
-
-/**
- * Build a wordIndex → tokenIndex map via Needleman-Wunsch alignment between
- * whisper's word list and the DOM tokens inside the sentence. Mirrors the
- * approach in `src/lib/client/pdf.ts#highlightWordIndex` so PDF and HTML
- * highlights behave the same way under count mismatches (contractions,
- * stripped punctuation, missing whitespace, etc.).
- */
-function buildAlignmentMap(
-  alignment: TTSSentenceAlignment,
-  domTokens: DomToken[],
-): number[] {
-  const words = alignment.words || [];
-  const wordToToken = new Array<number>(words.length).fill(-1);
-
-  const domFiltered: { tokenIndex: number; norm: string }[] = [];
-  for (let i = 0; i < domTokens.length; i += 1) {
-    const norm = domTokens[i].norm;
-    if (norm) domFiltered.push({ tokenIndex: i, norm });
-  }
-
-  const ttsFiltered: { wordIndex: number; norm: string }[] = [];
-  for (let i = 0; i < words.length; i += 1) {
-    const norm = normalizeWord(words[i].text);
-    if (norm) ttsFiltered.push({ wordIndex: i, norm });
-  }
-
-  const m = domFiltered.length;
-  const n = ttsFiltered.length;
-  if (!m || !n) return wordToToken;
-
-  const dp: number[][] = Array.from({ length: m + 1 }, () =>
-    new Array<number>(n + 1).fill(Number.POSITIVE_INFINITY),
-  );
-  const bt: number[][] = Array.from({ length: m + 1 }, () =>
-    new Array<number>(n + 1).fill(0),
-  ); // 0=diag (substitute), 1=up (skip dom), 2=left (skip tts)
-
-  dp[0][0] = 0;
-  const GAP_COST = 0.7;
-
-  for (let i = 0; i <= m; i += 1) {
-    for (let j = 0; j <= n; j += 1) {
-      if (i > 0 && j > 0) {
-        const a = domFiltered[i - 1].norm;
-        const b = ttsFiltered[j - 1].norm;
-        const sim = a === b ? 1 : cmp.compare(a, b);
-        const cand = dp[i - 1][j - 1] + (1 - sim);
-        if (cand < dp[i][j]) {
-          dp[i][j] = cand;
-          bt[i][j] = 0;
-        }
-      }
-      if (i > 0) {
-        const cand = dp[i - 1][j] + GAP_COST;
-        if (cand < dp[i][j]) {
-          dp[i][j] = cand;
-          bt[i][j] = 1;
-        }
-      }
-      if (j > 0) {
-        const cand = dp[i][j - 1] + GAP_COST;
-        if (cand < dp[i][j]) {
-          dp[i][j] = cand;
-          bt[i][j] = 2;
-        }
-      }
-    }
-  }
-
-  let i = m;
-  let j = n;
-  while (i > 0 || j > 0) {
-    const move = bt[i][j];
-    if (i > 0 && j > 0 && move === 0) {
-      const domIdx = domFiltered[i - 1].tokenIndex;
-      const ttsIdx = ttsFiltered[j - 1].wordIndex;
-      if (wordToToken[ttsIdx] === -1) wordToToken[ttsIdx] = domIdx;
-      i -= 1;
-      j -= 1;
-    } else if (i > 0 && (move === 1 || j === 0)) {
-      i -= 1;
-    } else if (j > 0 && (move === 2 || i === 0)) {
-      j -= 1;
-    } else {
-      break;
-    }
-  }
-
-  // Forward-fill, then backward-fill, so every wordIndex has a nearest known
-  // DOM token. This keeps the word highlight stable when whisper emits a
-  // word that didn't survive normalization (e.g. an apostrophe-only token).
-  let lastSeen = -1;
-  for (let k = 0; k < wordToToken.length; k += 1) {
-    if (wordToToken[k] !== -1) lastSeen = wordToToken[k];
-    else if (lastSeen !== -1) wordToToken[k] = lastSeen;
-  }
-  let nextSeen = -1;
-  for (let k = wordToToken.length - 1; k >= 0; k -= 1) {
-    if (wordToToken[k] !== -1) nextSeen = wordToToken[k];
-    else if (nextSeen !== -1) wordToToken[k] = nextSeen;
-  }
-
-  return wordToToken;
 }
 
 export function highlightHtmlWord(
@@ -411,16 +266,20 @@ export function highlightHtmlWord(
   if (!words.length || wordIndex >= words.length) return false;
 
   // (Re)build the alignment map when this is a new alignment object.
-  if (sentenceState.alignment !== alignment || !sentenceState.wordToToken) {
+  if (sentenceState.alignment !== alignment || !sentenceState.wordToTokenRange) {
     sentenceState.alignment = alignment;
-    sentenceState.wordToToken = buildAlignmentMap(alignment, sentenceState.wordTokens);
+    sentenceState.wordToTokenRange = buildAlignmentTokenRanges(
+      alignment.words,
+      sentenceState.wordTokens.map((token) => token.norm),
+      { fillGaps: true },
+    );
   }
 
-  const tokenIndex = sentenceState.wordToToken[wordIndex];
-  if (tokenIndex === undefined || tokenIndex < 0) return false;
-  if (tokenIndex >= sentenceState.wordTokens.length) return false;
+  const tokenRange = sentenceState.wordToTokenRange[wordIndex];
+  if (!tokenRange) return false;
+  if (tokenRange.start < 0 || tokenRange.end >= sentenceState.wordTokens.length) return false;
 
-  wordWraps = wrapTokenRange(sentenceState.wordTokens, tokenIndex, tokenIndex, HTML_WORD_CLASS);
+  wordWraps = wrapTokenRange(sentenceState.wordTokens, tokenRange.start, tokenRange.end, HTML_WORD_CLASS);
   return wordWraps.length > 0;
 }
 

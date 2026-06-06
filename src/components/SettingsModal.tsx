@@ -1,14 +1,10 @@
 'use client';
 
 import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  Transition,
-  Listbox,
-} from '@headlessui/react';
 import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useConfig } from '@/contexts/ConfigContext';
-import { ChevronUpDownIcon, CheckIcon, SettingsIcon, KeyIcon, PaletteIcon, DocumentIcon, UserIcon, DownloadIcon, ChevronRightIcon } from '@/components/icons/Icons';
+import { CheckIcon, SettingsIcon, KeyIcon, PaletteIcon, DocumentIcon, UserIcon, DownloadIcon, ChevronRightIcon } from '@/components/icons/Icons';
 import { useDocuments } from '@/contexts/DocumentContext';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ProgressPopup } from '@/components/ProgressPopup';
@@ -50,12 +46,10 @@ import {
   ChoiceTile,
   IconButton,
   Input,
+  Textarea,
   ModalFrame,
   ModalTitle,
-  inputClass,
-  SharedListboxButton,
-  SharedListboxOption,
-  SharedListboxOptions,
+  Select,
 } from '@/components/ui';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -654,8 +648,16 @@ export function SettingsModal({
                                 User API keys are restricted and no shared provider is configured. Ask an admin to add one.
                               </p>
                             ) : (
-                              <Listbox
+                              <Select
                                 value={selectedProviderOption!}
+                                options={ttsProviders}
+                                getOptionKey={(provider) => provider.id}
+                                renderValue={(provider) => provider.name}
+                                renderOption={(provider, { selected }) => (
+                                  <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
+                                    {provider.name}
+                                  </span>
+                                )}
                                 onChange={(provider) => {
                                   const defaults = resolveProviderDefaults({
                                     providerRef: provider.id,
@@ -675,46 +677,7 @@ export function SettingsModal({
                                   }
                                   setCustomModelInput('');
                                 }}
-                              >
-                                <SharedListboxButton>
-                                  <span className="block truncate">
-                                    {selectedProviderOption?.name || 'Select Provider'}
-                                  </span>
-                                  <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                                    <ChevronUpDownIcon className="h-5 w-5 text-soft" />
-                                  </span>
-                                </SharedListboxButton>
-                                <Transition
-                                  as={Fragment}
-                                  leave="transition ease-standard duration-fast"
-                                  leaveFrom="opacity-100"
-                                  leaveTo="opacity-0"
-                                >
-                                  <SharedListboxOptions
-                                    anchor="bottom start"
-                                  >
-                                    {ttsProviders.map((provider) => (
-                                      <SharedListboxOption
-                                        key={provider.id}
-                                        value={provider}
-                                      >
-                                        {({ selected }) => (
-                                          <>
-                                            <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
-                                              {provider.name}
-                                            </span>
-                                            {selected && (
-                                              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
-                                                <CheckIcon className="h-5 w-5" />
-                                              </span>
-                                            )}
-                                          </>
-                                        )}
-                                      </SharedListboxOption>
-                                    ))}
-                                  </SharedListboxOptions>
-                                </Transition>
-                              </Listbox>
+                              />
                             )}
                           </div>
                           {restrictUserApiKeys && (
@@ -734,7 +697,6 @@ export function SettingsModal({
                                 value={localBaseUrl}
                                 onChange={(e) => handleInputChange('baseUrl', e.target.value)}
                                 placeholder="Using environment variable"
-                                className={inputClass}
                               />
                             </div>
                           )}
@@ -750,7 +712,6 @@ export function SettingsModal({
                                 value={localApiKey}
                                 onChange={(e) => handleInputChange('apiKey', e.target.value)}
                                 placeholder="Using environment variable"
-                                className={inputClass}
                               />
                             </div>
                           )}
@@ -768,8 +729,30 @@ export function SettingsModal({
                               </p>
                             )}
                             <div className="flex flex-col gap-2">
-                              <Listbox
-                                value={ttsModels.find(m => m.id === selectedModelId) || ttsModels[0]}
+                              <Select
+                                value={selectedModel}
+                                options={ttsModels}
+                                getOptionKey={(model) => model.id}
+                                renderValue={(model) => (
+                                  <span className="block">
+                                    <span className="block truncate">{model.name}</span>
+                                    {selectedModelVersion ? (
+                                      <span className="block truncate text-xs text-soft">
+                                        {selectedModelVersion}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                )}
+                                renderOption={(model, { selected }) => (
+                                  <span className={`block ${selected ? 'font-medium' : 'font-normal'}`}>
+                                    <span className="block truncate">{model.name}</span>
+                                    {model.id.includes(':') ? (
+                                      <span className="block truncate text-xs text-soft">
+                                        {model.id.slice(model.id.indexOf(':'))}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                )}
                                 onChange={(model) => {
                                   if (model.id === 'custom') {
                                     setModelValue(customModelInput);
@@ -778,62 +761,7 @@ export function SettingsModal({
                                     setCustomModelInput('');
                                   }
                                 }}
-                              >
-                                <SharedListboxButton>
-                                  {selectedModel ? (
-                                    <span className="block">
-                                      <span className="block truncate">
-                                        {selectedModel.name}
-                                      </span>
-                                      {selectedModelVersion && (
-                                        <span className="block truncate text-xs text-soft">
-                                          {selectedModelVersion}
-                                        </span>
-                                      )}
-                                    </span>
-                                  ) : (
-                                    <span className="block truncate">Select Model</span>
-                                  )}
-                                  <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                                    <ChevronUpDownIcon className="h-5 w-5 text-soft" />
-                                  </span>
-                                </SharedListboxButton>
-                                <Transition
-                                  as={Fragment}
-                                  leave="transition ease-standard duration-fast"
-                                  leaveFrom="opacity-100"
-                                  leaveTo="opacity-0"
-                                >
-                                  <SharedListboxOptions
-                                    anchor="bottom start"
-                                  >
-                                    {ttsModels.map((model) => (
-                                      <SharedListboxOption
-                                        key={model.id}
-                                        value={model}
-                                    >
-                                      {({ selected }) => (
-                                        <>
-                                          <span className={`block ${selected ? 'font-medium' : 'font-normal'}`}>
-                                            <span className="block truncate">{model.name}</span>
-                                            {model.id.includes(':') && (
-                                              <span className="block truncate text-xs text-soft">
-                                                {model.id.slice(model.id.indexOf(':'))}
-                                              </span>
-                                            )}
-                                          </span>
-                                          {selected && (
-                                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
-                                                <CheckIcon className="h-5 w-5" />
-                                              </span>
-                                            )}
-                                          </>
-                                        )}
-                                      </SharedListboxOption>
-                                    ))}
-                                  </SharedListboxOptions>
-                                </Transition>
-                              </Listbox>
+                              />
 
                               {supportsCustom && selectedModelId === 'custom' && (
                                 <Input
@@ -844,7 +772,6 @@ export function SettingsModal({
                                     setModelValue(e.target.value);
                                   }}
                                   placeholder="Enter custom model name"
-                                  className={inputClass}
                                 />
                               )}
                             </div>
@@ -853,11 +780,11 @@ export function SettingsModal({
                           {providerModelPolicy.supportsInstructions && (
                             <div className="space-y-1.5">
                               <label className={fieldLabelClass}>TTS Instructions</label>
-                              <textarea
+                              <Textarea
                                 value={localTTSInstructions}
                                 onChange={(e) => setLocalTTSInstructions(e.target.value)}
                                 placeholder="Enter instructions for the TTS model"
-                                className={`${inputClass} h-24 resize-none`}
+                                className="h-24 resize-none"
                               />
                             </div>
                           )}

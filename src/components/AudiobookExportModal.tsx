@@ -1,19 +1,19 @@
 'use client';
 
-import { Fragment, useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { Transition, Listbox, Menu, MenuButton } from '@headlessui/react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useTimeEstimation } from '@/hooks/useTimeEstimation';
 import { ProgressPopup } from '@/components/ProgressPopup';
 import { ProgressCard } from '@/components/ProgressCard';
-import { DownloadIcon, CheckCircleIcon, XCircleIcon, ClockIcon, ChevronUpDownIcon, RefreshIcon, DotsVerticalIcon } from '@/components/icons/Icons';
+import { DownloadIcon, CheckCircleIcon, XCircleIcon, ClockIcon, RefreshIcon, DotsVerticalIcon } from '@/components/icons/Icons';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTTS } from '@/contexts/TTSContext';
 import { VoicesControlBase } from '@/components/player/VoicesControlBase';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
+import { getTtsLanguageCompatibilityWarnings, resolveTtsLanguage } from '@/lib/shared/language';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
-import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, RangeInput, SharedListboxButton, SharedListboxOption, SharedListboxOptions } from '@/components/ui';
+import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, MenuRoot, MenuTransition, MenuTrigger, RangeInput, Select } from '@/components/ui';
 import { 
   getAudiobookStatus, 
   deleteAudiobookChapter, 
@@ -50,7 +50,7 @@ export function AudiobookExportModal({
   onRegenerateChapter
 }: AudiobookExportModalProps) {
   const { isLoading, isDBReady, providerRef, providerType, ttsModel, ttsInstructions, voice: configVoice, voiceSpeed, audioPlayerSpeed } = useConfig();
-  const { availableVoices } = useTTS();
+  const { availableVoices, documentLanguage } = useTTS();
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
   const [isGenerating, setIsGenerating] = useState(false);
   const [chapters, setChapters] = useState<TTSAudiobookChapter[]>([]);
@@ -125,8 +125,17 @@ export function AudiobookExportModal({
       postSpeed,
       format,
       ttsInstructions: providerModelPolicy.supportsInstructions ? ttsInstructions : undefined,
+      language: resolveTtsLanguage({
+        configuredLanguage: documentLanguage,
+        voice: nextVoice,
+      }),
     };
-  }, [savedSettings, audiobookVoice, configVoice, availableVoices, providerRef, providerType, ttsModel, ttsInstructions, effectiveNativeSpeed, postSpeed, format, providerModelPolicy.supportsInstructions]);
+  }, [savedSettings, audiobookVoice, configVoice, availableVoices, providerRef, providerType, ttsModel, ttsInstructions, effectiveNativeSpeed, postSpeed, format, providerModelPolicy.supportsInstructions, documentLanguage]);
+  const languageWarnings = useMemo(() => getTtsLanguageCompatibilityWarnings({
+    model: effectiveSettings?.ttsModel,
+    voice: effectiveSettings?.voice,
+    documentLanguage: effectiveSettings?.language,
+  }), [effectiveSettings]);
 
   const fetchExistingChapters = useCallback(async (soft: boolean = false) => {
     if (soft) {
@@ -555,56 +564,35 @@ export function AudiobookExportModal({
 			                                    <div className="space-y-1.5">
 			                                      <label className="text-[11px] uppercase tracking-wider font-medium text-soft">Format</label>
 			                                      {chapters.length === 0 ? (
-			                                        <Listbox
+			                                        <Select
 			                                          value={format}
 			                                          onChange={(newFormat) => setFormat(newFormat)}
+			                                          options={['m4b', 'mp3'] as const}
 			                                          disabled={chapters.length > 0 || settingsLocked}
-			                                        >
-			                                          <div className="relative">
-			                                            <SharedListboxButton className="bg-surface">
-			                                              <span className="block truncate text-sm font-medium">{format.toUpperCase()}</span>
-			                                              <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-			                                                <ChevronUpDownIcon className="h-4 w-4 text-soft" />
-			                                              </span>
-			                                            </SharedListboxButton>
-			                                            <Transition
-			                                              as={Fragment}
-			                                              leave="transition ease-standard duration-fast"
-			                                              leaveFrom="opacity-100"
-			                                              leaveTo="opacity-0"
-			                                            >
-			                                              <SharedListboxOptions className="absolute left-0 mt-1 w-full">
-			                                                <SharedListboxOption
-			                                                  value="m4b"
-			                                                  inset="none"
-			                                                  itemClassName="py-2"
-			                                                >
-			                                                  {({ selected }) => (
-			                                                    <span className={`block truncate text-sm ${selected ? 'font-medium' : 'font-normal'}`}>
-			                                                      M4B
-			                                                    </span>
-			                                                  )}
-			                                                </SharedListboxOption>
-			                                                <SharedListboxOption
-			                                                  value="mp3"
-			                                                  inset="none"
-			                                                  itemClassName="py-2"
-			                                                >
-			                                                  {({ selected }) => (
-			                                                    <span className={`block truncate text-sm ${selected ? 'font-medium' : 'font-normal'}`}>
-			                                                      MP3
-			                                                    </span>
-			                                                  )}
-			                                                </SharedListboxOption>
-			                                              </SharedListboxOptions>
-			                                            </Transition>
-			                                          </div>
-			                                        </Listbox>
+			                                          renderValue={(option) => (
+			                                            <span className="text-sm font-medium">{option.toUpperCase()}</span>
+			                                          )}
+			                                          renderOption={(option, { selected }) => (
+			                                            <span className={`block truncate text-sm ${selected ? 'font-medium' : 'font-normal'}`}>
+			                                              {option.toUpperCase()}
+			                                            </span>
+			                                          )}
+			                                          buttonClassName="bg-surface"
+			                                          chevronClassName="h-4 w-4 text-soft"
+			                                          optionInset="none"
+			                                          optionItemClassName="py-2"
+			                                          showCheckmark={false}
+			                                        />
 			                                      ) : (
 			                                        <div className="text-sm font-medium text-foreground py-1.5 pl-3">{format.toUpperCase()}</div>
 			                                      )}
 			                                    </div>
 			                                  </div>
+                                  {languageWarnings.map((warning) => (
+                                    <p key={warning} className="text-xs text-warning">
+                                      {warning}
+                                    </p>
+                                  ))}
 
                                   {/* Speed controls */}
                                   <Card className="p-3 space-y-3">
@@ -773,23 +761,15 @@ export function AudiobookExportModal({
                                   </div>
                                   <div className="flex items-center">
                                     {((onRegenerateChapter && !isGenerating) || chapter.status === 'completed') && (
-                                      <Menu as="div" className="relative inline-block text-left">
-                                        <MenuButton
+                                      <MenuRoot as="div" className="relative inline-block text-left">
+                                        <MenuTrigger
                                           as={IconButton}
                                           size="sm"
                                           title="Chapter actions"
                                         >
                                           <DotsVerticalIcon className="h-5 w-5" />
-                                        </MenuButton>
-                                        <Transition
-                                          as={Fragment}
-                                          enter="transition ease-standard duration-fast"
-                                          enterFrom="transform opacity-0 scale-95"
-                                          enterTo="transform opacity-100 scale-100"
-                                          leave="transition ease-standard duration-fast"
-                                          leaveFrom="transform opacity-100 scale-100"
-                                          leaveTo="transform opacity-0 scale-95"
-                                        >
+                                        </MenuTrigger>
+                                        <MenuTransition>
                                           <MenuItemsSurface
                                             anchor={{ to: 'bottom end', gap: '8px', padding: '12px' }}
                                             portal
@@ -833,8 +813,8 @@ export function AudiobookExportModal({
                                             )}
                                           </MenuItemsSurface>
                                           {/* end of menu items */}
-                                        </Transition>
-                                      </Menu>
+                                        </MenuTransition>
+                                      </MenuRoot>
                                     )}
                                   </div>
                                 </div>

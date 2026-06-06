@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import {
-  buildMonotonicWordToTokenMap,
+  resolveAlignmentWordSourceRange,
   tokenizeCanonicalSegment,
 } from '../../src/lib/client/epub/epub-word-highlight';
 import type { CanonicalTtsSegment } from '../../src/lib/shared/tts-segment-plan';
@@ -18,16 +18,46 @@ const segment = (text: string, offset = 0): CanonicalTtsSegment => ({
   spansSourceBoundary: false,
 });
 
-const alignmentWords = (words: string[]): TTSSentenceAlignment['words'] =>
-  words.map((word, index) => ({
-    text: word,
-    startSec: index,
-    endSec: index + 0.5,
-    charStart: 0,
-    charEnd: word.length,
-  }));
-
 describe('EPUB word highlight mapping', () => {
+  test('tokenizes Japanese and Chinese using locale-aware word boundaries', () => {
+    const japanese = tokenizeCanonicalSegment(segment('これは日本語です。', 5), 'ja');
+    expect(japanese.length).toBeGreaterThan(1);
+    expect(japanese.every((token) => token.norm.length > 0)).toBe(true);
+
+    const chinese = tokenizeCanonicalSegment(segment('这是中文。', 10), 'zh');
+    expect(chinese.length).toBeGreaterThan(1);
+    expect(chinese.map((token) => token.norm).join('')).toBe('这是中文');
+  });
+
+  test('resolves Japanese alignment chunks directly from character offsets', () => {
+    const japanese = segment('これは日本語です。', 25);
+    const word: TTSSentenceAlignment['words'][number] = {
+      text: 'これは',
+      startSec: 0,
+      endSec: 0.5,
+      charStart: 0,
+      charEnd: 3,
+    };
+
+    expect(resolveAlignmentWordSourceRange(japanese, word)).toEqual({
+      sourceStart: 25,
+      sourceEnd: 28,
+    });
+  });
+
+  test('rejects invalid alignment character offsets so token mapping can be used', () => {
+    const japanese = segment('これは日本語です。', 25);
+    const word: TTSSentenceAlignment['words'][number] = {
+      text: '範囲外',
+      startSec: 0,
+      endSec: 0.5,
+      charStart: 20,
+      charEnd: 23,
+    };
+
+    expect(resolveAlignmentWordSourceRange(japanese, word)).toBeNull();
+  });
+
   test('tokenizes canonical segment words with source offsets', () => {
     const tokens = tokenizeCanonicalSegment(segment('"Hello," she said.', 12));
 
@@ -38,23 +68,4 @@ describe('EPUB word highlight mapping', () => {
     ]);
   });
 
-  test('maps repeated words monotonically instead of jumping to later duplicates', () => {
-    const tokens = tokenizeCanonicalSegment(segment('the light and the shadow and the light returned'));
-    const map = buildMonotonicWordToTokenMap(
-      alignmentWords(['the', 'light', 'and', 'the', 'shadow', 'and', 'the', 'light', 'returned']),
-      tokens,
-    );
-
-    expect(map).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
-  });
-
-  test('leaves unmatched alignment words unhighlighted instead of borrowing a neighbor', () => {
-    const tokens = tokenizeCanonicalSegment(segment('alpha beta gamma'));
-    const map = buildMonotonicWordToTokenMap(
-      alignmentWords(['alpha', 'missing', 'gamma']),
-      tokens,
-    );
-
-    expect(map).toEqual([0, -1, 2]);
-  });
 });

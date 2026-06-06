@@ -4,11 +4,15 @@ import { useCallback, useEffect, type MutableRefObject, type RefObject } from 'r
 import type { Rendition } from 'epubjs';
 
 import {
-  buildMonotonicWordToTokenMap,
   buildWordHighlightCacheKey,
+  resolveAlignmentWordSourceRange,
   tokenizeCanonicalSegment,
   type EpubCanonicalWordToken,
 } from '@/lib/client/epub/epub-word-highlight';
+import {
+  buildAlignmentTokenRanges,
+  type HighlightTokenRange,
+} from '@/lib/client/highlight-token-alignment';
 import {
   createRangeFromMappedOffsets,
   resolveVisibleSegmentRange,
@@ -19,7 +23,7 @@ import type { TTSSentenceAlignment } from '@/types/tts';
 
 export type EpubWordHighlightMapCache = {
   key: string;
-  wordToToken: number[];
+  wordToTokenRange: Array<HighlightTokenRange | null>;
   tokens: EpubCanonicalWordToken[];
 };
 
@@ -30,6 +34,7 @@ type UseEpubHighlightingParams = {
   currentWordHighlightCfiRef: MutableRefObject<string | null>;
   renderedTextMapsRef: MutableRefObject<EpubRenderedTextMap[]>;
   wordHighlightMapCacheRef: MutableRefObject<EpubWordHighlightMapCache | null>;
+  language?: string;
 };
 
 type UseEpubHighlightingResult = {
@@ -52,6 +57,7 @@ export function useEPUBHighlighting({
   currentWordHighlightCfiRef,
   renderedTextMapsRef,
   wordHighlightMapCacheRef,
+  language,
 }: UseEpubHighlightingParams): UseEpubHighlightingResult {
   const clearWordHighlights = useCallback(() => {
     if (!renditionRef.current) return;
@@ -116,25 +122,68 @@ export function useEPUBHighlighting({
     const resolved = resolveVisibleSegmentRange(renderedTextMapsRef.current, segment);
     if (!resolved || segment.startAnchor.sourceKey !== resolved.map.sourceKey) return;
 
-    const cacheKey = buildWordHighlightCacheKey(segment, alignment);
+    const alignmentRange = resolveAlignmentWordSourceRange(segment, words[wordIndex]);
+    if (
+      alignmentRange
+      && alignmentRange.sourceStart >= resolved.startOffset
+      && alignmentRange.sourceEnd <= resolved.endOffset
+    ) {
+      const wordRange = createRangeFromMappedOffsets(
+        resolved.map,
+        alignmentRange.sourceStart,
+        alignmentRange.sourceEnd,
+      );
+      if (wordRange) {
+        try {
+          const wordCfi = resolved.map.content.cfiFromRange(wordRange);
+          currentWordHighlightCfiRef.current = wordCfi;
+          renditionRef.current.annotations.add(
+            'highlight',
+            wordCfi,
+            {},
+            () => { },
+            '',
+            {
+              fill: 'var(--accent)',
+              'fill-opacity': '0.4',
+              'mix-blend-mode': 'multiply',
+            }
+          );
+          return;
+        } catch (error) {
+          console.error('Error highlighting EPUB word from alignment offsets:', error);
+        }
+      }
+    }
+
+    const cacheKey = buildWordHighlightCacheKey(segment, alignment, language);
     if (wordHighlightMapCacheRef.current?.key !== cacheKey) {
-      const tokens = tokenizeCanonicalSegment(segment);
+      const tokens = tokenizeCanonicalSegment(segment, language);
       wordHighlightMapCacheRef.current = {
         key: cacheKey,
         tokens,
-        wordToToken: buildMonotonicWordToTokenMap(words, tokens),
+        wordToTokenRange: buildAlignmentTokenRanges(
+          words,
+          tokens.map((token) => token.norm),
+          { minimumSimilarity: 0.8 },
+        ),
       };
     }
 
     const cached = wordHighlightMapCacheRef.current;
-    const tokenIndex = cached.wordToToken[wordIndex] ?? -1;
-    if (tokenIndex < 0) return;
+    const tokenRange = cached.wordToTokenRange[wordIndex];
+    if (!tokenRange) return;
 
-    const token = cached.tokens[tokenIndex];
-    if (!token) return;
-    if (token.sourceStart < resolved.startOffset || token.sourceEnd > resolved.endOffset) return;
+    const firstToken = cached.tokens[tokenRange.start];
+    const lastToken = cached.tokens[tokenRange.end];
+    if (!firstToken || !lastToken) return;
+    if (firstToken.sourceStart < resolved.startOffset || lastToken.sourceEnd > resolved.endOffset) return;
 
-    const wordRange = createRangeFromMappedOffsets(resolved.map, token.sourceStart, token.sourceEnd);
+    const wordRange = createRangeFromMappedOffsets(
+      resolved.map,
+      firstToken.sourceStart,
+      lastToken.sourceEnd,
+    );
     if (!wordRange) return;
 
     try {
@@ -162,6 +211,7 @@ export function useEPUBHighlighting({
     renderedTextMapsRef,
     renditionRef,
     wordHighlightMapCacheRef,
+    language,
   ]);
 
   const setRenderedTextMaps = useCallback((maps: EpubRenderedTextMap[]) => {

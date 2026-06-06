@@ -44,6 +44,7 @@ import type {
 import type { AudiobookGenerationSettings, TTSSegmentLocator } from '@/types/client';
 import { isStableEpubLocator } from '@/types/client';
 import type { CanonicalTtsSegment } from '@/lib/shared/tts-segment-plan';
+import { normalizeOptionalLanguageTag } from '@/lib/shared/language';
 
 export interface EpubDocumentState {
   currDocData: ArrayBuffer | undefined;
@@ -51,6 +52,7 @@ export interface EpubDocumentState {
   currDocPages: number | undefined;
   currDocPage: number | string;
   currDocText: string | undefined;
+  metadataLanguage: string | null;
   isPlaybackReady: boolean;
   setCurrentDocument: (id: string) => Promise<void>;
   clearCurrDoc: () => void;
@@ -93,7 +95,16 @@ export interface EpubDocumentState {
  * Route-local EPUB reader hook.
  */
 export function useEpubDocument(documentId?: string): EpubDocumentState {
-  const { setText: setTTSText, currDocPage, currDocPages, setCurrDocPages, stop, skipToLocation, setIsEPUB } = useTTS();
+  const {
+    setText: setTTSText,
+    currDocPage,
+    currDocPages,
+    setCurrDocPages,
+    stop,
+    skipToLocation,
+    setIsEPUB,
+    resolvedLanguage,
+  } = useTTS();
   // Configuration context to get TTS settings
   const {
     apiKey,
@@ -107,6 +118,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
   const [currDocData, setCurrDocData] = useState<ArrayBuffer>();
   const [currDocName, setCurrDocName] = useState<string>();
   const [currDocText, setCurrDocText] = useState<string>();
+  const [metadataLanguage, setMetadataLanguage] = useState<string | null>(null);
   const [isPlaybackReady, setIsPlaybackReady] = useState(false);
   // Mirror state into a ref so resolveEpubLocator (registered once with
   // TTSContext via a stable callback) can always read the latest page text
@@ -145,6 +157,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
     currentWordHighlightCfiRef: currentWordHighlightCfi,
     renderedTextMapsRef,
     wordHighlightMapCacheRef,
+    language: resolvedLanguage,
   });
 
   useEffect(() => () => {
@@ -162,6 +175,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
     setCurrDocData(undefined);
     setCurrDocName(undefined);
     setCurrDocText(undefined);
+    setMetadataLanguage(null);
     setIsPlaybackReady(false);
     setCurrDocPages(undefined);
     isEPUBSetOnce.current = false;
@@ -183,6 +197,9 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
       setIsPlaybackReady(false);
+      setMetadataLanguage(null);
+      bookRef.current = null;
+      renditionRef.current = undefined;
       const meta = await getDocumentMetadata(id);
       if (!meta) {
         clearCurrDoc();
@@ -370,8 +387,19 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
   });
 
   const setRendition = useCallback((rendition: Rendition) => {
-    bookRef.current = rendition.book;
+    const book = rendition.book;
+    bookRef.current = book;
     renditionRef.current = rendition;
+    void book.loaded.metadata
+      .then((metadata) => {
+        if (bookRef.current !== book) return;
+        setMetadataLanguage(normalizeOptionalLanguageTag(metadata.language));
+      })
+      .catch((error) => {
+        if (bookRef.current !== book) return;
+        setMetadataLanguage(null);
+        console.warn('Failed to read EPUB language metadata:', error);
+      });
   }, []);
 
   const handleLocationChanged = useEPUBLocationController({
@@ -396,6 +424,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
       currDocPages,
       currDocPage,
       currDocText,
+      metadataLanguage,
       isPlaybackReady,
       clearCurrDoc,
       extractPageText,
@@ -422,6 +451,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
       currDocPages,
       currDocPage,
       currDocText,
+      metadataLanguage,
       isPlaybackReady,
       clearCurrDoc,
       extractPageText,

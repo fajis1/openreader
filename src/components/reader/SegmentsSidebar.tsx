@@ -1,14 +1,14 @@
 'use client';
 
 import { Fragment, type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Popover, PopoverButton, Transition } from '@headlessui/react';
+import { Transition } from '@headlessui/react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Book } from 'epubjs';
 import toast from 'react-hot-toast';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { RefreshIcon, InfoIcon } from '@/components/icons/Icons';
-import { Button, IconButton, PopoverSurface } from '@/components/ui';
+import { Button, IconButton, PopoverIconTrigger, PopoverRoot, PopoverSurface } from '@/components/ui';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { compareSegmentLocators, locatorGroupKey, locatorIdentityKey } from '@/lib/shared/tts-locator';
 import { buildSegmentKey, buildSegmentKeyPrefix } from '@/lib/shared/tts-segment-plan';
@@ -94,6 +94,7 @@ function settingsAreEqual(a: TTSSegmentSettings | null, b: TTSSegmentSettings | 
     && a.voice === b.voice
     && Number(a.nativeSpeed) === Number(b.nativeSpeed)
     && (a.ttsInstructions || '') === (b.ttsInstructions || '')
+    && (a.language || 'en') === (b.language || 'en')
   );
 }
 
@@ -186,6 +187,8 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     playFromSegment,
     activeReaderType,
     clearSegmentCaches,
+    resolvedLanguage,
+    setDocumentLanguage,
   } = useTTS();
   const {
     providerRef,
@@ -348,7 +351,8 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
     voice,
     nativeSpeed: Number.isFinite(Number(voiceSpeed)) ? Number(voiceSpeed) : 1,
     ttsInstructions: ttsInstructions || '',
-  }), [providerRef, providerType, ttsModel, voice, voiceSpeed, ttsInstructions]);
+    language: resolvedLanguage,
+  }), [providerRef, providerType, ttsModel, voice, voiceSpeed, ttsInstructions, resolvedLanguage]);
 
   const handleClearCache = useCallback(async () => {
     if (!documentId || isClearingSegments) return;
@@ -418,7 +422,8 @@ export function SegmentsSidebar({ isOpen, setIsOpen, documentId, epubBookRef }: 
       updateConfigKey('voiceSpeed', Number.isFinite(Number(settings.nativeSpeed)) ? Number(settings.nativeSpeed) : 1),
       updateConfigKey('ttsInstructions', settings.ttsInstructions || ''),
     ]);
-  }, [updateConfigKey]);
+    if (settings.language) setDocumentLanguage(settings.language);
+  }, [updateConfigKey, setDocumentLanguage]);
 
   const handleRefresh = useCallback(() => {
     didAutoScrollOnOpenRef.current = false;
@@ -885,15 +890,14 @@ function SegmentsListSkeletonRows() {
 
 function SegmentMetadataPopover({ row }: { row: TTSSegmentRow }) {
   return (
-    <Popover className="relative shrink-0">
-      <PopoverButton
-        as={IconButton}
+    <PopoverRoot className="relative shrink-0">
+      <PopoverIconTrigger
         size="sm"
         aria-label="Segment metadata"
         title="Metadata"
       >
         <InfoIcon className="w-3.5 h-3.5" />
-      </PopoverButton>
+      </PopoverIconTrigger>
       <Transition
         as={Fragment}
         enter="transition ease-standard duration-fast"
@@ -960,7 +964,7 @@ function SegmentMetadataPopover({ row }: { row: TTSSegmentRow }) {
           </dl>
         </PopoverSurface>
       </Transition>
-    </Popover>
+    </PopoverRoot>
   );
 }
 
