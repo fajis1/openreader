@@ -96,27 +96,6 @@ Optional first-boot bootstrap API key for the auto-created `default-openai` shar
 - Stored encrypted at rest after bootstrap.
 - After bootstrap, provider configuration is DB-backed and managed in **Settings → Admin → Shared providers**.
 
-### TTS Daily Rate Limiting (Runtime Settings)
-
-Managed as runtime config in **Settings → Admin → Site features**.
-
-- `disableTtsRateLimit` default: `true` (daily TTS limits disabled)
-- `ttsDailyLimitAnonymous` default: `50000`
-- `ttsDailyLimitAuthenticated` default: `500000`
-- `ttsIpDailyLimitAnonymous` default: `100000`
-- `ttsIpDailyLimitAuthenticated` default: `1000000`
-
-### TTS Upstream Settings (Runtime Settings)
-
-Managed as runtime config in **Settings → Admin → Site features → TTS upstream**.
-
-- `ttsUpstreamMaxRetries` default: `2`
-- `ttsUpstreamTimeoutMs` default: `285000`
-- `ttsCacheMaxSizeBytes` default: `268435456` (256 MB)
-- `ttsCacheTtlMs` default: `1800000` (30 minutes)
-
-There are no dedicated env vars for these runtime settings.
-
 ## Auth and Identity
 
 ### BASE_URL
@@ -338,19 +317,6 @@ External compute worker URL.
 ### COMPUTE_WORKER_TOKEN
 
 Shared token for app-to-external-worker requests.
-
-## Compute PDF Parsing Rate Limiting (Runtime Settings)
-
-Managed as runtime config in **Settings → Admin → Site features**.
-
-- `disableComputeRateLimit` default: `true`
-- `computeParseBurstMax` default: `8`
-- `computeParseBurstWindowSec` default: `60`
-- `computeParseSustainedMax` default: `24`
-- `computeParseSustainedWindowSec` default: `600`
-- `maxUploadMb` default: `200`
-
-There are no dedicated env vars for these runtime settings.
 
 ## Audio Runtime
 
