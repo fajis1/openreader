@@ -36,6 +36,29 @@ export function findBestHighlightTokenMatch(
 
   if (!patternLen || !normalizedTargets.length) return responseBase;
 
+  // Most viewer highlights are exact token sequences. Resolve those in one
+  // linear pass before entering the fuzzy window search, which is expensive
+  // enough to stall the UI when the target is a full HTML/TXT/MD document.
+  const firstPatternToken = normalizedPattern[0];
+  for (let start = 0; start < normalizedTargets.length; start += 1) {
+    if (normalizedTargets[start] !== firstPatternToken) continue;
+    let matches = true;
+    for (let offset = 1; offset < normalizedPattern.length; offset += 1) {
+      if (normalizedTargets[start + offset] !== normalizedPattern[offset]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      return {
+        start,
+        end: start + normalizedPattern.length - 1,
+        rating: 1,
+        lengthDiff: 0,
+      };
+    }
+  }
+
   const patternTokenCount = normalizedPattern.length;
   const minWindowTokens = Math.max(1, Math.floor(patternTokenCount * 0.6));
   const maxWindowTokens = Math.max(

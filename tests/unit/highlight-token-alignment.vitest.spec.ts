@@ -19,6 +19,21 @@ const alignmentWords = (
   }));
 
 describe('shared viewer highlight token alignment', () => {
+  test('finds an exact sentence in a large document without entering fuzzy comparison', () => {
+    const targets = Array.from({ length: 20_000 }, (_, index) => `token-${index}`);
+    targets.splice(15_000, 4, 'the', 'exact', 'sentence', 'here');
+
+    expect(findBestHighlightTokenMatch(
+      ['the', 'exact', 'sentence', 'here'],
+      targets,
+    )).toEqual({
+      start: 15_000,
+      end: 15_003,
+      rating: 1,
+      lengthDiff: 0,
+    });
+  });
+
   test('matches a complete Japanese sentence using locale-aware token count', () => {
     const sentence = 'これは日本語です。';
     const patternTokens = segmentWords(sentence, 'ja').map((token) => token.text);
