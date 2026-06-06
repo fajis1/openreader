@@ -37,6 +37,8 @@ import { useRuntimeConfig } from '@/contexts/RuntimeConfigContext';
 import { AdminProvidersPanel } from '@/components/admin/AdminProvidersPanel';
 import { AdminFeaturesPanel } from '@/components/admin/AdminFeaturesPanel';
 import { useSharedProviders } from '@/hooks/useSharedProviders';
+import { flushUserPreferencesSync } from '@/lib/client/api/user-state';
+import toast from 'react-hot-toast';
 import { useLibraryDocumentsQuery } from '@/hooks/useLibraryDocumentsQuery';
 import {
   SidebarNav,
@@ -265,7 +267,7 @@ export function SettingsModal({
     prefetch: prefetchLibraryDocuments,
   } = useLibraryDocumentsQuery(isSelectionModalOpen);
 
-  const { providers: sharedProviders } = useSharedProviders();
+  const { providers: sharedProviders, isLoading: sharedProvidersLoading } = useSharedProviders();
   const {
     providers: ttsProviders,
     models: ttsModels,
@@ -295,13 +297,18 @@ export function SettingsModal({
   }, [changelogOpenSignal, setIsOpen]);
 
   useEffect(() => {
+    // Only mirror persisted config into the local form while the modal is closed.
+    // While it's open the user may be mid-edit, and a background refresh (e.g. the
+    // focus refetch in ConfigContext, or async shared-provider loading) must not
+    // stomp their in-progress selection. On close, resetToCurrent re-syncs.
+    if (isOpen) return;
     setLocalApiKey(apiKey);
     setLocalBaseUrl(baseUrl);
     setLocalProviderRef(providerRef);
     setLocalProviderType(providerType);
     setModelValue(ttsModel);
     setLocalTTSInstructions(ttsInstructions);
-  }, [apiKey, baseUrl, providerRef, providerType, ttsModel, ttsInstructions]);
+  }, [isOpen, apiKey, baseUrl, providerRef, providerType, ttsModel, ttsInstructions]);
 
   useEffect(() => {
     if (!ttsModels.some(m => m.id === modelValue) && modelValue !== '') {
@@ -643,7 +650,9 @@ export function SettingsModal({
                         <div className="space-y-4">
                           <div className="space-y-1.5">
                             <label className={fieldLabelClass}>TTS Provider</label>
-                            {ttsProviders.length === 0 ? (
+                            {sharedProvidersLoading ? (
+                              <p className="text-xs text-soft">Loading providers…</p>
+                            ) : ttsProviders.length === 0 ? (
                               <p className="text-xs text-accent">
                                 User API keys are restricted and no shared provider is configured. Ask an admin to add one.
                               </p>
@@ -815,7 +824,7 @@ export function SettingsModal({
                               type="button"
                               variant="primary"
                               size="md"
-                              disabled={!canSubmit}
+                              disabled={!canSubmit || sharedProvidersLoading}
                               onClick={async () => {
                                 const defaults = resolveProviderDefaults({
                                   providerRef: selectedProviderRef,
@@ -833,6 +842,16 @@ export function SettingsModal({
                                   : defaults.defaultModel;
                                 await updateConfigKey('ttsModel', finalModel);
                                 await updateConfigKey('ttsInstructions', localTTSInstructions);
+                                // Push the change to the server immediately rather than waiting on
+                                // the debounce, so a quick reload can't lose the save. Surface
+                                // failures instead of silently dropping them.
+                                try {
+                                  await flushUserPreferencesSync();
+                                } catch (error) {
+                                  console.error('Failed to save TTS provider settings:', error);
+                                  toast.error('Failed to save provider settings. Please try again.');
+                                  return;
+                                }
                                 setIsOpen(false);
                               }}
                             >

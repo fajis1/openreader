@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Toaster } from 'react-hot-toast';
 
 import { Providers } from '@/app/providers';
+import { ConfigProvider } from '@/contexts/ConfigContext';
 import { AppMain, AppShell } from '@/components/layout';
 import { getAuthBaseUrl, isAnonymousAuthSessionsEnabled, isGithubAuthEnabled } from '@/lib/server/auth/config';
 
@@ -33,9 +34,17 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       allowAnonymousAuthSessions={allowAnonymousAuthSessions}
       githubAuthEnabled={githubAuthEnabled}
     >
-      <AppShell>
-        <AppMain>{children}</AppMain>
-      </AppShell>
+      {/* ConfigProvider lives here, in the shared (app) layout, so it stays
+          mounted across library <-> reader navigation. Mounting it per-route
+          re-ran the Dexie/server hydration race on every navigation, causing
+          the reader to briefly use the admin-default provider until a full
+          page refresh. A single shared instance keeps the user's saved
+          provider hydrated the whole time. */}
+      <ConfigProvider>
+        <AppShell>
+          <AppMain>{children}</AppMain>
+        </AppShell>
+      </ConfigProvider>
       <Toaster
         toastOptions={{
           style: {

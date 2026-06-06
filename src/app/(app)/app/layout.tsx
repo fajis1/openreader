@@ -2,16 +2,15 @@
 
 import type { ReactNode } from 'react';
 
-import { ConfigProvider } from '@/contexts/ConfigContext';
 import { DocumentProvider } from '@/contexts/DocumentContext';
 import { OnboardingFlowProvider } from '@/contexts/OnboardingFlowContext';
 
+// ConfigProvider is mounted once in the shared (app) layout so it survives
+// library <-> reader navigation; do not re-wrap it here.
 export default function AppHomeLayout({ children }: { children: ReactNode }) {
   return (
-    <ConfigProvider>
-      <DocumentProvider>
-        <OnboardingFlowProvider>{children}</OnboardingFlowProvider>
-      </DocumentProvider>
-    </ConfigProvider>
+    <DocumentProvider>
+      <OnboardingFlowProvider>{children}</OnboardingFlowProvider>
+    </DocumentProvider>
   );
 }

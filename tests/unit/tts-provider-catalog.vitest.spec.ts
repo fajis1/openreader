@@ -476,9 +476,13 @@ describe('config helpers', () => {
       ttsModel: 'kokoro',
     });
 
+    // The user's provider/model now default to empty ("inherit the admin
+    // default"), so empty values are treated as defaults and filtered out.
     expect(buildSyncedPreferencePatch({
       voiceSpeed: 1,
-      ttsModel: 'kokoro',
+      providerRef: '',
+      providerType: 'unknown',
+      ttsModel: '',
     }, { nonDefaultOnly: true })).toEqual({});
   });
 });
