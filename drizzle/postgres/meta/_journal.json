@@ -71,6 +71,20 @@
       "when": 1780625663880,
       "tag": "0009_drop_pdf_parse",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1780794520924,
+      "tag": "0010_user-data-cleanup-cascades",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780851107819,
+      "tag": "0011_scheduled-tasks",
+      "breakpoints": true
     }
   ]
 }

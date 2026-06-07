@@ -11,7 +11,7 @@ export type ExportBlobBody =
   | ArrayBufferView
   | { transformToByteArray: () => Promise<Uint8Array> };
 
-type ExportIssueScope = 'document' | 'audiobook' | 'audiobook_list';
+type ExportIssueScope = 'document' | 'audiobook' | 'audiobook_list' | 'tts_segment';
 
 type ExportIssue = {
   scope: ExportIssueScope;
@@ -41,6 +41,20 @@ type ExportAudiobookObject = {
   [key: string]: unknown;
 };
 
+type ExportTtsSegmentEntry = {
+  segmentEntryId: string;
+  documentId: string;
+  [key: string]: unknown;
+};
+
+type ExportTtsSegmentVariant = {
+  segmentId: string;
+  segmentEntryId: string;
+  audioKey?: string | null;
+  audioFormat?: string | null;
+  [key: string]: unknown;
+};
+
 export type AppendUserExportArchiveInput = {
   archive: Archiver;
   userId: string;
@@ -49,12 +63,20 @@ export type AppendUserExportArchiveInput = {
   preferences: unknown | null;
   readingHistory: unknown[];
   ttsUsage: unknown[];
+  jobEvents: unknown[];
+  documentSettings: unknown[];
+  authSessions: unknown[];
+  linkedAccounts: unknown[];
   documents: ExportDocument[];
   audiobooks: ExportAudiobook[];
   audiobookChapters: ExportAudiobookChapter[];
+  ttsSegmentEntries: ExportTtsSegmentEntry[];
+  ttsSegmentVariants: ExportTtsSegmentVariant[];
+  storageEnabled: boolean;
   getDocumentBlobStream: (documentId: string) => Promise<ExportBlobBody>;
   listAudiobookObjects: (bookId: string, userId: string) => Promise<ExportAudiobookObject[]>;
   getAudiobookObjectStream: (bookId: string, userId: string, fileName: string) => Promise<ExportBlobBody>;
+  getTtsSegmentAudioStream: (audioKey: string) => Promise<ExportBlobBody>;
 };
 
 function isNodeReadableStream(value: unknown): value is Readable {
@@ -124,17 +146,26 @@ export async function appendUserExportArchive(input: AppendUserExportArchiveInpu
     preferences,
     readingHistory,
     ttsUsage,
+    jobEvents,
+    documentSettings,
+    authSessions,
+    linkedAccounts,
     documents,
     audiobooks,
     audiobookChapters,
+    ttsSegmentEntries,
+    ttsSegmentVariants,
+    storageEnabled,
     getDocumentBlobStream,
     listAudiobookObjects,
     getAudiobookObjectStream,
+    getTtsSegmentAudioStream,
   } = input;
 
   const issues: ExportIssue[] = [];
   let documentFilesExported = 0;
   let audiobookFilesExported = 0;
+  let ttsSegmentFilesExported = 0;
 
   appendJson(archive, 'profile.json', profileData);
   if (preferences) {
@@ -142,7 +173,13 @@ export async function appendUserExportArchive(input: AppendUserExportArchiveInpu
   }
   appendJson(archive, 'reading_history.json', readingHistory);
   appendJson(archive, 'tts_usage.json', ttsUsage);
+  appendJson(archive, 'job_events.json', jobEvents);
+  appendJson(archive, 'document_settings.json', documentSettings);
+  appendJson(archive, 'auth_sessions.json', authSessions);
+  appendJson(archive, 'linked_accounts.json', linkedAccounts);
   appendJson(archive, 'library_documents.json', documents);
+  appendJson(archive, 'tts_segment_entries.json', ttsSegmentEntries);
+  appendJson(archive, 'tts_segment_variants.json', ttsSegmentVariants);
 
   const chaptersByBookId = new Map<string, ExportAudiobookChapter[]>();
   for (const chapter of audiobookChapters) {
@@ -157,7 +194,7 @@ export async function appendUserExportArchive(input: AppendUserExportArchiveInpu
   }));
   appendJson(archive, 'library_audiobooks.json', audiobooksWithChapters);
 
-  for (const doc of documents) {
+  for (const doc of storageEnabled ? documents : []) {
     const documentId = toSafePathSegment(doc.id, 'document');
     const fileName = toSafePathSegment(doc.name || `${doc.id}.bin`, `${documentId}.bin`);
     const entryName = `files/documents/${documentId}/${fileName}`;
@@ -177,7 +214,7 @@ export async function appendUserExportArchive(input: AppendUserExportArchiveInpu
     }
   }
 
-  for (const book of audiobooks) {
+  for (const book of storageEnabled ? audiobooks : []) {
     let objects: ExportAudiobookObject[] = [];
     try {
       objects = await listAudiobookObjects(book.id, userId);
@@ -215,8 +252,38 @@ export async function appendUserExportArchive(input: AppendUserExportArchiveInpu
     }
   }
 
+  const documentIdByEntryId = new Map(
+    ttsSegmentEntries.map((entry) => [entry.segmentEntryId, entry.documentId]),
+  );
+  for (const variant of storageEnabled ? ttsSegmentVariants : []) {
+    const audioKey = typeof variant.audioKey === 'string' ? variant.audioKey : '';
+    if (!audioKey) continue;
+
+    const documentId = toSafePathSegment(
+      documentIdByEntryId.get(variant.segmentEntryId) ?? 'unknown-document',
+      'unknown-document',
+    );
+    const segmentId = toSafePathSegment(variant.segmentId, 'segment');
+    const format = toSafePathSegment(variant.audioFormat || 'mp3', 'mp3');
+    const entryName = `files/tts_segments/${documentId}/${segmentId}.${format}`;
+
+    try {
+      const body = await getTtsSegmentAudioStream(audioKey);
+      const stream = await bodyToNodeReadable(body);
+      archive.append(stream, { name: entryName });
+      ttsSegmentFilesExported += 1;
+    } catch (error) {
+      issues.push({
+        scope: 'tts_segment',
+        id: variant.segmentId,
+        fileName: entryName,
+        message: normalizeErrorMessage(error),
+      });
+    }
+  }
+
   const manifest = {
-    formatVersion: 2,
+    formatVersion: 3,
     exportedAtMs,
     userId,
     scope: 'owned',
@@ -224,14 +291,26 @@ export async function appendUserExportArchive(input: AppendUserExportArchiveInpu
       documentsMetadata: documents.length,
       audiobooksMetadata: audiobooks.length,
       audiobookChaptersMetadata: audiobookChapters.length,
+      documentSettingsMetadata: documentSettings.length,
+      ttsSegmentEntriesMetadata: ttsSegmentEntries.length,
+      ttsSegmentVariantsMetadata: ttsSegmentVariants.length,
+      authSessionsMetadata: authSessions.length,
+      linkedAccountsMetadata: linkedAccounts.length,
+      jobEventsMetadata: jobEvents.length,
       documentFiles: documentFilesExported,
       audiobookFiles: audiobookFilesExported,
+      ttsSegmentFiles: ttsSegmentFilesExported,
       issues: issues.length,
     },
     includes: {
       metadata: true,
-      documentFiles: true,
-      audiobookFiles: true,
+      documentFiles: storageEnabled,
+      audiobookFiles: storageEnabled,
+      ttsSegmentFiles: storageEnabled,
+      credentialSecrets: false,
+      temporaryUploads: false,
+      derivedDocumentPreviews: false,
+      derivedParsedDocuments: false,
       filesystemSources: false,
     },
   };

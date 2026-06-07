@@ -22,6 +22,7 @@ import {
 import { extractRawTextSnippet } from '@/lib/server/documents/text-snippets';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
+import { deleteOwnedDocument } from '@/lib/server/documents/delete-owned';
 
 export const dynamic = 'force-dynamic';
 
@@ -108,9 +109,11 @@ export async function GET(req: NextRequest) {
         );
       } catch (error) {
         if (isMissingDocumentBlobError(error)) {
-          await db
-            .delete(documents)
-            .where(and(eq(documents.id, id), inArray(documents.userId, allowedUserIds)));
+          await deleteOwnedDocument({
+            userId: doc.userId,
+            documentId: id,
+            namespace: testNamespace,
+          });
           return NextResponse.json({ error: 'Not found' }, { status: 404 });
         }
         throw error;

@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, count, eq, inArray } from 'drizzle-orm';
+import { and, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { toDocumentTypeFromName } from '@/lib/server/documents/utils';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
-import {
-  cleanupDocumentPreviewArtifacts,
-  deleteDocumentPreviewRows,
-} from '@/lib/server/documents/previews';
-import { deleteDocumentBlob, isMissingBlobError, isValidDocumentId } from '@/lib/server/documents/blobstore';
+import { isValidDocumentId } from '@/lib/server/documents/blobstore';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { isS3Configured } from '@/lib/server/storage/s3';
+import { deleteOwnedDocument } from '@/lib/server/documents/delete-owned';
 import type { BaseDocument, DocumentType } from '@/types/documents';
 
 export const dynamic = 'force-dynamic';
@@ -114,10 +111,6 @@ export async function DELETE(req: NextRequest) {
 
     const targetUserIds = [storageUserId];
 
-    if (targetUserIds.length === 0) {
-      return NextResponse.json({ success: true, deleted: 0 });
-    }
-
     let targetIds: string[] = [];
     if (idsParam) {
       targetIds = idsParam
@@ -136,52 +129,26 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: true, deleted: 0 });
     }
 
-    const deletedRows = (await db
-      .delete(documents)
-      .where(and(inArray(documents.userId, targetUserIds), inArray(documents.id, targetIds)))
-      .returning({ id: documents.id })) as Array<{ id: string }>;
+    const ownedRows = (await db
+      .select({ id: documents.id, userId: documents.userId })
+      .from(documents)
+      .where(and(inArray(documents.userId, targetUserIds), inArray(documents.id, targetIds)))) as Array<{
+      id: string;
+      userId: string;
+    }>;
 
-    const uniqueIds = Array.from(new Set(deletedRows.map((row) => row.id)));
-    for (const id of uniqueIds) {
-      const [ref] = await db.select({ count: count() }).from(documents).where(eq(documents.id, id));
-      const refCount = Number(ref?.count ?? 0);
-      if (refCount > 0) continue;
-
-      try {
-        await deleteDocumentBlob(id, testNamespace);
-      } catch (error) {
-        if (!isMissingBlobError(error)) {
-          serverLogger.warn({
-            event: 'documents.delete.blob_cleanup_failed',
-            degraded: true,
-            step: 'delete_document_blob',
-            documentId: id,
-            error: errorToLog(error),
-          }, 'Failed to delete document blob during cleanup');
-        }
+    let deleted = 0;
+    for (const row of ownedRows) {
+      if (await deleteOwnedDocument({
+        userId: row.userId,
+        documentId: row.id,
+        namespace: testNamespace,
+      })) {
+        deleted += 1;
       }
-
-      await cleanupDocumentPreviewArtifacts(id, testNamespace).catch((error) => {
-        serverLogger.warn({
-          event: 'documents.delete.preview_artifacts_cleanup_failed',
-          degraded: true,
-          step: 'delete_preview_artifacts',
-          documentId: id,
-          error: errorToLog(error),
-        }, 'Failed to cleanup preview artifacts');
-      });
-      await deleteDocumentPreviewRows(id, testNamespace).catch((error) => {
-        serverLogger.warn({
-          event: 'documents.delete.preview_rows_cleanup_failed',
-          degraded: true,
-          step: 'delete_preview_rows',
-          documentId: id,
-          error: errorToLog(error),
-        }, 'Failed to cleanup preview rows');
-      });
     }
 
-    return NextResponse.json({ success: true, deleted: deletedRows.length });
+    return NextResponse.json({ success: true, deleted });
   } catch (error) {
     serverLogger.error({
       event: 'documents.delete.failed',

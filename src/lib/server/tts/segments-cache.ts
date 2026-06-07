@@ -1,7 +1,12 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { ttsSegmentEntries, ttsSegmentVariants } from '@/db/schema';
-import { deleteTtsSegmentAudioObjects } from '@/lib/server/tts/segments-blobstore';
+import {
+  deleteTtsSegmentAudioObjects,
+  deleteTtsSegmentPrefix,
+} from '@/lib/server/tts/segments-blobstore';
+import { buildTtsSegmentDocumentPrefix } from '@/lib/server/tts/segments';
+import { getS3Config } from '@/lib/server/storage/s3';
 import type { ReaderType } from '@/types/user-state';
 import { serverLogger } from '@/lib/server/logger';
 import { logDegraded } from '@/lib/server/errors/logging';
@@ -35,6 +40,11 @@ export async function clearTtsSegmentCache(
     conditions.push(eq(ttsSegmentEntries.readerType, input.readerType));
   }
 
+  const entryRows = (await db
+    .select({ segmentEntryId: ttsSegmentEntries.segmentEntryId })
+    .from(ttsSegmentEntries)
+    .where(and(...conditions))) as Array<{ segmentEntryId: string }>;
+
   const rows = (await db
     .select({
       segmentId: ttsSegmentVariants.segmentId,
@@ -49,8 +59,6 @@ export async function clearTtsSegmentCache(
       ),
     )
     .where(and(...conditions))) as Array<{ segmentId: string; audioKey: string | null }>;
-
-  await db.delete(ttsSegmentEntries).where(and(...conditions));
 
   const audioKeys = rows
     .map((row) => row.audioKey)
@@ -80,10 +88,38 @@ export async function clearTtsSegmentCache(
     }
   }
 
+  // Keep metadata when storage cleanup is incomplete so a later retry still
+  // knows which objects must be removed.
+  if (!warning) {
+    await db.delete(ttsSegmentEntries).where(and(...conditions));
+  }
+
   return {
-    deletedSegments: rows.length,
+    deletedSegments: warning ? 0 : new Set(entryRows.map((row) => row.segmentEntryId)).size,
     requestedAudioObjects: uniqueAudioKeys.length,
     deletedAudioObjects,
     ...(warning ? { warning } : {}),
   };
+}
+
+export async function deleteDocumentTtsSegmentCache(input: {
+  userId: string;
+  documentId: string;
+  namespace: string | null;
+}): Promise<void> {
+  const storagePrefix = getS3Config().prefix;
+  for (const storageVersion of ['v1', 'v2'] as const) {
+    await deleteTtsSegmentPrefix(buildTtsSegmentDocumentPrefix({
+      storagePrefix,
+      namespace: input.namespace,
+      userId: input.userId,
+      documentId: input.documentId,
+      storageVersion,
+    }));
+  }
+
+  await db.delete(ttsSegmentEntries).where(and(
+    eq(ttsSegmentEntries.userId, input.userId),
+    eq(ttsSegmentEntries.documentId, input.documentId),
+  ));
 }

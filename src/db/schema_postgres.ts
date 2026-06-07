@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, real, date, bigint, primaryKey, index, jsonb, foreignKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, real, date, bigint, boolean, primaryKey, index, jsonb, foreignKey, check } from 'drizzle-orm/pg-core';
 import { user } from './schema_auth_postgres';
 
 const PG_NOW_MS = sql`(extract(epoch from now()) * 1000)::bigint`;
@@ -54,6 +54,7 @@ export const audiobookChapters = pgTable('audiobook_chapters', {
 // defined here. Only application-specific tables belong in this file.
 
 export const userTtsChars = pgTable("user_tts_chars", {
+  // Also stores device:* and ip:* backstop buckets, so this cannot reference user.id.
   userId: text('user_id').notNull(),
   date: date('date').notNull(),
   charCount: bigint('char_count', { mode: 'number' }).default(0),
@@ -71,7 +72,7 @@ export const userTtsChars = pgTable("user_tts_chars", {
 // worker bounds each op by a hard cap, "ops created in the last hard-cap
 // window" is an upper bound on in-flight ops. Old rows are pruned opportunistically.
 export const userJobEvents = pgTable('user_job_events', {
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   action: text('action').notNull(),
   opId: text('op_id').notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull().default(PG_NOW_MS),
@@ -207,6 +208,30 @@ export const adminSettings = pgTable('admin_settings', {
   valueJson: jsonb('value_json').notNull(),
   source: text('source').notNull().default('admin'),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull().default(PG_NOW_MS),
+});
+
+export const scheduledTasks = pgTable('scheduled_tasks', {
+  key: text('key').primaryKey(),
+  enabled: boolean('enabled').notNull().default(true),
+  intervalMs: bigint('interval_ms', { mode: 'number' }).notNull(),
+  lastStatus: text('last_status').notNull().default('idle'),
+  leaseOwner: text('lease_owner'),
+  lastRunAt: bigint('last_run_at', { mode: 'number' }),
+  lastDurationMs: bigint('last_duration_ms', { mode: 'number' }),
+  lastError: text('last_error'),
+  lastResultJson: text('last_result_json'),
+  nextRunAt: bigint('next_run_at', { mode: 'number' }),
+  runRequested: boolean('run_requested').notNull().default(false),
+  runningSince: bigint('running_since', { mode: 'number' }),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull().default(PG_NOW_MS),
+}, (table) => [
+  check('scheduled_tasks_interval_ms_positive', sql`${table.intervalMs} > 0`),
+]);
+
+export const documentBlobLeases = pgTable('document_blob_leases', {
+  documentId: text('document_id').primaryKey(),
+  leaseOwner: text('lease_owner').notNull(),
+  leaseUntilMs: bigint('lease_until_ms', { mode: 'number' }).notNull(),
 });
 
 export const ttsSegmentVariants = pgTable('tts_segment_variants', {

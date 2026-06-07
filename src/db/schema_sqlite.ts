@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, primaryKey, index, foreignKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, primaryKey, index, foreignKey, check } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import { user } from './schema_auth_sqlite';
 
@@ -54,6 +54,7 @@ export const audiobookChapters = sqliteTable('audiobook_chapters', {
 // defined here. Only application-specific tables belong in this file.
 
 export const userTtsChars = sqliteTable("user_tts_chars", {
+  // Also stores device:* and ip:* backstop buckets, so this cannot reference user.id.
   userId: text('user_id').notNull(),
   date: text('date').notNull(), // SQLite doesn't have native DATE type, text YYYY-MM-DD is standard
   charCount: integer('char_count').default(0),
@@ -71,7 +72,7 @@ export const userTtsChars = sqliteTable("user_tts_chars", {
 // worker bounds each op by a hard cap, "ops created in the last hard-cap
 // window" is an upper bound on in-flight ops. Old rows are pruned opportunistically.
 export const userJobEvents = sqliteTable('user_job_events', {
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   action: text('action').notNull(),
   opId: text('op_id').notNull(),
   createdAt: integer('created_at').notNull().default(SQLITE_NOW_MS),
@@ -207,6 +208,30 @@ export const adminSettings = sqliteTable('admin_settings', {
   valueJson: text('value_json').notNull(),
   source: text('source').notNull().default('admin'),
   updatedAt: integer('updated_at').notNull().default(SQLITE_NOW_MS),
+});
+
+export const scheduledTasks = sqliteTable('scheduled_tasks', {
+  key: text('key').primaryKey(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  intervalMs: integer('interval_ms').notNull(),
+  lastStatus: text('last_status').notNull().default('idle'),
+  leaseOwner: text('lease_owner'),
+  lastRunAt: integer('last_run_at'),
+  lastDurationMs: integer('last_duration_ms'),
+  lastError: text('last_error'),
+  lastResultJson: text('last_result_json'),
+  nextRunAt: integer('next_run_at'),
+  runRequested: integer('run_requested', { mode: 'boolean' }).notNull().default(false),
+  runningSince: integer('running_since'),
+  updatedAt: integer('updated_at').notNull().default(SQLITE_NOW_MS),
+}, (table) => [
+  check('scheduled_tasks_interval_ms_positive', sql`${table.intervalMs} > 0`),
+]);
+
+export const documentBlobLeases = sqliteTable('document_blob_leases', {
+  documentId: text('document_id').primaryKey(),
+  leaseOwner: text('lease_owner').notNull(),
+  leaseUntilMs: integer('lease_until_ms').notNull(),
 });
 
 export const ttsSegmentVariants = sqliteTable('tts_segment_variants', {

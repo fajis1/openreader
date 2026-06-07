@@ -1,14 +1,26 @@
 /**
- * Cleans up all S3 storage artifacts belonging to a user.
- * Called from Better Auth's `beforeDelete` hook so that blobs are removed
- * before the DB cascade wipes the metadata rows we query against.
+ * Cleans up user-scoped storage that the orphaned-blob reaper cannot reach.
+ *
+ * Called from Better Auth's `beforeDelete` hook (canonical pass) and the
+ * account-delete route (test-namespaced pass). Shared, content-addressed
+ * document blobs + previews are NOT deleted here on the canonical pass — they
+ * are reclaimed by the `reap-orphaned-blobs` task once their ownership rows are
+ * gone. Per-user storage (audiobooks, TTS segments, temp uploads) is keyed by
+ * userId and would be unreachable after the cascade, so it is deleted inline
+ * and failures block the deletion.
  */
 
 import { db } from '@/db';
-import { documents, audiobooks } from '@/db/schema';
+import { documents, audiobooks, userJobEvents, userTtsChars } from '@/db/schema';
+import * as authSchemaSqlite from '@/db/schema_auth_sqlite';
+import * as authSchemaPostgres from '@/db/schema_auth_postgres';
 import { eq } from 'drizzle-orm';
 import { getS3Config, isS3Configured } from '@/lib/server/storage/s3';
-import { deleteDocumentBlob } from '@/lib/server/documents/blobstore';
+import {
+  deleteDocumentBlob,
+  deleteDocumentPrefix,
+  tempDocumentUploadPrefix,
+} from '@/lib/server/documents/blobstore';
 import { deleteDocumentPreviewArtifacts } from '@/lib/server/documents/previews-blobstore';
 import { deleteDocumentPreviewRows } from '@/lib/server/documents/previews';
 import { audiobookPrefix, deleteAudiobookPrefix } from '@/lib/server/audiobooks/blobstore';
@@ -16,87 +28,50 @@ import { deleteTtsSegmentPrefix } from '@/lib/server/tts/segments-blobstore';
 import { hashForLog, serverLogger } from '@/lib/server/logger';
 import { logDegraded } from '@/lib/server/errors/logging';
 
-type DocumentRow = { id: string };
 type AudiobookRow = { id: string };
 
-/**
- * Delete all S3 blobs owned by `userId`.
- *
- * This covers:
- *  - Document file blobs
- *  - Document preview images
- *  - Audiobook audio files (chapter mp3s, metadata json, etc.)
- *
- * Each item is cleaned up independently; a failure on one does not block the rest.
- */
 export async function deleteUserStorageData(
   userId: string,
   namespace: string | null,
 ): Promise<void> {
   const s3Enabled = isS3Configured();
+  const failures: unknown[] = [];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const database = db as any;
+  const authSchema = process.env.POSTGRES_URL ? authSchemaPostgres : authSchemaSqlite;
 
-  // --- Documents & previews ---
-  const userDocs: DocumentRow[] = await database
-    .select({ id: documents.id })
-    .from(documents)
-    .where(eq(documents.userId, userId));
-
-  let docsDeleted = 0;
-  for (const doc of userDocs) {
-    if (s3Enabled) {
+  // --- Document blobs & previews ---
+  // Canonical pass: deferred to the reap-orphaned-blobs task (the rows cascade
+  // away with the user, then the reaper reclaims the now-orphaned blobs). The
+  // reaper only runs for the canonical namespace, so test-namespaced storage is
+  // deleted inline here.
+  let docBlobsDeleted = 0;
+  if (s3Enabled && namespace !== null) {
+    const userDocs = (await database
+      .select({ id: documents.id })
+      .from(documents)
+      .where(eq(documents.userId, userId))) as Array<{ id: string }>;
+    for (const doc of userDocs) {
       try {
         await deleteDocumentBlob(doc.id, namespace);
-        docsDeleted++;
-      } catch (error) {
-        logDegraded(serverLogger, {
-          event: 'user.data_cleanup.document_blob_delete.failed',
-          msg: 'Failed to delete document blob',
-          step: 'delete_document_blob',
-          context: {
-            documentId: doc.id,
-            userIdHash: hashForLog(userId),
-          },
-          error,
-        });
-      }
-
-      try {
         await deleteDocumentPreviewArtifacts(doc.id, namespace);
+        await deleteDocumentPreviewRows(doc.id, namespace);
+        docBlobsDeleted++;
       } catch (error) {
+        failures.push(error);
         logDegraded(serverLogger, {
-          event: 'user.data_cleanup.document_preview_delete.failed',
-          msg: 'Failed to delete preview artifacts',
-          step: 'delete_document_preview_artifacts',
-          context: {
-            documentId: doc.id,
-            userIdHash: hashForLog(userId),
-          },
+          event: 'user.data_cleanup.document_storage_delete.failed',
+          msg: 'Failed to delete namespaced document storage',
+          step: 'delete_namespaced_document_storage',
+          context: { documentId: doc.id, userIdHash: hashForLog(userId) },
           error,
         });
       }
-    }
-
-    // Always clean up DB rows — documentPreviews has no FK cascade on user.
-    try {
-      await deleteDocumentPreviewRows(doc.id, namespace);
-    } catch (error) {
-      logDegraded(serverLogger, {
-        event: 'user.data_cleanup.document_preview_rows_delete.failed',
-        msg: 'Failed to delete preview rows',
-        step: 'delete_document_preview_rows',
-        context: {
-          documentId: doc.id,
-          userIdHash: hashForLog(userId),
-        },
-        error,
-      });
     }
   }
 
-  // --- Audiobooks ---
+  // --- Audiobooks (per-user object storage; not reaped) ---
   const userBooks: AudiobookRow[] = s3Enabled
     ? await database
         .select({ id: audiobooks.id })
@@ -107,26 +82,36 @@ export async function deleteUserStorageData(
   let booksDeleted = 0;
   for (const book of userBooks) {
     try {
-      const prefix = audiobookPrefix(book.id, userId, namespace);
-      await deleteAudiobookPrefix(prefix);
+      await deleteAudiobookPrefix(audiobookPrefix(book.id, userId, namespace));
       booksDeleted++;
     } catch (error) {
+      failures.push(error);
       logDegraded(serverLogger, {
         event: 'user.data_cleanup.audiobook_blobs_delete.failed',
         msg: 'Failed to delete audiobook blobs',
         step: 'delete_audiobook_prefix',
-        context: {
-          bookId: book.id,
-          userIdHash: hashForLog(userId),
-        },
+        context: { bookId: book.id, userIdHash: hashForLog(userId) },
         error,
       });
     }
   }
 
-  // --- TTS segments ---
+  // --- Temp uploads + TTS segments (per-user object storage; not reaped) ---
   let segmentsDeleted = 0;
   if (s3Enabled) {
+    try {
+      await deleteDocumentPrefix(tempDocumentUploadPrefix(userId, namespace));
+    } catch (error) {
+      failures.push(error);
+      logDegraded(serverLogger, {
+        event: 'user.data_cleanup.temp_document_uploads_delete.failed',
+        msg: 'Failed to delete temporary document uploads',
+        step: 'delete_temp_document_upload_prefix',
+        context: { userIdHash: hashForLog(userId) },
+        error,
+      });
+    }
+
     try {
       const cfg = getS3Config();
       const nsSegment = namespace ? `ns/${namespace}/` : '';
@@ -135,6 +120,7 @@ export async function deleteUserStorageData(
       segmentsDeleted += await deleteTtsSegmentPrefix(ttsPrefixV1);
       segmentsDeleted += await deleteTtsSegmentPrefix(ttsPrefixV2);
     } catch (error) {
+      failures.push(error);
       logDegraded(serverLogger, {
         event: 'user.data_cleanup.tts_segments_delete.failed',
         msg: 'Failed to delete TTS segment blobs',
@@ -145,15 +131,48 @@ export async function deleteUserStorageData(
     }
   }
 
-  if (docsDeleted > 0 || booksDeleted > 0 || segmentsDeleted > 0) {
+  // Block deletion if any non-reapable storage cleanup failed — proceeding
+  // would permanently orphan it. Nothing was removed from the database yet, so
+  // there is nothing to roll back.
+  if (failures.length > 0) {
+    throw new AggregateError(failures, `User storage cleanup failed in ${failures.length} operation(s)`);
+  }
+
+  // Namespaced cleanup is a storage-only pass; database rows are global and are
+  // only removed on the canonical (non-namespaced) pass.
+  if (namespace === null) {
+    // Explicit for compatibility with pre-cascade installations and to remove
+    // auth verification tokens, which cannot carry a user FK.
+    for (const { table, userColumn, step } of [
+      { table: userTtsChars, userColumn: userTtsChars.userId, step: 'delete_user_tts_usage_rows' },
+      { table: userJobEvents, userColumn: userJobEvents.userId, step: 'delete_user_job_event_rows' },
+      { table: authSchema.verification, userColumn: authSchema.verification.value, step: 'delete_user_verification_rows' },
+    ]) {
+      await database.delete(table).where(eq(userColumn, userId)).catch((error: unknown) => {
+        failures.push(error);
+        logDegraded(serverLogger, {
+          event: 'user.data_cleanup.db_rows_delete.failed',
+          msg: 'Failed to delete non-cascading user database rows',
+          step,
+          context: { userIdHash: hashForLog(userId) },
+          error,
+        });
+      });
+    }
+  }
+
+  if (docBlobsDeleted > 0 || booksDeleted > 0 || segmentsDeleted > 0) {
     serverLogger.info({
       event: 'user.data_cleanup.completed',
       userIdHash: hashForLog(userId),
-      docsDeleted,
-      totalDocs: userDocs.length,
+      docBlobsDeleted,
       booksDeleted,
       totalBooks: userBooks.length,
       segmentsDeleted,
     }, 'Completed user storage cleanup');
+  }
+
+  if (failures.length > 0) {
+    throw new AggregateError(failures, `User database cleanup failed in ${failures.length} operation(s)`);
   }
 }

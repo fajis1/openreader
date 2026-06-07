@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   ListObjectsV2Command,
@@ -244,11 +245,64 @@ export async function deleteTtsSegmentPrefix(prefix: string): Promise<number> {
           },
         }),
       );
-      deleted += deleteRes.Deleted?.length ?? 0;
+      const errors = deleteRes.Errors ?? [];
+      if (errors.length > 0) {
+        throw new Error(`Failed deleting ${errors.length} TTS segment audio objects`);
+      }
+      // Quiet=true commonly omits Deleted entries on successful requests.
+      deleted += keys.length;
     }
 
     continuationToken = listRes.IsTruncated ? listRes.NextContinuationToken : undefined;
   } while (continuationToken);
 
   return deleted;
+}
+
+export async function copyTtsSegmentPrefix(sourcePrefix: string, destinationPrefix: string): Promise<number> {
+  const cfg = getS3Config();
+  const client = getS3ProxyClient();
+  const source = sourcePrefix.replace(/^\/+/, '');
+  const destination = destinationPrefix.replace(/^\/+/, '');
+  if (source === destination) return 0;
+
+  let copied = 0;
+  let continuationToken: string | undefined;
+  // Track destination keys we have written so a mid-copy failure can be rolled
+  // back, leaving no orphaned objects behind at the destination prefix.
+  const copiedKeys: string[] = [];
+  try {
+    do {
+      const listRes = await client.send(new ListObjectsV2Command({
+        Bucket: cfg.bucket,
+        Prefix: source,
+        ContinuationToken: continuationToken,
+      }));
+      const keys = (listRes.Contents ?? [])
+        .map((item) => item.Key)
+        .filter((value): value is string => typeof value === 'string' && value.startsWith(source));
+
+      for (const key of keys) {
+        const destinationKey = `${destination}${key.slice(source.length)}`;
+        await client.send(new CopyObjectCommand({
+          Bucket: cfg.bucket,
+          Key: destinationKey,
+          CopySource: `${cfg.bucket}/${key}`,
+          ServerSideEncryption: 'AES256',
+        }));
+        copiedKeys.push(destinationKey);
+        copied += 1;
+      }
+
+      continuationToken = listRes.IsTruncated ? listRes.NextContinuationToken : undefined;
+    } while (continuationToken);
+  } catch (error) {
+    // Best-effort rollback of the partial copy; surface the original error.
+    if (copiedKeys.length > 0) {
+      await deleteTtsSegmentAudioObjects(copiedKeys).catch(() => {});
+    }
+    throw error;
+  }
+
+  return copied;
 }

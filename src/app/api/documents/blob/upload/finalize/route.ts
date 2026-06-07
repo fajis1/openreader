@@ -18,6 +18,7 @@ import {
 } from '@/lib/server/documents/blobstore';
 import { convertDocxBufferToPdfBuffer } from '@/lib/server/documents/docx-convert';
 import { registerUploadedDocument } from '@/lib/server/documents/register-upload';
+import { withDocumentBlobLease } from '@/lib/server/documents/blob-lease';
 import { safeDocumentName, toDocumentTypeFromName } from '@/lib/server/documents/utils';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
@@ -149,47 +150,52 @@ async function finalizeOne(input: {
     : input.upload.name;
   const documentId = createHash('sha256').update(finalizedBody).digest('hex');
 
-  try {
-    await headDocumentBlob(documentId, input.namespace);
-  } catch (error) {
-    if (!isMissingBlobError(error)) throw error;
-    if (!isDocxUpload) {
-      try {
-        await copyTempDocumentBlobToDocument(
-          input.upload.token,
-          input.userId,
-          documentId,
-          input.namespace,
-          finalizedContentType,
-          { ifNoneMatch: true },
-        );
-      } catch (copyError) {
-        if (!isPreconditionFailed(copyError)) throw copyError;
-      }
-    } else {
-      try {
-        await putDocumentBlob(
-          documentId,
-          finalizedBody,
-          finalizedContentType,
-          input.namespace,
-          { ifNoneMatch: true },
-        );
-      } catch (putError) {
-        if (!isPreconditionFailed(putError)) throw putError;
+  const stored = await withDocumentBlobLease(documentId, async () => {
+    // Keep the canonical blob and ownership-row write under the same durable
+    // lease so the orphan reaper cannot delete between its ownership check and
+    // this registration.
+    try {
+      await headDocumentBlob(documentId, input.namespace);
+    } catch (error) {
+      if (!isMissingBlobError(error)) throw error;
+      if (!isDocxUpload) {
+        try {
+          await copyTempDocumentBlobToDocument(
+            input.upload.token,
+            input.userId,
+            documentId,
+            input.namespace,
+            finalizedContentType,
+            { ifNoneMatch: true },
+          );
+        } catch (copyError) {
+          if (!isPreconditionFailed(copyError)) throw copyError;
+        }
+      } else {
+        try {
+          await putDocumentBlob(
+            documentId,
+            finalizedBody,
+            finalizedContentType,
+            input.namespace,
+            { ifNoneMatch: true },
+          );
+        } catch (putError) {
+          if (!isPreconditionFailed(putError)) throw putError;
+        }
       }
     }
-  }
 
-  const canonicalHead = await headDocumentBlob(documentId, input.namespace);
-  const stored = await registerUploadedDocument({
-    documentId,
-    userId: input.userId,
-    namespace: input.namespace,
-    name: finalizedName,
-    type: finalizedType,
-    size: canonicalHead.contentLength > 0 ? canonicalHead.contentLength : finalizedBody.byteLength,
-    lastModified: input.upload.lastModified,
+    const canonicalHead = await headDocumentBlob(documentId, input.namespace);
+    return registerUploadedDocument({
+      documentId,
+      userId: input.userId,
+      namespace: input.namespace,
+      name: finalizedName,
+      type: finalizedType,
+      size: canonicalHead.contentLength > 0 ? canonicalHead.contentLength : finalizedBody.byteLength,
+      lastModified: input.upload.lastModified,
+    });
   });
 
   await putTempDocumentFinalizeReceipt(

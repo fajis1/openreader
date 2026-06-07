@@ -10,6 +10,8 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PDF_PARSER_VERSION, encodeParserVersion } from '@openreader/compute-core/api-contracts';
 import { getS3Client, getS3Config, getS3ProxyClient } from '@/lib/server/storage/s3';
+import { serverLogger } from '@/lib/server/logger';
+import { logDegraded } from '@/lib/server/errors/logging';
 
 const DOCUMENT_ID_REGEX = /^[a-f0-9]{64}$/i;
 const SAFE_NAMESPACE_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
@@ -506,11 +508,27 @@ export async function deleteDocumentBlob(id: string, namespace: string | null): 
   const nsSegment = ns ? `ns/${ns}/` : '';
   const parsedPrefix = `${cfg.prefix}/documents_v1/parsed_v2/${nsSegment}${id}/`;
 
+  await deleteDocumentPrefix(parsedPrefix);
+  await deleteDocumentPrefix(`${key}/`);
+  await client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: parsedKey }));
+  await client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: legacyParsedKey }));
+  // Delete the source after the initial derived-artifact cleanup, then sweep
+  // parsed output once more to catch a worker that finished during deletion.
   await client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: key }));
-  await client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: parsedKey })).catch(() => undefined);
-  await client.send(new DeleteObjectCommand({ Bucket: cfg.bucket, Key: legacyParsedKey })).catch(() => undefined);
-  await deleteDocumentPrefix(parsedPrefix).catch(() => undefined);
-  await deleteDocumentPrefix(`${key}/`).catch(() => undefined);
+  // The source blob is already gone at this point. Treat the final sweep as a
+  // best-effort cleanup: if it throws, rethrowing would make callers roll back
+  // the document row even though the source is deleted, so log and swallow.
+  try {
+    await deleteDocumentPrefix(parsedPrefix);
+  } catch (error) {
+    logDegraded(serverLogger, {
+      event: 'documents.blob_delete.final_parsed_sweep.failed',
+      msg: 'Failed final parsed-output sweep after document deletion',
+      step: 'delete_document_parsed_prefix_final',
+      context: { parsedPrefix },
+      error,
+    });
+  }
 }
 
 export async function deleteTempDocumentUpload(token: string, userId: string, namespace: string | null): Promise<void> {
@@ -564,7 +582,16 @@ export async function deleteDocumentPrefix(prefix: string): Promise<number> {
           },
         }),
       );
-      deleted += deleteRes.Deleted?.length ?? 0;
+      const errors = deleteRes.Errors ?? [];
+      if (errors.length > 0) {
+        const details = errors
+          .map((e) => `${e.Key ?? '?'} (${e.Code ?? 'Unknown'}: ${e.Message ?? 'no message'})`)
+          .join('; ');
+        throw new Error(
+          `Failed deleting ${errors.length} document storage object(s) under prefix "${cleanedPrefix}": ${details}`,
+        );
+      }
+      deleted += keys.length;
     }
 
     continuationToken = listRes.IsTruncated ? listRes.NextContinuationToken : undefined;
@@ -573,52 +600,107 @@ export async function deleteDocumentPrefix(prefix: string): Promise<number> {
   return deleted;
 }
 
-export async function deleteExpiredTempDocumentUploads(
-  userId: string,
+/**
+ * List the source document blobs under a namespace (content-addressed objects
+ * directly beneath `documents_v1/`, excluding the `parsed_v2/` and `ns/`
+ * subtrees via the `/` delimiter). Used by the orphaned-blob reaper.
+ */
+export async function listDocumentSourceBlobs(
+  namespace: string | null,
+  options?: { signal?: AbortSignal },
+): Promise<Array<{ id: string; lastModifiedMs: number }>> {
+  const cfg = getS3Config();
+  const client = getS3ProxyClient();
+  const ns = sanitizeNamespace(namespace);
+  const nsSegment = ns ? `ns/${ns}/` : '';
+  const prefix = `${cfg.prefix}/documents_v1/${nsSegment}`;
+  const out: Array<{ id: string; lastModifiedMs: number }> = [];
+  let continuationToken: string | undefined;
+
+  do {
+    options?.signal?.throwIfAborted();
+    const listRes = await client.send(
+      new ListObjectsV2Command({
+        Bucket: cfg.bucket,
+        Prefix: prefix,
+        Delimiter: '/',
+        ContinuationToken: continuationToken,
+      }),
+      { abortSignal: options?.signal },
+    );
+
+    for (const item of listRes.Contents ?? []) {
+      const key = item.Key;
+      if (!key) continue;
+      const id = key.slice(prefix.length);
+      if (!isValidDocumentId(id)) continue;
+      out.push({ id, lastModifiedMs: item.LastModified?.getTime() ?? 0 });
+    }
+
+    continuationToken = listRes.IsTruncated ? listRes.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return out;
+}
+
+/**
+ * Delete every temporary upload object (across all users) older than the given
+ * cutoff. Used by the cleanup-temp-uploads scheduled task.
+ */
+export async function deleteAllExpiredTempDocumentUploads(
   namespace: string | null,
   olderThanMs: number,
+  options?: { signal?: AbortSignal },
 ): Promise<number> {
   const cfg = getS3Config();
   const client = getS3ProxyClient();
-  const prefix = tempDocumentUploadPrefix(userId, namespace);
+  const ns = sanitizeNamespace(namespace);
+  const nsSegment = ns ? `ns/${ns}/` : '';
+  const prefix = `${cfg.prefix}/document_uploads_temp_v1/${nsSegment}`;
   let continuationToken: string | undefined;
-  const keys: string[] = [];
+  let deleted = 0;
 
   do {
+    options?.signal?.throwIfAborted();
     const listRes = await client.send(
       new ListObjectsV2Command({
         Bucket: cfg.bucket,
         Prefix: prefix,
         ContinuationToken: continuationToken,
       }),
+      { abortSignal: options?.signal },
     );
 
+    const batch: string[] = [];
     for (const item of listRes.Contents ?? []) {
       const key = item.Key;
       const lastModified = item.LastModified?.getTime() ?? 0;
       if (!key || lastModified <= 0 || lastModified >= olderThanMs) continue;
-      keys.push(key);
+      batch.push(key);
+    }
+
+    if (batch.length > 0) {
+      const deleteRes = await client.send(
+        new DeleteObjectsCommand({
+          Bucket: cfg.bucket,
+          Delete: {
+            Objects: batch.map((Key) => ({ Key })),
+            Quiet: true,
+          },
+        }),
+        { abortSignal: options?.signal },
+      );
+      if (deleteRes.Errors?.length) {
+        throw new Error(
+          `Failed to delete temporary uploads from bucket "${cfg.bucket}" `
+          + `(keys: ${JSON.stringify(batch)}, errors: ${JSON.stringify(deleteRes.Errors)})`,
+        );
+      }
+      deleted += batch.length;
     }
 
     continuationToken = listRes.IsTruncated ? listRes.NextContinuationToken : undefined;
   } while (continuationToken);
-
-  if (keys.length === 0) return 0;
-
-  let deleted = 0;
-  for (let i = 0; i < keys.length; i += 1000) {
-    const batch = keys.slice(i, i + 1000);
-    const deleteRes = await client.send(
-      new DeleteObjectsCommand({
-        Bucket: cfg.bucket,
-        Delete: {
-          Objects: batch.map((Key) => ({ Key })),
-          Quiet: true,
-        },
-      }),
-    );
-    deleted += deleteRes.Deleted?.length ?? 0;
-  }
 
   return deleted;
 }

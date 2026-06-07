@@ -1,5 +1,14 @@
 import { db } from '@/db';
-import { documents, audiobooks, audiobookChapters, userPreferences, userDocumentProgress } from '@/db/schema';
+import {
+  documents,
+  audiobooks,
+  audiobookChapters,
+  documentSettings,
+  ttsSegmentEntries,
+  ttsSegmentVariants,
+  userPreferences,
+  userDocumentProgress,
+} from '@/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { UNCLAIMED_USER_ID } from '../storage/docstore-legacy';
 import { cleanupClaimedLegacyFsSources } from './legacy-fs-claim-cleanup';
@@ -12,6 +21,9 @@ import {
 import { isS3Configured } from '../storage/s3';
 import { logDegraded } from '../errors/logging';
 import { hashForLog, serverLogger } from '../logger';
+import { getS3Config } from '../storage/s3';
+import { copyTtsSegmentPrefix, deleteTtsSegmentPrefix } from '../tts/segments-blobstore';
+import { buildTtsSegmentDocumentPrefix } from '../tts/segments';
 
 type AudiobookRow = {
   id: string;
@@ -61,7 +73,7 @@ function contentTypeForAudiobookObject(fileName: string): string {
   return 'application/octet-stream';
 }
 
-async function moveAudiobookBlobScope(
+async function copyAudiobookBlobScope(
   bookId: string,
   fromUserId: string,
   toUserId: string,
@@ -83,15 +95,27 @@ async function moveAudiobookBlobScope(
       namespace,
     );
   }
+}
 
+async function deleteAudiobookBlobScope(
+  bookId: string,
+  userId: string,
+  namespace: string | null,
+): Promise<void> {
+  const objects = await listAudiobookObjects(bookId, userId, namespace);
   for (const object of objects) {
-    await deleteAudiobookObject(bookId, fromUserId, object.fileName, namespace).catch(() => {});
+    await deleteAudiobookObject(bookId, userId, object.fileName, namespace);
   }
 }
 
-export async function claimAnonymousData(userId: string, unclaimedUserId: string = UNCLAIMED_USER_ID, namespace: string | null = null) {
+export async function claimAnonymousData(
+  userId: string,
+  unclaimedUserId: string = UNCLAIMED_USER_ID,
+  namespace: string | null = null,
+  options?: { cleanupLegacySources?: boolean },
+) {
   if (!userId) {
-    return { documents: 0, audiobooks: 0, preferences: 0, progress: 0 };
+    return { documents: 0, audiobooks: 0, preferences: 0, progress: 0, documentSettings: 0 };
   }
 
   const [claimableDocumentRows, claimableAudiobookRows] = await Promise.all([
@@ -105,14 +129,18 @@ export async function claimAnonymousData(userId: string, unclaimedUserId: string
       .where(eq(audiobooks.userId, unclaimedUserId)) as Promise<Array<{ id: string }>>,
   ]);
 
-  const [documentsClaimed, audiobooksClaimed, preferencesClaimed, progressClaimed] = await Promise.all([
-    transferUserDocuments(unclaimedUserId, userId),
+  const [documentsClaimed, audiobooksClaimed, preferencesClaimed, progressClaimed, documentSettingsClaimed] = await Promise.all([
+    transferUserDocuments(unclaimedUserId, userId, { namespace, transferTts: true }),
     transferUserAudiobooks(unclaimedUserId, userId, namespace),
     transferUserPreferences(unclaimedUserId, userId),
     transferUserProgress(unclaimedUserId, userId),
+    transferUserDocumentSettings(unclaimedUserId, userId),
   ]);
 
-  if (claimableDocumentRows.length > 0 || claimableAudiobookRows.length > 0) {
+  if (
+    options?.cleanupLegacySources !== false
+    && (claimableDocumentRows.length > 0 || claimableAudiobookRows.length > 0)
+  ) {
     await cleanupClaimedLegacyFsSources({
       documentIds: claimableDocumentRows.map((row) => row.id),
       audiobookIds: claimableAudiobookRows.map((row) => row.id),
@@ -139,6 +167,7 @@ export async function claimAnonymousData(userId: string, unclaimedUserId: string
     audiobooks: audiobooksClaimed,
     preferences: preferencesClaimed,
     progress: progressClaimed,
+    documentSettings: documentSettingsClaimed,
   };
 }
 
@@ -146,7 +175,8 @@ export async function claimAnonymousData(userId: string, unclaimedUserId: string
  * Transfer documents from one userId to another.
  *
  * This is used when an anonymous user upgrades to an authenticated account.
- * The underlying blob storage is shared (by sha), so this only moves metadata rows.
+ * The source document blob is shared, while user-scoped TTS metadata and audio
+ * are copied before the old ownership is removed.
  *
  * @returns number of document rows transferred
  */
@@ -154,24 +184,164 @@ export async function transferUserDocuments(
   fromUserId: string,
   toUserId: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  options?: { db?: any },
+  options?: { db?: any; namespace?: string | null; transferTts?: boolean; skipStorage?: boolean },
 ): Promise<number> {
   if (!fromUserId || !toUserId) return 0;
   if (fromUserId === toUserId) return 0;
 
   const database = options?.db ?? db;
+  // Object storage is always present in a real deployment; `skipStorage` lets
+  // tests transfer metadata only. The shared, content-addressed document blob is
+  // never touched here — it stays as long as any owner (the new user) remains.
+  const copyStorage = !options?.skipStorage && isS3Configured();
 
   const rows = await database.select().from(documents).where(eq(documents.userId, fromUserId));
   if (rows.length === 0) return 0;
 
-  await database
-    .insert(documents)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .values(rows.map((row: any) => ({ ...row, userId: toUserId })))
-    .onConflictDoNothing();
-
-  await database.delete(documents).where(eq(documents.userId, fromUserId));
+  for (const row of rows) {
+    await database
+      .insert(documents)
+      .values({ ...row, userId: toUserId })
+      .onConflictDoNothing();
+    if (options?.transferTts) {
+      await transferDocumentTtsSegments({
+        documentId: row.id,
+        fromUserId,
+        toUserId,
+        namespace: options.namespace ?? null,
+        database,
+        copyStorage,
+      });
+    }
+    await database.delete(documents).where(and(
+      eq(documents.userId, fromUserId),
+      eq(documents.id, row.id),
+    ));
+  }
   return rows.length;
+}
+
+async function transferDocumentTtsSegments(input: {
+  documentId: string;
+  fromUserId: string;
+  toUserId: string;
+  namespace: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: any;
+  copyStorage: boolean;
+}): Promise<void> {
+  // Built only when storage is in play — getS3Config() throws if storage is
+  // unconfigured, which is exactly the metadata-only path tests exercise.
+  const sourceTtsPrefixes = () => (['v1', 'v2'] as const).map((storageVersion) => ({
+    from: buildTtsSegmentDocumentPrefix({
+      storagePrefix: getS3Config().prefix,
+      namespace: input.namespace,
+      userId: input.fromUserId,
+      documentId: input.documentId,
+      storageVersion,
+    }),
+    to: buildTtsSegmentDocumentPrefix({
+      storagePrefix: getS3Config().prefix,
+      namespace: input.namespace,
+      userId: input.toUserId,
+      documentId: input.documentId,
+      storageVersion,
+    }),
+  }));
+
+  if (input.copyStorage) {
+    for (const { from, to } of sourceTtsPrefixes()) {
+      await copyTtsSegmentPrefix(from, to);
+    }
+  }
+
+  const entries = await input.database
+    .select()
+    .from(ttsSegmentEntries)
+    .where(and(
+      eq(ttsSegmentEntries.userId, input.fromUserId),
+      eq(ttsSegmentEntries.documentId, input.documentId),
+    ));
+  const variants = entries.length > 0
+    ? await input.database
+      .select()
+      .from(ttsSegmentVariants)
+      .where(and(
+        eq(ttsSegmentVariants.userId, input.fromUserId),
+        inArray(ttsSegmentVariants.segmentEntryId, entries.map(
+          (entry: typeof ttsSegmentEntries.$inferSelect) => entry.segmentEntryId,
+        )),
+      ))
+    : [];
+
+  if (entries.length > 0) {
+    await input.database.insert(ttsSegmentEntries)
+      .values(entries.map((entry: typeof ttsSegmentEntries.$inferSelect) => ({
+        ...entry,
+        userId: input.toUserId,
+      })))
+      .onConflictDoNothing();
+  }
+
+  const encodedFrom = encodeURIComponent(input.fromUserId);
+  const encodedTo = encodeURIComponent(input.toUserId);
+  const sourceAudioKeyPrefix = `/users/${encodedFrom}/docs/${input.documentId}/`;
+  const destAudioKeyPrefix = `/users/${encodedTo}/docs/${input.documentId}/`;
+  if (variants.length > 0) {
+    await input.database.insert(ttsSegmentVariants)
+      .values(variants.map((variant: typeof ttsSegmentVariants.$inferSelect) => {
+        const audioKey = variant.audioKey ?? null;
+        if (!audioKey || audioKey.includes(sourceAudioKeyPrefix)) {
+          return {
+            ...variant,
+            userId: input.toUserId,
+            audioKey: audioKey?.replace(sourceAudioKeyPrefix, destAudioKeyPrefix) ?? null,
+          };
+        }
+        // The key did not contain the expected source path, so it cannot be
+        // safely remapped. Leaving it would point the new owner at the source
+        // user's (soon-deleted) audio, so null it out and log for investigation.
+        logDegraded(serverLogger, {
+          event: 'user.claim.tts_variant_audio_key.unmapped',
+          msg: 'TTS segment variant audioKey did not match expected source path during claim',
+          step: 'remap_tts_variant_audio_key',
+          context: {
+            originalAudioKey: audioKey,
+            fromUserIdHash: hashForLog(input.fromUserId),
+            toUserIdHash: hashForLog(input.toUserId),
+            documentId: input.documentId,
+          },
+        });
+        return {
+          ...variant,
+          userId: input.toUserId,
+          audioKey: null,
+        };
+      }))
+      .onConflictDoNothing();
+  }
+
+  // Always remove the source metadata: the source account (e.g. the persistent
+  // 'unclaimed' user) is not deleted, so nothing would cascade it away.
+  if (variants.length > 0) {
+    await input.database.delete(ttsSegmentVariants).where(and(
+      eq(ttsSegmentVariants.userId, input.fromUserId),
+      inArray(ttsSegmentVariants.segmentId, variants.map(
+        (variant: typeof ttsSegmentVariants.$inferSelect) => variant.segmentId,
+      )),
+    ));
+  }
+  await input.database.delete(ttsSegmentEntries).where(and(
+    eq(ttsSegmentEntries.userId, input.fromUserId),
+    eq(ttsSegmentEntries.documentId, input.documentId),
+  ));
+
+  // Remove the now-copied source audio objects too (only when storage is in play).
+  if (input.copyStorage) {
+    for (const { from } of sourceTtsPrefixes()) {
+      await deleteTtsSegmentPrefix(from);
+    }
+  }
 }
 
 /**
@@ -195,7 +365,7 @@ export async function transferUserAudiobooks(
 
   if (isS3Configured()) {
     for (const book of books) {
-      await moveAudiobookBlobScope(book.id, fromUserId, toUserId, namespace);
+      await copyAudiobookBlobScope(book.id, fromUserId, toUserId, namespace);
     }
   }
 
@@ -213,6 +383,12 @@ export async function transferUserAudiobooks(
       .insert(audiobookChapters)
       .values(chapters.map((chapter) => ({ ...chapter, userId: toUserId })))
       .onConflictDoNothing();
+  }
+
+  if (isS3Configured()) {
+    for (const book of books) {
+      await deleteAudiobookBlobScope(book.id, fromUserId, namespace);
+    }
   }
 
   await db.delete(audiobookChapters).where(eq(audiobookChapters.userId, fromUserId));
@@ -308,4 +484,58 @@ export async function transferUserProgress(fromUserId: string, toUserId: string)
 
   await db.delete(userDocumentProgress).where(eq(userDocumentProgress.userId, fromUserId));
   return fromRows.length;
+}
+
+export async function transferUserDocumentSettings(
+  fromUserId: string,
+  toUserId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  options?: { db?: any },
+): Promise<number> {
+  if (!fromUserId || !toUserId || fromUserId === toUserId) return 0;
+
+  const database = options?.db ?? db;
+  const rows = await database
+    .select()
+    .from(documentSettings)
+    .where(eq(documentSettings.userId, fromUserId));
+  const documentIds = rows.map((row: { documentId: string }) => row.documentId);
+  const existingRows = documentIds.length > 0
+    ? await database
+      .select({
+        documentId: documentSettings.documentId,
+        clientUpdatedAtMs: documentSettings.clientUpdatedAtMs,
+      })
+      .from(documentSettings)
+      .where(and(
+        eq(documentSettings.userId, toUserId),
+        inArray(documentSettings.documentId, documentIds),
+      ))
+    : [];
+  const existingByDocumentId = new Map<string, { clientUpdatedAtMs: number | null }>(
+    existingRows.map((row: { documentId: string; clientUpdatedAtMs: number | null }) => [
+      row.documentId,
+      row,
+    ] as const),
+  );
+
+  for (const row of rows) {
+    const existing = existingByDocumentId.get(row.documentId);
+    if (existing && Number(existing.clientUpdatedAtMs ?? 0) >= Number(row.clientUpdatedAtMs ?? 0)) {
+      continue;
+    }
+    await database
+      .insert(documentSettings)
+      .values({ ...row, userId: toUserId })
+      .onConflictDoUpdate({
+        target: [documentSettings.documentId, documentSettings.userId],
+        set: {
+          dataJson: row.dataJson,
+          clientUpdatedAtMs: row.clientUpdatedAtMs,
+          updatedAt: row.updatedAt,
+        },
+      });
+  }
+  await database.delete(documentSettings).where(eq(documentSettings.userId, fromUserId));
+  return rows.length;
 }
