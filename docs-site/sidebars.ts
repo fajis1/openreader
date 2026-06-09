@@ -23,6 +23,7 @@ const sidebars: SidebarsConfig = {
             'configure/tts-provider-guides/kokoro-fastapi',
             'configure/tts-provider-guides/kitten-tts-fastapi',
             'configure/tts-provider-guides/orpheus-fastapi',
+            'configure/tts-provider-guides/supertonic',
             'configure/tts-provider-guides/replicate',
             'configure/tts-provider-guides/deepinfra',
             'configure/tts-provider-guides/openai',

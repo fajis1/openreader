@@ -45,6 +45,7 @@ TTS requests originate from the **Next.js server**, not the browser. `API_BASE` 
 - [Kokoro-FastAPI](./tts-provider-guides/kokoro-fastapi)
 - [KittenTTS-FastAPI](./tts-provider-guides/kitten-tts-fastapi)
 - [Orpheus-FastAPI](./tts-provider-guides/orpheus-fastapi)
+- [Supertonic](./tts-provider-guides/supertonic)
 - [Replicate](./tts-provider-guides/replicate)
 - [DeepInfra](./tts-provider-guides/deepinfra)
 - [OpenAI](./tts-provider-guides/openai)
