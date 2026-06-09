@@ -44,7 +44,9 @@ export function useEPUBHighlighting({
   renderedTextMapsRef,
 }: UseEpubHighlightingParams): UseEpubHighlightingResult {
   // Cache the per-segment word→region map so we don't re-align on every whisper
-  // tick. Keyed by the segment + resolved region + alignment.
+  // tick. Keyed by the segment + resolved region + the aligned word texts, so a
+  // corrected/rebuilt alignment (even with an identical word count) misses the
+  // cache instead of reusing stale spans.
   const wordRangeCacheRef = useRef<{ key: string; spans: Array<AlignmentCharSpan | null> } | null>(null);
 
   const clearWordHighlights = useCallback(() => {
@@ -122,6 +124,9 @@ export function useEPUBHighlighting({
       resolved.startOffset,
       resolved.endOffset,
       words.length,
+      // Word texts (not timings) drive the span mapping, so include them: a
+      // re-aligned segment with the same count still invalidates the cache.
+      words.map((word) => word.text).join(''),
     ].join('::');
     if (wordRangeCacheRef.current?.key !== cacheKey) {
       wordRangeCacheRef.current = {
@@ -166,10 +171,14 @@ export function useEPUBHighlighting({
 
   const setRenderedTextMaps = useCallback((maps: EpubRenderedTextMap[]) => {
     renderedTextMapsRef.current = maps;
+    // Remapped content can change a region's text under an unchanged cache key,
+    // so drop the word-span cache whenever the text maps are replaced.
+    wordRangeCacheRef.current = null;
   }, [renderedTextMapsRef]);
 
   const resetHighlightState = useCallback(() => {
     renderedTextMapsRef.current = [];
+    wordRangeCacheRef.current = null;
     clearHighlights();
   }, [clearHighlights, renderedTextMapsRef]);
 

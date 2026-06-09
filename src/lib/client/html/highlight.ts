@@ -66,6 +66,9 @@ interface SentenceState {
   // Normalized text of the wrap (chars joined), tokenized to align each spoken
   // word against the rendered words.
   text: string;
+  // Locale captured when the sentence was highlighted, reused for locale-aware
+  // word segmentation when mapping the alignment (matters for CJK/Thai, etc.).
+  language?: string;
   // For an alignment we've already seen: each word's [start, end) char span
   // within `text`/`chars` (null entries = words that aligned to no token).
   alignment: TTSSentenceAlignment | null;
@@ -318,6 +321,7 @@ export function highlightHtmlSentence(
     sentence,
     chars,
     text,
+    language,
     alignment: null,
     wordRanges: null,
   };
@@ -349,7 +353,7 @@ export function highlightHtmlWord(
   // rendered words and won't jump to a later/duplicate word.
   if (sentenceState.alignment !== alignment || !sentenceState.wordRanges) {
     sentenceState.alignment = alignment;
-    sentenceState.wordRanges = locateAlignmentWordSpans(words, sentenceState.text);
+    sentenceState.wordRanges = locateAlignmentWordSpans(words, sentenceState.text, sentenceState.language);
   }
 
   const range = sentenceState.wordRanges[wordIndex];
