@@ -41,6 +41,8 @@ describe('tts provider catalog', () => {
   test('resolves default voices and instruction support unchanged', () => {
     expect(getDefaultVoices('openai', 'gpt-4o-mini-tts')).toContain('sage');
     expect(getDefaultVoices('custom-openai', 'kokoro')).toContain('af_sarah');
+    // Non-kokoro custom-openai models fall back to the canonical OpenAI six.
+    expect(getDefaultVoices('custom-openai', 'supertonic-3')).toEqual(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']);
     expect(getDefaultVoices('deepinfra', 'ResembleAI/chatterbox')).toEqual(['None']);
     expect(getDefaultVoices('deepinfra', 'Zyphra/Zonos-v0.1-transformer')).toEqual(['random']);
     expect(supportsTtsInstructions('gpt-4o-mini-tts')).toBe(true);

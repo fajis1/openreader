@@ -232,7 +232,9 @@ export function getDefaultVoices(provider: TtsProviderId, model: string): string
   }
 
   if (provider === 'custom-openai') {
-    return isKokoroModel(model) ? [...KOKORO_DEFAULT_VOICES] : [...CUSTOM_OPENAI_DEFAULT_VOICES];
+    // Kokoro models get the kokoro voice set; any other OpenAI-compatible model
+    // falls back to the canonical OpenAI six, which such servers generally accept.
+    return isKokoroModel(model) ? [...KOKORO_DEFAULT_VOICES] : [...OPENAI_DEFAULT_VOICES];
   }
 
   if (provider === 'replicate') {
