@@ -656,7 +656,12 @@ async function runOpenAiCompatibleRequest(
   upstreamSettings: ResolvedTtsUpstreamRuntimeSettings,
 ): Promise<Buffer> {
   const openai = new OpenAI({
-    apiKey: request.apiKey,
+    // The SDK constructor rejects an empty apiKey, but many OpenAI-compatible
+    // servers (e.g. a local Supertonic/Kokoro) need no auth. Pass a placeholder to
+    // satisfy the constructor; `defaultHeaders` clears the Authorization header
+    // (merged after the bearer auth, and allowed by validateHeaders), so the
+    // placeholder is never sent.
+    apiKey: request.apiKey || 'no-key',
     baseURL: request.baseUrl,
     defaultHeaders: request.apiKey ? undefined : { Authorization: null },
     maxRetries: 0,
