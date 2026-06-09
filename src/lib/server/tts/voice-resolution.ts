@@ -390,9 +390,16 @@ function extractVoiceNames(payload: unknown): string[] | null {
         }
       }
     }
+    // An explicitly empty list is a valid answer ("this server has no voices");
+    // honor it rather than probing further or falling back to defaults.
+    if (value.length === 0) {
+      return [];
+    }
     const cleaned = Array.from(
       new Set(names.map((name) => name.trim()).filter((name) => name.length > 0)),
     );
+    // The value was an array but yielded no usable names (unrecognized shape);
+    // treat as not-a-voices-list so the next endpoint / defaults can apply.
     return cleaned.length > 0 ? cleaned : null;
   };
 
