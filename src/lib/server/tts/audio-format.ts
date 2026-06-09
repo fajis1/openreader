@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { serverLogger } from '@/lib/server/logger';
@@ -133,27 +133,42 @@ function spawnFfmpegToBuffer(args: string[], signal?: AbortSignal): Promise<Buff
  * what the user listens to live, and aggressive low-bitrate encoding of pristine
  * high-fidelity TTS (e.g. 44.1 kHz wav) introduces high-frequency artifacts that
  * cause listening fatigue. The audiobook export still re-encodes to 64k for size.
+ *
+ * The mp3 is written to a seekable temp file rather than piped to stdout: VBR mp3
+ * stores its total-duration metadata in a Xing/Info header at the *start* of the
+ * file, which ffmpeg can only emit by seeking back after encoding finishes. On a
+ * pipe that seek is impossible, so a piped VBR mp3 carries no valid duration. The
+ * HTML5 <audio> element then extrapolates duration from the first frame's bitrate
+ * (correct for CBR, wrong for VBR), which makes the `ended` event fire at the
+ * wrong time — or stall without firing — and stops segment-to-segment playback.
+ * Writing to a real file lets ffmpeg backpatch the Xing header so duration is
+ * accurate and `ended` fires reliably.
  */
 export async function transcodeToMp3(buffer: Buffer, signal?: AbortSignal): Promise<Buffer> {
   let workDir: string | null = null;
   try {
     workDir = await mkdtemp(join(tmpdir(), 'openreader-tts-transcode-'));
     const inputPath = join(workDir, 'input');
+    const outputPath = join(workDir, 'output.mp3');
     await writeFile(inputPath, buffer);
 
-    return await spawnFfmpegToBuffer(
+    await spawnFfmpegToBuffer(
       [
         '-nostdin',
         '-loglevel', 'error',
+        '-y',
         '-i', inputPath,
         '-vn',
         '-c:a', 'libmp3lame',
         '-q:a', '2',
+        '-write_xing', '1',
         '-f', 'mp3',
-        'pipe:1',
+        outputPath,
       ],
       signal,
     );
+
+    return await readFile(outputPath);
   } finally {
     if (workDir) {
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
