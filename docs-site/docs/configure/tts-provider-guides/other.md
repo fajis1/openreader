@@ -6,12 +6,14 @@ Use any OpenAI-compatible TTS service with OpenReader, including self-hosted ser
 
 ## Requirements
 
-Your service must expose these endpoints:
+Your service only needs an OpenAI-compatible speech endpoint:
 
-- `GET /v1/audio/voices`
-- `POST /v1/audio/speech`
+- `POST /v1/audio/speech` — **required**.
+- Voice listing is **optional** and auto-discovered from `/v1/audio/voices`, `/v1/voices`, or `/v1/styles`; OpenReader falls back to default voices if none are available.
 
-Known compatible implementations: [Kokoro-FastAPI](./kokoro-fastapi), [KittenTTS-FastAPI](./kitten-tts-fastapi), [Orpheus-FastAPI](./orpheus-fastapi).
+The endpoint may return `mp3`, `wav`, `ogg`, or `flac` — OpenReader normalizes non-mp3 audio to mp3 automatically. An API key is optional.
+
+Known compatible implementations: [Kokoro-FastAPI](./kokoro-fastapi), [KittenTTS-FastAPI](./kitten-tts-fastapi), [Orpheus-FastAPI](./orpheus-fastapi), [Supertonic](./supertonic).
 
 ## Setup
 
@@ -44,7 +46,7 @@ See [TTS Providers](../tts-providers) for admin-shared vs per-user behavior.
 
 ## Troubleshooting
 
-If voices don't load, check that `/v1/audio/voices` is reachable from the server and returns a valid response shape.
+If voices don't load, confirm the server is reachable from the Next.js runtime and that at least one of `/v1/audio/voices`, `/v1/voices`, or `/v1/styles` returns a valid response. If none do, OpenReader falls back to default voices — synthesis still works as long as `POST /v1/audio/speech` succeeds.
 
 ## References
 

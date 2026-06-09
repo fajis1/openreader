@@ -31,10 +31,12 @@ For `OpenAI`, `DeepInfra`, and `Replicate` you only need to supply an API key. F
 
 ## Custom provider requirements
 
-Self-hosted or custom providers must expose OpenAI-compatible audio endpoints:
+Self-hosted or custom providers only need an OpenAI-compatible speech endpoint:
 
-- `GET /v1/audio/voices`
-- `POST /v1/audio/speech`
+- `POST /v1/audio/speech` — **required**.
+- Voice listing is **optional** and auto-discovered: OpenReader probes `/v1/audio/voices`, `/v1/voices`, then `/v1/styles`, and falls back to sensible default voices if none respond.
+
+The speech endpoint may return any common audio format — `mp3`, `wav`, `ogg`, or `flac`. OpenReader detects the format and transcodes non-mp3 audio to mp3 automatically, so your server does not need to honor `response_format: mp3`. An API key is optional; keyless servers work.
 
 :::warning TTS requests are server-side
 TTS requests originate from the **Next.js server**, not the browser. `API_BASE` must be reachable from the server runtime. In Docker, use container names or `host.docker.internal` rather than `localhost`.
