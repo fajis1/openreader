@@ -56,6 +56,7 @@ export function UploadMenuDialog({
 
   // --- Import URL State ---
   const [webUrl, setWebUrl] = useState('');
+  const [webTitle, setWebTitle] = useState('');
   const [importStep, setImportStep] = useState<
     'idle' | 'fetching' | 'converting' | 'uploading' | 'error'
   >('idle');
@@ -126,7 +127,8 @@ export function UploadMenuDialog({
       setImportStep('uploading');
       
       // Create virtual file from markdown content
-      const safeTitle = (scrapeResult.title || 'Imported Web Page')
+      const displayTitle = webTitle.trim() || scrapeResult.title || 'Imported Web Page';
+      const safeTitle = displayTitle
         .replace(/[/\\?%*:|"<>\s]/g, '_')
         .substring(0, 80);
       const filename = `${safeTitle}.md`;
@@ -137,8 +139,9 @@ export function UploadMenuDialog({
       await uploadDocuments([file]);
 
       // Success
-      toast.success(`Successfully imported "${scrapeResult.title}"!`);
+      toast.success(`Successfully imported "${displayTitle}"!`);
       setWebUrl('');
+      setWebTitle('');
       setImportStep('idle');
       onClose();
     } catch (err) {
@@ -265,18 +268,48 @@ export function UploadMenuDialog({
       {activeTab === 'url' && (
         <div className="h-full flex flex-col justify-between animate-fade-in">
           <div className="space-y-4 flex-1">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="web-url" className="text-xs font-semibold text-foreground">
-                Source Web URL
-              </label>
-              <div className="flex gap-2">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="web-url" className="text-xs font-semibold text-foreground">
+                  Source Web URL
+                </label>
+                <div className="flex gap-2">
+                  <Input
+                    id="web-url"
+                    type="url"
+                    value={webUrl}
+                    onChange={(e) => setWebUrl(e.target.value)}
+                    placeholder="https://en.wikipedia.org/wiki/Speed_reading"
+                    className="flex-1"
+                    disabled={importStep !== 'idle' && importStep !== 'error'}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleImportUrl();
+                      }
+                    }}
+                  />
+                  <Button
+                    variant="primary"
+                    onClick={handleImportUrl}
+                    disabled={importStep !== 'idle' && importStep !== 'error'}
+                  >
+                    Import
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="web-title" className="text-xs font-semibold text-foreground">
+                  Document Title (Optional)
+                </label>
                 <Input
-                  id="web-url"
-                  type="url"
-                  value={webUrl}
-                  onChange={(e) => setWebUrl(e.target.value)}
-                  placeholder="https://en.wikipedia.org/wiki/Speed_reading"
-                  className="flex-1"
+                  id="web-title"
+                  type="text"
+                  value={webTitle}
+                  onChange={(e) => setWebTitle(e.target.value)}
+                  placeholder="Leave empty to use article title"
+                  className="w-full"
                   disabled={importStep !== 'idle' && importStep !== 'error'}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
@@ -285,14 +318,8 @@ export function UploadMenuDialog({
                     }
                   }}
                 />
-                <Button
-                  variant="primary"
-                  onClick={handleImportUrl}
-                  disabled={importStep !== 'idle' && importStep !== 'error'}
-                >
-                  Import
-                </Button>
               </div>
+
               <p className="text-[11px] text-soft leading-normal mt-1">
                 Extracts the central article body, removes boilerplate noise (headers, sidebars, ads), and converts it into a clean Markdown document for synchrony reading.
               </p>
