@@ -22,7 +22,9 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { CreateFolderDialog } from '@/components/doclist/CreateFolderDialog';
 import { DocumentListSkeleton } from '@/components/doclist/DocumentListSkeleton';
 import { DocumentUploader, type UploadBatchState } from '@/components/documents/DocumentUploader';
-import { IconButton } from '@/components/ui';
+import { IconButton, SidebarNavItem } from '@/components/ui';
+import { UploadIcon } from '@/components/icons/Icons';
+import { UploadMenuDialog } from '@/components/documents/UploadMenuDialog';
 import { DocumentDndProvider } from './dnd/DocumentDndProvider';
 import {
   DocumentSelectionProvider,
@@ -209,6 +211,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [activeUploadBatches, setActiveUploadBatches] = useState<Record<string, UploadBatchState>>({});
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
 
   const [isInitialized, setIsInitialized] = useState(cachedState !== null);
 
@@ -619,7 +622,14 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
           onDropOnFolder={handleDropOnFolder}
           width={sidebarWidth}
           onWidthChange={setSidebarWidth}
-          topSlot={<DocumentUploader variant="compact" onUploadBatchChange={handleUploadBatchChange} />}
+          topSlot={(
+            <SidebarNavItem
+              compact
+              onClick={() => setIsUploadDialogOpen(true)}
+              icon={<UploadIcon className="w-3.5 h-3.5" />}
+              label="Upload documents"
+            />
+          )}
           bottomSlot={(
             <div className="flex flex-col gap-2">
               {sidebarUploadState && (
@@ -774,6 +784,12 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         message="Remove all folders? This will not delete documents."
         confirmText="Remove Folders"
         isDangerous
+      />
+
+      <UploadMenuDialog
+        isOpen={isUploadDialogOpen}
+        onClose={() => setIsUploadDialogOpen(false)}
+        onUploadBatchChange={handleUploadBatchChange}
       />
     </FinderWindow>
   );
