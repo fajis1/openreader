@@ -133,13 +133,16 @@ export function DocumentUploader({
 
   return (
     <div
-      {...getRootProps()}
-      onClick={(e) => {
-        if (onClick) {
-          e.stopPropagation();
-          onClick();
-        }
-      }}
+      {...getRootProps(
+        onClick
+          ? {
+              onClick: (e) => {
+                e.stopPropagation();
+                onClick();
+              },
+            }
+          : {}
+      )}
       className={dropzoneSurfaceClass({
         variant: variant === 'compact' ? 'compact' : 'default',
         active: isDragActive,
