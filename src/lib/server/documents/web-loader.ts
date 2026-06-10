@@ -28,9 +28,11 @@ function isPrivateIpv4(ip: string): boolean {
   if (o1 === 0) return true; // 0.0.0.0/8 ("this host")
   if (o1 === 10) return true; // 10.0.0.0/8
   if (o1 === 127) return true; // 127.0.0.0/8 loopback
+  if (o1 === 100 && o2 >= 64 && o2 <= 127) return true; // 100.64.0.0/10 CGNAT (cloud-internal; Alibaba metadata 100.100.100.200)
   if (o1 === 169 && o2 === 254) return true; // 169.254.0.0/16 link-local
   if (o1 === 172 && o2 >= 16 && o2 <= 31) return true; // 172.16.0.0/12
   if (o1 === 192 && o2 === 168) return true; // 192.168.0.0/16
+  if (o1 === 198 && (o2 === 18 || o2 === 19)) return true; // 198.18.0.0/15 benchmarking
   if (o1 >= 224 && o1 <= 239) return true; // 224.0.0.0/4 multicast
   if (ip === '255.255.255.255') return true; // limited broadcast
   return false;
@@ -63,7 +65,7 @@ function isPrivateIp(ip: string): boolean {
   }
 
   if (/^fe[89ab]/.test(addr)) return true; // fe80::/10 link-local
-  if (/^fec/.test(addr)) return true; // fec0::/10 (deprecated site-local)
+  if (/^fe[c-f]/.test(addr)) return true; // fec0::/10 (deprecated site-local)
   if (/^f[cd]/.test(addr)) return true; // fc00::/7 unique-local
   if (/^ff/.test(addr)) return true; // ff00::/8 multicast
   return false;
@@ -242,7 +244,7 @@ async function fetchWithLimit(
   urlStr: string,
   maxBytes: number = MAX_BYTES,
   timeoutMs: number = TIMEOUT_MS
-): Promise<string> {
+): Promise<{ html: string; finalUrl: string }> {
   let currentUrl = urlStr;
 
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
@@ -254,7 +256,7 @@ async function fetchWithLimit(
       continue;
     }
 
-    return result.body ?? '';
+    return { html: result.body ?? '', finalUrl: currentUrl };
   }
 
   throw new Error('Too many redirects while fetching the webpage.');
@@ -268,15 +270,16 @@ export async function fetchAndParseUrl(
 ): Promise<{ title: string; content: string }> {
   // 1. Fetch HTML content with limit (SSRF validation + IP pinning happens
   //    inside fetchWithLimit for the initial URL and every redirect hop).
-  const html = await fetchWithLimit(urlStr);
+  const { html, finalUrl } = await fetchWithLimit(urlStr);
 
   // 3. Parse HTML string to a virtual DOM document
   const { document } = parseHTML(html);
 
-  // Resolve relative URLs for links and images to absolute paths based on source URL base
+  // Resolve relative URLs against the final (post-redirect) location so links
+  // and images point at the page we actually fetched.
   const resolveUrl = (relativeUrl: string) => {
     try {
-      return new URL(relativeUrl, urlStr).href;
+      return new URL(relativeUrl, finalUrl).href;
     } catch {
       return relativeUrl;
     }
