@@ -46,6 +46,20 @@ describe('replicate output URL extraction', () => {
     const output = { status: 'ok', value: 123 };
     expect(extractReplicateAudioUrl(output)).toBeNull();
   });
+
+  test('allows replicate.delivery subdomains', () => {
+    expect(extractReplicateAudioUrl('https://pbxt.replicate.delivery/out-0.wav')).toBe(
+      'https://pbxt.replicate.delivery/out-0.wav'
+    );
+  });
+
+  test('rejects URLs from non-replicate hosts (SSRF guard)', () => {
+    expect(extractReplicateAudioUrl('http://169.254.169.254/latest/meta-data/')).toBeNull();
+    expect(extractReplicateAudioUrl('https://evil.example.com/audio.mp3')).toBeNull();
+    // a host that merely embeds the allowed host as a substring must not pass
+    expect(extractReplicateAudioUrl('https://replicate.delivery.evil.com/x.mp3')).toBeNull();
+    expect(extractReplicateAudioUrl({ url: () => new URL('http://localhost:6379/') })).toBeNull();
+  });
 });
 
 describe('TTS upstream cache identity', () => {

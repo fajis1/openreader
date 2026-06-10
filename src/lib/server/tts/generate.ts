@@ -210,9 +210,23 @@ async function runWithReplicateGate<T>(
   return operation();
 }
 
+// Replicate serves all model output files from replicate.delivery and its
+// subdomains (https://replicate.com/docs/topics/predictions/output-files).
+// The extraction walker below picks up any URL string a model emits in its
+// output, so a malicious third-party model could otherwise return an internal
+// address (e.g. http://169.254.169.254/...) and turn this into an SSRF read.
+// Restricting fetchable hosts to replicate.delivery closes that without
+// affecting legitimate audio outputs, which always come from there.
+const REPLICATE_OUTPUT_HOST = 'replicate.delivery';
+
+function isAllowedReplicateOutputHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === REPLICATE_OUTPUT_HOST || host.endsWith(`.${REPLICATE_OUTPUT_HOST}`);
+}
+
 function normalizeReplicateUrlCandidate(value: unknown): string | null {
   if (value instanceof URL) {
-    return value.toString();
+    return isAllowedReplicateOutputHost(value.hostname) ? value.toString() : null;
   }
 
   if (typeof value !== 'string') {
@@ -224,13 +238,18 @@ function normalizeReplicateUrlCandidate(value: unknown): string | null {
     return null;
   }
 
+  // data: URIs are resolved inline by fetch with no network egress, so they
+  // carry no SSRF risk and need no host check.
   if (trimmed.startsWith('data:')) {
     return trimmed;
   }
 
   try {
     const parsed = new URL(trimmed);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? trimmed : null;
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    return isAllowedReplicateOutputHost(parsed.hostname) ? trimmed : null;
   } catch {
     return null;
   }
