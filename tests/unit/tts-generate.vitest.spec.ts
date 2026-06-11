@@ -149,4 +149,17 @@ describe('speech-sdk request resolution', () => {
       apiKey: 'unused',
     })).rejects.toThrow('Unknown Speech SDK provider prefix');
   });
+
+  test('rejects models missing the provider/model form', async () => {
+    for (const model of ['openai', 'openai/', '/gpt-4o-mini-tts']) {
+      await expect(generateTTSBuffer({
+        text: 'hello',
+        voice: 'alloy',
+        speed: 1,
+        model,
+        provider: 'speech-sdk',
+        apiKey: 'unused',
+      })).rejects.toThrow('Expected "provider/model"');
+    }
+  });
 });

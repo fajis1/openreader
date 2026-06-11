@@ -696,10 +696,15 @@ const SPEECH_SDK_PROVIDER_FACTORIES: Record<string, SpeechSdkModelFactory> = {
 async function runSpeechSdkRequest(
   request: ResolvedServerTTSRequest,
   signal: AbortSignal,
-  maxRetries: number,
+  upstreamSettings: ResolvedTtsUpstreamRuntimeSettings,
 ): Promise<Buffer> {
   const model = request.model as string;
   const prefix = speechSdkProviderPrefix(model);
+  const modelId = model.slice(prefix.length + 1);
+  if (!prefix || !modelId) {
+    throw new Error(`Invalid Speech SDK model "${model}". Expected "provider/model".`);
+  }
+
   const factory = SPEECH_SDK_PROVIDER_FACTORIES[prefix];
   if (!factory) {
     throw new Error(
@@ -707,19 +712,30 @@ async function runSpeechSdkRequest(
     );
   }
 
-  const modelId = model.slice(prefix.length + 1);
   // 'default' is the placeholder voice for providers without a static voice
   // list; omit it so the provider's own default applies.
   const voice = request.voice === 'default' ? undefined : request.voice;
-  const result = await generateSpeech({
-    model: factory({ apiKey: request.apiKey || undefined })(modelId || undefined),
-    text: request.text,
-    voice: voice as string,
-    output: { format: 'mp3' },
-    maxRetries,
-    abortSignal: signal,
-  });
-  return Buffer.from(result.audio.uint8Array);
+
+  // Overall budget across the SDK's internal retries, mirroring the timeout
+  // the OpenAI-compatible path configures on its client.
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), upstreamSettings.ttsUpstreamTimeoutMs);
+  const onAbort = () => timeoutController.abort();
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    const result = await generateSpeech({
+      model: factory({ apiKey: request.apiKey || undefined })(modelId),
+      text: request.text,
+      voice: voice as string,
+      output: { format: 'mp3' },
+      maxRetries: upstreamSettings.ttsUpstreamMaxRetries,
+      abortSignal: timeoutController.signal,
+    });
+    return Buffer.from(result.audio.uint8Array);
+  } finally {
+    clearTimeout(timeoutId);
+    signal.removeEventListener('abort', onAbort);
+  }
 }
 
 async function runProviderRequest(
@@ -733,7 +749,7 @@ async function runProviderRequest(
   const raw = request.provider === 'replicate'
     ? await runReplicateRequest(request, signal, upstreamSettings.ttsUpstreamMaxRetries)
     : request.provider === 'speech-sdk'
-      ? await runSpeechSdkRequest(request, signal, upstreamSettings.ttsUpstreamMaxRetries)
+      ? await runSpeechSdkRequest(request, signal, upstreamSettings)
       : await runOpenAiCompatibleRequest(request, signal, upstreamSettings);
 
   // OpenAI-compatible servers (and some Replicate models) may emit wav/ogg/etc.;

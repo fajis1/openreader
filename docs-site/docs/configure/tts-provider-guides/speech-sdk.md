@@ -24,7 +24,7 @@ See [TTS Providers](../tts-providers) for admin-shared vs per-user behavior.
 
 ## Built-in models
 
-- `openai/gpt-4o-mini-tts`
+- `openai/gpt-4o-mini-tts` (works with your existing OpenAI API key)
 - `elevenlabs/eleven_multilingual_v2`
 - `cartesia/sonic-3.5`
 - `deepgram/aura-2`
