@@ -13,9 +13,10 @@ interface ProvidersProps {
   authBaseUrl: string | null;
   allowAnonymousAuthSessions: boolean;
   githubAuthEnabled: boolean;
+  googleAuthEnabled: boolean;
 }
 
-export function Providers({ children, authBaseUrl, allowAnonymousAuthSessions, githubAuthEnabled }: ProvidersProps) {
+export function Providers({ children, authBaseUrl, allowAnonymousAuthSessions, githubAuthEnabled, googleAuthEnabled }: ProvidersProps) {
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -32,6 +33,7 @@ export function Providers({ children, authBaseUrl, allowAnonymousAuthSessions, g
           authBaseUrl={authBaseUrl}
           allowAnonymousAuthSessions={allowAnonymousAuthSessions}
           githubAuthEnabled={githubAuthEnabled}
+          googleAuthEnabled={googleAuthEnabled}
         >
           <ThemeProvider>
             <AuthLoader>

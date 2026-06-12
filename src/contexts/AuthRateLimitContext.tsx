@@ -18,6 +18,7 @@ interface AuthRateLimitContextType {
   authBaseUrl: string | null;
   allowAnonymousAuthSessions: boolean;
   githubAuthEnabled: boolean;
+  googleAuthEnabled: boolean;
 
   // Rate Limit
   status: RateLimitStatus | null;
@@ -43,8 +44,8 @@ export function useAuthRateLimit(): AuthRateLimitContextType {
 }
 
 export function useAuthConfig() {
-  const { authBaseUrl, allowAnonymousAuthSessions, githubAuthEnabled } = useAuthRateLimit();
-  return { baseUrl: authBaseUrl, allowAnonymousAuthSessions, githubAuthEnabled };
+  const { authBaseUrl, allowAnonymousAuthSessions, githubAuthEnabled, googleAuthEnabled } = useAuthRateLimit();
+  return { baseUrl: authBaseUrl, allowAnonymousAuthSessions, githubAuthEnabled, googleAuthEnabled };
 }
 
 export function useRateLimit() {
@@ -105,6 +106,7 @@ interface AuthRateLimitProviderProps {
   authBaseUrl: string | null;
   allowAnonymousAuthSessions: boolean;
   githubAuthEnabled: boolean;
+  googleAuthEnabled: boolean;
 }
 
 const RATE_LIMIT_QUERY_KEY = ['rate-limit-status'] as const;
@@ -114,6 +116,7 @@ export function AuthRateLimitProvider({
   authBaseUrl,
   allowAnonymousAuthSessions,
   githubAuthEnabled,
+  googleAuthEnabled,
 }: AuthRateLimitProviderProps) {
   const queryClient = useQueryClient();
 
@@ -208,6 +211,7 @@ export function AuthRateLimitProvider({
     authBaseUrl,
     allowAnonymousAuthSessions,
     githubAuthEnabled,
+    googleAuthEnabled,
     status,
     loading,
     error,

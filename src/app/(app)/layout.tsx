@@ -5,7 +5,7 @@ import { Toaster } from 'react-hot-toast';
 import { Providers } from '@/app/providers';
 import { ConfigProvider } from '@/contexts/ConfigContext';
 import { AppMain, AppShell } from '@/components/layout';
-import { getAuthBaseUrl, isAnonymousAuthSessionsEnabled, isGithubAuthEnabled } from '@/lib/server/auth/config';
+import { getAuthBaseUrl, isAnonymousAuthSessionsEnabled, isGithubAuthEnabled, isGoogleAuthEnabled } from '@/lib/server/auth/config';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,12 +27,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const authBaseUrl = getAuthBaseUrl();
   const allowAnonymousAuthSessions = isAnonymousAuthSessionsEnabled();
   const githubAuthEnabled = isGithubAuthEnabled();
+  const googleAuthEnabled = isGoogleAuthEnabled();
 
   return (
     <Providers
       authBaseUrl={authBaseUrl}
       allowAnonymousAuthSessions={allowAnonymousAuthSessions}
       githubAuthEnabled={githubAuthEnabled}
+      googleAuthEnabled={googleAuthEnabled}
     >
       {/* ConfigProvider lives here, in the shared (app) layout, so it stays
           mounted across library <-> reader navigation. Mounting it per-route

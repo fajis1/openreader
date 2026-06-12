@@ -49,6 +49,14 @@ export function isGithubAuthEnabled(): boolean {
 }
 
 /**
+ * Google sign-in is available when both GOOGLE_CLIENT_ID and
+ * GOOGLE_CLIENT_SECRET are set.
+ */
+export function isGoogleAuthEnabled(): boolean {
+  return !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+}
+
+/**
  * Get the required auth base URL.
  */
 export function getAuthBaseUrl(): string {
