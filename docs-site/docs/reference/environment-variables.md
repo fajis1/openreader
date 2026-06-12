@@ -25,6 +25,8 @@ Runtime site features are seeded with `RUNTIME_SEED_JSON` / `RUNTIME_SEED_JSON_P
 | `USE_ANONYMOUS_AUTH_SESSIONS` | Auth | `false` | Set `true` to allow anonymous auth sessions |
 | `GITHUB_CLIENT_ID` | Auth/OAuth | unset | Set with `GITHUB_CLIENT_SECRET` to enable GitHub sign-in |
 | `GITHUB_CLIENT_SECRET` | Auth/OAuth | unset | Set with `GITHUB_CLIENT_ID` to enable GitHub sign-in |
+| `GOOGLE_CLIENT_ID` | Auth/OAuth | unset | Set with `GOOGLE_CLIENT_SECRET` to enable Google sign-in |
+| `GOOGLE_CLIENT_SECRET` | Auth/OAuth | unset | Set with `GOOGLE_CLIENT_ID` to enable Google sign-in |
 | `ADMIN_EMAILS` | Admin | empty | Comma-separated emails auto-promoted to admin |
 | `CRON_SECRET` | Scheduled tasks | unset | Required for Vercel cron invocations |
 | `POSTGRES_URL` | Database | unset (SQLite mode) | Set to switch metadata/auth DB to Postgres |
@@ -137,6 +139,18 @@ GitHub OAuth client ID.
 GitHub OAuth client secret.
 
 - Set with `GITHUB_CLIENT_ID`
+
+### GOOGLE_CLIENT_ID
+
+Google OAuth client ID.
+
+- Set with `GOOGLE_CLIENT_SECRET`
+
+### GOOGLE_CLIENT_SECRET
+
+Google OAuth client secret.
+
+- Set with `GOOGLE_CLIENT_ID`
 
 ### ADMIN_EMAILS
 
