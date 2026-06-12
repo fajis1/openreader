@@ -228,7 +228,7 @@ export function DocumentTile({
             {hasSmartAudio && (
               <div className="relative flex" onClick={(e) => e.stopPropagation()}>
               <MenuRoot>
-                <MenuTrigger className={`${TRASH_BTN_CLASSES[iconSize]} flex items-center justify-center text-purple-500 hover:bg-purple-500/10 transition-colors`} aria-label={`View AI Changelog for ${doc.name}`} title="AI Changelog">
+                <MenuTrigger className={`${TRASH_BTN_CLASSES[iconSize]} flex items-center justify-center text-accent hover:bg-accent-wash transition-colors`} aria-label={`View AI Changelog for ${doc.name}`} title="AI Changelog">
                   <svg className={TRASH_ICON_CLASSES[iconSize]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>

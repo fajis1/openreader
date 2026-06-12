@@ -110,8 +110,8 @@ export function JobsInlineView() {
                       {job.status === 'running' && (
                         <div className="w-full max-w-sm h-1.5 bg-surface-sunken rounded-full overflow-hidden mt-1 border border-line">
                           <div 
-                            className="h-full bg-accent transition-all duration-1000 ease-linear" 
-                            style={{ width: `${Math.round(job.progress || 0)}%` }}
+                            className="h-full bg-accent" 
+                            style={{ width: `${Math.round(job.progress || 0)}%`, transition: 'width 1000ms linear' }}
                           />
                         </div>
                       )}
@@ -121,11 +121,11 @@ export function JobsInlineView() {
                     Created: {new Date(job.createdAt).toLocaleString()}
                     {job.error && <p className="text-danger mt-1">Error: {job.error}</p>}
                     <div className="mt-2 flex gap-2">
-                      <button onClick={() => { onCancelJob(job.id); fetchJobs(); }} className="text-danger font-semibold hover:underline bg-danger/10 px-2 py-1 rounded">
+                      <button onClick={() => { onCancelJob(job.id); fetchJobs(); }} className="text-danger font-semibold hover:underline bg-surface-sunken border border-danger px-2 py-1 rounded">
                         {job.status === 'error' ? 'Dismiss' : 'Cancel Generation'}
                       </button>
                       {job.status === 'error' && (
-                        <button onClick={() => { onRequeueJob(job.id); fetchJobs(); }} className="text-primary font-semibold hover:underline bg-primary/10 px-2 py-1 rounded text-accent">
+                        <button onClick={() => { onRequeueJob(job.id); fetchJobs(); }} className="text-accent font-semibold hover:underline bg-surface-sunken border border-accent px-2 py-1 rounded">
                           Requeue
                         </button>
                       )}

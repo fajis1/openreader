@@ -1,4 +1,4 @@
-import { connect, StringCodec } from 'nats';
+
 import { readGlobalGeminiApiKey, readSmartAudioProfilesDocument, findSmartAudioProfileById, writeSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
 import { eq, and, asc, lt, inArray } from 'drizzle-orm';
 import { db } from '@/db';
@@ -7,7 +7,6 @@ import { readCurrentParsedPdfArtifact } from '@/lib/server/pdf-parse/artifact';
 import { getDocumentBlob } from '@/lib/server/documents/blobstore';
 import { checkSystemResources } from '@/lib/server/audiobooks/system-monitor';
 import { randomUUID } from 'node:crypto';
-import type { TaskContext } from '@/lib/server/tasks/types';
 import { generateTTSBuffer } from '@/lib/server/tts/generate';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
@@ -72,12 +71,22 @@ async function extractTextFromEpub(buffer: Buffer): Promise<{ title: string; tex
   return chapters;
 }
 
-export async function processAudiobookQueue(_context: TaskContext) {
-  // Reset any jobs that have been "running" for over 15 minutes without an update (stale crash recovery)
-  const staleThreshold = Date.now() - 15 * 60 * 1000;
-  await db.update(audiobookJobs)
-    .set({ status: 'queued', progress: 0 })
-    .where(and(eq(audiobookJobs.status, 'running'), lt(audiobookJobs.updatedAt, staleThreshold)));
+const globalWorkerState = globalThis as unknown as { __worker_booted?: boolean };
+
+export async function processAudiobookQueue() {
+  if (!globalWorkerState.__worker_booted) {
+    globalWorkerState.__worker_booted = true;
+    serverLogger.info({ event: 'audiobook.queue.boot' }, 'Worker booted. Resetting any orphaned running jobs to queued.');
+    await db.update(audiobookJobs)
+      .set({ status: 'queued', progress: 0 })
+      .where(eq(audiobookJobs.status, 'running'));
+  } else {
+    // Reset any jobs that have been "running" for over 15 minutes without an update (stale crash recovery)
+    const staleThreshold = Date.now() - 15 * 60 * 1000;
+    await db.update(audiobookJobs)
+      .set({ status: 'queued', progress: 0 })
+      .where(and(eq(audiobookJobs.status, 'running'), lt(audiobookJobs.updatedAt, staleThreshold)));
+  }
 
   const resources = await checkSystemResources();
   if (!resources.ok) {

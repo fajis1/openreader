@@ -111,7 +111,7 @@ export const withRetry = async <T>(
               await new Promise(resolve => setTimeout(resolve, postPingDelay));
               break; // Resume the main retry loop
             }
-          } catch (_e) {
+          } catch {
             // ping failed, ignore and loop again after a short delay
           }
           await new Promise(resolve => setTimeout(resolve, 10000)); // ping every 10s

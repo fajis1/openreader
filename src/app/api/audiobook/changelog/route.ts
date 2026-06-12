@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
           fullChangelog += `${text}\n`;
         }
         fullChangelog += `\n`;
-      } catch (_err) {
+      } catch {
         fullChangelog += `\n[Failed to load changelog for batch ${file}]\n\n`;
       }
     }

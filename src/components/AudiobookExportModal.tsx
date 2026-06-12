@@ -224,7 +224,7 @@ export function AudiobookExportModal({
       const qRes = await fetch('/api/audiobooks/queue');
       if (qRes.ok) {
         const qData = await qRes.json();
-        const activeJob = qData.jobs?.find((j: any) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running'));
+        const activeJob = qData.jobs?.find((j: { documentId: string; status: string; progress?: number }) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running'));
         if (activeJob) {
           setIsGenerating(true);
           if (activeJob.progress !== undefined) setProgress(activeJob.progress);
@@ -235,7 +235,9 @@ export function AudiobookExportModal({
           setIsGenerating(false);
         }
       }
-    } catch (e) {}
+    } catch {
+      // Ignored
+    }
   }, [documentId, setProgress, isGenerating]);
 
   // Fetch existing chapters when modal opens
@@ -329,6 +331,7 @@ export function AudiobookExportModal({
         setErrorMessage(error instanceof Error ? error.message : 'Failed to generate audiobook. Please try again.');
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onGenerateAudiobook, handleChapterComplete, setProgress, bookId, documentId, fetchExistingChapters, effectiveSettings, useSmartAudio, router]);
 
   // Effect to auto-start generation if URL has autoGenerate=true

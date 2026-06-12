@@ -202,6 +202,48 @@ export function SmartAudioSettings() {
     setSelectedProfileId(nextProfileId);
   }, []);
 
+  const downloadCSV = (items: { key: string; value: string }[], filename: string) => {
+    const csvContent = items.map(i => `${i.key},${i.value}`).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+  };
+
+  const handleCSVUpload = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    currentItems: { key: string; value: string }[],
+    setItems: (items: { key: string; value: string }[]) => void
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const newItems = text.split('\n').map((line) => {
+        const [key, value] = line.split(',');
+        return { key: key?.trim(), value: value?.trim() };
+      }).filter((item) => item.key && item.value);
+
+      if (currentItems.length > 0) {
+        const wantsOverwrite = window.confirm('Click OK to OVERWRITE the current list, or Cancel to APPEND the new items to the bottom of the list.');
+        if (wantsOverwrite) {
+          const confirmOverwrite = window.confirm('You have chosen to overwrite. Are you sure you want to completely replace your current list? This cannot be undone.');
+          if (confirmOverwrite) {
+            setItems(newItems);
+          }
+        } else {
+          setItems([...currentItems, ...newItems]);
+        }
+      } else {
+        setItems(newItems);
+      }
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  };
+
   const handleAddAbbrev = () => {
     if (!newAbbrev.key || !newAbbrev.value) return;
     setAbbreviations([...abbreviations, newAbbrev]);
@@ -415,23 +457,11 @@ export function SmartAudioSettings() {
               <p className="text-xs text-gray-500">Static text expansion.</p>
             </div>
             <div className="flex gap-2">
+              <button onClick={() => downloadCSV(abbreviations, 'abbreviations.csv')} className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded cursor-pointer hover:bg-blue-200">Export</button>
               <button onClick={() => setAbbreviations(BASE_ABBREVIATIONS.map(({ key, value }) => ({ key, value })))} className="text-xs bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 px-2 py-1 rounded cursor-pointer hover:bg-yellow-200">Reset</button>
               <label className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-2 py-1 rounded cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600">
                 Import CSV
-                <input type="file" accept=".csv" className="hidden" onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = (ev) => {
-                    const text = ev.target?.result as string;
-                    const newItems = text.split('\n').map((line) => {
-                      const [key, value] = line.split(',');
-                      return { key: key?.trim(), value: value?.trim() };
-                    }).filter((item) => item.key && item.value);
-                    setAbbreviations([...abbreviations, ...newItems]);
-                  };
-                  reader.readAsText(file);
-                }} />
+                <input type="file" accept=".csv" className="hidden" onChange={(e) => handleCSVUpload(e, abbreviations, setAbbreviations)} />
               </label>
             </div>
           </div>
@@ -460,23 +490,13 @@ export function SmartAudioSettings() {
               <h3 className="font-semibold text-lg">Pronunciations</h3>
               <p className="text-xs text-gray-500">Force specific phonetics.</p>
             </div>
-            <label className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-2 py-1 rounded cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600">
-              Import CSV
-              <input type="file" accept=".csv" className="hidden" onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                  const text = ev.target?.result as string;
-                  const newItems = text.split('\n').map((line) => {
-                    const [key, value] = line.split(',');
-                    return { key: key?.trim(), value: value?.trim() };
-                  }).filter((item) => item.key && item.value);
-                  setPronunciations([...pronunciations, ...newItems]);
-                };
-                reader.readAsText(file);
-              }} />
-            </label>
+            <div className="flex gap-2">
+              <button onClick={() => downloadCSV(pronunciations, 'pronunciations.csv')} className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded cursor-pointer hover:bg-blue-200">Export</button>
+              <label className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-2 py-1 rounded cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600">
+                Import CSV
+                <input type="file" accept=".csv" className="hidden" onChange={(e) => handleCSVUpload(e, pronunciations, setPronunciations)} />
+              </label>
+            </div>
           </div>
           <div className="flex gap-2">
             <input type="text" placeholder="Word" className="w-1/2 p-2 text-sm border rounded bg-white dark:bg-gray-900 dark:border-gray-700 text-gray-900 dark:text-gray-100" value={newPronun.key} onChange={(e) => setNewPronun({ ...newPronun, key: e.target.value })} />
@@ -504,23 +524,11 @@ export function SmartAudioSettings() {
               <p className="text-xs text-gray-500">Structural expansion.</p>
             </div>
             <div className="flex gap-2">
+              <button onClick={() => downloadCSV(books, 'biblical_books.csv')} className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded cursor-pointer hover:bg-blue-200">Export</button>
               <button onClick={() => setBooks(BASE_BOOKS.map(({ key, value }) => ({ key, value })))} className="text-xs bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 px-2 py-1 rounded cursor-pointer hover:bg-yellow-200">Reset</button>
               <label className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-2 py-1 rounded cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600">
                 Import CSV
-                <input type="file" accept=".csv" className="hidden" onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = (ev) => {
-                    const text = ev.target?.result as string;
-                    const newItems = text.split('\n').map((line) => {
-                      const [key, value] = line.split(',');
-                      return { key: key?.trim(), value: value?.trim() };
-                    }).filter((item) => item.key && item.value);
-                    setBooks([...books, ...newItems]);
-                  };
-                  reader.readAsText(file);
-                }} />
+                <input type="file" accept=".csv" className="hidden" onChange={(e) => handleCSVUpload(e, books, setBooks)} />
               </label>
             </div>
           </div>

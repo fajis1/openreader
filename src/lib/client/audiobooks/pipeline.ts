@@ -212,7 +212,7 @@ async function _runAudiobookGeneration({
         const headers = buildAudiobookRequestHeaders(apiKey, baseUrl, effectiveProviderRef);
         await getVoices(headers as HeadersInit);
         return true;
-      } catch (e) {
+      } catch {
         return false;
       }
     }
@@ -360,7 +360,7 @@ async function _regenerateAudiobookChapter({
         const headers = buildAudiobookRequestHeaders(apiKey, baseUrl, effectiveProviderRef);
         await getVoices(headers as HeadersInit);
         return true;
-      } catch (e) {
+      } catch {
         return false;
       }
     }

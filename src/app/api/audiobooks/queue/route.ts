@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
       settingsJson: settings || {},
     });
 
-    runTaskNow('process-audiobook-queue').catch((err) => console.error('Failed to wake queue:', err));
+    runTaskNow('process-audiobook-queue').catch((err) => serverLogger.error({ event: 'audiobook.queue.wake.error', error: errorToLog(err) }, 'Failed to wake queue'));
     return NextResponse.json({ jobId });
   } catch (error) {
     serverLogger.error({ event: 'audiobook.queue.post.error', error: errorToLog(error) }, 'Failed to queue audiobook');
@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
       .where(eq(audiobookJobs.userId, userId))
       .orderBy(asc(audiobookJobs.createdAt));
 
-    const userJobs = userJobsRaw.map((row: any) => ({
+    const userJobs = userJobsRaw.map((row: typeof userJobsRaw[0]) => ({
       ...row.job,
       documentTitle: row.documentTitle,
     }));
@@ -133,7 +133,7 @@ export async function PUT(req: NextRequest) {
       .set({ status: 'queued', error: null, progress: 0, startedAt: null, updatedAt: Date.now() })
       .where(and(eq(audiobookJobs.id, id), eq(audiobookJobs.userId, ctxOrRes.userId)));
       
-    runTaskNow('process-audiobook-queue').catch((err) => console.error('Failed to wake queue:', err));
+    runTaskNow('process-audiobook-queue').catch((err) => serverLogger.error({ event: 'audiobook.queue.wake.error', error: errorToLog(err) }, 'Failed to wake queue'));
     return NextResponse.json({ success: true });
   } catch (error) {
     serverLogger.error({ event: 'audiobook.queue.put.error', error: errorToLog(error) }, 'Failed to requeue audiobook job');

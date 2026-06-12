@@ -29,12 +29,12 @@ export async function checkSystemResources(): Promise<{ ok: boolean; reason?: st
       if (freeSpace / totalSpace < 0.2) {
         return { ok: false, reason: `Disk space low: ${(freeSpace / 1024 / 1024 / 1024).toFixed(2)}GB free of ${(totalSpace / 1024 / 1024 / 1024).toFixed(2)}GB` };
       }
-    } catch (_e) {
+    } catch {
       // Ignored if statfs is not supported
     }
 
     return { ok: true };
-  } catch (_err) {
+  } catch {
     return { ok: false, reason: 'Failed to read system resources' };
   }
 }

@@ -758,7 +758,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               </>
             ) : visibleSelectedCount > 0 && sidebarFilter !== 'audiobooks' ? (
               <>
-                <Button size="xs" className="!bg-blue-500 hover:!bg-blue-600 !text-white !border-transparent" onClick={handleDownloadSelectedOriginals}>
+                <Button size="xs" variant="secondary" onClick={handleDownloadSelectedOriginals}>
                   Download {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Originals
                 </Button>
                 <Button size="xs" variant="primary" onClick={() => setShowBatchAudiobookSidebar(true)}>
