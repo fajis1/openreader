@@ -134,8 +134,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     const userId = job.userId;
 
     const existingBook = await db.select().from(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, userId)));
-    const jobSettings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : job.settingsJson;
+    const jobSettings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
     const hasSmartAudio = !!jobSettings?.useSmartAudio;
+    const testNamespace = jobSettings?.testNamespace || null;
 
     if (existingBook.length === 0) {
       await db.insert(audiobooks).values({
@@ -152,9 +153,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     let chapters: { index: number; title: string; text: string }[] = [];
 
     if (doc.type === 'pdf') {
-      const artifact = await readCurrentParsedPdfArtifact({ documentId: doc.id, namespace: null });
+      const artifact = await readCurrentParsedPdfArtifact({ documentId: doc.id, namespace: testNamespace });
       if (!artifact) {
-        await createOrReuseCurrentPdfParseOperation({ documentId: doc.id, namespace: null });
+        await createOrReuseCurrentPdfParseOperation({ documentId: doc.id, namespace: testNamespace });
         await db.update(audiobookJobs).set({ status: 'waiting_for_pdf' }).where(eq(audiobookJobs.id, job.id));
         return;
       }
@@ -215,11 +216,11 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       flush();
 
     } else if (doc.type === 'epub') {
-      const buffer = await getDocumentBlob(doc.id, null);
+      const buffer = await getDocumentBlob(doc.id, testNamespace);
       const epubChapters = await extractTextFromEpub(buffer);
       chapters = epubChapters.map((c, i) => ({ index: i, title: c.title, text: c.text }));
     } else if (doc.type === 'txt' || doc.type === 'html') {
-      const buffer = await getDocumentBlob(doc.id, null);
+      const buffer = await getDocumentBlob(doc.id, testNamespace);
       let text = buffer.toString('utf-8');
       if (doc.type === 'html') text = stripHtmlTags(text);
       chapters = [{ index: 0, title: 'Document', text }];
@@ -348,7 +349,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             
             if (workerResult.changelog) {
               const changelogName = `${String(chapter.index + 1).padStart(4, '0')}__changelog.txt`;
-              await putAudiobookObject(bookId, userId, changelogName, Buffer.from(workerResult.changelog, 'utf8'), 'text/plain; charset=utf-8', null).catch(() => {});
+              await putAudiobookObject(bookId, userId, changelogName, Buffer.from(workerResult.changelog, 'utf8'), 'text/plain; charset=utf-8', testNamespace).catch(() => {});
             }
           }
         } catch (e) {
@@ -398,11 +399,12 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         provider: creds.provider,
         apiKey: creds.apiKey,
         baseUrl: creds.baseUrl,
+        testNamespace: testNamespace,
       });
 
       const contentType = format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';
       totalBytes += ttsBuffer.length;
-      await putAudiobookObject(bookId, userId, chapterFileName, ttsBuffer, contentType, null);
+      await putAudiobookObject(bookId, userId, chapterFileName, ttsBuffer, contentType, testNamespace);
 
       try {
         await db.insert(audiobookChapters).values({

@@ -26,6 +26,11 @@ export async function POST(req: NextRequest) {
     }
 
     const jobId = randomUUID();
+    const testNamespace = req.headers.get('x-openreader-test-namespace');
+    const settingsJson = { ...(settings || {}) };
+    if (testNamespace) {
+      settingsJson.testNamespace = testNamespace;
+    }
 
     await db.insert(audiobookJobs).values({
       id: jobId,
@@ -33,7 +38,7 @@ export async function POST(req: NextRequest) {
       documentId,
       status: 'queued',
       progress: 0,
-      settingsJson: settings || {},
+      settingsJson,
     });
 
     runTaskNow('process-audiobook-queue').catch((err) => serverLogger.error({ event: 'audiobook.queue.wake.error', error: errorToLog(err) }, 'Failed to wake queue'));
