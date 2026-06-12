@@ -97,6 +97,7 @@ const NATS_API_TIMEOUT_MS = 60_000;
 // put it to sleep. Reconnect happens lazily on the next inbound request.
 const IDLE_DISCONNECT_MS = 120_000;
 const IDLE_CHECK_INTERVAL_MS = 5_000;
+const IDLE_STATUS_LOG_INTERVAL_MS = 60_000;
 const ORPHAN_SWEEP_INTERVAL_MS = 15_000;
 // Bounded pull window so consumer loops yield periodically and can be stopped
 // cleanly when going idle, instead of blocking on a long-lived pull.
@@ -583,22 +584,40 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   let activeSse = 0;
   let inFlightJobs = 0;
   let lastActivityAt = Date.now();
+  let lastActivityReason = 'startup';
+  let lastIdleStatusLogAt = 0;
   const jobGate = new ConcurrencyGate(jobConcurrency);
 
-  const markActivity = (): void => {
+  const markActivity = (reason: string): void => {
     lastActivityAt = Date.now();
+    lastActivityReason = reason;
   };
 
   function startIdleTimer(): void {
     if (idleTimer) return;
     idleTimer = setInterval(() => {
       if (!session || stopping) return;
+      const now = Date.now();
+      const idleForMs = now - lastActivityAt;
+      if (now - lastIdleStatusLogAt >= IDLE_STATUS_LOG_INTERVAL_MS) {
+        lastIdleStatusLogAt = now;
+        app.log.info({
+          activeSse,
+          idleForMs,
+          inFlightHttp,
+          inFlightJobs,
+          lastActivityReason,
+          disconnectEligible: inFlightHttp === 0
+            && inFlightJobs === 0
+            && idleForMs >= IDLE_DISCONNECT_MS,
+        }, 'nats idle status');
+      }
       // Hard work in flight always blocks idle. An open SSE no longer blocks just
       // by existing — only by delivering events, which refresh lastActivityAt via
       // markActivity() in the stream's onEvent. So a silent/stuck-op stream lets
       // the idle window elapse and is torn down by disconnect() below.
       if (inFlightHttp > 0 || inFlightJobs > 0) return;
-      if (Date.now() - lastActivityAt < IDLE_DISCONNECT_MS) return;
+      if (idleForMs < IDLE_DISCONNECT_MS) return;
       void disconnect('idle');
     }, IDLE_CHECK_INTERVAL_MS);
     // Don't let the idle checker keep the process alive on its own.
@@ -681,7 +700,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
       session = next;
       sessionGeneration += 1;
       orphanRecoveryDoneForGeneration = -1;
-      markActivity();
+      markActivity('nats_connected');
       startWorkerLoops(next);
       startIdleTimer();
       startOrphanSweepTimer();
@@ -899,7 +918,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     if (!counted[REQUEST_COUNTED_KEY]) return;
     counted[REQUEST_COUNTED_KEY] = false;
     inFlightHttp = Math.max(0, inFlightHttp - 1);
-    markActivity();
+    markActivity('http_completed');
   };
 
   app.addHook('onRequest', async (request, reply) => {
@@ -910,7 +929,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     // for SSE streams (where onResponse does not fire).
     (request as FastifyRequest & { [REQUEST_COUNTED_KEY]?: boolean })[REQUEST_COUNTED_KEY] = true;
     inFlightHttp += 1;
-    markActivity();
+    markActivity(`http_started:${path}`);
     if (isHealthPath(path)) return;
     if (!isAuthed(request, workerToken)) {
       return reply.code(401).send({ error: 'Unauthorized' });
@@ -1045,7 +1064,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     // count here and track the long-lived stream via activeSse instead.
     releaseHttp(request);
     activeSse += 1;
-    markActivity();
+    markActivity('sse_started');
     reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
     reply.raw.setHeader('Connection', 'keep-alive');
@@ -1084,7 +1103,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
         keepalive = null;
       }
       activeSse = Math.max(0, activeSse - 1);
-      markActivity();
+      markActivity('sse_closed');
       if (!reply.raw.writableEnded) {
         reply.raw.end();
       }
@@ -1119,7 +1138,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
             signature = nextSignature;
             // A real event is progress: refresh the idle window so an actively
             // streaming op keeps the worker awake. A silent stream does not.
-            markActivity();
+            markActivity('sse_event');
             writeSnapshot(current, event.eventId);
           }
           if (isTerminalStatus(event.snapshot.status)) {
@@ -1548,7 +1567,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
 
         // An empty pull is not activity; let the idle window advance.
         if (!msg) continue;
-        markActivity();
+        markActivity(`job_received:${input.workerLabel}`);
         inFlightJobs += 1;
         await jobGate.acquire();
         if (detached()) {
@@ -1564,7 +1583,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
         if (msg) {
           jobGate.release();
           inFlightJobs = Math.max(0, inFlightJobs - 1);
-          markActivity();
+          markActivity(`job_completed:${input.workerLabel}`);
         }
       }
     }
