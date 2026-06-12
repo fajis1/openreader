@@ -11,12 +11,14 @@ import { GithubIcon } from '@/components/icons/Icons';
 import { LoadingSpinner } from '@/components/Spinner';
 import { Button, Checkbox, Field, InlineButton, Input, Surface } from '@/components/ui';
 
-function SessionExpiredLoader({ setSessionExpired }: { setSessionExpired: (v: boolean) => void }) {
+function SessionExpiredLoader({ setSessionExpired, setErrorFromUrl }: { setSessionExpired: (v: boolean) => void, setErrorFromUrl: (v: string | null) => void }) {
   const searchParams = useSearchParams();
   useEffect(() => {
     const reason = searchParams.get('reason');
     setSessionExpired(reason === 'expired');
-  }, [searchParams, setSessionExpired]);
+    const err = searchParams.get('error');
+    if (err) setErrorFromUrl(err);
+  }, [searchParams, setSessionExpired, setErrorFromUrl]);
   return null;
 }
 
@@ -75,7 +77,7 @@ function SignInContent() {
         // Immediately refresh rate-limit status so the banner clears without a full reload.
         // This is especially important when an anonymous user upgrades to an account.
         await refreshRateLimit();
-        router.push('/app');
+        window.location.href = '/app';
       }
     } catch (err) {
       console.error('Sign in error:', err);
@@ -118,7 +120,7 @@ function SignInContent() {
       const client = getAuthClient(baseUrl);
       await client.signIn.anonymous();
       await refreshRateLimit();
-      router.push('/app');
+      window.location.href = '/app';
     } catch (e) {
       console.error('Anonymous sign-in failed:', e);
       setError('Unable to continue anonymously. Please try again.');
@@ -130,7 +132,7 @@ function SignInContent() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
       <Suspense fallback={null}>
-        <SessionExpiredLoader setSessionExpired={setSessionExpired} />
+        <SessionExpiredLoader setSessionExpired={setSessionExpired} setErrorFromUrl={setError} />
       </Suspense>
 
         <Surface elevation="3" className="w-full max-w-md p-6">
