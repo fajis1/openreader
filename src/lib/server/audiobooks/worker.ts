@@ -104,7 +104,7 @@ export async function processAudiobookQueue() {
   
   if (rows.length === 0) return;
   
-  const jobIds = rows.map(r => r.id);
+  const jobIds = rows.map((r: typeof rows[0]) => r.id);
   const updateResult = await db.update(audiobookJobs)
     .set({ status: 'running', startedAt: Date.now() })
     .where(and(inArray(audiobookJobs.id, jobIds), inArray(audiobookJobs.status, ['queued', 'waiting_for_pdf'])))
@@ -112,7 +112,7 @@ export async function processAudiobookQueue() {
     
   if (updateResult.length === 0) return;
   
-  await Promise.allSettled(updateResult.map(job => processSingleAudiobookJob(job)));
+  await Promise.allSettled(updateResult.map((job: typeof updateResult[0]) => processSingleAudiobookJob(job)));
 }
 
 async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect) {

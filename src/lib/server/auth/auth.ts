@@ -143,6 +143,13 @@ const createAuth = () => betterAuth({
       },
     }),
   },
+  account: {
+    accountLinking: {
+      enabled: true,
+      trustedProviders: ["google", "github"],
+      requireLocalEmailVerified: false,
+    },
+  },
   session: {
     expiresIn: 60 * 60 * 24 * 7, // 7 days (reasonable for user experience)
     updateAge: 60 * 60 * 1, // 1 hour (refresh more frequently)

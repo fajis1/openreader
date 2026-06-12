@@ -20,9 +20,9 @@ export async function GET(request: NextRequest) {
       .where(eq(audiobooks.userId, ctxOrRes.userId));
 
     return NextResponse.json({ 
-      audiobooks: userAudiobooks.map((b) => b.id),
-      smartAudiobookIds: userAudiobooks.filter((b) => b.hasSmartAudio).map((b) => b.id),
-      audiobookSizes: Object.fromEntries(userAudiobooks.filter((b) => b.totalBytes).map((b) => [b.id, b.totalBytes]))
+      audiobooks: userAudiobooks.map((b: typeof userAudiobooks[0]) => b.id),
+      smartAudiobookIds: userAudiobooks.filter((b: typeof userAudiobooks[0]) => b.hasSmartAudio).map((b: typeof userAudiobooks[0]) => b.id),
+      audiobookSizes: Object.fromEntries(userAudiobooks.filter((b: typeof userAudiobooks[0]) => b.totalBytes).map((b: typeof userAudiobooks[0]) => [b.id, b.totalBytes]))
     });
   } catch (error) {
     serverLogger.error({
