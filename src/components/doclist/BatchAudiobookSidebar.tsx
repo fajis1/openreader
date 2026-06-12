@@ -228,7 +228,15 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
                 type="checkbox"
                 className="peer sr-only"
                 checked={useSmartAudio}
-                onChange={(e) => setUseSmartAudio(e.target.checked)}
+                onChange={(e) => {
+                  if (e.target.checked && smartAudioProfiles.length === 0) {
+                    window.alert('No Smart AI profile exists. Please create one to use this feature.');
+                    window.dispatchEvent(new CustomEvent('open-smart-ai-profiles'));
+                    setUseSmartAudio(false);
+                  } else {
+                    setUseSmartAudio(e.target.checked);
+                  }
+                }}
               />
               <div className="h-6 w-11 rounded-full bg-surface-sunken border border-line peer-checked:bg-accent peer-checked:border-accent after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-full" />
             </div>

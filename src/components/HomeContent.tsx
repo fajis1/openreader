@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DocumentList } from '@/components/doclist/DocumentList';
 import { SettingsModal, SettingsTrigger } from '@/components/SettingsModal';
 import { UserMenu } from '@/components/auth/UserMenu';
@@ -20,6 +20,12 @@ const Brand = () => (
 export function HomeContent() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [smartAiOpen, setSmartAiOpen] = useState(false);
+
+  useEffect(() => {
+    const handleOpen = () => setSmartAiOpen(true);
+    window.addEventListener('open-smart-ai-profiles', handleOpen);
+    return () => window.removeEventListener('open-smart-ai-profiles', handleOpen);
+  }, []);
 
   const appActions = (
     <div className="flex flex-col gap-0.5 w-full">
