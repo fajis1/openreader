@@ -85,6 +85,20 @@
       "when": 1780851107505,
       "tag": "0011_scheduled-tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1781036960610,
+      "tag": "0012_broken_pretty_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1781215502209,
+      "tag": "0013_wandering_greymalkin",
+      "breakpoints": true
     }
   ]
 }

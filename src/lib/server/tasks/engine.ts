@@ -7,9 +7,9 @@ import { logDegraded } from '@/lib/server/errors/logging';
 import { TASK_REGISTRY } from './registry';
 import type { TaskContext, TaskDef, TaskRegistry, TaskRunStatus } from './types';
 
-// A task still marked 'running' after this long is assumed abandoned (process
-// crashed mid-run) and may be reclaimed by the next tick.
-const STALE_RUNNING_MS = 60 * 60 * 1000;
+// A task still marked 'running' after this long WITHOUT an updatedAt heartbeat
+// is assumed abandoned (process crashed mid-run) and may be reclaimed.
+const STALE_RUNNING_MS = 5 * 60 * 1000;
 const DEFAULT_TASK_MAX_RUN_MS = 4 * 60 * 1000;
 
 /**
@@ -53,7 +53,7 @@ async function claimTask(key: string, now: number): Promise<string | null> {
       eq(scheduledTasks.key, key),
       or(
         ne(scheduledTasks.lastStatus, 'running'),
-        lt(scheduledTasks.runningSince, now - STALE_RUNNING_MS),
+        lt(scheduledTasks.updatedAt, now - STALE_RUNNING_MS),
       ),
     ))
     .returning({ leaseOwner: scheduledTasks.leaseOwner });
@@ -101,6 +101,14 @@ async function executeTask(key: string, def: TaskDef, leaseOwner: string): Promi
     deadlineAt: startedAt + maxRunMs,
   };
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  
+  // Heartbeat to keep the lock fresh
+  const heartbeat = setInterval(() => {
+    db.update(scheduledTasks)
+      .set({ updatedAt: Date.now() })
+      .where(and(eq(scheduledTasks.key, key), eq(scheduledTasks.leaseOwner, leaseOwner)))
+      .catch((err: unknown) => serverLogger.error({ event: 'tasks.heartbeat.error', error: err }, `Failed to update heartbeat for task ${key}`));
+  }, 60 * 1000);
 
   try {
     const result = await Promise.race([
@@ -124,6 +132,7 @@ async function executeTask(key: string, def: TaskDef, leaseOwner: string): Promi
     await finishTask(key, leaseOwner, { status: 'error', startedAt, error });
   } finally {
     if (timeout) clearTimeout(timeout);
+    clearInterval(heartbeat);
   }
 }
 

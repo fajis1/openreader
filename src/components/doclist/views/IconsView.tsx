@@ -11,6 +11,7 @@ interface IconsViewProps {
   iconSize: IconSize;
   onDeleteDoc: (doc: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
+  isAudiobookView?: boolean;
 }
 
 export function IconsView({
@@ -18,6 +19,7 @@ export function IconsView({
   iconSize,
   onDeleteDoc,
   onMergeIntoFolder,
+  isAudiobookView,
 }: IconsViewProps) {
   const { setVisibleOrder, clear } = useDocumentSelection();
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -67,6 +69,7 @@ export function IconsView({
             iconSize={iconSize}
             onDelete={onDeleteDoc}
             onMergeIntoFolder={onMergeIntoFolder}
+            isAudiobookView={isAudiobookView}
           />
         ))}
       </div>

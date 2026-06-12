@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useTimeEstimation } from '@/hooks/useTimeEstimation';
 import { ProgressPopup } from '@/components/ProgressPopup';
 import { ProgressCard } from '@/components/ProgressCard';
@@ -17,11 +18,9 @@ import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, MenuRoot, M
 import { 
   getAudiobookStatus, 
   deleteAudiobookChapter, 
-  deleteAudiobook, 
-  downloadAudiobookChapter, 
-  downloadAudiobook 
+  deleteAudiobook 
 } from '@/lib/client/api/audiobooks';
-import type { AudiobookGenerationSettings } from '@/types/client';
+import type { AudiobookGenerationSettings, SmartAudioProfile } from '@/types/client';
 interface AudiobookExportModalProps {
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
@@ -49,9 +48,12 @@ export function AudiobookExportModal({
   onGenerateAudiobook,
   onRegenerateChapter
 }: AudiobookExportModalProps) {
-  const { isLoading, isDBReady, providerRef, providerType, ttsModel, ttsInstructions, voice: configVoice, voiceSpeed, audioPlayerSpeed } = useConfig();
+  const { isLoading, isDBReady, providerRef, providerType, ttsModel, ttsInstructions, voice: configVoice, voiceSpeed, audioPlayerSpeed, smartAudioProfileId, updateConfigKey } = useConfig();
   const { availableVoices, documentLanguage } = useTTS();
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const autoGenerate = searchParams.get('autoGenerate') === 'true';
   const [isGenerating, setIsGenerating] = useState(false);
   const [chapters, setChapters] = useState<TTSAudiobookChapter[]>([]);
   const [bookId, setBookId] = useState<string | null>(null);
@@ -63,6 +65,9 @@ export function AudiobookExportModal({
   const [audiobookVoice, setAudiobookVoice] = useState<string>(configVoice || '');
   const [nativeSpeed, setNativeSpeed] = useState<number>(voiceSpeed);
   const [postSpeed, setPostSpeed] = useState<number>(audioPlayerSpeed);
+  const [useSmartAudio, setUseSmartAudio] = useState<boolean>(false);
+  const [smartAudioProfiles, setSmartAudioProfiles] = useState<SmartAudioProfile[]>([]);
+  const [selectedSmartAudioProfileId, setSelectedSmartAudioProfileId] = useState<string>(smartAudioProfileId || '');
   const [savedSettings, setSavedSettings] = useState<AudiobookGenerationSettings | null>(null);
   const [regeneratingChapter, setRegeneratingChapter] = useState<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -70,6 +75,8 @@ export function AudiobookExportModal({
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showRegenerateHint, setShowRegenerateHint] = useState(false);
+  const [showBackgroundWarning, setShowBackgroundWarning] = useState(false);
+  const [pendingCloseAction, setPendingCloseAction] = useState<'close_modal' | 'navigate' | null>(null);
 
   const formatSpeed = useCallback((speed: number) => {
     return Number.isInteger(speed) ? speed.toString() : speed.toFixed(1);
@@ -80,6 +87,36 @@ export function AudiobookExportModal({
   );
   const nativeSpeedSupported = providerModelPolicy.supportsNativeModelSpeed;
   const effectiveNativeSpeed = nativeSpeedSupported ? nativeSpeed : 1;
+  const selectedSmartAudioProfile = useMemo(
+    () => smartAudioProfiles.find((profile) => profile.id === selectedSmartAudioProfileId) || smartAudioProfiles[0] || null,
+    [smartAudioProfiles, selectedSmartAudioProfileId],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadProfiles = async () => {
+      try {
+        const response = await fetch('/api/tts-settings', { signal: controller.signal });
+        const data = await response.json();
+        const profiles = Array.isArray(data.smartAudioProfiles) ? data.smartAudioProfiles : [];
+        setSmartAudioProfiles(profiles);
+
+        const preferredProfileId = typeof data.selectedSmartAudioProfileId === 'string' && data.selectedSmartAudioProfileId
+          ? data.selectedSmartAudioProfileId
+          : smartAudioProfileId;
+        const nextProfileId = profiles.some((profile: SmartAudioProfile) => profile.id === preferredProfileId)
+          ? preferredProfileId
+          : profiles[0]?.id || '';
+        setSelectedSmartAudioProfileId(nextProfileId);
+      } catch (error) {
+        if ((error as Error)?.name === 'AbortError') return;
+        console.warn('Failed to load smart audio profiles:', error);
+      }
+    };
+
+    void loadProfiles();
+    return () => controller.abort();
+  }, [smartAudioProfileId]);
 
   const hasExistingAudiobook = Boolean(bookId) || chapters.length > 0;
   const isLegacyAudiobookMissingSettings = hasExistingAudiobook && savedSettings === null;
@@ -124,13 +161,15 @@ export function AudiobookExportModal({
       nativeSpeed: effectiveNativeSpeed,
       postSpeed,
       format,
+      useSmartAudio,
+      smartAudioProfileId: selectedSmartAudioProfileId || smartAudioProfileId || undefined,
       ttsInstructions: providerModelPolicy.supportsInstructions ? ttsInstructions : undefined,
       language: resolveTtsLanguage({
         configuredLanguage: documentLanguage,
         voice: nextVoice,
       }),
     };
-  }, [savedSettings, audiobookVoice, configVoice, availableVoices, providerRef, providerType, ttsModel, ttsInstructions, effectiveNativeSpeed, postSpeed, format, providerModelPolicy.supportsInstructions, documentLanguage]);
+  }, [savedSettings, audiobookVoice, configVoice, availableVoices, providerRef, providerType, ttsModel, ttsInstructions, effectiveNativeSpeed, postSpeed, format, providerModelPolicy.supportsInstructions, documentLanguage, useSmartAudio, selectedSmartAudioProfileId, smartAudioProfileId]);
   const languageWarnings = useMemo(() => getTtsLanguageCompatibilityWarnings({
     model: effectiveSettings?.ttsModel,
     voice: effectiveSettings?.voice,
@@ -179,12 +218,40 @@ export function AudiobookExportModal({
         setIsLoadingExisting(false);
       }
     }
-  }, [documentId, setProgress]);
+    
+    // Check server queue status
+    try {
+      const qRes = await fetch('/api/audiobooks/queue');
+      if (qRes.ok) {
+        const qData = await qRes.json();
+        const activeJob = qData.jobs?.find((j: any) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running'));
+        if (activeJob) {
+          setIsGenerating(true);
+          if (activeJob.progress !== undefined) setProgress(activeJob.progress);
+          if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
+          else setCurrentChapter('Generating on server...');
+        } else if (isGenerating) {
+          // It was generating but now it's gone from the active queue
+          setIsGenerating(false);
+        }
+      }
+    } catch (e) {}
+  }, [documentId, setProgress, isGenerating]);
 
   // Fetch existing chapters when modal opens
   useEffect(() => {
     if (isOpen && documentId && !isGenerating) {
       fetchExistingChapters();
+    }
+  }, [isOpen, documentId, isGenerating, fetchExistingChapters]);
+
+  // Poll server queue if generating
+  useEffect(() => {
+    if (isOpen && documentId && isGenerating) {
+      const interval = setInterval(() => {
+        fetchExistingChapters(true);
+      }, 3000);
+      return () => clearInterval(interval);
     }
   }, [isOpen, documentId, isGenerating, fetchExistingChapters]);
 
@@ -215,32 +282,80 @@ export function AudiobookExportModal({
     abortControllerRef.current = new AbortController();
 
     try {
-      const generatedBookId = await onGenerateAudiobook(
-        (progress) => setProgress(progress),
-        abortControllerRef.current.signal,
-        handleChapterComplete,
-        effectiveSettings
-      );
-      setBookId(generatedBookId);
+      const settingsWithToggle = { ...effectiveSettings, useSmartAudio };
+
+      // Queue it on the server
+      const res = await fetch('/api/audiobooks/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId, settings: settingsWithToggle })
+      });
+      if (!res.ok) throw new Error('Failed to queue audiobook on server');
+      
+      // Start polling
+      await fetchExistingChapters();
+
+      // Check if there is a batch queue in localStorage
+      const queueRaw = localStorage.getItem('batchAudiobookQueue');
+      if (queueRaw) {
+        try {
+          const batchData = JSON.parse(queueRaw);
+          if (batchData && batchData.queue && batchData.queue.length > 0) {
+            const nextDoc = batchData.queue[0];
+            const remainingQueue = batchData.queue.slice(1);
+            localStorage.setItem('batchAudiobookQueue', JSON.stringify({
+              queue: remainingQueue,
+              settings: batchData.settings
+            }));
+            router.push(`/${nextDoc.type}/${nextDoc.id}?autoGenerate=true`);
+            return; // skip cleanup to avoid unmount issues during navigation
+          } else {
+            // Queue is empty, clear it and go back to app
+            localStorage.removeItem('batchAudiobookQueue');
+            router.push('/app');
+            return;
+          }
+        } catch (e) {
+          console.error('Failed to parse batch queue', e);
+        }
+      }
+
     } catch (error) {
       console.error('Error generating audiobook:', error);
+      setIsGenerating(false);
       if (error instanceof Error && error.message.includes('cancelled')) {
-        // Graceful cancellation - chapters are saved
         console.log('Audiobook generation cancelled gracefully');
       } else {
-        // Show error to user for actual errors
         setErrorMessage(error instanceof Error ? error.message : 'Failed to generate audiobook. Please try again.');
       }
-    } finally {
-      setIsGenerating(false);
-      setProgress(0);
-      abortControllerRef.current = null;
-      // Refresh chapters to show what was completed (soft refresh list only)
-      if (bookId || documentId) {
-        await fetchExistingChapters(true);
-      }
     }
-  }, [onGenerateAudiobook, handleChapterComplete, setProgress, bookId, documentId, fetchExistingChapters, effectiveSettings]);
+  }, [onGenerateAudiobook, handleChapterComplete, setProgress, bookId, documentId, fetchExistingChapters, effectiveSettings, useSmartAudio, router]);
+
+  // Effect to auto-start generation if URL has autoGenerate=true
+  useEffect(() => {
+    if (autoGenerate && !isGenerating && !isLoadingExisting && effectiveSettings && bookId === null) {
+      // Check batch queue to apply settings automatically
+      const queueRaw = localStorage.getItem('batchAudiobookQueue');
+      if (queueRaw) {
+        try {
+          const batchData = JSON.parse(queueRaw);
+          if (batchData.settings) {
+            setAudiobookVoice(batchData.settings.voice);
+            setFormat(batchData.settings.format);
+            setNativeSpeed(batchData.settings.nativeSpeed);
+            setPostSpeed(batchData.settings.postSpeed);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      // Start generating after a tiny delay so state settles
+      const timeout = setTimeout(() => {
+        handleStartGeneration();
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [autoGenerate, isGenerating, isLoadingExisting, effectiveSettings, bookId, handleStartGeneration]);
 
   const handleCancel = useCallback(() => {
     if (abortControllerRef.current) {
@@ -248,8 +363,13 @@ export function AudiobookExportModal({
     }
   }, []);
 
-  // Cancel in-flight conversion if the page is being hidden or the component unmounts
-  // (e.g., user navigates away from the document to the home screen).
+  const handleSmartAudioProfileChange = useCallback((profileId: string) => {
+    setSelectedSmartAudioProfileId(profileId);
+    void updateConfigKey('smartAudioProfileId', profileId);
+  }, [updateConfigKey]);
+
+  // Cancel in-flight conversion ONLY if the page is literally being closed or refreshed.
+  // We DO NOT cancel on unmount, so that generation continues in the background if the user navigates within the SPA.
   useEffect(() => {
     const onPageHide = () => {
       if (abortControllerRef.current) {
@@ -261,9 +381,7 @@ export function AudiobookExportModal({
     return () => {
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('beforeunload', onPageHide);
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      // Removed unmount abort to allow background generation
     };
   }, []);
 
@@ -366,53 +484,38 @@ export function AudiobookExportModal({
   }, [bookId, documentId, setProgress, fetchExistingChapters]);
 
   const handleDownloadChapter = useCallback(async (chapter: TTSAudiobookChapter) => {
-    if (!chapter.bookId) return;
+    if (!bookId) return;
 
     try {
-      const blob = await downloadAudiobookChapter(chapter.bookId, chapter.index);
-      const url = URL.createObjectURL(blob);
+      const ext = chapter.format || 'm4b';
+      const url = `/api/audiobook/chapter?bookId=${bookId}&chapterIndex=${chapter.index}`;
       const a = document.createElement('a');
       a.href = url;
-      // Use the chapter's stored format directly - it knows what it actually is
-      const ext = chapter.format || 'm4b';
       a.download = `${chapter.title}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error downloading chapter:', error);
       setErrorMessage('Failed to download chapter. Please try again.');
     }
-  }, []);
+  }, [bookId]);
 
   const handleDownloadComplete = useCallback(async () => {
     if (!bookId) return;
 
     setIsCombining(true);
     try {
-      const response = await downloadAudiobook(bookId, format);
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
-
-      const chunks: Uint8Array[] = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-
-      const mimeType = format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';
-      const blob = new Blob(chunks as BlobPart[], { type: mimeType });
-      const url = URL.createObjectURL(blob);
+      const url = `/api/audiobook?bookId=${bookId}&format=${format}`;
       const a = document.createElement('a');
       a.href = url;
       a.download = `audiobook.${format}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      
+      // Delay disabling the loading state so the browser has time to start the download
+      await new Promise(resolve => setTimeout(resolve, 2000));
     } catch (error) {
       console.error('Error downloading complete audiobook:', error);
       setErrorMessage('Failed to download audiobook. Please try again.');
@@ -475,7 +578,14 @@ export function AudiobookExportModal({
 
       <ReaderSidebarShell
         isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
+        onClose={() => {
+          if (isGenerating) {
+            setPendingCloseAction('close_modal');
+            setShowBackgroundWarning(true);
+          } else {
+            setIsOpen(false);
+          }
+        }}
         ariaLabel="Export audiobook"
         title="Export Audiobook"
         subtitle="Only leaving the document cancels generation."
@@ -647,6 +757,53 @@ export function AudiobookExportModal({
 			                                </div>
 			                              )}
 
+                                    {/* 🧠 Smart AI Toggle */}
+                                        <Card className="p-3">
+                                          <label className="flex items-center justify-between cursor-pointer">
+                                            <div className="space-y-0.5 pr-4">
+                                              <span className="text-sm font-medium text-foreground">Smart AI Formatting</span>
+                                              <p className="text-xs text-soft">Use Gemini to process footnotes, apply phonetics, and fix layout artifacts before TTS generation.</p>
+                                            </div>
+                                            <div className="relative inline-flex items-center shrink-0">
+                                              <input
+                                                type="checkbox"
+                                                className="peer sr-only"
+                                                checked={useSmartAudio}
+                                                onChange={(e) => setUseSmartAudio(e.target.checked)}
+                                                disabled={settingsLocked}
+                                              />
+                                              <div className="h-6 w-11 rounded-full bg-surface-sunken border border-line peer-checked:bg-accent peer-checked:border-accent after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-full peer-disabled:opacity-50"></div>
+                                            </div>
+                                          </label>
+                                        </Card>
+
+                                        {useSmartAudio && (
+                                          <Card className="p-3">
+                                            <div className="space-y-2">
+                                              <label className="block text-sm font-medium text-foreground">Smart AI Profile</label>
+                                              <select
+                                                className="w-full rounded-md border border-line bg-background px-3 py-2 text-sm text-foreground"
+                                                value={selectedSmartAudioProfileId}
+                                                onChange={(e) => handleSmartAudioProfileChange(e.target.value)}
+                                              >
+                                                {smartAudioProfiles.map((profile) => (
+                                                  <option key={profile.id} value={profile.id}>
+                                                    {profile.name}
+                                                  </option>
+                                                ))}
+                                                {smartAudioProfiles.length === 0 && (
+                                                  <option value="">No smart AI profiles found</option>
+                                                )}
+                                              </select>
+                                              {selectedSmartAudioProfile && (
+                                                <p className="text-xs text-soft">
+                                                  {selectedSmartAudioProfile.aiModel} · {Object.keys(selectedSmartAudioProfile.abbreviations || {}).length} abbreviations · {Object.keys(selectedSmartAudioProfile.pronunciations || {}).length} pronunciations
+                                                </p>
+                                              )}
+                                            </div>
+                                          </Card>
+                                        )}
+
 			                              {/* Action buttons */}
 			                              <div className="mt-4 flex items-center gap-2">
 			                                {chapters.length === 0 && (
@@ -683,6 +840,29 @@ export function AudiobookExportModal({
 			                                  </Button>
 			                                )}
 			                              </div>
+                                    
+                                    {/* AI Changelog Links */}
+                                    {hasAnyChapters && (
+                                      <div className="mt-4 pt-3 border-t border-line-soft flex items-center justify-between">
+                                        <div className="text-xs text-soft font-medium">Smart AI Changelog</div>
+                                        <div className="flex gap-3">
+                                          <a 
+                                            href={`/api/audiobook/changelog?bookId=${bookId || documentId}`} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-accent hover:text-accent-hover hover:underline transition-colors font-medium"
+                                          >
+                                            View in browser
+                                          </a>
+                                          <a 
+                                            href={`/api/audiobook/changelog?bookId=${bookId || documentId}&download=true`} 
+                                            className="text-xs text-accent hover:text-accent-hover hover:underline transition-colors font-medium"
+                                          >
+                                            Download .txt
+                                          </a>
+                                        </div>
+                                      </div>
+                                    )}
 			                            </div>
 			                          </div>
 			                        )}
@@ -850,6 +1030,28 @@ export function AudiobookExportModal({
                     </>
                   )}
       </ReaderSidebarShell>
+
+      <ConfirmDialog
+        isOpen={showBackgroundWarning}
+        onClose={() => {
+          setShowBackgroundWarning(false);
+          if (pendingCloseAction === 'close_modal') {
+            setIsOpen(false);
+          }
+        }}
+        title="Audiobook Generation Running"
+        message="The audiobook is currently generating. If you leave, it will continue generating in the background. Do you want to explicitly stop it?"
+        confirmText="Stop Generation"
+        cancelText="Keep Generating (Default)"
+        isDangerous={true}
+        onConfirm={() => {
+          handleCancel();
+          setShowBackgroundWarning(false);
+          if (pendingCloseAction === 'close_modal') {
+            setIsOpen(false);
+          }
+        }}
+      />
       {/* Confirm delete chapter */}
       <ConfirmDialog
         isOpen={pendingDeleteChapter !== null}

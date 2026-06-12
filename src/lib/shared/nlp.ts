@@ -136,6 +136,7 @@ const normalizeSentenceBoundariesForNlp = (text: string): string => {
  */
 export const preprocessSentenceForAudio = (text: string): string => {
   return text
+    .replace(/\[([^\]]+)\]\(\/([^\/]+)\/\)/g, '$2') // Convert [Word](/IPA/) to just the pronunciation for TTS
     .replace(/\S*(?:https?:\/\/|www\.)([^\/\s]+)(?:\/\S*)?/gi, '- (link to $1) -')
     .replace(/([\p{L}\p{N}\p{M}]+)-\s+([\p{L}\p{N}\p{M}]+)/gu, '$1$2') // Remove hyphenation
     // Remove special character *
@@ -254,7 +255,12 @@ export const splitTextToTtsBlocksEPUB = (text: string, options?: TtsSplitOptions
 export const normalizeTextForTts = (text: string, options?: TtsSplitOptions): string => {
   const language = normalizeLanguageTag(options?.language);
   const separator = ['ja', 'zh'].includes(toBaseLanguageCode(language)) ? '' : ' ';
-  return splitTextToTtsBlocks(text, options).join(separator);
+  const paragraphs = text.split(/\n{2,}/);
+  const normalizedParagraphs = paragraphs.map(p => {
+    if (!p.trim()) return '';
+    return splitTextToTtsBlocks(p, options).join(separator);
+  }).filter(Boolean);
+  return normalizedParagraphs.join('\n\n');
 };
 
 // Helper functions to merge quoted dialogue across sentences

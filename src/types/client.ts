@@ -16,6 +16,8 @@ export interface TTSRetryOptions {
   initialDelay?: number;
   maxDelay?: number;
   backoffFactor?: number;
+  pingOperation?: () => Promise<boolean>;
+  postPingDelay?: number;
 }
 
 export interface TTSRequestError extends Error {
@@ -46,6 +48,7 @@ export interface AudiobookGenerationSettings {
   format: TTSAudiobookFormat;
   ttsInstructions?: string;
   language?: string;
+  smartAudioProfileId?: string;
 }
 
 export interface CreateChapterPayload {
@@ -55,6 +58,16 @@ export interface CreateChapterPayload {
   format: TTSAudiobookFormat;
   chapterIndex: number;
   settings?: AudiobookGenerationSettings;
+}
+
+export interface SmartAudioProfile {
+  id: string;
+  name: string;
+  aiModel: string;
+  customTtsPrompt: string;
+  abbreviations: Record<string, string>;
+  pronunciations: Record<string, string>;
+  books: Record<string, string>;
 }
 
 

@@ -39,6 +39,7 @@ interface ConfigContextType {
   providerType: AppConfigValues['providerType'];
   ttsModel: string;
   ttsInstructions: string;
+  smartAudioProfileId: string;
   savedVoices: SavedVoices;
   updateConfig: (newConfig: Partial<{ apiKey: string; baseUrl: string; viewType: ViewType }>) => Promise<void>;
   updateConfigKey: <K extends keyof AppConfigValues>(key: K, value: AppConfigValues[K]) => Promise<void>;
@@ -329,6 +330,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     providerType: _persistedProviderType,
     ttsModel,
     ttsInstructions,
+    smartAudioProfileId,
     savedVoices,
     segmentPreloadDepthPages,
     segmentPreloadSentenceLookahead,
@@ -478,6 +480,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       providerType,
       ttsModel: effectiveTtsModel,
       ttsInstructions: effectiveTtsInstructions,
+      smartAudioProfileId,
       savedVoices,
       updateConfig,
       updateConfigKey,

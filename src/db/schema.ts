@@ -8,6 +8,7 @@ const usePostgres = !!process.env.POSTGRES_URL;
 
 export const documents = usePostgres ? postgresSchema.documents : sqliteSchema.documents;
 export const audiobooks = usePostgres ? postgresSchema.audiobooks : sqliteSchema.audiobooks;
+export const audiobookJobs = usePostgres ? postgresSchema.audiobookJobs : sqliteSchema.audiobookJobs;
 export const audiobookChapters = usePostgres ? postgresSchema.audiobookChapters : sqliteSchema.audiobookChapters;
 export const userTtsChars = usePostgres ? postgresSchema.userTtsChars : sqliteSchema.userTtsChars;
 export const userJobEvents = usePostgres ? postgresSchema.userJobEvents : sqliteSchema.userJobEvents;

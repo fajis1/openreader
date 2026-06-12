@@ -70,6 +70,7 @@ export async function GET(req: NextRequest) {
 
     const filename = doc.name || `${id}.bin`;
     const responseType = contentTypeForName(filename);
+    const download = url.searchParams.get('download') === 'true';
 
     try {
       const content = await getDocumentBlob(id, testNamespace);
@@ -77,6 +78,7 @@ export async function GET(req: NextRequest) {
         headers: {
           'Content-Type': responseType,
           'Cache-Control': 'no-store',
+          ...(download ? { 'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"` } : {}),
         },
       });
     } catch (error) {

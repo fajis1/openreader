@@ -3,6 +3,7 @@ import { reapOrphanedBlobs } from './handlers/reap-orphaned-blobs';
 import { cleanupTempUploads } from './handlers/cleanup-temp-uploads';
 import { pruneJobEvents } from './handlers/prune-job-events';
 import { pruneTtsUsage } from './handlers/prune-tts-usage';
+import { processAudiobookQueue } from '../audiobooks/worker';
 
 /**
  * The catalog of scheduled tasks. Each key is the stable task id stored in the
@@ -33,5 +34,12 @@ export const TASK_REGISTRY: TaskRegistry = {
     description: 'Delete TTS usage rows (user_tts_chars) older than 30 days.',
     defaultIntervalMs: 24 * 60 * 60 * 1000,
     run: pruneTtsUsage,
+  },
+  'process-audiobook-queue': {
+    name: 'Process Audiobook Queue',
+    description: 'Check system resources and process background audiobook generation jobs.',
+    defaultIntervalMs: 60 * 1000, // 1 minute checks
+    maxRunMs: 12 * 60 * 60 * 1000, // 12 hours max run time
+    run: processAudiobookQueue,
   },
 };

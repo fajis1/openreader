@@ -1,0 +1,28 @@
+--- src/components/AudiobookExportModal.tsx
++++ src/components/AudiobookExportModal.tsx
+@@ -218,6 +218,24 @@
+       if (soft) {
+         setIsRefreshingChapters(false);
+       } else {
+         setIsLoadingExisting(false);
+       }
++      
++      // Check server queue status
++      try {
++        const qRes = await fetch('/api/audiobooks/queue');
++        if (qRes.ok) {
++          const qData = await qRes.json();
++          const activeJob = qData.jobs?.find((j: any) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running'));
++          if (activeJob) {
++            setIsGenerating(true);
++            if (activeJob.progress !== undefined) setProgress(activeJob.progress);
++            if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
++            else setCurrentChapter('Generating on server...');
++          } else if (isGenerating) {
++            // Job finished or error
++            setIsGenerating(false);
++          }
++        }
++      } catch (e) {}
+     }
+   }, [documentId, setProgress, isGenerating]);

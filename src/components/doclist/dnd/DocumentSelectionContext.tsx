@@ -26,6 +26,7 @@ interface SelectionContextValue {
     doc: DocumentListDocument,
     opts?: { shift?: boolean; meta?: boolean },
   ) => void;
+  deselect: (doc: Pick<DocumentListDocument, 'id' | 'type'>) => void;
   clear: () => void;
   /** Force a precise selection (e.g. on drag start when nothing was selected). */
   replace: (docs: DocumentListDocument[]) => void;
@@ -80,6 +81,14 @@ export function DocumentSelectionProvider({ children }: { children: ReactNode })
     [anchor, order],
   );
 
+  const deselect = useCallback((doc: Pick<DocumentListDocument, 'id' | 'type'>) => {
+    setSelection((prev) => {
+      const next = new Set(prev);
+      next.delete(docKey(doc));
+      return next;
+    });
+  }, []);
+
   const clear = useCallback(() => {
     setSelection(new Set());
     setAnchor(null);
@@ -104,11 +113,12 @@ export function DocumentSelectionProvider({ children }: { children: ReactNode })
       selectionSize: selection.size,
       setVisibleOrder,
       select,
+      deselect,
       clear,
       replace,
       getSelectedDocs,
     }),
-    [selection, isSelected, setVisibleOrder, select, clear, replace, getSelectedDocs],
+    [selection, isSelected, setVisibleOrder, select, deselect, clear, replace, getSelectedDocs],
   );
 
   return <SelectionContext.Provider value={value}>{children}</SelectionContext.Provider>;

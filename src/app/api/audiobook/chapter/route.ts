@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
+import { connect, StringCodec } from 'nats';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { and, eq } from 'drizzle-orm';
@@ -44,8 +45,20 @@ import {
   type SharedProviderPolicyEntry,
 } from '@/lib/server/audiobooks/settings';
 import { errorResponse } from '@/lib/server/errors/next-response';
+import {
+  findSmartAudioProfileById,
+  readGlobalGeminiApiKey,
+  readSmartAudioProfilesDocument,
+  writeSmartAudioProfilesDocument,
+} from '@/lib/server/smart-audio-profiles';
 
 export const dynamic = 'force-dynamic';
+
+function contentDispositionAttachment(filename: string): string {
+  const fallback = filename.replace(/[^\x20-\x7E]/g, '_');
+  const encoded = encodeURIComponent(filename);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
 
 interface ConversionRequest {
   chapterTitle: string;
@@ -54,6 +67,7 @@ interface ConversionRequest {
   format?: TTSAudiobookFormat;
   chapterIndex?: number;
   settings?: unknown;
+  useSmartAudio?: boolean;
 }
 
 type ChapterObject = {
@@ -588,10 +602,132 @@ export async function POST(request: NextRequest) {
         return response;
       }
     }
+// ==========================================
+    // 🧠 BEGIN PYTHON/GEMINI INTERCEPTION
+    // ==========================================
+    let processedTextForTts = data.text;
+
+    const useSmartAudio = Boolean(
+      data.useSmartAudio
+      || (typeof data.settings === 'object'
+        && data.settings !== null
+        && 'useSmartAudio' in data.settings
+        && Boolean((data.settings as Record<string, unknown>).useSmartAudio))
+    );
+
+    const smartAudioProfileId = typeof data.settings === 'object' && data.settings !== null && 'smartAudioProfileId' in data.settings
+      ? String((data.settings as Record<string, unknown>).smartAudioProfileId || '')
+      : '';
+    
+    // ONLY run the Python worker if the frontend toggle is switched ON
+    if (useSmartAudio) {
+        const profilesDocument = readSmartAudioProfilesDocument();
+        const selectedProfile = findSmartAudioProfileById(profilesDocument, smartAudioProfileId);
+        const geminiApiKey = readGlobalGeminiApiKey();
+        try {
+          serverLogger.info(
+            { event: 'audiobook.chapter.smart_audio.enabled', bookId, smartAudioProfileId: selectedProfile?.id },
+            'Smart Audio Toggle is ON. Triggering Python Gemini worker...'
+          );
+          const nc = await connect({ servers: "nats://127.0.0.1:4222" });
+          const sc = StringCodec();
+          
+          const payload = JSON.stringify({
+            user_id: storageUserId,
+            api_key: geminiApiKey,
+            ai_model: selectedProfile?.aiModel || 'gemini-2.5-flash',
+            prompt: selectedProfile?.customTtsPrompt || "You are an expert audiobook preparation assistant...",
+            raw_text: data.text,
+            pronunciations: selectedProfile?.pronunciations || {}, 
+            abbreviations: selectedProfile?.abbreviations || {},
+            books: selectedProfile?.books || {}
+          });
+
+          const msg = await nc.request("audiobooks.gemini.clean", sc.encode(payload), { timeout: 60000 });
+          const workerResult = JSON.parse(sc.decode(msg.data));
+
+          if (workerResult.status === "success" && workerResult.cleaned_text) {
+            processedTextForTts = workerResult.cleaned_text;
+            serverLogger.info(
+              { event: 'audiobook.chapter.smart_audio.cleaned', bookId },
+              'Python worker cleaned the chapter text.'
+            );
+
+            // Save the changelog for UI viewing
+            if (workerResult.changelog) {
+              const changelogName = `${String(chapterIndex + 1).padStart(4, '0')}__changelog.txt`;
+              await putAudiobookObject(
+                bookId,
+                storageUserId,
+                changelogName,
+                Buffer.from(workerResult.changelog, 'utf8'),
+                'text/plain; charset=utf-8',
+                testNamespace,
+              ).catch((e) => {
+                serverLogger.warn({ event: 'audiobook.chapter.smart_audio.changelog_failed', error: errorToLog(e) }, 'Failed to save changelog');
+              });
+            }
+
+            // Sync new learned pronunciations back to the profile
+            if (
+              workerResult.new_pronunciations &&
+              Object.keys(workerResult.new_pronunciations as Record<string, string>).length > 0 &&
+              selectedProfile
+            ) {
+              const newPronuns = workerResult.new_pronunciations as Record<string, string>;
+              const updatedProfiles = profilesDocument.profiles.map((p) => {
+                if (p.id === selectedProfile.id) {
+                  return {
+                    ...p,
+                    pronunciations: {
+                      ...p.pronunciations,
+                      ...newPronuns,
+                    },
+                  };
+                }
+                return p;
+              });
+              writeSmartAudioProfilesDocument({
+                selectedProfileId: profilesDocument.selectedProfileId,
+                profiles: updatedProfiles,
+              });
+              serverLogger.info(
+                {
+                  event: 'audiobook.chapter.smart_audio.sync_pronunciations',
+                  bookId,
+                  profileId: selectedProfile.id,
+                  count: Object.keys(newPronuns).length,
+                },
+                'Saved learned pronunciations back to smart audio profile.',
+              );
+            }
+          } else {
+            serverLogger.warn(
+              { event: 'audiobook.chapter.smart_audio.worker_error', bookId },
+              'Python worker returned an error. Falling back to raw text.'
+            );
+          }
+          
+          await nc.close();
+        } catch (natsError) {
+          serverLogger.error(
+            { event: 'audiobook.chapter.smart_audio.nats_failed', bookId, error: errorToLog(natsError) },
+            'NATS failed. Falling back to raw text.'
+          );
+        }
+    } else {
+        serverLogger.info(
+          { event: 'audiobook.chapter.smart_audio.disabled', bookId },
+          'Smart Audio Toggle is OFF. Using raw text.'
+        );
+    }
+    // ==========================================
+    // END PYTHON/GEMINI INTERCEPTION
+    // ==========================================
 
     const ttsBuffer = await generateTTSBuffer(
       {
-        text: data.text,
+        text: processedTextForTts, // <--- CHANGED THIS FROM data.text
         voice,
         speed: nativeSpeed,
         format: 'mp3',
@@ -850,12 +986,11 @@ export async function GET(request: NextRequest) {
     }
 
     const mimeType = chapter.format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';
-    const sanitizedTitle = chapter.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
     return new NextResponse(streamBuffer(buffer), {
       headers: {
         'Content-Type': mimeType,
-        'Content-Disposition': `attachment; filename="${sanitizedTitle}.${chapter.format}"`,
+        'Content-Disposition': contentDispositionAttachment(`${chapter.title}.${chapter.format}`),
         'Cache-Control': 'no-cache',
       },
     });

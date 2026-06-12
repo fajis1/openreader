@@ -124,7 +124,12 @@ export function stitchCrossPageBlocks(doc: ParsedPdfDocument): ParsedPdfDocument
     if (continuationFragment) {
       tail.fragments.push(continuationFragment);
     }
-    tail.text = `${tail.text} ${continuation}`.replace(/\s+/g, ' ').trim();
+    tail.text = `${tail.text} ${continuation}`
+      .replace(/[ \t\r\f\v]+/g, ' ')
+      .replace(/ \n/g, '\n')
+      .replace(/\n /g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 
     if (!remainder) {
       next.blocks.splice(headIndex, 1);

@@ -18,6 +18,7 @@ export const SYNCED_PREFERENCE_KEYS = [
   'providerType',
   'ttsModel',
   'ttsInstructions',
+  'smartAudioProfileId',
   'savedVoices',
   'pdfHighlightEnabled',
   'pdfWordHighlightEnabled',

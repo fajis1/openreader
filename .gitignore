@@ -58,3 +58,13 @@ node_modules/
 
 # .agents
 .agents
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Scripts
+*.js
+!scripts/
+!next.config.js

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import useSWR, { useSWRConfig } from 'swr';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useDocuments } from '@/contexts/DocumentContext';
 import type {
@@ -19,10 +20,11 @@ import {
   saveDocumentListState,
 } from '@/lib/client/dexie';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { BatchAudiobookSidebar } from './BatchAudiobookSidebar';
 import { CreateFolderDialog } from '@/components/doclist/CreateFolderDialog';
 import { DocumentListSkeleton } from '@/components/doclist/DocumentListSkeleton';
 import { DocumentUploader, type UploadBatchState } from '@/components/documents/DocumentUploader';
-import { IconButton } from '@/components/ui';
+import { Button, IconButton } from '@/components/ui';
 import { DocumentDndProvider } from './dnd/DocumentDndProvider';
 import {
   DocumentSelectionProvider,
@@ -36,6 +38,7 @@ import { FinderStatusBar } from './window/FinderStatusBar';
 import { IconsView } from './views/IconsView';
 import { ListView } from './views/ListView';
 import { GalleryView } from './views/GalleryView';
+import { JobsInlineView } from './views/JobsInlineView';
 
 let cachedDocumentListState: DocumentListState | null = null;
 
@@ -43,6 +46,7 @@ type DocumentToDelete = {
   id: string;
   name: string;
   type: DocumentListDocument['type'];
+  isAudiobookView?: boolean;
 };
 
 const DEFAULT_STATE: Required<
@@ -220,6 +224,32 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const [newFolderName, setNewFolderName] = useState('');
   const [manualFolderPrompt, setManualFolderPrompt] = useState(false);
   const [clearFoldersPrompt, setClearFoldersPrompt] = useState(false);
+  const [bulkDeleteAudiobooksPrompt, setBulkDeleteAudiobooksPrompt] = useState(false);
+  const [showBatchAudiobookSidebar, setShowBatchAudiobookSidebar] = useState(false);
+  const [backgroundJobs, setBackgroundJobs] = useState<{ id: string, documentId: string, status: string, progress: number }[] | null>(null);
+
+  useEffect(() => {
+    // Also check if there's an old legacy localStorage batch, clear it.
+    localStorage.removeItem('batchAudiobookQueue');
+
+    const fetchQueue = async () => {
+      try {
+        const res = await fetch('/api/audiobooks/queue');
+        if (res.ok) {
+          const data = await res.json();
+          const active = data.jobs?.filter((j: { status: string }) => j.status === 'queued' || j.status === 'running') || [];
+          setBackgroundJobs(active.length > 0 ? active : null);
+        }
+      } catch (e) {
+        console.error('Failed to fetch background audiobook queue', e);
+      }
+    };
+    
+    fetchQueue();
+    // Poll every 10 seconds while jobs are active
+    const interval = setInterval(fetchQueue, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   const isNarrow = useIsNarrow();
   const selection = useDocumentSelection();
@@ -233,6 +263,18 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     deleteDocument,
     isHTMLLoading,
   } = useDocuments();
+
+  const { data: audiobooksData } = useSWR('/api/audiobooks', async (url) => {
+    try {
+      const res = await fetch(url);
+      const json = await res.json();
+      return json;
+    } catch {
+      return { audiobooks: [], smartAudiobookIds: [], audiobookSizes: {} };
+    }
+  });
+  const EMPTY_ARRAY: string[] = [];
+  const generatedAudiobookIds = audiobooksData?.audiobooks || EMPTY_ARRAY;
 
   // Load saved state.
   useEffect(() => {
@@ -397,6 +439,9 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         .filter((d) => (d.recentlyOpenedAt ?? 0) > 0)
         .sort((a, b) => (b.recentlyOpenedAt ?? 0) - (a.recentlyOpenedAt ?? 0))
         .slice(0, 20);
+    } else if (sidebarFilter === 'audiobooks') {
+      const ids = generatedAudiobookIds || [];
+      docs = docs.filter((d) => ids.includes(d.id));
     } else if (sidebarFilter.startsWith('folder:')) {
       const fid = sidebarFilter.slice('folder:'.length);
       const folder = foldersWithLiveDocs.find((f) => f.id === fid);
@@ -409,7 +454,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     }
     if (q) docs = docs.filter((d) => d.name.toLowerCase().includes(q));
     return docs;
-  }, [allDocumentsWithFolder, sidebarFilter, query, foldersWithLiveDocs, allDocumentsById]);
+  }, [allDocumentsWithFolder, sidebarFilter, query, foldersWithLiveDocs, allDocumentsById, generatedAudiobookIds]);
 
   // Apply sort.
   const sortedVisible = useMemo(() => {
@@ -429,27 +474,50 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
 
   // --- Actions ---
 
+  const { mutate } = useSWRConfig();
+
   const handleDelete = useCallback(async () => {
     if (!documentToDelete) return;
     try {
-      await deleteDocument(documentToDelete.id);
-      setFolders((prev) =>
-        prev.map((f) => ({
-          ...f,
-          documents: f.documents.filter(
-            (d) => !(d.id === documentToDelete.id && d.type === documentToDelete.type),
-          ),
-        })),
-      );
+      if (documentToDelete.isAudiobookView) {
+        const res = await fetch(`/api/audiobook?bookId=${encodeURIComponent(documentToDelete.id)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Failed to delete audiobook');
+        await mutate('/api/audiobooks');
+      } else {
+        await deleteDocument(documentToDelete.id);
+        setFolders((prev) =>
+          prev.map((f) => ({
+            ...f,
+            documents: f.documents.filter(
+              (d) => !(d.id === documentToDelete.id && d.type === documentToDelete.type),
+            ),
+          })),
+        );
+      }
       setDocumentToDelete(null);
     } catch (err) {
-      console.error('Failed to remove document:', err);
+      console.error('Failed to remove document or audiobook:', err);
     }
-  }, [deleteDocument, documentToDelete]);
+  }, [deleteDocument, documentToDelete, mutate]);
 
   const handleDeleteDoc = useCallback((doc: DocumentListDocument) => {
-    setDocumentToDelete({ id: doc.id, name: doc.name, type: doc.type });
-  }, []);
+    setDocumentToDelete({ id: doc.id, name: doc.name, type: doc.type, isAudiobookView: sidebarFilter === 'audiobooks' });
+  }, [sidebarFilter]);
+
+  const handleBulkDeleteAudiobooks = useCallback(async () => {
+    const selectedDocs = selection.getSelectedDocs();
+    try {
+      await Promise.all(selectedDocs.map(async (doc) => {
+        const res = await fetch(`/api/audiobook?bookId=${encodeURIComponent(doc.id)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Failed to delete audiobook');
+      }));
+      await mutate('/api/audiobooks');
+      selection.clear();
+      setBulkDeleteAudiobooksPrompt(false);
+    } catch (err) {
+      console.error('Failed to bulk delete audiobooks:', err);
+    }
+  }, [selection, mutate]);
 
   const handleDropOnFolder = useCallback(
     (folderId: string, item: DocumentDragItem) => {
@@ -476,6 +544,30 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     },
     [selection],
   );
+
+  const handleDownloadSelected = useCallback(() => {
+    const selectedDocs = selection.getSelectedDocs();
+    selectedDocs.forEach((doc, i) => {
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.href = `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`;
+        a.download = `${doc.name}.m4b`;
+        a.click();
+      }, i * 500);
+    });
+  }, [selection]);
+
+  const handleDownloadSelectedOriginals = useCallback(() => {
+    const selectedDocs = selection.getSelectedDocs();
+    selectedDocs.forEach((doc, i) => {
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.href = `/api/documents/blob/get/fallback?id=${encodeURIComponent(doc.id)}&download=true`;
+        a.download = doc.name || `${doc.id}.bin`;
+        a.click();
+      }, i * 500);
+    });
+  }, [selection]);
 
   const handleMergeIntoFolder = useCallback(
     (sources: DocumentListDocument[], target: DocumentListDocument) => {
@@ -526,6 +618,16 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     setFolders((prev) => prev.filter((f) => f.id !== folderId));
     if (sidebarFilter === `folder:${folderId}`) setSidebarFilter('all');
   }, [sidebarFilter]);
+
+  const previousSidebarFilter = useRef(sidebarFilter);
+  useEffect(() => {
+    if (sidebarFilter === 'audiobooks' && previousSidebarFilter.current !== 'audiobooks') {
+      if (viewMode === 'icons') {
+        setViewMode('list');
+      }
+    }
+    previousSidebarFilter.current = sidebarFilter;
+  }, [sidebarFilter, viewMode]);
 
   const handleClearFolders = useCallback(() => {
     setFolders([]);
@@ -644,6 +746,27 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
           selectedCount={visibleSelectedCount}
           totalSize={totalBytes}
           summary={summary}
+          actions={
+            visibleSelectedCount > 0 && sidebarFilter === 'audiobooks' ? (
+              <>
+                <Button size="xs" variant="primary" onClick={handleDownloadSelected}>
+                  Download {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Audiobooks
+                </Button>
+                <Button size="xs" variant="danger" onClick={() => setBulkDeleteAudiobooksPrompt(true)}>
+                  Delete {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Audiobooks
+                </Button>
+              </>
+            ) : visibleSelectedCount > 0 && sidebarFilter !== 'audiobooks' ? (
+              <>
+                <Button size="xs" className="!bg-blue-500 hover:!bg-blue-600 !text-white !border-transparent" onClick={handleDownloadSelectedOriginals}>
+                  Download {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Originals
+                </Button>
+                <Button size="xs" variant="primary" onClick={() => setShowBatchAudiobookSidebar(true)}>
+                  Generate Audiobook{visibleSelectedCount > 1 ? 's' : ''}
+                </Button>
+              </>
+            ) : null
+          }
         />
       }
       sidebarOpen={effectiveSidebarOpen}
@@ -651,6 +774,20 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         if (isNarrow) setMobileSidebarOpen(false);
       }}
     >
+      {!isLoading && backgroundJobs && backgroundJobs.length > 0 && (
+        <div className="px-3 pt-3 shrink-0 bg-surface-sunken">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-surface border border-accent rounded-md px-3 py-2 text-[13px] shadow-sm">
+            <p className="text-foreground font-medium flex items-center gap-2">
+              <svg className="w-4 h-4 text-accent animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              You have {backgroundJobs.length} audiobook{backgroundJobs.length > 1 ? 's' : ''} generating in the background.
+            </p>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Button size="xs" variant="secondary" onClick={() => setSidebarFilter('jobs')}>View Queue</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!isLoading && showHint && allDocuments.length > 1 && (
         <div className="px-3 pt-3 shrink-0 bg-surface-sunken">
           <div className="flex items-center justify-between bg-surface border border-line rounded-md px-3 py-1 text-[12px]">
@@ -679,6 +816,8 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
             <DocumentListStateLoader />
           )}
         </div>
+      ) : sidebarFilter === 'jobs' ? (
+        <JobsInlineView />
       ) : allDocuments.length === 0 ? (
         <div className="flex-1 min-h-0 flex items-center justify-center p-6">
           <DocumentUploader
@@ -698,6 +837,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               iconSize={iconSize}
               onDeleteDoc={handleDeleteDoc}
               onMergeIntoFolder={handleMergeIntoFolder}
+              isAudiobookView={sidebarFilter === 'audiobooks'}
             />
           )}
           {fallbackViewMode === 'list' && (
@@ -711,6 +851,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               }}
               onDeleteDoc={handleDeleteDoc}
               onMergeIntoFolder={handleMergeIntoFolder}
+              isAudiobookView={sidebarFilter === 'audiobooks'}
             />
           )}
           {fallbackViewMode === 'gallery' && (
@@ -719,6 +860,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               folderNameById={folderNameById}
               onDeleteDoc={handleDeleteDoc}
               onMergeIntoFolder={handleMergeIntoFolder}
+              isAudiobookView={sidebarFilter === 'audiobooks'}
             />
           )}
         </DocumentUploader>
@@ -760,8 +902,8 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         isOpen={documentToDelete !== null}
         onClose={() => setDocumentToDelete(null)}
         onConfirm={handleDelete}
-        title="Delete Document"
-        message={`Are you sure you want to delete ${documentToDelete?.name ?? 'this document'}?`}
+        title={documentToDelete?.isAudiobookView ? 'Delete Audiobook' : 'Delete Document'}
+        message={documentToDelete?.isAudiobookView ? `Are you sure you want to delete the audiobook for ${documentToDelete?.name.replace(/\.[^/.]+$/, "")}? The original document will not be deleted.` : `Are you sure you want to delete ${documentToDelete?.name ?? 'this document'}?`}
         confirmText="Delete"
         isDangerous
       />
@@ -774,6 +916,22 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         message="Remove all folders? This will not delete documents."
         confirmText="Remove Folders"
         isDangerous
+      />
+
+      <ConfirmDialog
+        isOpen={bulkDeleteAudiobooksPrompt}
+        onClose={() => setBulkDeleteAudiobooksPrompt(false)}
+        onConfirm={handleBulkDeleteAudiobooks}
+        title="Delete Selected Audiobooks"
+        message={`Are you sure you want to delete the ${visibleSelectedCount} selected audiobooks? The original documents will not be deleted.`}
+        confirmText="Delete"
+        isDangerous
+      />
+
+      <BatchAudiobookSidebar
+        isOpen={showBatchAudiobookSidebar}
+        setIsOpen={setShowBatchAudiobookSidebar}
+        selectedDocs={selection.getSelectedDocs()}
       />
     </FinderWindow>
   );

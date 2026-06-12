@@ -6,9 +6,10 @@ import { useDrag, useDrop, type DragSourceMonitor } from 'react-dnd';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
 import type { DocumentListDocument, IconSize } from '@/types/documents';
 import { DocumentPreview } from '@/components/doclist/DocumentPreview';
-import { IconButton } from '@/components/ui';
+import { IconButton, MenuRoot, MenuTrigger, MenuTransition, MenuItemsSurface, MenuActionItem } from '@/components/ui';
 import { useDocumentSelection } from '../dnd/DocumentSelectionContext';
 import { DND_DOCUMENT, documentIdentityKey, type DocumentDragItem } from '../dnd/dndTypes';
+import useSWR from 'swr';
 
 interface DocumentTileProps {
   doc: DocumentListDocument;
@@ -16,6 +17,7 @@ interface DocumentTileProps {
   onDelete: (doc: DocumentListDocument) => void;
   /** Fired when two unfoldered docs are dropped together → caller should open a "create folder" dialog. */
   onMergeIntoFolder: (source: DocumentListDocument[], target: DocumentListDocument) => void;
+  isAudiobookView?: boolean;
 }
 
 const NAME_SIZE_CLASSES: Record<IconSize, string> = {
@@ -67,9 +69,26 @@ export function DocumentTile({
   iconSize,
   onDelete,
   onMergeIntoFolder,
+  isAudiobookView,
 }: DocumentTileProps) {
-  const href = `/${doc.type}/${encodeURIComponent(doc.id)}`;
+  const href = isAudiobookView ? `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b` : `/${doc.type}/${encodeURIComponent(doc.id)}`;
   const selection = useDocumentSelection();
+
+  const { data: audiobooksData } = useSWR('/api/audiobooks', async (url) => {
+    try {
+      const res = await fetch(url);
+      const json = await res.json();
+      return json;
+    } catch {
+      return { audiobooks: [], smartAudiobookIds: [] };
+    }
+  });
+  const generatedAudiobookIds = audiobooksData?.audiobooks || [];
+  const smartAudiobookIds = audiobooksData?.smartAudiobookIds || [];
+  const audiobookSizes = audiobooksData?.audiobookSizes || {};
+
+  const hasAudiobook = generatedAudiobookIds?.includes(doc.id) ?? false;
+  const hasSmartAudio = smartAudiobookIds?.includes(doc.id) ?? false;
 
   const showDeleteButton = true;
   const isSelected = selection.isSelected(doc);
@@ -180,9 +199,12 @@ export function DocumentTile({
           draggable={false}
           className={`flex items-center flex-1 min-w-0 rounded-md ${LINK_PADDING_CLASS} ${GAP_CLASSES[iconSize]}`}
           onClick={handleClick}
+          {...(isAudiobookView ? { download: true } : {})}
         >
           <span className="flex-shrink-0 flex items-center">
-            {doc.type === 'pdf' ? (
+            {isAudiobookView ? (
+              <svg className={`${FILE_ICON_CLASSES[iconSize]} text-accent`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+            ) : doc.type === 'pdf' ? (
               <PDFIcon className={`${FILE_ICON_CLASSES[iconSize]} text-danger`} />
             ) : doc.type === 'epub' ? (
               <EPUBIcon className={`${FILE_ICON_CLASSES[iconSize]} text-accent`} />
@@ -198,9 +220,64 @@ export function DocumentTile({
               (isSelected ? 'text-accent' : 'text-foreground group-hover:text-accent')
             }
           >
-            {doc.name}
+            {doc.name}{isAudiobookView ? ' (Audiobook)' : ''}
           </span>
         </Link>
+        {hasAudiobook && (
+          <>
+            {hasSmartAudio && (
+              <div className="relative flex" onClick={(e) => e.stopPropagation()}>
+              <MenuRoot>
+                <MenuTrigger className={`${TRASH_BTN_CLASSES[iconSize]} flex items-center justify-center text-purple-500 hover:bg-purple-500/10 transition-colors`} aria-label={`View AI Changelog for ${doc.name}`} title="AI Changelog">
+                  <svg className={TRASH_ICON_CLASSES[iconSize]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </MenuTrigger>
+                <MenuTransition>
+                  <MenuItemsSurface className="w-48 z-[60] right-0 mt-1">
+                    <MenuActionItem
+                      onClick={() => {
+                        window.open(`/api/audiobook/changelog?bookId=${encodeURIComponent(doc.id)}`, '_blank');
+                      }}
+                      >View in Browser</MenuActionItem>
+                    <MenuActionItem
+                      onClick={() => {
+                        window.location.href = `/api/audiobook/changelog?bookId=${encodeURIComponent(doc.id)}&download=true`;
+                      }}
+                      >Download as File</MenuActionItem>
+                  </MenuItemsSurface>
+                </MenuTransition>
+              </MenuRoot>
+              </div>
+            )}
+            <a
+              href={`/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`}
+              download
+              onClick={(e) => e.stopPropagation()}
+              className={`${TRASH_BTN_CLASSES[iconSize]} flex items-center justify-center text-accent hover:bg-accent-wash transition-colors`}
+              aria-label={`Download M4B Audiobook for ${doc.name}`}
+              title="Download Audiobook"
+            >
+              <svg className={TRASH_ICON_CLASSES[iconSize]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+            </a>
+          </>
+        )}
+        {!isAudiobookView && (
+          <a
+            href={`/api/documents/blob/get/fallback?id=${encodeURIComponent(doc.id)}&download=true`}
+            download
+            onClick={(e) => e.stopPropagation()}
+            className={`${TRASH_BTN_CLASSES[iconSize]} flex items-center justify-center text-foreground hover:text-white hover:bg-accent transition-colors`}
+            aria-label={`Download ${doc.name}`}
+            title="Download Original Document"
+          >
+            <svg className={TRASH_ICON_CLASSES[iconSize]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          </a>
+        )}
         {showDeleteButton && (
           <IconButton
             onClick={() => onDelete(doc)}

@@ -27,9 +27,28 @@ export const audiobooks = pgTable('audiobooks', {
   description: text('description'),
   coverPath: text('cover_path'),
   duration: real('duration').default(0),
+  hasSmartAudio: boolean('has_smart_audio').default(false),
+  totalBytes: bigint('total_bytes', { mode: 'number' }).default(0),
   createdAt: bigint('created_at', { mode: 'number' }).default(PG_NOW_MS),
 }, (table) => [
   primaryKey({ columns: [table.id, table.userId] }),
+]);
+
+export const audiobookJobs = pgTable('audiobook_jobs', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  documentId: text('document_id').notNull(),
+  status: text('status').notNull().default('queued'), // queued, running, paused, completed, error
+  progress: real('progress').default(0),
+  settingsJson: jsonb('settings_json').notNull().default({}),
+  createdAt: bigint('created_at', { mode: 'number' }).default(PG_NOW_MS),
+  updatedAt: bigint('updated_at', { mode: 'number' }).default(PG_NOW_MS),
+  startedAt: bigint('started_at', { mode: 'number' }),
+  completedAt: bigint('completed_at', { mode: 'number' }),
+  error: text('error'),
+}, (table) => [
+  index('idx_audiobook_jobs_status').on(table.status),
+  index('idx_audiobook_jobs_user_id').on(table.userId),
 ]);
 
 export const audiobookChapters = pgTable('audiobook_chapters', {

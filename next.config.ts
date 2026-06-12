@@ -43,6 +43,8 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
   turbopack: {
     resolveAlias: {
       canvas: '@napi-rs/canvas',

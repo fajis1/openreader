@@ -45,6 +45,7 @@ export interface AppConfigValues {
   providerType: TtsProviderType;
   ttsModel: string;
   ttsInstructions: string;
+  smartAudioProfileId: string;
   savedVoices: SavedVoices;
   segmentPreloadDepthPages: number;
   segmentPreloadSentenceLookahead: number;
@@ -91,6 +92,7 @@ export function getAppConfigDefaults(): AppConfigValues {
     providerType: 'unknown',
     ttsModel: '',
     ttsInstructions: '',
+    smartAudioProfileId: 'default',
     savedVoices: {},
     segmentPreloadDepthPages: 1,
     segmentPreloadSentenceLookahead: 3,

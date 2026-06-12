@@ -27,9 +27,28 @@ export const audiobooks = sqliteTable('audiobooks', {
   description: text('description'),
   coverPath: text('cover_path'),
   duration: real('duration').default(0),
+  hasSmartAudio: integer('has_smart_audio', { mode: 'boolean' }).default(false),
+  totalBytes: integer('total_bytes').default(0),
   createdAt: integer('created_at').default(SQLITE_NOW_MS),
 }, (table) => [
   primaryKey({ columns: [table.id, table.userId] }),
+]);
+
+export const audiobookJobs = sqliteTable('audiobook_jobs', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  documentId: text('document_id').notNull(),
+  status: text('status').notNull().default('queued'), // queued, running, paused, completed, error
+  progress: real('progress').default(0),
+  settingsJson: text('settings_json', { mode: 'json' }).notNull().default({}),
+  createdAt: integer('created_at').default(SQLITE_NOW_MS),
+  updatedAt: integer('updated_at').default(SQLITE_NOW_MS),
+  startedAt: integer('started_at'),
+  completedAt: integer('completed_at'),
+  error: text('error'),
+}, (table) => [
+  index('idx_audiobook_jobs_status').on(table.status),
+  index('idx_audiobook_jobs_user_id').on(table.userId),
 ]);
 
 export const audiobookChapters = sqliteTable('audiobook_chapters', {
@@ -87,6 +106,25 @@ export const userPreferences = sqliteTable('user_preferences', {
   clientUpdatedAtMs: integer('client_updated_at_ms').notNull().default(0),
   createdAt: integer('created_at').default(SQLITE_NOW_MS),
   updatedAt: integer('updated_at').default(SQLITE_NOW_MS),
+
+  // ==========================================
+  // 🚀 CUSTOM AUDIOBOOK WORKER EXTENSIONS
+  // Do not merge or overwrite during upstream updates!
+  // ==========================================
+  
+  // The user's specific API key for the isolated container
+  geminiApiKey: text('gemini_api_key'),
+  
+  // The custom instruction block (LitRPG vs Academic)
+  customTtsPrompt: text('custom_tts_prompt'),
+  
+  // JSON object for Phase 1 Regex Expansions (e.g., {"1 Thess": "1 Thessalonians"})
+  abbreviations: text('abbreviations', { mode: 'json' }).$type<Record<string, string>>().default({}),
+  
+  // JSON object for Phase 2 Phonetics (e.g., {"Lamoch": "/ˈlæmək/"})
+  pronunciations: text('pronunciations', { mode: 'json' }).$type<Record<string, string>>().default({}),
+  
+  // ==========================================
 });
 
 export const documentSettings = sqliteTable('document_settings', {

@@ -395,7 +395,7 @@ async function fetchCustomOpenAiVoices(baseUrl: string, apiKey: string): Promise
       event: 'tts.voice_resolution.custom_endpoint.voices_unsupported',
       degraded: true,
       fallbackPath: 'provider_default_voices',
-    }, 'Custom endpoint does not support voices, using defaults');
+    }, 'Custom endpoint does not support voices, using default voice list');
     return null;
   } finally {
     clearTimeout(timeoutId);

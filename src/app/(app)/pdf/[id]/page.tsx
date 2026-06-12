@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { useTTS } from '@/contexts/TTSContext';
 import { DocumentSettings } from '@/components/documents/DocumentSettings';
@@ -62,6 +62,7 @@ export default function PDFViewerPage() {
     forceReparseParsedPdf,
     createFullAudioBook: createPDFAudioBook,
     regenerateChapter: regeneratePDFChapter,
+    isAudioGenerating,
   } = pdfState;
   const { stop } = useTTS();
   const { isAtLimit } = useAuthRateLimit();
@@ -69,7 +70,9 @@ export default function PDFViewerPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isPdfViewerReady, setIsPdfViewerReady] = useState(false);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
-  const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'audiobook' | 'segments'>(null);
+  const searchParams = useSearchParams();
+  const autoGenerateParam = searchParams.get('autoGenerate');
+  const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'audiobook' | 'segments'>(autoGenerateParam === 'true' ? 'audiobook' : null);
   const [showForceReparseConfirm, setShowForceReparseConfirm] = useState(false);
   const [showDetailedParseLoader, setShowDetailedParseLoader] = useState(false);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
@@ -207,14 +210,20 @@ export default function PDFViewerPage() {
   const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 10, 300));
   const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 10, 50));
 
+  const [showNavWarning, setShowNavWarning] = useState(false);
+
   const handleBackToDocuments = useCallback((event?: MouseEvent) => {
     event?.preventDefault();
+    if (isAudioGenerating) {
+      setShowNavWarning(true);
+      return;
+    }
     if (isNavigatingBack) return;
     setIsNavigatingBack(true);
     stop();
     setActiveSidebar(null);
     router.push('/app');
-  }, [isNavigatingBack, stop, router]);
+  }, [isAudioGenerating, isNavigatingBack, stop, router]);
 
   const requestForceReparse = useCallback(() => {
     if (forceReparseDisabled) return;
@@ -530,6 +539,31 @@ export default function PDFViewerPage() {
         message={FORCE_REPARSE_CONFIRM_MESSAGE}
         confirmText={FORCE_REPARSE_CONFIRM_TEXT}
         cancelText="Cancel"
+      />
+      <ConfirmDialog
+        isOpen={showNavWarning}
+        onClose={() => {
+          setShowNavWarning(false);
+          // Default action: keep generating and leave
+          setIsNavigatingBack(true);
+          stop();
+          setActiveSidebar(null);
+          router.push('/app');
+        }}
+        title="Audiobook Generation Running"
+        message="The audiobook is currently generating. If you leave, it will continue generating in the background. Do you want to explicitly stop it?"
+        confirmText="Stop Generation"
+        cancelText="Keep Generating (Default)"
+        isDangerous={true}
+        onConfirm={() => {
+          // If they want to stop, wait, page.tsx doesn't have the abort signal to abort the audiobook generation!
+          // But if they navigate away, Next.js WILL unmount the component, but we specifically removed the unmount abort!
+          // So if they REALLY want to stop it, they should have clicked Stop inside the modal.
+          // Wait, if they click Stop here, we need a way to abort it globally.
+          // For now, if they click Stop, we can trigger a hard reload `window.location.href = '/app'` which kills all JS memory!
+          setShowNavWarning(false);
+          window.location.href = '/app';
+        }}
       />
       <SegmentsSidebar
         isOpen={activeSidebar === 'segments'}

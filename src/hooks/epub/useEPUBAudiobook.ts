@@ -32,6 +32,31 @@ export function filterNonEmptySpineTextEntries<T extends { text: string }>(entri
   return entries.filter((entry) => entry.text.trim() !== '');
 }
 
+function extractTextWithParagraphs(node: Node): string {
+  if (node.nodeType === 3) { // Node.TEXT_NODE
+    return node.textContent || '';
+  }
+  if (node.nodeType === 1) { // Node.ELEMENT_NODE
+    const el = node as Element;
+    const tagName = el.tagName.toLowerCase();
+    const isBlock = ['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote', 'article', 'section'].includes(tagName);
+    
+    let text = '';
+    for (let i = 0; i < el.childNodes.length; i++) {
+      text += extractTextWithParagraphs(el.childNodes[i]!);
+    }
+    
+    if (isBlock) {
+      return `\n\n${text}\n\n`;
+    }
+    if (tagName === 'br') {
+      return '\n';
+    }
+    return text;
+  }
+  return '';
+}
+
 type UseEpubAudiobookParams = {
   bookRef: RefObject<Book | null>;
   tocRef: RefObject<NavItem[]>;
@@ -92,7 +117,12 @@ export function useEPUBAudiobook({
         const promise = loadSpineSection(url)
           .then((loaded) => {
             if (!loaded?.doc) return { text: '', href: url };
-            const text = loaded.doc.body?.textContent || '';
+            let text = '';
+            if (loaded.doc.body) {
+              text = extractTextWithParagraphs(loaded.doc.body)
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+            }
             return { text, href: url };
           })
           .catch((err) => {

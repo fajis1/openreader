@@ -360,6 +360,8 @@ async function main() {
   let natsExitPromise = Promise.resolve();
   let workerProc = null;
   let workerExitPromise = Promise.resolve();
+  let pyWorkerProc = null;
+  let pyWorkerExitPromise = Promise.resolve();
   let appProc = null;
   let shutdownPromise = null;
   let isShuttingDown = false;
@@ -370,6 +372,8 @@ async function main() {
   let stopNatsStderrForward = () => { };
   let stopWorkerStdoutForward = () => { };
   let stopWorkerStderrForward = () => { };
+  let stopPyWorkerStdoutForward = () => { };
+  let stopPyWorkerStderrForward = () => { };
   let didExit = false;
 
   const exitOnce = (code) => {
@@ -398,18 +402,22 @@ async function main() {
       await Promise.all([
         terminateChild(appProc, signal, 4000),
         terminateChild(workerProc, 'SIGTERM', 4000),
+        terminateChild(pyWorkerProc, 'SIGTERM', 4000),
         terminateChild(natsProc, 'SIGTERM', 4000),
         terminateChild(weedProc, 'SIGTERM', 4000),
       ]);
       await weedExitPromise;
       await natsExitPromise;
       await workerExitPromise;
+      await pyWorkerExitPromise;
       stopWeedStdoutForward();
       stopWeedStderrForward();
       stopNatsStdoutForward();
       stopNatsStderrForward();
       stopWorkerStdoutForward();
       stopWorkerStderrForward();
+      stopPyWorkerStdoutForward();
+      stopPyWorkerStderrForward();
     })();
     return shutdownPromise;
   };
@@ -591,6 +599,40 @@ async function main() {
       });
       await waitForEndpoint(`http://127.0.0.1:${embeddedWorkerPort}/health/ready`, 30);
       console.log(`Embedded compute-worker is ready at http://127.0.0.1:${embeddedWorkerPort}`);
+
+      if (fs.existsSync(path.join(process.cwd(), 'audiobook_worker.py'))) {
+        console.log(`Starting embedded python smart audio worker...`);
+        const venvPython = fs.existsSync(path.join(process.cwd(), '.venv', 'bin', 'python')) 
+          ? path.join(process.cwd(), '.venv', 'bin', 'python') 
+          : 'python3';
+        
+        pyWorkerProc = spawn(
+          venvPython,
+          ['audiobook_worker.py'],
+          {
+            cwd: process.cwd(),
+            env: runtimeEnv,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        );
+        stopPyWorkerStdoutForward = forwardChildStream(pyWorkerProc.stdout, process.stdout);
+        stopPyWorkerStderrForward = forwardChildStream(pyWorkerProc.stderr, process.stderr);
+        pyWorkerExitPromise = once(pyWorkerProc, 'exit').then(() => undefined).catch(() => undefined);
+        pyWorkerProc.on('exit', (code, signal) => {
+          if (isShuttingDown) return;
+          if (typeof code === 'number' && code !== 0) {
+            console.error(`Embedded python worker exited with code ${code}.`);
+          } else if (signal) {
+            console.error(`Embedded python worker exited due to signal ${signal}.`);
+          }
+        });
+        pyWorkerProc.on('error', (error) => {
+          console.error(`Embedded python worker failed to start: ${error instanceof Error ? error.message : String(error)}`);
+        });
+      } else {
+        console.warn('audiobook_worker.py not found in project root. Skipping python smart audio worker.');
+      }
+
     } else if (!runtimeEnv.COMPUTE_WORKER_URL?.trim() || !runtimeEnv.COMPUTE_WORKER_TOKEN?.trim()) {
       throw new Error('COMPUTE_WORKER_URL and COMPUTE_WORKER_TOKEN are required when embedded compute worker startup is disabled.');
     }

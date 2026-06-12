@@ -24,7 +24,9 @@ export const withRetry = async <T>(
     maxRetries = 3,
     initialDelay = 1000,
     maxDelay = 10000,
-    backoffFactor = 2
+    backoffFactor = 2,
+    pingOperation,
+    postPingDelay = 300000,
   } = options;
 
   let lastError: Error | null = null;
@@ -68,6 +70,7 @@ export const withRetry = async <T>(
       // Narrow client retries to transport-level failures only.
       // If we got an HTTP status from a server route, do not retry from the client.
       // Server-side routes already apply upstream retry logic where needed.
+      const isServerCrash = status === 502 || status === 503 || status === 504;
       const message = lastError.message.toLowerCase();
       const isTransportFailure =
         status === undefined &&
@@ -81,7 +84,7 @@ export const withRetry = async <T>(
           message.includes('econnreset') ||
           message.includes('etimedout')
         );
-      if (!isTransportFailure) {
+      if (!isTransportFailure && !isServerCrash) {
         break;
       }
 
@@ -96,6 +99,24 @@ export const withRetry = async <T>(
 
       console.log(`Retry attempt ${attempt + 1}/${maxRetries} failed. Retrying in ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
+      
+      // If we crashed and have a pingOperation, loop the ping until it returns true, then wait postPingDelay
+      if ((isTransportFailure || isServerCrash) && pingOperation) {
+        let isUp = false;
+        while (!isUp) {
+          try {
+            isUp = await pingOperation();
+            if (isUp) {
+              console.log(`Ping successful! Waiting ${postPingDelay}ms before resuming generation to allow server warmup...`);
+              await new Promise(resolve => setTimeout(resolve, postPingDelay));
+              break; // Resume the main retry loop
+            }
+          } catch (_e) {
+            // ping failed, ignore and loop again after a short delay
+          }
+          await new Promise(resolve => setTimeout(resolve, 10000)); // ping every 10s
+        }
+      }
     }
   }
 
@@ -176,6 +197,13 @@ export const downloadAudiobook = async (bookId: string, format: string): Promise
   const response = await fetch(`/api/audiobook?bookId=${bookId}&format=${format}`);
   if (!response.ok) throw new Error('Download failed');
   return response;
+};
+
+export const combineAudiobook = async (bookId: string, format: string): Promise<void> => {
+  const response = await fetch(`/api/audiobook?bookId=${bookId}&format=${format}`, {
+    method: 'POST',
+  });
+  if (!response.ok) throw new Error('Failed to combine audiobook');
 };
 
 export const deleteAudiobookChapter = async (bookId: string, chapterIndex: number): Promise<void> => {

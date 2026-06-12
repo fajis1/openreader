@@ -9,6 +9,8 @@ import { errorToLog, serverLogger } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { normalizeServerError, toApiErrorBody, toHttpStatus } from '@/lib/server/errors/contract';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     // Auth check - require session

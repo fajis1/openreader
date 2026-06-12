@@ -98,3 +98,8 @@ export const HomeIcon = (props: IconProps) => (
     <path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9" />
   </svg>
 );
+export const HeadphonesIcon = (props: IconProps) => (
+  <svg {...baseSvg(props)}>
+    <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3" />
+  </svg>
+);

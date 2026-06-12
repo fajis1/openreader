@@ -10,9 +10,10 @@ import type {
 } from '@/types/documents';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
 import { formatDocumentSize } from '@/components/doclist/formatSize';
-import { IconButton } from '@/components/ui';
+import { IconButton, MenuRoot, MenuTrigger, MenuTransition, MenuItemsSurface, MenuActionItem } from '@/components/ui';
 import { useDocumentSelection } from '../dnd/DocumentSelectionContext';
 import { DND_DOCUMENT, documentIdentityKey, type DocumentDragItem } from '../dnd/dndTypes';
+import useSWR from 'swr';
 
 interface ListViewProps {
   documents: DocumentListDocument[];
@@ -21,6 +22,7 @@ interface ListViewProps {
   onSortChange: (sortBy: SortBy, direction: SortDirection) => void;
   onDeleteDoc: (doc: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
+  isAudiobookView?: boolean;
 }
 
 function formatDate(ms: number): string {
@@ -79,16 +81,33 @@ function DocRow({
   doc,
   onDeleteDoc,
   onMergeIntoFolder,
+  isAudiobookView,
 }: {
   doc: DocumentListDocument;
   onDeleteDoc: (d: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
+  isAudiobookView?: boolean;
 }) {
   const selection = useDocumentSelection();
   const isSelected = selection.isSelected(doc);
   const isInFolder = Boolean(doc.folderId);
-  const href = `/${doc.type}/${encodeURIComponent(doc.id)}`;
+  const href = isAudiobookView ? `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b` : `/${doc.type}/${encodeURIComponent(doc.id)}`;
   const didDragRef = useRef(false);
+
+  const { data: audiobooksData } = useSWR('/api/audiobooks', async (url) => {
+    try {
+      const res = await fetch(url);
+      const json = await res.json();
+      return json;
+    } catch {
+      return { audiobooks: [], smartAudiobookIds: [] };
+    }
+  });
+  const generatedAudiobookIds = audiobooksData?.audiobooks || [];
+  const smartAudiobookIds = audiobooksData?.smartAudiobookIds || [];
+  const audiobookSizes = audiobooksData?.audiobookSizes || {};
+  const hasAudiobook = generatedAudiobookIds?.includes(doc.id) ?? false;
+  const hasSmartAudio = smartAudiobookIds?.includes(doc.id) ?? false;
 
   const [{ isDragging }, dragRef] = useDrag<DocumentDragItem, void, { isDragging: boolean }>(() => ({
     type: DND_DOCUMENT,
@@ -144,7 +163,7 @@ function DocRow({
       data-doc-tile
       aria-selected={isSelected}
       className={
-        'grid grid-cols-[minmax(0,1fr)_44px_72px_104px_28px] sm:grid-cols-[minmax(0,1fr)_56px_96px_140px_32px] items-center text-[12px] border-b border-line-soft transition-colors duration-base ease-standard ' +
+        'grid grid-cols-[36px_minmax(0,1fr)_44px_72px_104px_56px] sm:grid-cols-[36px_minmax(0,1fr)_56px_96px_140px_64px] items-center text-[12px] border-b border-line-soft transition-colors duration-base ease-standard ' +
         // iOS: suppress the long-press link preview/callout and selection magnifier so the
         // long-press is handed to the touch DnD backend instead of the native preview.
         'select-none [-webkit-touch-callout:none] ' +
@@ -155,31 +174,104 @@ function DocRow({
         (isDragging ? ' opacity-50' : '')
       }
     >
+      <div className="flex items-center justify-center pl-2">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={(e) => {
+            if (e.target.checked) selection.select(doc, { meta: true });
+            else selection.deselect(doc);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-3.5 h-3.5 rounded border-line text-accent focus:ring-accent accent-accent bg-surface-sunken"
+        />
+      </div>
       <Link
         href={href}
         prefetch={false}
         draggable={false}
         onClick={handleClick}
         className="flex items-center gap-2 min-w-0 px-2 py-1.5"
+        {...(isAudiobookView ? { download: true } : {})}
       >
-        <KindIcon doc={doc} />
-        <span className="truncate">{doc.name}</span>
+        {isAudiobookView ? (
+          <svg className="w-4 h-4 shrink-0 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+        ) : (
+          <KindIcon doc={doc} />
+        )}
+        <span className="truncate">{doc.name}{isAudiobookView ? ' (Audiobook)' : ''}</span>
       </Link>
-      <span className="px-2 text-[11px] text-soft uppercase tracking-wide">{doc.type}</span>
+      <span className="px-2 text-[11px] text-soft uppercase tracking-wide">{isAudiobookView ? 'M4B' : doc.type}</span>
       <span className="px-2 text-[11px] text-soft text-right tabular-nums">
-        {formatDocumentSize(doc.size)}
+        {formatDocumentSize(isAudiobookView && audiobookSizes[doc.id] ? audiobookSizes[doc.id] : doc.size)}
       </span>
       <span className="px-2 text-[11px] text-soft tabular-nums">
         {formatDate(doc.lastModified)}
       </span>
-      <IconButton
-        onClick={(e: React.MouseEvent) => {
-          e.stopPropagation();
-          onDeleteDoc(doc);
-        }}
-        size="sm"
-        aria-label={`Delete ${doc.name}`}
-      >
+      <div className="flex items-center justify-end pr-2 gap-1">
+        {hasAudiobook && (
+          <>
+            {hasSmartAudio && (
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <MenuRoot>
+                <MenuTrigger className="flex items-center justify-center w-7 h-7 text-purple-500 hover:bg-purple-500/10 transition-colors rounded-sm" aria-label={`View AI Changelog for ${doc.name}`} title="AI Changelog">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </MenuTrigger>
+                <MenuTransition>
+                  <MenuItemsSurface className="w-48 z-[60] right-0 mt-1">
+                    <MenuActionItem
+                      onClick={() => {
+                        window.open(`/api/audiobook/changelog?bookId=${encodeURIComponent(doc.id)}`, '_blank');
+                      }}
+                      >View in Browser</MenuActionItem>
+                    <MenuActionItem
+                      onClick={() => {
+                        window.location.href = `/api/audiobook/changelog?bookId=${encodeURIComponent(doc.id)}&download=true`;
+                      }}
+                      >Download as File</MenuActionItem>
+                  </MenuItemsSurface>
+                </MenuTransition>
+              </MenuRoot>
+              </div>
+            )}
+            <a
+              href={`/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`}
+              download
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center justify-center w-7 h-7 text-accent hover:bg-accent-wash transition-colors rounded-sm"
+              aria-label={`Download M4B Audiobook for ${doc.name}`}
+              title="Download Audiobook"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+            </a>
+          </>
+        )}
+        {!isAudiobookView && (
+          <a
+            href={`/api/documents/blob/get/fallback?id=${encodeURIComponent(doc.id)}&download=true`}
+            download
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center justify-center w-8 h-8 text-foreground hover:bg-accent hover:text-white transition-colors rounded-md"
+            aria-label={`Download ${doc.name}`}
+            title="Download Original Document"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          </a>
+        )}
+        <IconButton
+          onClick={(e: React.MouseEvent) => {
+            e.stopPropagation();
+            onDeleteDoc(doc);
+          }}
+          size="sm"
+          aria-label={`Delete ${doc.name}`}
+        >
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             strokeLinecap="round"
@@ -189,6 +281,7 @@ function DocRow({
           />
         </svg>
       </IconButton>
+      </div>
     </div>
   );
 }
@@ -200,6 +293,7 @@ export function ListView({
   onSortChange,
   onDeleteDoc,
   onMergeIntoFolder,
+  isAudiobookView,
 }: ListViewProps) {
   const { setVisibleOrder, clear } = useDocumentSelection();
 
@@ -214,7 +308,10 @@ export function ListView({
 
   return (
     <div onClick={handleBackgroundClick} className="flex-1 min-h-0 overflow-y-auto">
-      <div className="sticky top-0 z-10 bg-surface border-b border-line-soft grid grid-cols-[minmax(0,1fr)_44px_72px_104px_28px] sm:grid-cols-[minmax(0,1fr)_56px_96px_140px_32px]">
+      <div className="sticky top-0 z-10 bg-surface border-b border-line-soft grid grid-cols-[36px_minmax(0,1fr)_44px_72px_104px_56px] sm:grid-cols-[36px_minmax(0,1fr)_56px_96px_140px_64px]">
+        <div className="flex items-center justify-center pl-2">
+          {/* Header checkbox could go here in the future if a select-all feature is needed */}
+        </div>
         <HeaderCell label="Name" field="name" sortBy={sortBy} sortDirection={sortDirection} onSortChange={onSortChange} />
         <HeaderCell label="Kind" field="type" sortBy={sortBy} sortDirection={sortDirection} onSortChange={onSortChange} />
         <HeaderCell label="Size" field="size" sortBy={sortBy} sortDirection={sortDirection} onSortChange={onSortChange} align="right" />
@@ -228,6 +325,7 @@ export function ListView({
             doc={doc}
             onDeleteDoc={onDeleteDoc}
             onMergeIntoFolder={onMergeIntoFolder}
+            isAudiobookView={isAudiobookView}
           />
         ))}
       </div>

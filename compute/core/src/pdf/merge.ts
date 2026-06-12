@@ -44,6 +44,14 @@ function sortReadingOrder(items: PdfTextItem[]): PdfTextItem[] {
 function joinText(items: PdfTextItem[]): string {
   let out = '';
   let prev: PdfTextItem | null = null;
+  
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  for (const item of items) {
+    if (item.x < minX) minX = item.x;
+    if (item.x + item.width > maxX) maxX = item.x + item.width;
+  }
+
   for (const item of items) {
     if (!prev) {
       out += item.text;
@@ -58,12 +66,30 @@ function joinText(items: PdfTextItem[]): string {
     const verticalOverlap = Math.max(0, Math.min(prevBottom, itemBottom) - Math.max(prev.y, item.y));
     const sharesLineBand = verticalOverlap >= Math.max(1, Math.min(prev.height, item.height) * 0.5);
     const lineBreak = !sharesLineBand && lineJump > Math.max(2, Math.min(prev.height, item.height) * 0.6);
-    const avgCharWidth = item.width / Math.max(1, item.text.length);
-    const needsSpace = lineBreak || gap > Math.max(avgCharWidth * 0.3, 2);
-    out += needsSpace ? ` ${item.text}` : item.text;
+    
+    let separator = '';
+    if (lineBreak) {
+      const isLargeVerticalGap = lineJump > Math.min(prev.height, item.height) * 1.4;
+      const isIndented = item.x > minX + item.height * 1.2;
+      const isPrevShort = prevEndX < maxX - prev.height * 2;
+      const isParagraphBreak = isLargeVerticalGap || isIndented || isPrevShort;
+      
+      separator = isParagraphBreak ? '\n\n' : ' ';
+    } else {
+      const avgCharWidth = item.width / Math.max(1, item.text.length);
+      const needsSpace = gap > Math.max(avgCharWidth * 0.3, 2);
+      separator = needsSpace ? ' ' : '';
+    }
+    
+    out += separator + item.text;
     prev = item;
   }
-  return out.replace(/\s+/g, ' ').trim();
+  return out
+    .replace(/[ \t\r\f\v]+/g, ' ')
+    .replace(/ \n/g, '\n')
+    .replace(/\n /g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function regionArea(region: LayoutRegion): number {

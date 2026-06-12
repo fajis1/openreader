@@ -4,7 +4,7 @@ import { useRef, type CSSProperties, type ReactNode } from 'react';
 import { useDrop } from 'react-dnd';
 import type { Folder, SidebarFilter } from '@/types/documents';
 import { PDFIcon, EPUBIcon, FileIcon, DotsHorizontalIcon } from '@/components/icons/Icons';
-import { FolderIcon, HomeIcon, ClockIcon, FolderPlusIcon } from './finderIcons';
+import { FolderIcon, HomeIcon, ClockIcon, FolderPlusIcon, HeadphonesIcon } from './finderIcons';
 import { DND_DOCUMENT, type DocumentDragItem } from '../dnd/dndTypes';
 import { IconButton, MenuActionItem, MenuItemsSurface, MenuRoot, MenuTransition, MenuTrigger, Sidebar as SidebarShell, SidebarNav, SidebarNavGroup, SidebarNavItem } from '@/components/ui';
 
@@ -196,6 +196,30 @@ export function FinderSidebar({
             icon={<FileIcon className="w-3.5 h-3.5" />}
             label="Text"
             count={counts.html}
+          />
+
+          <SidebarNavGroup>Audiobooks</SidebarNavGroup>
+          <SidebarNavItem
+            compact
+            active={filter === 'audiobooks'}
+            onClick={() => {
+              onFilterChange('audiobooks');
+              onRowAction?.();
+            }}
+            icon={<HeadphonesIcon className="w-3.5 h-3.5" />}
+            label="M4B Audiobooks"
+          />
+
+          <SidebarNavGroup>Queue</SidebarNavGroup>
+          <SidebarNavItem
+            compact
+            active={filter === 'jobs'}
+            onClick={() => {
+              onFilterChange('jobs');
+              onRowAction?.();
+            }}
+            icon={<ClockIcon className="w-3.5 h-3.5" />}
+            label="Background Jobs"
           />
 
           <SidebarNavGroup

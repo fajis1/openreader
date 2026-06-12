@@ -6,6 +6,8 @@ import { deleteUserStorageData } from '@/lib/server/user/data-cleanup';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
 
+export const dynamic = 'force-dynamic';
+
 export async function DELETE() {
   const reqHeaders = await headers();
 

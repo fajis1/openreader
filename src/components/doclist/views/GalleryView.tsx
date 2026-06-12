@@ -1,4 +1,5 @@
 'use client';
+import { MenuRoot, MenuTrigger, MenuTransition, MenuItemsSurface, MenuActionItem } from '@/components/ui';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
@@ -9,12 +10,14 @@ import { formatDocumentSize } from '@/components/doclist/formatSize';
 import { Button, ButtonLink } from '@/components/ui';
 import { useDocumentSelection } from '../dnd/DocumentSelectionContext';
 import { DND_DOCUMENT, documentIdentityKey, type DocumentDragItem } from '../dnd/dndTypes';
+import useSWR from 'swr';
 
 interface GalleryViewProps {
   documents: DocumentListDocument[];
   folderNameById?: Record<string, string>;
   onDeleteDoc: (doc: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
+  isAudiobookView?: boolean;
 }
 
 function formatDateTime(value: number | undefined): string {
@@ -39,11 +42,13 @@ function GalleryThumb({
   active,
   onClick,
   onMergeIntoFolder,
+  isAudiobookView,
 }: {
   doc: DocumentListDocument;
   active: boolean;
   onClick: () => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
+  isAudiobookView?: boolean;
 }) {
   const selection = useDocumentSelection();
   const isSelected = selection.isSelected(doc);
@@ -109,8 +114,12 @@ function GalleryThumb({
       }
       title={doc.name}
     >
-      <div className="aspect-[3/4] bg-surface">
-        <DocumentPreview doc={doc} />
+      <div className="aspect-[3/4] bg-surface flex items-center justify-center">
+        {isAudiobookView ? (
+          <svg className="w-12 h-12 text-accent opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+        ) : (
+          <DocumentPreview doc={doc} />
+        )}
       </div>
       <div
         className={
@@ -118,20 +127,24 @@ function GalleryThumb({
           (active ? 'bg-surface-sunken border-accent-line' : 'bg-surface border-line')
         }
       >
-        <KindIcon
-          doc={doc}
-          className={
-            'w-3 h-3 shrink-0 transition-colors duration-base ' +
-            (active ? 'text-accent' : 'text-soft')
-          }
-        />
+        {isAudiobookView ? (
+          <svg className={`w-3 h-3 shrink-0 transition-colors duration-base ${active ? 'text-accent' : 'text-soft'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+        ) : (
+          <KindIcon
+            doc={doc}
+            className={
+              'w-3 h-3 shrink-0 transition-colors duration-base ' +
+              (active ? 'text-accent' : 'text-soft')
+            }
+          />
+        )}
         <span
           className={
             'truncate text-[10px] leading-none transition-colors duration-base ' +
             (active ? 'text-accent font-medium' : 'text-foreground')
           }
         >
-          {doc.name}
+          {doc.name}{isAudiobookView ? ' (Audiobook)' : ''}
         </span>
       </div>
     </div>
@@ -143,12 +156,28 @@ export function GalleryView({
   folderNameById,
   onDeleteDoc,
   onMergeIntoFolder,
+  isAudiobookView,
 }: GalleryViewProps) {
   const { setVisibleOrder } = useDocumentSelection();
   const railRef = useRef<HTMLDivElement | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const activeDoc = useMemo(() => documents[activeIdx], [documents, activeIdx]);
   const openHref = activeDoc ? `/${activeDoc.type}/${encodeURIComponent(activeDoc.id)}` : null;
+
+  const { data: audiobooksData } = useSWR('/api/audiobooks', async (url) => {
+    try {
+      const res = await fetch(url);
+      const json = await res.json();
+      return json;
+    } catch {
+      return { audiobooks: [], smartAudiobookIds: [] };
+    }
+  });
+  const generatedAudiobookIds = audiobooksData?.audiobooks || [];
+  const smartAudiobookIds = audiobooksData?.smartAudiobookIds || [];
+  const audiobookSizes = audiobooksData?.audiobookSizes || {};
+  const activeHasAudiobook = activeDoc && (generatedAudiobookIds?.includes(activeDoc.id) ?? false);
+  const activeHasSmartAudio = activeDoc && (smartAudiobookIds?.includes(activeDoc.id) ?? false);
 
   useEffect(() => {
     setVisibleOrder(documents);
@@ -194,21 +223,75 @@ export function GalleryView({
         {activeDoc ? (
           <div className="w-full max-w-[920px] flex flex-col md:flex-row items-center md:items-start justify-center gap-4 md:gap-6">
             <div className="flex flex-col items-center gap-3 w-[180px] sm:w-[260px] md:w-[320px] shrink-0">
-              <div className="w-full aspect-[3/4] rounded-lg overflow-hidden border border-line shadow-elev-2">
-                <DocumentPreview doc={activeDoc} />
+              <div className="w-full aspect-[3/4] rounded-lg overflow-hidden border border-line shadow-elev-2 flex items-center justify-center bg-surface">
+                {isAudiobookView ? (
+                  <svg className="w-24 h-24 text-accent opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                ) : (
+                  <DocumentPreview doc={activeDoc} />
+                )}
               </div>
               <div className="text-center">
                 <h2 className="text-[14px] font-semibold text-foreground truncate max-w-[320px]">
-                  {activeDoc.name}
+                  {activeDoc.name}{isAudiobookView ? ' (Audiobook)' : ''}
                 </h2>
                 <p className="text-[11px] text-soft">
-                  {activeDoc.type.toUpperCase()} • {formatDocumentSize(activeDoc.size)}
+                  {isAudiobookView ? 'M4B' : activeDoc.type.toUpperCase()} • {formatDocumentSize(activeDoc.size)}
                 </p>
               </div>
               <div className="flex gap-2">
-                <ButtonLink href={openHref || '/app'} prefetch={false} variant="primary" size="sm">
+                {activeHasAudiobook && (
+                  <>
+                    {activeHasSmartAudio && (
+                      <div className="relative flex-1">
+                      <MenuRoot>
+                        <MenuTrigger className="w-full flex items-center justify-center h-8 px-3 rounded-md border border-line bg-surface text-sm font-medium text-foreground hover:bg-surface-sunken transition-colors whitespace-nowrap">
+                          <svg className="w-4 h-4 mr-1 inline-block text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          Changelog
+                        </MenuTrigger>
+                        <MenuTransition>
+                          <MenuItemsSurface className="w-48 z-[60] left-0 mt-1">
+                            <MenuActionItem
+                              onClick={() => {
+                                window.open(`/api/audiobook/changelog?bookId=${encodeURIComponent(activeDoc.id)}`, '_blank');
+                              }}
+                              >View in Browser</MenuActionItem>
+                            <MenuActionItem
+                              onClick={() => {
+                                window.location.href = `/api/audiobook/changelog?bookId=${encodeURIComponent(activeDoc.id)}&download=true`;
+                              }}
+                              >Download as File</MenuActionItem>
+                          </MenuItemsSurface>
+                        </MenuTransition>
+                      </MenuRoot>
+                      </div>
+                    )}
+                    <ButtonLink
+                      href={`/api/audiobook?bookId=${encodeURIComponent(activeDoc.id)}&format=m4b`}
+                      download
+                      prefetch={false}
+                      variant="primary"
+                      size="sm"
+                      className="flex-1 whitespace-nowrap"
+                    >
+                      Download M4B
+                    </ButtonLink>
+                  </>
+                )}
+                <ButtonLink href={openHref || '/app'} prefetch={false} variant={activeHasAudiobook ? 'secondary' : 'primary'} size="sm" className="flex-1">
                   Open
                 </ButtonLink>
+                {!isAudiobookView && (
+                  <ButtonLink
+                    href={`/api/documents/blob/get/fallback?id=${encodeURIComponent(activeDoc.id)}&download=true`}
+                    download
+                    variant="secondary"
+                    size="sm"
+                  >
+                    Download
+                  </ButtonLink>
+                )}
                 <Button
                   type="button"
                   onClick={() => onDeleteDoc(activeDoc)}
@@ -221,9 +304,9 @@ export function GalleryView({
             </div>
             <dl className="w-full max-w-[280px] sm:max-w-[360px] md:max-w-[340px] grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-line bg-surface px-3 py-2 text-[11px] md:self-center">
               <dt className="text-soft">Type</dt>
-              <dd className="text-foreground text-right uppercase tracking-wide">{activeDoc.type}</dd>
+              <dd className="text-foreground text-right uppercase tracking-wide">{isAudiobookView ? 'M4B' : activeDoc.type}</dd>
               <dt className="text-soft">Size</dt>
-              <dd className="text-foreground text-right tabular-nums">{formatDocumentSize(activeDoc.size)}</dd>
+              <dd className="text-foreground text-right tabular-nums">{formatDocumentSize(isAudiobookView && audiobookSizes[activeDoc.id] ? audiobookSizes[activeDoc.id] : activeDoc.size)}</dd>
               <dt className="text-soft">Last opened</dt>
               <dd className="text-foreground text-right">{formatDateTime(activeDoc.recentlyOpenedAt)}</dd>
               <dt className="text-soft">Last modified</dt>
@@ -256,6 +339,7 @@ export function GalleryView({
               active={i === activeIdx}
               onClick={() => setActiveIdx(i)}
               onMergeIntoFolder={onMergeIntoFolder}
+              isAudiobookView={isAudiobookView}
             />
           ))}
         </div>

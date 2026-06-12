@@ -31,6 +31,7 @@ import {
 import { createPdfAudiobookSourceAdapter } from '@/lib/client/audiobooks/adapters/pdf';
 import { regenerateAudiobookChapter, runAudiobookGeneration } from '@/lib/client/audiobooks/pipeline';
 import { ensureCachedDocument } from '@/lib/client/cache/documents';
+import { combineAudiobook } from '@/lib/client/api/audiobooks';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import {
@@ -118,6 +119,7 @@ export interface PdfDocumentState {
     settings?: AudiobookGenerationSettings
   ) => Promise<TTSAudiobookChapter>;
   isAudioCombining: boolean;
+  isAudioGenerating: boolean;
 }
 
 function delay(ms: number): Promise<void> {
@@ -163,7 +165,8 @@ export function usePdfDocument(): PdfDocumentState {
     lastPreparedPlaybackPageRef.current = null;
   }, [documentSettings.language, setDocumentLanguage]);
   const [parsedOverlayEnabled, setParsedOverlayEnabled] = useState(false);
-  const [isAudioCombining] = useState(false);
+  const [isAudioCombining, setIsAudioCombining] = useState(false);
+  const [isAudioGenerating, setIsAudioGenerating] = useState(false);
   const audiobookAdapter = useMemo(() => createPdfAudiobookSourceAdapter({
     parsed: parsedDocument ?? undefined,
     settings: documentSettings,
@@ -681,8 +684,9 @@ export function usePdfDocument(): PdfDocumentState {
     format: TTSAudiobookFormat = 'mp3',
     settings?: AudiobookGenerationSettings
   ): Promise<string> => {
+    setIsAudioGenerating(true);
     try {
-      return await runAudiobookGeneration({
+      const bookId = await runAudiobookGeneration({
         adapter: audiobookAdapter,
         apiKey,
         baseUrl,
@@ -694,9 +698,24 @@ export function usePdfDocument(): PdfDocumentState {
         format,
         settings,
       });
+
+      if (!signal?.aborted) {
+        setIsAudioCombining(true);
+        try {
+          await combineAudiobook(bookId, format);
+        } catch (e) {
+          console.error('Failed to auto-combine audiobook:', e);
+        } finally {
+          setIsAudioCombining(false);
+        }
+      }
+
+      return bookId;
     } catch (error) {
       console.error('Error creating audiobook:', error);
       throw error;
+    } finally {
+      setIsAudioGenerating(false);
     }
   }, [audiobookAdapter, apiKey, baseUrl, providerRef]);
 
@@ -779,6 +798,7 @@ export function usePdfDocument(): PdfDocumentState {
       createFullAudioBook,
       regenerateChapter,
       isAudioCombining,
+      isAudioGenerating,
     }),
     [
       onDocumentLoadSuccess,
@@ -803,6 +823,7 @@ export function usePdfDocument(): PdfDocumentState {
       createFullAudioBook,
       regenerateChapter,
       isAudioCombining,
+      isAudioGenerating,
     ]
   );
 }

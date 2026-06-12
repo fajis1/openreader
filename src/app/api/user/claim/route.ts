@@ -8,6 +8,8 @@ import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/li
 import { errorToLog, serverLogger } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
 
+export const dynamic = 'force-dynamic';
+
 async function checkClaimMigrationReadiness(): Promise<NextResponse | null> {
   const [legacyRows] = await db
     .select({ count: count() })

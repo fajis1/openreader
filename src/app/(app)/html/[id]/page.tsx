@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DocumentSkeleton } from '@/components/documents/DocumentSkeleton';
 import { HTMLViewer } from '@/components/views/HTMLViewer';
@@ -27,6 +27,7 @@ export default function HTMLPage() {
   const canExportAudiobook = useFeatureFlag('enableAudiobookExport');
   const { id } = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const routeDocumentId = typeof id === 'string' ? id : undefined;
   const htmlState = useHtmlDocument();
   const {
@@ -45,7 +46,8 @@ export default function HTMLPage() {
   const { isAtLimit } = useAuthRateLimit();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'segments' | 'audiobook'>(null);
+  const autoGenerateParam = searchParams.get('autoGenerate');
+  const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'segments' | 'audiobook'>(autoGenerateParam === 'true' ? 'audiobook' : null);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const [padPct, setPadPct] = useState<number>(100); // 0..100 (100 = full width)
   const [maxPadPx, setMaxPadPx] = useState<number>(0);
