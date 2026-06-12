@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-
 import type { SmartAudioProfile } from '@/types/client';
+import defaultProfilesData from './default_smart_audio_profiles.json';
 
 const configDir = path.join(process.cwd(), 'config');
 const smartAudioProfilesPath = path.join(configDir, 'smart_audio_profiles.json');
@@ -81,30 +81,28 @@ export function writeGlobalGeminiApiKey(apiKey: string): void {
 export function readSmartAudioProfilesDocument(): SmartAudioProfilesDocument {
   try {
     if (!fs.existsSync(smartAudioProfilesPath)) {
-      const defaultProfile = getDefaultSmartAudioProfile();
       return {
-        selectedProfileId: defaultProfile.id,
-        profiles: [defaultProfile],
+        selectedProfileId: defaultProfilesData.selectedProfileId,
+        profiles: defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>)),
       };
     }
 
     const raw = JSON.parse(fs.readFileSync(smartAudioProfilesPath, 'utf8')) as Partial<SmartAudioProfilesDocument>;
     const profiles = Array.isArray(raw.profiles)
       ? raw.profiles.map((profile) => sanitizeProfile(profile as SmartAudioProfile))
-      : [getDefaultSmartAudioProfile()];
+      : defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>));
     const selectedProfileId = typeof raw.selectedProfileId === 'string' && raw.selectedProfileId.trim()
       ? raw.selectedProfileId.trim()
-      : profiles[0]?.id || getDefaultSmartAudioProfile().id;
+      : profiles[0]?.id || defaultProfilesData.selectedProfileId;
 
     return {
       selectedProfileId,
-      profiles: profiles.length > 0 ? profiles : [getDefaultSmartAudioProfile()],
+      profiles: profiles.length > 0 ? profiles : defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>)),
     };
   } catch {
-    const defaultProfile = getDefaultSmartAudioProfile();
     return {
-      selectedProfileId: defaultProfile.id,
-      profiles: [defaultProfile],
+      selectedProfileId: defaultProfilesData.selectedProfileId,
+      profiles: defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>)),
     };
   }
 }
@@ -114,7 +112,7 @@ export function writeSmartAudioProfilesDocument(document: SmartAudioProfilesDocu
 
   const profiles = document.profiles.length > 0
     ? document.profiles.map((profile) => sanitizeProfile(profile))
-    : [getDefaultSmartAudioProfile()];
+    : defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>));
   const selectedProfileId = profiles.some((profile) => profile.id === document.selectedProfileId)
     ? document.selectedProfileId
     : profiles[0].id;
