@@ -135,24 +135,6 @@ const normalizeSentenceBoundariesForNlp = (text: string): string => {
 
 /**
 
- * Preprocesses text for audio generation by cleaning up various text artifacts
- * 
- * @param {string} text - The text to preprocess
- * @returns {string} The cleaned text
- */
-export const preprocessSentenceForAudio = (text: string): string => {
-  return text
-    .replace(/\[([^\]]+)\]\(\/([^\/]+)\/\)/g, '$2') // Convert [Word](/IPA/) to just the pronunciation for TTS
-    .replace(/\S*(?:https?:\/\/|www\.)([^\/\s]+)(?:\/\S*)?/gi, '- (link to $1) -')
-    .replace(/([\p{L}\p{N}\p{M}]+)-\s+([\p{L}\p{N}\p{M}]+)/gu, '$1$2') // Remove hyphenation
-    // Remove special character *
-    .replace(/\*/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-};
-
-/**
-
  * Splits text into sentences and groups them into blocks suitable for TTS processing
  * 
  * @param {string} text - The text to split into sentences
@@ -267,7 +249,7 @@ export const normalizeTextForTts = (text: string, options?: TtsSplitOptions): st
     if (!p.trim()) return '';
     return splitTextToTtsBlocks(p, options).join(separator);
   }).filter(Boolean);
-  return normalizedParagraphs.join('\n\n');
+  return normalizedParagraphs.join(separator);
 };
 
 // Helper functions to merge quoted dialogue across sentences

@@ -158,15 +158,12 @@ importers:
       replicate:
         specifier: ^1.4.0
         version: 1.4.0
-<<<<<<< HEAD
       swr:
         specifier: ^2.4.1
         version: 2.4.1(react@19.2.7)
-=======
       turndown:
         specifier: ^7.2.4
         version: 7.2.4
->>>>>>> upstream/main
       uuid:
         specifier: ^11.1.1
         version: 11.1.1

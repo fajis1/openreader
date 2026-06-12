@@ -42,6 +42,7 @@ export const isStrippedGlyph = (char: string): boolean => STRIPPED_GLYPH_SET.has
  */
 export const preprocessSentenceForAudio = (text: string): string =>
   text
+    .replace(/\[([^\]]+)\]\(\/([^\/]+)\/\)/g, '$2') // Convert [Word](/IPA/) to just the pronunciation for TTS
     .replace(URL_PATTERN, (_match, domain: string) => linkReplacement(domain))
     .replace(HYPHENATION_PATTERN, '$1$2')
     .replace(STRIPPED_GLYPHS, '')
