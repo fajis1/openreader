@@ -157,6 +157,9 @@ const createAuth = () => betterAuth({
       maxAge: 60 * 5, // 5 minutes – revalidate session against DB regularly
     },
   },
+  logger: {
+    level: "debug",
+  },
   plugins: [
     ...(isAnonymousAuthSessionsEnabled()
       ? [
