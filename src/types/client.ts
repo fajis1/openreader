@@ -68,6 +68,8 @@ export interface SmartAudioProfile {
   abbreviations: Record<string, string>;
   pronunciations: Record<string, string>;
   books: Record<string, string>;
+  /** Per-profile Gemini API key. Never exposed to other users. */
+  geminiApiKey?: string;
 }
 
 

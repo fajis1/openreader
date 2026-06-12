@@ -1,5 +1,5 @@
 
-import { readGlobalGeminiApiKey, readSmartAudioProfilesDocument, findSmartAudioProfileById, writeSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
+import { readSmartAudioProfilesDocument, findSmartAudioProfileById, writeSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
 import { eq, and, asc, lt, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { audiobookJobs, documents, audiobooks, audiobookChapters } from '@/db/schema';
@@ -305,6 +305,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         try {
           serverLogger.info({ event: 'audiobook.queue.smart_audio.enabled', bookId, chapter: chapter.index }, 'Triggering Python Gemini worker...');
           
+          // Key is stored per-profile; fall back to empty string which causes
+          // the Python worker to return {status:"error"} and skip smart audio.
+          const geminiApiKey = (selectedProfile?.geminiApiKey || '').trim();
+
           const payload = JSON.stringify({
             user_id: userId,
             api_key: geminiApiKey,

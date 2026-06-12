@@ -233,8 +233,17 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
                     window.alert('No Smart AI profile exists. Please create one to use this feature.');
                     window.dispatchEvent(new CustomEvent('open-smart-ai-profiles'));
                     setUseSmartAudio(false);
+                  } else if (e.target.checked) {
+                    const currentProfile = smartAudioProfiles.find(p => p.id === selectedSmartAudioProfileId) || smartAudioProfiles[0];
+                    if (!currentProfile?.geminiApiKey) {
+                      window.alert('The selected Smart AI profile does not have a Gemini API key configured. Please add one in the Smart AI profile settings.');
+                      window.dispatchEvent(new CustomEvent('open-smart-ai-profiles'));
+                      setUseSmartAudio(false);
+                    } else {
+                      setUseSmartAudio(true);
+                    }
                   } else {
-                    setUseSmartAudio(e.target.checked);
+                    setUseSmartAudio(false);
                   }
                 }}
               />
@@ -260,7 +269,16 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
                   <select
                     className="w-full rounded-md border border-line bg-background px-3 py-2 text-sm text-foreground"
                     value={selectedSmartAudioProfileId}
-                    onChange={(e) => setSelectedSmartAudioProfileId(e.target.value)}
+                    onChange={(e) => {
+                      const newProfileId = e.target.value;
+                      const newProfile = smartAudioProfiles.find(p => p.id === newProfileId);
+                      if (!newProfile?.geminiApiKey) {
+                        window.alert('This Smart AI profile does not have a Gemini API key configured. Please add one in the Smart AI profile settings.');
+                        window.dispatchEvent(new CustomEvent('open-smart-ai-profiles'));
+                        setUseSmartAudio(false);
+                      }
+                      setSelectedSmartAudioProfileId(newProfileId);
+                    }}
                   >
                     {smartAudioProfiles.map((profile) => (
                       <option key={profile.id} value={profile.id}>

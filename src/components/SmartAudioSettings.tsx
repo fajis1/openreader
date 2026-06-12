@@ -102,6 +102,9 @@ export function SmartAudioSettings() {
     setAbbreviations(objectToEntries(activeProfile.abbreviations || {}));
     setPronunciations(objectToEntries(activeProfile.pronunciations || {}));
     setBooks(objectToEntries(activeProfile.books || {}));
+    // Load this profile's key — show masked placeholder if already saved
+    setApiKey('');
+    setMaskedKey(activeProfile.geminiApiKey ? `••••••••••••${activeProfile.geminiApiKey.slice(-4)}` : null);
   }, [activeProfile]);
 
   const buildCurrentProfile = useCallback((): SmartAudioProfile | null => {
@@ -116,8 +119,10 @@ export function SmartAudioSettings() {
       abbreviations: entriesToObject(abbreviations),
       pronunciations: entriesToObject(pronunciations),
       books: entriesToObject(books),
+      // Preserve stored key; overwrite only if user typed a new one
+      geminiApiKey: apiKey.trim() || activeProfile?.geminiApiKey || undefined,
     };
-  }, [aiModel, customModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books]);
+  }, [apiKey, aiModel, customModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, activeProfile]);
 
   const handleNewProfile = useCallback(() => {
     const profile = EMPTY_PROFILE();
@@ -169,13 +174,7 @@ export function SmartAudioSettings() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          bookId: current.id,
-          aiModel: current.aiModel,
-          geminiApiKey: apiKey,
-          customTtsPrompt: current.customTtsPrompt,
-          abbreviations: current.abbreviations,
-          pronunciations: current.pronunciations,
-          books: current.books,
+          // Key is now embedded inside each profile object, not sent globally
           smartAudioProfiles: nextProfiles,
           selectedSmartAudioProfileId: current.id,
         }),
@@ -348,7 +347,7 @@ export function SmartAudioSettings() {
               onChange={(e) => setApiKey(e.target.value)}
             />
             <p className="text-xs text-gray-400">
-              {maskedKey ? 'Leave blank to continue using your active key for all profiles.' : 'Required. This will be saved globally for your account.'}
+              {maskedKey ? 'Leave blank to keep using the saved key for this profile.' : 'Required. This key is saved securely to this specific profile.'}
             </p>
           </div>
         </div>
