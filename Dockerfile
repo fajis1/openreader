@@ -50,9 +50,15 @@ FROM node:lts-slim AS runner
 
 # Add runtime OS dependencies:
 # - libreoffice-writer: required for DOCX → PDF conversion
+# - python3, python3-pip, python3-venv: required for smart audio worker (audiobook_worker.py)
 # ffmpeg is provided by ffmpeg-static from node_modules.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates libreoffice-writer && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libreoffice-writer \
+        python3 \
+        python3-pip \
+        python3-venv && \
     rm -rf /var/lib/apt/lists/*
 
 # App runtime directory
@@ -99,6 +105,12 @@ RUN chmod +x /usr/local/bin/nats-server
 
 # Include OpenAI Whisper license text for runtime-downloaded ONNX artifacts.
 COPY --from=app-builder /app/compute/core/src/whisper/assets/LICENSE.txt /licenses/openai-whisper-LICENSE.txt
+
+# Copy smart audio Python worker and install its dependencies into a venv.
+# The entrypoint checks for .venv/bin/python first, then falls back to python3.
+COPY --from=app-builder /app/audiobook_worker.py ./audiobook_worker.py
+RUN python3 -m venv .venv && \
+    .venv/bin/pip install --no-cache-dir nats-py google-genai
 
 # Match the app's historical container port now that standalone server.js
 # is started directly instead of `next start -p 3003`.
