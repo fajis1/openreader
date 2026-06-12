@@ -83,6 +83,11 @@ const COMPUTE_STATE_TTL_MS = 24 * 60 * 60 * 1000;
 const LOOP_ERROR_BACKOFF_MS = 500;
 const RUNNING_HEARTBEAT_MS = 5000;
 const OP_EVENTS_KEEPALIVE_MS = 15_000;
+// Reconnection delay handed to the browser EventSource via the SSE `retry:`
+// directive. When a silent stream is torn down for idle sleep, this keeps the
+// client from immediately reconnecting and re-waking the worker; instead it
+// reconnects on a slow cadence so the container stays asleep most of the time.
+const OP_EVENTS_RECONNECT_HINT_MS = 120_000;
 const DOCUMENT_ID_REGEX = /^[a-f0-9]{64}$/i;
 const SAFE_NAMESPACE_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
 const WHISPER_MAX_DELIVER = 1;
@@ -92,6 +97,7 @@ const NATS_API_TIMEOUT_MS = 60_000;
 // put it to sleep. Reconnect happens lazily on the next inbound request.
 const IDLE_DISCONNECT_MS = 120_000;
 const IDLE_CHECK_INTERVAL_MS = 5_000;
+const IDLE_STATUS_LOG_INTERVAL_MS = 60_000;
 const ORPHAN_SWEEP_INTERVAL_MS = 15_000;
 // Bounded pull window so consumer loops yield periodically and can be stopped
 // cleanly when going idle, instead of blocking on a long-lived pull.
@@ -578,18 +584,40 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   let activeSse = 0;
   let inFlightJobs = 0;
   let lastActivityAt = Date.now();
+  let lastActivityReason = 'startup';
+  let lastIdleStatusLogAt = 0;
   const jobGate = new ConcurrencyGate(jobConcurrency);
 
-  const markActivity = (): void => {
+  const markActivity = (reason: string): void => {
     lastActivityAt = Date.now();
+    lastActivityReason = reason;
   };
 
   function startIdleTimer(): void {
     if (idleTimer) return;
     idleTimer = setInterval(() => {
       if (!session || stopping) return;
-      if (inFlightHttp > 0 || activeSse > 0 || inFlightJobs > 0) return;
-      if (Date.now() - lastActivityAt < IDLE_DISCONNECT_MS) return;
+      const now = Date.now();
+      const idleForMs = now - lastActivityAt;
+      if (now - lastIdleStatusLogAt >= IDLE_STATUS_LOG_INTERVAL_MS) {
+        lastIdleStatusLogAt = now;
+        app.log.info({
+          activeSse,
+          idleForMs,
+          inFlightHttp,
+          inFlightJobs,
+          lastActivityReason,
+          disconnectEligible: inFlightHttp === 0
+            && inFlightJobs === 0
+            && idleForMs >= IDLE_DISCONNECT_MS,
+        }, 'nats idle status');
+      }
+      // Hard work in flight always blocks idle. An open SSE no longer blocks just
+      // by existing — only by delivering events, which refresh lastActivityAt via
+      // markActivity() in the stream's onEvent. So a silent/stuck-op stream lets
+      // the idle window elapse and is torn down by disconnect() below.
+      if (inFlightHttp > 0 || inFlightJobs > 0) return;
+      if (idleForMs < IDLE_DISCONNECT_MS) return;
       void disconnect('idle');
     }, IDLE_CHECK_INTERVAL_MS);
     // Don't let the idle checker keep the process alive on its own.
@@ -612,6 +640,15 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   async function disconnect(reason: string): Promise<void> {
     const current = session;
     if (!current) return;
+    // Snapshot what's still attached so a dropped connection is visible in logs
+    // (e.g. SSE streams torn down because we went idle while they were open).
+    app.log.info({
+      reason,
+      activeSse,
+      inFlightHttp,
+      inFlightJobs,
+      idleForMs: Date.now() - lastActivityAt,
+    }, 'nats dropping connection');
     // Clear synchronously (before any await) so concurrent requests reconnect a
     // fresh session instead of using the connection we're about to close.
     session = null;
@@ -663,7 +700,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
       session = next;
       sessionGeneration += 1;
       orphanRecoveryDoneForGeneration = -1;
-      markActivity();
+      markActivity('nats_connected');
       startWorkerLoops(next);
       startIdleTimer();
       startOrphanSweepTimer();
@@ -881,7 +918,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     if (!counted[REQUEST_COUNTED_KEY]) return;
     counted[REQUEST_COUNTED_KEY] = false;
     inFlightHttp = Math.max(0, inFlightHttp - 1);
-    markActivity();
+    markActivity('http_completed');
   };
 
   app.addHook('onRequest', async (request, reply) => {
@@ -892,7 +929,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     // for SSE streams (where onResponse does not fire).
     (request as FastifyRequest & { [REQUEST_COUNTED_KEY]?: boolean })[REQUEST_COUNTED_KEY] = true;
     inFlightHttp += 1;
-    markActivity();
+    markActivity(`http_started:${path}`);
     if (isHealthPath(path)) return;
     if (!isAuthed(request, workerToken)) {
       return reply.code(401).send({ error: 'Unauthorized' });
@@ -1027,11 +1064,15 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     // count here and track the long-lived stream via activeSse instead.
     releaseHttp(request);
     activeSse += 1;
-    markActivity();
+    markActivity('sse_started');
     reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     reply.raw.setHeader('Cache-Control', 'no-cache, no-transform');
     reply.raw.setHeader('Connection', 'keep-alive');
     reply.raw.setHeader('X-Accel-Buffering', 'no');
+    // Tell the browser EventSource to back off before reconnecting. If this stream
+    // is torn down because the worker went idle (NATS dropped), we don't want the
+    // client to reconnect immediately and re-wake the container.
+    reply.raw.write(encodeSseFrame({ retry: OP_EVENTS_RECONNECT_HINT_MS }));
 
     let closed = false;
     let unsubscribe: (() => void) | null = null;
@@ -1062,7 +1103,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
         keepalive = null;
       }
       activeSse = Math.max(0, activeSse - 1);
-      markActivity();
+      markActivity('sse_closed');
       if (!reply.raw.writableEnded) {
         reply.raw.end();
       }
@@ -1095,6 +1136,9 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
           if (nextSignature !== signature) {
             current = event.snapshot;
             signature = nextSignature;
+            // A real event is progress: refresh the idle window so an actively
+            // streaming op keeps the worker awake. A silent stream does not.
+            markActivity('sse_event');
             writeSnapshot(current, event.eventId);
           }
           if (isTerminalStatus(event.snapshot.status)) {
@@ -1523,7 +1567,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
 
         // An empty pull is not activity; let the idle window advance.
         if (!msg) continue;
-        markActivity();
+        markActivity(`job_received:${input.workerLabel}`);
         inFlightJobs += 1;
         await jobGate.acquire();
         if (detached()) {
@@ -1539,7 +1583,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
         if (msg) {
           jobGate.release();
           inFlightJobs = Math.max(0, inFlightJobs - 1);
-          markActivity();
+          markActivity(`job_completed:${input.workerLabel}`);
         }
       }
     }

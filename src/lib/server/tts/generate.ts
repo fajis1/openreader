@@ -1,9 +1,29 @@
 import OpenAI from 'openai';
 import Replicate from 'replicate';
 import { SpeechCreateParams } from 'openai/resources/audio/speech.mjs';
+import { generateSpeech } from '@speech-sdk/core';
+import type { ResolvedModel } from '@speech-sdk/core/types';
+import {
+  createCartesia,
+  createDeepgram,
+  createElevenLabs,
+  createFal,
+  createFishAudio,
+  createGoogle,
+  createHume,
+  createInworld,
+  createMiniMax,
+  createMistral,
+  createMurf,
+  createOpenAI,
+  createResemble,
+  createSmallestAI,
+  createXai,
+} from '@speech-sdk/core/providers';
 import {
   isBuiltInTtsProviderId,
   REPLICATE_KOKORO_82M_VERSIONED_MODEL,
+  speechSdkProviderPrefix,
 } from '@/lib/shared/tts-provider-catalog';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import {
@@ -11,6 +31,7 @@ import {
   resolveReplicateVoiceInputKey,
 } from '@/lib/server/tts/voice-resolution';
 import { getUpstreamRetryAfterSeconds, getUpstreamStatus } from '@/lib/server/tts/upstream-response';
+import { normalizeToMp3 } from '@/lib/server/tts/audio-format';
 import { LRUCache } from 'lru-cache';
 import { createHash } from 'crypto';
 import { access, readFile } from 'fs/promises';
@@ -67,6 +88,12 @@ const replicateBlockedUntilByScope = new LRUCache<string, number>({
   max: REPLICATE_COOLDOWN_SCOPE_CACHE_MAX_ENTRIES,
 });
 const openAiCompatibleLanguageUnsupported = new LRUCache<string, true>({ max: 256 });
+// Tracks OpenAI-compatible servers that reject an explicit `response_format` (e.g.
+// wav-only servers that 400 on `response_format: mp3`). After the first rejection
+// we omit the field and let the server emit its default, which `normalizeToMp3`
+// then converts. In-memory + per-process: on serverless this may re-probe once per
+// cold instance, which is harmless; on long-running self-hosted it persists.
+const openAiCompatibleResponseFormatUnsupported = new LRUCache<string, true>({ max: 256 });
 
 const DEFAULT_TTS_CACHE_MAX_SIZE_BYTES = 256 * 1024 * 1024;
 const DEFAULT_TTS_CACHE_TTL_MS = 1000 * 60 * 30;
@@ -203,9 +230,23 @@ async function runWithReplicateGate<T>(
   return operation();
 }
 
+// Replicate serves all model output files from replicate.delivery and its
+// subdomains (https://replicate.com/docs/topics/predictions/output-files).
+// The extraction walker below picks up any URL string a model emits in its
+// output, so a malicious third-party model could otherwise return an internal
+// address (e.g. http://169.254.169.254/...) and turn this into an SSRF read.
+// Restricting fetchable hosts to replicate.delivery closes that without
+// affecting legitimate audio outputs, which always come from there.
+const REPLICATE_OUTPUT_HOST = 'replicate.delivery';
+
+function isAllowedReplicateOutputHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === REPLICATE_OUTPUT_HOST || host.endsWith(`.${REPLICATE_OUTPUT_HOST}`);
+}
+
 function normalizeReplicateUrlCandidate(value: unknown): string | null {
   if (value instanceof URL) {
-    return value.toString();
+    return isAllowedReplicateOutputHost(value.hostname) ? value.toString() : null;
   }
 
   if (typeof value !== 'string') {
@@ -217,13 +258,18 @@ function normalizeReplicateUrlCandidate(value: unknown): string | null {
     return null;
   }
 
+  // data: URIs are resolved inline by fetch with no network egress, so they
+  // carry no SSRF risk and need no host check.
   if (trimmed.startsWith('data:')) {
     return trimmed;
   }
 
   try {
     const parsed = new URL(trimmed);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? trimmed : null;
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    return isAllowedReplicateOutputHost(parsed.hostname) ? trimmed : null;
   } catch {
     return null;
   }
@@ -307,6 +353,7 @@ function resolveTTSRequest(input: ServerTTSRequest): ResolvedServerTTSRequest {
   const providerType = isBuiltInTtsProviderId(provider) ? provider : 'openai';
   const rawModel = provider === 'deepinfra' && !input.model ? 'hexgrad/Kokoro-82M'
     : provider === 'replicate' && !input.model ? REPLICATE_KOKORO_82M_VERSIONED_MODEL
+    : provider === 'speech-sdk' && !input.model ? 'openai/gpt-4o-mini-tts'
     : input.model;
   const model = (rawModel ?? 'gpt-4o-mini-tts') as SpeechCreateParams['model'];
   const providerModelPolicy = resolveTtsProviderModelPolicy({
@@ -316,7 +363,7 @@ function resolveTTSRequest(input: ServerTTSRequest): ResolvedServerTTSRequest {
   });
 
   const normalizedVoice = (
-    (providerType === 'replicate' || !providerModelPolicy.isKokoroModel) && input.voice.includes('+')
+    (providerType === 'replicate' || providerType === 'speech-sdk' || !providerModelPolicy.isKokoroModel) && input.voice.includes('+')
       ? input.voice.split('+')[0].trim()
       : input.voice
   ) as string;
@@ -626,6 +673,71 @@ async function runReplicateRequest(
   });
 }
 
+type SpeechSdkModelFactory = (config: { apiKey?: string }) => (modelId?: string) => ResolvedModel;
+
+const SPEECH_SDK_PROVIDER_FACTORIES: Record<string, SpeechSdkModelFactory> = {
+  openai: createOpenAI,
+  elevenlabs: createElevenLabs,
+  cartesia: createCartesia,
+  hume: createHume,
+  deepgram: createDeepgram,
+  google: createGoogle,
+  inworld: createInworld,
+  minimax: createMiniMax,
+  'fish-audio': createFishAudio,
+  murf: createMurf,
+  resemble: createResemble,
+  'fal-ai': createFal,
+  mistral: createMistral,
+  xai: createXai,
+  'smallest-ai': createSmallestAI,
+};
+
+async function runSpeechSdkRequest(
+  request: ResolvedServerTTSRequest,
+  signal: AbortSignal,
+  upstreamSettings: ResolvedTtsUpstreamRuntimeSettings,
+): Promise<Buffer> {
+  const model = request.model as string;
+  const prefix = speechSdkProviderPrefix(model);
+  const modelId = model.slice(prefix.length + 1);
+  if (!prefix || !modelId) {
+    throw new Error(`Invalid Speech SDK model "${model}". Expected "provider/model".`);
+  }
+
+  const factory = SPEECH_SDK_PROVIDER_FACTORIES[prefix];
+  if (!factory) {
+    throw new Error(
+      `Unknown Speech SDK provider prefix "${prefix}". Use "provider/model" with one of: ${Object.keys(SPEECH_SDK_PROVIDER_FACTORIES).join(', ')}.`
+    );
+  }
+
+  // 'default' is the placeholder voice for providers without a static voice
+  // list; omit it so the provider's own default applies.
+  const voice = request.voice === 'default' ? undefined : request.voice;
+
+  // Overall budget across the SDK's internal retries, mirroring the timeout
+  // the OpenAI-compatible path configures on its client.
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), upstreamSettings.ttsUpstreamTimeoutMs);
+  const onAbort = () => timeoutController.abort();
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    const result = await generateSpeech({
+      model: factory({ apiKey: request.apiKey || undefined })(modelId),
+      text: request.text,
+      voice: voice as string,
+      output: { format: 'mp3' },
+      maxRetries: upstreamSettings.ttsUpstreamMaxRetries,
+      abortSignal: timeoutController.signal,
+    });
+    return Buffer.from(result.audio.uint8Array);
+  } finally {
+    clearTimeout(timeoutId);
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
 async function runProviderRequest(
   request: ResolvedServerTTSRequest,
   signal: AbortSignal,
@@ -634,56 +746,97 @@ async function runProviderRequest(
   const mockBuffer = await getTestMockTtsBuffer(request.testNamespace);
   if (mockBuffer) return mockBuffer;
 
-  if (request.provider === 'replicate') {
-    return runReplicateRequest(request, signal, upstreamSettings.ttsUpstreamMaxRetries);
-  }
+  const raw = request.provider === 'replicate'
+    ? await runReplicateRequest(request, signal, upstreamSettings.ttsUpstreamMaxRetries)
+    : request.provider === 'speech-sdk'
+      ? await runSpeechSdkRequest(request, signal, upstreamSettings)
+      : await runOpenAiCompatibleRequest(request, signal, upstreamSettings);
 
+  // OpenAI-compatible servers (and some Replicate models) may emit wav/ogg/etc.;
+  // normalize to mp3 so the cache, storage, and audiobook pipeline stay mp3-only.
+  return normalizeToMp3(raw, signal);
+}
+
+async function runOpenAiCompatibleRequest(
+  request: ResolvedServerTTSRequest,
+  signal: AbortSignal,
+  upstreamSettings: ResolvedTtsUpstreamRuntimeSettings,
+): Promise<Buffer> {
   const openai = new OpenAI({
-    apiKey: request.apiKey,
+    // The SDK constructor rejects an empty apiKey, but many OpenAI-compatible
+    // servers (e.g. a local Supertonic/Kokoro) need no auth. Pass a placeholder to
+    // satisfy the constructor; `defaultHeaders` clears the Authorization header
+    // (merged after the bearer auth, and allowed by validateHeaders), so the
+    // placeholder is never sent.
+    apiKey: request.apiKey || 'no-key',
     baseURL: request.baseUrl,
     defaultHeaders: request.apiKey ? undefined : { Authorization: null },
     maxRetries: 0,
     timeout: upstreamSettings.ttsUpstreamTimeoutMs,
   });
 
+  const formatKey = `${request.provider}|${request.baseUrl || ''}|${request.model as string}`;
+  const skipResponseFormat = openAiCompatibleResponseFormatUnsupported.has(formatKey);
+
   const createParams: ExtendedSpeechParams = {
     model: request.model,
     voice: request.voice as SpeechCreateParams['voice'],
     input: request.text,
     speed: request.speed,
-    response_format: request.format as SpeechCreateParams['response_format'],
   };
-
+  if (!skipResponseFormat) {
+    createParams.response_format = request.format as SpeechCreateParams['response_format'];
+  }
   if (request.instructions) {
     createParams.instructions = request.instructions;
   }
 
-  if (request.provider !== 'openai' && request.language) {
-    const supportKey = `${request.provider}|${request.baseUrl || ''}|${request.model as string}|${request.language}`;
-    if (!openAiCompatibleLanguageUnsupported.has(supportKey)) {
-      try {
-        return await fetchTTSBufferWithRetry(
-          openai,
-          { ...createParams, language: request.language },
-          signal,
-          upstreamSettings.ttsUpstreamMaxRetries,
-        );
-      } catch (error) {
-        const status = getUpstreamStatus(error);
-        if (status !== 400 && status !== 422) throw error;
-        const fallback = await fetchTTSBufferWithRetry(
-          openai,
-          createParams,
-          signal,
-          upstreamSettings.ttsUpstreamMaxRetries,
-        );
-        openAiCompatibleLanguageUnsupported.set(supportKey, true);
-        return fallback;
+  // Inner attempt with the existing language-unsupported fallback.
+  const fetchWithLanguageFallback = async (params: ExtendedSpeechParams): Promise<Buffer> => {
+    if (request.provider !== 'openai' && request.language) {
+      const supportKey = `${request.provider}|${request.baseUrl || ''}|${request.model as string}|${request.language}`;
+      if (!openAiCompatibleLanguageUnsupported.has(supportKey)) {
+        try {
+          return await fetchTTSBufferWithRetry(
+            openai,
+            { ...params, language: request.language },
+            signal,
+            upstreamSettings.ttsUpstreamMaxRetries,
+          );
+        } catch (error) {
+          const status = getUpstreamStatus(error);
+          if (status !== 400 && status !== 422) throw error;
+          const fallback = await fetchTTSBufferWithRetry(
+            openai,
+            params,
+            signal,
+            upstreamSettings.ttsUpstreamMaxRetries,
+          );
+          openAiCompatibleLanguageUnsupported.set(supportKey, true);
+          return fallback;
+        }
       }
     }
-  }
+    return fetchTTSBufferWithRetry(openai, params, signal, upstreamSettings.ttsUpstreamMaxRetries);
+  };
 
-  return fetchTTSBufferWithRetry(openai, createParams, signal, upstreamSettings.ttsUpstreamMaxRetries);
+  try {
+    return await fetchWithLanguageFallback(createParams);
+  } catch (error) {
+    const status = getUpstreamStatus(error);
+    // A wav-only server rejects the explicit mp3 `response_format`. Retry once
+    // without it, cache the decision, and let `normalizeToMp3` convert the result.
+    const canRetryWithoutFormat = request.provider !== 'openai'
+      && (status === 400 || status === 422)
+      && !skipResponseFormat
+      && createParams.response_format !== undefined;
+    if (!canRetryWithoutFormat) throw error;
+
+    openAiCompatibleResponseFormatUnsupported.set(formatKey, true);
+    const { response_format: _omitted, ...withoutFormat } = createParams;
+    void _omitted;
+    return fetchWithLanguageFallback(withoutFormat as ExtendedSpeechParams);
+  }
 }
 
 export async function generateTTSBuffer(

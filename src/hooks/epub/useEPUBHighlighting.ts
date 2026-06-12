@@ -1,31 +1,19 @@
 'use client';
 
-import { useCallback, useEffect, type MutableRefObject, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, type MutableRefObject, type RefObject } from 'react';
 import type { Rendition } from 'epubjs';
 
-import {
-  buildWordHighlightCacheKey,
-  resolveAlignmentWordSourceRange,
-  tokenizeCanonicalSegment,
-  type EpubCanonicalWordToken,
-} from '@/lib/client/epub/epub-word-highlight';
-import {
-  buildAlignmentTokenRanges,
-  type HighlightTokenRange,
-} from '@/lib/client/highlight-token-alignment';
 import {
   createRangeFromMappedOffsets,
   resolveVisibleSegmentRange,
   type EpubRenderedTextMap,
 } from '@/lib/client/epub/epub-rendered-text-maps';
+import {
+  locateAlignmentWordSpans,
+  type AlignmentCharSpan,
+} from '@/lib/client/highlight-token-alignment';
 import type { CanonicalTtsSegment } from '@/lib/shared/tts-segment-plan';
 import type { TTSSentenceAlignment } from '@/types/tts';
-
-export type EpubWordHighlightMapCache = {
-  key: string;
-  wordToTokenRange: Array<HighlightTokenRange | null>;
-  tokens: EpubCanonicalWordToken[];
-};
 
 type UseEpubHighlightingParams = {
   renditionRef: RefObject<Rendition | undefined>;
@@ -33,8 +21,6 @@ type UseEpubHighlightingParams = {
   currentHighlightCfiRef: MutableRefObject<string | null>;
   currentWordHighlightCfiRef: MutableRefObject<string | null>;
   renderedTextMapsRef: MutableRefObject<EpubRenderedTextMap[]>;
-  wordHighlightMapCacheRef: MutableRefObject<EpubWordHighlightMapCache | null>;
-  language?: string;
 };
 
 type UseEpubHighlightingResult = {
@@ -56,9 +42,13 @@ export function useEPUBHighlighting({
   currentHighlightCfiRef,
   currentWordHighlightCfiRef,
   renderedTextMapsRef,
-  wordHighlightMapCacheRef,
-  language,
 }: UseEpubHighlightingParams): UseEpubHighlightingResult {
+  // Cache the per-segment word→region map so we don't re-align on every whisper
+  // tick. Keyed by the segment + resolved region + the aligned word texts, so a
+  // corrected/rebuilt alignment (even with an identical word count) misses the
+  // cache instead of reusing stale spans.
+  const wordRangeCacheRef = useRef<{ key: string; spans: Array<AlignmentCharSpan | null> } | null>(null);
+
   const clearWordHighlights = useCallback(() => {
     if (!renditionRef.current) return;
     if (currentWordHighlightCfiRef.current) {
@@ -122,68 +112,35 @@ export function useEPUBHighlighting({
     const resolved = resolveVisibleSegmentRange(renderedTextMapsRef.current, segment);
     if (!resolved || segment.startAnchor.sourceKey !== resolved.map.sourceKey) return;
 
-    const alignmentRange = resolveAlignmentWordSourceRange(segment, words[wordIndex]);
-    if (
-      alignmentRange
-      && alignmentRange.sourceStart >= resolved.startOffset
-      && alignmentRange.sourceEnd <= resolved.endOffset
-    ) {
-      const wordRange = createRangeFromMappedOffsets(
-        resolved.map,
-        alignmentRange.sourceStart,
-        alignmentRange.sourceEnd,
-      );
-      if (wordRange) {
-        try {
-          const wordCfi = resolved.map.content.cfiFromRange(wordRange);
-          currentWordHighlightCfiRef.current = wordCfi;
-          renditionRef.current.annotations.add(
-            'highlight',
-            wordCfi,
-            {},
-            () => { },
-            '',
-            {
-              fill: 'var(--accent)',
-              'fill-opacity': '0.4',
-              'mix-blend-mode': 'multiply',
-            }
-          );
-          return;
-        } catch (error) {
-          console.error('Error highlighting EPUB word from alignment offsets:', error);
-        }
-      }
-    }
-
-    const cacheKey = buildWordHighlightCacheKey(segment, alignment, language);
-    if (wordHighlightMapCacheRef.current?.key !== cacheKey) {
-      const tokens = tokenizeCanonicalSegment(segment, language);
-      wordHighlightMapCacheRef.current = {
+    // Map each spoken word onto the rendered region with the shared token-
+    // sequence aligner (same primitive as the HTML and PDF viewers). The region
+    // text is the *rendered* text, so a returned span's offsets are already
+    // indices into the char map — no canonical-vs-rendered coordinate drift.
+    // Spans are relative to resolved.startOffset.
+    const regionText = resolved.map.text.slice(resolved.startOffset, resolved.endOffset);
+    const cacheKey = [
+      segment.key,
+      resolved.map.sourceKey,
+      resolved.startOffset,
+      resolved.endOffset,
+      words.length,
+      // Word texts (not timings) drive the span mapping, so include them: a
+      // re-aligned segment with the same count still invalidates the cache.
+      words.map((word) => word.text).join(''),
+    ].join('::');
+    if (wordRangeCacheRef.current?.key !== cacheKey) {
+      wordRangeCacheRef.current = {
         key: cacheKey,
-        tokens,
-        wordToTokenRange: buildAlignmentTokenRanges(
-          words,
-          tokens.map((token) => token.norm),
-          { minimumSimilarity: 0.8 },
-        ),
+        spans: locateAlignmentWordSpans(words, regionText),
       };
     }
 
-    const cached = wordHighlightMapCacheRef.current;
-    const tokenRange = cached.wordToTokenRange[wordIndex];
-    if (!tokenRange) return;
+    const span = wordRangeCacheRef.current.spans[wordIndex];
+    if (!span) return;
 
-    const firstToken = cached.tokens[tokenRange.start];
-    const lastToken = cached.tokens[tokenRange.end];
-    if (!firstToken || !lastToken) return;
-    if (firstToken.sourceStart < resolved.startOffset || lastToken.sourceEnd > resolved.endOffset) return;
-
-    const wordRange = createRangeFromMappedOffsets(
-      resolved.map,
-      firstToken.sourceStart,
-      lastToken.sourceEnd,
-    );
+    const absStart = resolved.startOffset + span.start;
+    const absEnd = resolved.startOffset + span.end;
+    const wordRange = createRangeFromMappedOffsets(resolved.map, absStart, absEnd);
     if (!wordRange) return;
 
     try {
@@ -210,20 +167,20 @@ export function useEPUBHighlighting({
     epubHighlightEnabled,
     renderedTextMapsRef,
     renditionRef,
-    wordHighlightMapCacheRef,
-    language,
   ]);
 
   const setRenderedTextMaps = useCallback((maps: EpubRenderedTextMap[]) => {
     renderedTextMapsRef.current = maps;
-    wordHighlightMapCacheRef.current = null;
-  }, [renderedTextMapsRef, wordHighlightMapCacheRef]);
+    // Remapped content can change a region's text under an unchanged cache key,
+    // so drop the word-span cache whenever the text maps are replaced.
+    wordRangeCacheRef.current = null;
+  }, [renderedTextMapsRef]);
 
   const resetHighlightState = useCallback(() => {
     renderedTextMapsRef.current = [];
-    wordHighlightMapCacheRef.current = null;
+    wordRangeCacheRef.current = null;
     clearHighlights();
-  }, [clearHighlights, renderedTextMapsRef, wordHighlightMapCacheRef]);
+  }, [clearHighlights, renderedTextMapsRef]);
 
   // Clear any highlight annotations when feature is disabled.
   useEffect(() => {

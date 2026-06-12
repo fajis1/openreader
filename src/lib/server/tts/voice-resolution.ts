@@ -2,6 +2,7 @@ import { LRUCache } from 'lru-cache';
 import { serverLogger } from '@/lib/server/logger';
 import { logServerError } from '@/lib/server/errors/logging';
 import {
+  OPENAI_DEFAULT_VOICES,
   resolveProviderModels,
   type ReplicateVoiceInputKey,
   type ResolveVoicesOptions,
@@ -366,15 +367,62 @@ async function fetchDeepinfraVoices(apiKey: string): Promise<string[]> {
   }
 }
 
-async function fetchCustomOpenAiVoices(baseUrl: string, apiKey: string): Promise<string[] | null> {
+// Custom OpenAI-compatible servers expose voices under different, non-standardized
+// routes. Probe the common ones in order until one returns a usable list.
+const CUSTOM_OPENAI_VOICE_ENDPOINTS = ['/audio/voices', '/voices', '/styles'] as const;
+
+// Extract a list of voice/style names from an arbitrary JSON payload. Handles a
+// bare string array, the OpenAI-style `{ voices: [...] }`, the `{ styles: [...] }`
+// shape used by some servers, and arrays of objects keyed by name/id/voice/style.
+function extractVoiceNames(payload: unknown): string[] | null {
+  const collect = (value: unknown): string[] | null => {
+    if (!Array.isArray(value)) {
+      return null;
+    }
+    const names: string[] = [];
+    for (const item of value) {
+      if (typeof item === 'string') {
+        names.push(item);
+      } else if (isRecord(item)) {
+        const name = item.name ?? item.id ?? item.voice ?? item.style;
+        if (typeof name === 'string') {
+          names.push(name);
+        }
+      }
+    }
+    // An explicitly empty list is a valid answer ("this server has no voices");
+    // honor it rather than probing further or falling back to defaults.
+    if (value.length === 0) {
+      return [];
+    }
+    const cleaned = Array.from(
+      new Set(names.map((name) => name.trim()).filter((name) => name.length > 0)),
+    );
+    // The value was an array but yielded no usable names (unrecognized shape);
+    // treat as not-a-voices-list so the next endpoint / defaults can apply.
+    return cleaned.length > 0 ? cleaned : null;
+  };
+
+  if (Array.isArray(payload)) {
+    return collect(payload);
+  }
+  if (isRecord(payload)) {
+    return collect(payload.voices) ?? collect(payload.styles) ?? collect(payload.data);
+  }
+  return null;
+}
+
+async function fetchCustomOpenAiVoicesFromEndpoint(
+  url: string,
+  apiKey: string,
+): Promise<string[] | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
   }, 10_000);
 
   try {
-    const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
-    const response = await fetch(`${normalizedBaseUrl}/audio/voices`, {
+    const response = await fetch(url, {
       signal: controller.signal,
       headers: {
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
@@ -386,10 +434,7 @@ async function fetchCustomOpenAiVoices(baseUrl: string, apiKey: string): Promise
       return null;
     }
 
-    const data = await response.json();
-    return Array.isArray(data.voices) && data.voices.every((voice: unknown) => typeof voice === 'string')
-      ? data.voices
-      : null;
+    return extractVoiceNames(await response.json());
   } catch {
     serverLogger.info({
       event: 'tts.voice_resolution.custom_endpoint.voices_unsupported',
@@ -400,6 +445,24 @@ async function fetchCustomOpenAiVoices(baseUrl: string, apiKey: string): Promise
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+async function fetchCustomOpenAiVoices(baseUrl: string, apiKey: string): Promise<string[] | null> {
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+
+  for (const endpoint of CUSTOM_OPENAI_VOICE_ENDPOINTS) {
+    const voices = await fetchCustomOpenAiVoicesFromEndpoint(`${normalizedBaseUrl}${endpoint}`, apiKey);
+    if (voices !== null) {
+      return voices;
+    }
+  }
+
+  serverLogger.info({
+    event: 'tts.voice_resolution.custom_endpoint.voices_unsupported',
+    degraded: true,
+    fallbackPath: 'provider_default_voices',
+  }, 'Custom endpoint does not support voices, using defaults');
+  return null;
 }
 
 export async function resolveVoices({ provider, model, apiKey = '', baseUrl = '' }: ResolveVoicesOptions): Promise<string[]> {
@@ -420,13 +483,15 @@ export async function resolveVoices({ provider, model, apiKey = '', baseUrl = ''
   }
 
   if (voiceSource === 'custom-openai-api') {
-    if (!baseUrl) {
-      return defaultVoices;
+    if (baseUrl) {
+      const apiVoices = await fetchCustomOpenAiVoices(baseUrl, apiKey);
+      if (apiVoices !== null) {
+        return apiVoices;
+      }
     }
-    const apiVoices = await fetchCustomOpenAiVoices(baseUrl, apiKey);
-    if (apiVoices !== null) {
-      return apiVoices;
-    }
+    // No voices endpoint resolved on this OpenAI-compatible server. Fall back to the
+    // canonical OpenAI voices, which every OpenAI-compatible endpoint accepts.
+    return defaultVoices.length > 0 ? defaultVoices : [...OPENAI_DEFAULT_VOICES];
   }
 
   if (voiceSource === 'replicate-api') {

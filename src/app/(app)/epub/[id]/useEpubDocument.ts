@@ -16,6 +16,11 @@ import { getDocumentMetadata } from '@/lib/client/api/documents';
 import { ensureCachedDocument } from '@/lib/client/cache/documents';
 import { EpubRenderedLocationCloneManager } from '@/lib/client/epub/rendered-location-walker';
 import { canonicalizeEpubSegmentAgainstSpineText } from '@/lib/client/epub/canonicalize-epub-segment';
+import {
+  buildEpubCanonicalWindow,
+  buildEpubCanonicalWindowFromChunk,
+  materializeWindowSegments,
+} from '@/lib/client/epub/epub-canonical-window';
 import { buildEpubLocator, getSpineItemPlainText } from '@/lib/client/epub/spine-coordinates';
 import { useTTS, type EpubLocatorResolver } from '@/contexts/TTSContext';
 import { createRangeCfi } from '@/lib/client/epub';
@@ -31,7 +36,6 @@ import {
 } from '@/lib/client/epub/epub-rendered-text-maps';
 import {
   useEPUBHighlighting,
-  type EpubWordHighlightMapCache,
 } from '@/hooks/epub/useEPUBHighlighting';
 import { useEPUBLocationController } from '@/hooks/epub/useEPUBLocationController';
 import { useEPUBAudiobook } from '@/hooks/epub/useEPUBAudiobook';
@@ -43,8 +47,12 @@ import type {
 } from '@/types/tts';
 import type { AudiobookGenerationSettings, TTSSegmentLocator } from '@/types/client';
 import { isStableEpubLocator } from '@/types/client';
-import type { CanonicalTtsSegment } from '@/lib/shared/tts-segment-plan';
+import { buildSegmentKeyPrefix, type CanonicalTtsSegment } from '@/lib/shared/tts-segment-plan';
 import { normalizeOptionalLanguageTag } from '@/lib/shared/language';
+
+// How many canonical segments to pre-stage for the next page so a
+// background-tab page turn can keep speaking without waiting on the rendition.
+const EPUB_PREFETCH_SEGMENT_COUNT = 24;
 
 export interface EpubDocumentState {
   currDocData: ArrayBuffer | undefined;
@@ -139,7 +147,6 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
   const currentHighlightCfi = useRef<string | null>(null);
   const currentWordHighlightCfi = useRef<string | null>(null);
   const renderedTextMapsRef = useRef<EpubRenderedTextMap[]>([]);
-  const wordHighlightMapCacheRef = useRef<EpubWordHighlightMapCache | null>(null);
   const renderedLocationCloneManagerRef = useRef<EpubRenderedLocationCloneManager>(
     new EpubRenderedLocationCloneManager(),
   );
@@ -156,8 +163,6 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
     currentHighlightCfiRef: currentHighlightCfi,
     currentWordHighlightCfiRef: currentWordHighlightCfi,
     renderedTextMapsRef,
-    wordHighlightMapCacheRef,
-    language: resolvedLanguage,
   });
 
   useEffect(() => () => {
@@ -242,6 +247,17 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
       const { start, end } = location;
       if (!start?.cfi || !end?.cfi || !book || !book.isOpen || !rendition) return '';
 
+      // Guard against stale async completion: this function awaits range +
+      // canonical-plan resolution, during which rapid page turns can move the
+      // rendition on. If the live location no longer matches the page we
+      // captured, bail before writing state so we don't overwrite the active
+      // page's segments/highlights with a superseded page's.
+      const capturedStartCfi = start.cfi;
+      const isStale = (): boolean => {
+        const live = rendition.location?.start?.cfi;
+        return Boolean(live) && live !== capturedStartCfi;
+      };
+
       const rangeCfi = createRangeCfi(start.cfi, end.cfi);
 
       const range = await book.getRange(rangeCfi);
@@ -249,22 +265,77 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
         console.warn('Failed to get range from CFI:', rangeCfi);
         return '';
       }
+      if (isStale()) return '';
       const textContent = range.toString().trim();
       setRenderedTextMaps(buildRenderedTextMaps(
         rendition,
         rangeCfi,
         normalizeTtsLocationKey(start.cfi),
       ));
-      const leadingPreview = collectLeadingContextFromRange(range);
-      const continuationPreview = collectContinuationFromRange(range);
 
-      setTTSText(textContent, {
-        shouldPause,
-        location: start.cfi,
-        previousText: leadingPreview,
-        nextLocation: end.cfi,
-        nextText: continuationPreview
+      // Canonical path: derive this page's TTS segments as a window into the
+      // chapter's single, viewport-independent canonical plan. This is what
+      // keeps a block that straddles a page break identical (same key/ordinal)
+      // on both pages, so playback never repeats or wrongly pauses at the seam.
+      const keyPrefix = buildSegmentKeyPrefix(documentId, 'epub');
+      const canonicalWindow = await buildEpubCanonicalWindow(book, {
+        startCfi: start.cfi,
+        viewportText: textContent,
+        keyPrefix,
+        maxBlockLength: ttsSegmentMaxBlockLength,
+        language: resolvedLanguage,
+        // Match the rendered text map's sourceKey so the page's canonical
+        // segments resolve to highlight ranges.
+        viewportAnchorSourceKey: normalizeTtsLocationKey(start.cfi),
       });
+
+      // The plan resolution above can load + segment a whole chapter; re-check
+      // that we're still on the captured page before committing TTS state.
+      if (isStale()) return '';
+
+      if (canonicalWindow) {
+        // Stage the next page's canonical segments (the slice immediately after
+        // this window) so a hidden-tab page turn keeps speaking canonical
+        // segments; ordinal continuity in TTSContext de-dupes the shared seam.
+        const nextStart = canonicalWindow.windowEndOrdinal + 1;
+        const nextSegments = nextStart < canonicalWindow.plan.length
+          ? materializeWindowSegments(
+              canonicalWindow.plan,
+              nextStart,
+              Math.min(canonicalWindow.plan.length - 1, nextStart + EPUB_PREFETCH_SEGMENT_COUNT - 1),
+              {
+                spineHref: canonicalWindow.spineHref,
+                spineIndex: canonicalWindow.spineIndex,
+                cfi: end.cfi,
+              },
+            )
+          : [];
+
+        setTTSText(textContent, {
+          shouldPause,
+          location: start.cfi,
+          nextLocation: end.cfi,
+          canonicalSegments: canonicalWindow.segments,
+          canonicalSpine: {
+            spineHref: canonicalWindow.spineHref,
+            spineIndex: canonicalWindow.spineIndex,
+          },
+          canonicalNextSegments: nextSegments.length > 0 ? nextSegments : undefined,
+        });
+      } else {
+        // Fallback (spine→spine boundary, footnote/nav/image pages, or text not
+        // indexable in the spine): legacy preview-based plan + fuzzy handoff.
+        const leadingPreview = collectLeadingContextFromRange(range);
+        const continuationPreview = collectContinuationFromRange(range);
+        setTTSText(textContent, {
+          shouldPause,
+          location: start.cfi,
+          previousText: leadingPreview,
+          nextLocation: end.cfi,
+          nextText: continuationPreview,
+        });
+      }
+
       setCurrDocText(textContent);
       setIsPlaybackReady(true);
 
@@ -273,7 +344,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
       console.error('Error extracting EPUB text:', error);
       return '';
     }
-  }, [setRenderedTextMaps, setTTSText]);
+  }, [setRenderedTextMaps, setTTSText, documentId, ttsSegmentMaxBlockLength, resolvedLanguage]);
 
   /**
    * Resolves a draft EPUB locator (typically `{ readerType: 'epub', location:
@@ -315,6 +386,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
       cfi: stable.cfi,
       keyPrefix: options?.keyPrefix,
       maxBlockLength: options?.maxBlockLength ?? ttsSegmentMaxBlockLength,
+      language: resolvedLanguage,
     });
     if (!canonical) return null;
 
@@ -324,7 +396,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
       segmentIndex: canonical.segmentIndex,
       text: canonical.text,
     };
-  }, [ttsSegmentMaxBlockLength]);
+  }, [ttsSegmentMaxBlockLength, resolvedLanguage]);
 
   const walkUpcomingRenderedLocations = useCallback<EpubRenderedLocationWalker>(async (startCfi, depth, signal) => {
     if (!startCfi || depth <= 0 || signal.aborted) return [];
@@ -366,7 +438,7 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
       }
       : null;
 
-    return renderedLocationCloneManagerRef.current.walk({
+    const items = await renderedLocationCloneManagerRef.current.walk({
       data: currDocData,
       startCfi,
       depth,
@@ -376,7 +448,32 @@ export function useEpubDocument(documentId?: string): EpubDocumentState {
       spread: visibleSettings?.spread,
       theme,
     });
-  }, [currDocData, epubTheme]);
+
+    // Enrich each walked chunk with canonical segments from the live book's
+    // cached chapter plan, so preload warms audio under the same keys/locators
+    // playback will request. Best-effort: a chunk that can't be canonicalized
+    // is left bare and falls back to preview-based planning downstream.
+    const liveBook = bookRef.current;
+    if (signal.aborted || !liveBook?.isOpen || items.length === 0) return items;
+    const keyPrefix = buildSegmentKeyPrefix(documentId, 'epub');
+    return Promise.all(items.map(async (item) => {
+      try {
+        const chunkWindow = await buildEpubCanonicalWindowFromChunk(liveBook, {
+          spineHref: item.spineHref,
+          spineIndex: item.spineIndex,
+          chunkOffset: item.chunkOffset,
+          text: item.text,
+          cfi: item.cfi,
+          keyPrefix,
+          maxBlockLength: ttsSegmentMaxBlockLength,
+          language: resolvedLanguage,
+        });
+        return chunkWindow ? { ...item, segments: chunkWindow.segments } : item;
+      } catch {
+        return item;
+      }
+    }));
+  }, [currDocData, epubTheme, documentId, ttsSegmentMaxBlockLength, resolvedLanguage]);
 
   const { createFullAudioBook, regenerateChapter } = useEPUBAudiobook({
     bookRef,

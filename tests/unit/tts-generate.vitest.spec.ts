@@ -4,6 +4,7 @@ import {
   buildReplicateInput,
   buildTTSCacheKey,
   extractReplicateAudioUrl,
+  generateTTSBuffer,
   resolveReplicateLanguageValue,
 } from '../../src/lib/server/tts/generate';
 import { REPLICATE_KOKORO_82M_VERSIONED_MODEL } from '../../src/lib/shared/tts-provider-catalog';
@@ -45,6 +46,20 @@ describe('replicate output URL extraction', () => {
   test('returns null for non-url outputs', () => {
     const output = { status: 'ok', value: 123 };
     expect(extractReplicateAudioUrl(output)).toBeNull();
+  });
+
+  test('allows replicate.delivery subdomains', () => {
+    expect(extractReplicateAudioUrl('https://pbxt.replicate.delivery/out-0.wav')).toBe(
+      'https://pbxt.replicate.delivery/out-0.wav'
+    );
+  });
+
+  test('rejects URLs from non-replicate hosts (SSRF guard)', () => {
+    expect(extractReplicateAudioUrl('http://169.254.169.254/latest/meta-data/')).toBeNull();
+    expect(extractReplicateAudioUrl('https://evil.example.com/audio.mp3')).toBeNull();
+    // a host that merely embeds the allowed host as a substring must not pass
+    expect(extractReplicateAudioUrl('https://replicate.delivery.evil.com/x.mp3')).toBeNull();
+    expect(extractReplicateAudioUrl({ url: () => new URL('http://localhost:6379/') })).toBeNull();
   });
 });
 
@@ -120,5 +135,31 @@ describe('Replicate language schema values', () => {
       voice: 'af_sarah',
       language_code: 'a',
     });
+  });
+});
+
+describe('speech-sdk request resolution', () => {
+  test('rejects unknown provider prefixes before any network call', async () => {
+    await expect(generateTTSBuffer({
+      text: 'hello',
+      voice: 'alloy',
+      speed: 1,
+      model: 'doesnotexist/some-model',
+      provider: 'speech-sdk',
+      apiKey: 'unused',
+    })).rejects.toThrow('Unknown Speech SDK provider prefix');
+  });
+
+  test('rejects models missing the provider/model form', async () => {
+    for (const model of ['openai', 'openai/', '/gpt-4o-mini-tts']) {
+      await expect(generateTTSBuffer({
+        text: 'hello',
+        voice: 'alloy',
+        speed: 1,
+        model,
+        provider: 'speech-sdk',
+        apiKey: 'unused',
+      })).rejects.toThrow('Expected "provider/model"');
+    }
   });
 });

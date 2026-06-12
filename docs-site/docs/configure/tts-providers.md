@@ -19,6 +19,7 @@ If you're running a private/self-hosted instance and want per-user BYOK behavior
 - **OpenAI**: Cloud. Base URL pre-filled (`https://api.openai.com/v1`). API key required.
 - **Replicate**: Cloud. Base URL managed internally by OpenReader. API key required.
 - **DeepInfra**: Cloud. Base URL pre-filled (`https://api.deepinfra.com/v1/openai`). API key required.
+- **Speech SDK**: Cloud. Reaches additional providers (ElevenLabs, Cartesia, Hume, Deepgram, Google, Inworld, and more) directly with your own provider API keys via [speech-sdk](./tts-provider-guides/speech-sdk). No base URL. API key required (the key for the model's provider).
 - **Custom OpenAI-Like**: Self-hosted or any custom endpoint. `API_BASE` must be set manually (typically ending in `/v1`). API key optional.
 
 For `OpenAI`, `DeepInfra`, and `Replicate` you only need to supply an API key. For `Custom OpenAI-Like` you must also set `API_BASE`.
@@ -28,13 +29,16 @@ For `OpenAI`, `DeepInfra`, and `Replicate` you only need to supply an API key. F
 - **Replicate** models: `alphanumericuser/kokoro-82m`, `google/gemini-3.1-flash-tts`, `minimax/speech-2.8-turbo`, `qwen/qwen3-tts`, `inworld/tts-1.5-mini` (or choose `Other` and enter any Replicate model ID, such as `owner/model` or `owner/model:version`)
 - **OpenAI** models: `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`
 - **DeepInfra** models: includes `hexgrad/Kokoro-82M` and additional hosted models (depending on API key / feature flags)
+- **Speech SDK** models: `openai/gpt-4o-mini-tts`, `elevenlabs/eleven_multilingual_v2`, `cartesia/sonic-3.5`, `deepgram/aura-2`, `google/gemini-2.5-flash-preview-tts`, `inworld/inworld-tts-1.5-max` (or choose `Other` and enter any `provider/model` the SDK supports)
 
 ## Custom provider requirements
 
-Self-hosted or custom providers must expose OpenAI-compatible audio endpoints:
+Self-hosted or custom providers only need an OpenAI-compatible speech endpoint:
 
-- `GET /v1/audio/voices`
-- `POST /v1/audio/speech`
+- `POST /v1/audio/speech` — **required**.
+- Voice listing is **optional** and auto-discovered: OpenReader probes `/v1/audio/voices`, `/v1/voices`, then `/v1/styles`. If none respond, it falls back to default voices — the Kokoro set for Kokoro models, otherwise the standard OpenAI voices (`alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`).
+
+The speech endpoint may return any common audio format — `mp3`, `wav`, `ogg`, or `flac`. OpenReader detects the format and transcodes non-mp3 audio to mp3 automatically, so your server does not need to honor `response_format: mp3`. An API key is optional; keyless servers work.
 
 :::warning TTS requests are server-side
 TTS requests originate from the **Next.js server**, not the browser. `API_BASE` must be reachable from the server runtime. In Docker, use container names or `host.docker.internal` rather than `localhost`.
@@ -45,9 +49,11 @@ TTS requests originate from the **Next.js server**, not the browser. `API_BASE` 
 - [Kokoro-FastAPI](./tts-provider-guides/kokoro-fastapi)
 - [KittenTTS-FastAPI](./tts-provider-guides/kitten-tts-fastapi)
 - [Orpheus-FastAPI](./tts-provider-guides/orpheus-fastapi)
+- [Supertonic](./tts-provider-guides/supertonic)
 - [Replicate](./tts-provider-guides/replicate)
 - [DeepInfra](./tts-provider-guides/deepinfra)
 - [OpenAI](./tts-provider-guides/openai)
+- [Speech SDK](./tts-provider-guides/speech-sdk)
 - [Other](./tts-provider-guides/other)
 
 ## Related

@@ -49,7 +49,7 @@ export default function HTMLPage() {
   const autoGenerateParam = searchParams.get('autoGenerate');
   const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'segments' | 'audiobook'>(autoGenerateParam === 'true' ? 'audiobook' : null);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
-  const [padPct, setPadPct] = useState<number>(100); // 0..100 (100 = full width)
+  const [padPct, setPadPct] = useState<number>(50); // 0..100 (50 = 50% default width)
   const [maxPadPx, setMaxPadPx] = useState<number>(0);
   const inFlightDocIdRef = useRef<string | null>(null);
   const loadedDocIdRef = useRef<string | null>(null);

@@ -6,6 +6,11 @@
  */
 
 import { normalizeLanguageTag, segmentSentences, toBaseLanguageCode } from '@/lib/shared/language';
+import { preprocessSentenceForAudio } from '@/lib/shared/audio-text';
+
+// Re-exported so existing `@/lib/shared/nlp` importers keep working; the rules
+// themselves live in `@/lib/shared/audio-text`.
+export { preprocessSentenceForAudio };
 
 export const MAX_BLOCK_LENGTH = 450;
 const MIN_BLOCK_LENGTH = 50;
@@ -129,6 +134,7 @@ const normalizeSentenceBoundariesForNlp = (text: string): string => {
 };
 
 /**
+
  * Preprocesses text for audio generation by cleaning up various text artifacts
  * 
  * @param {string} text - The text to preprocess
@@ -146,6 +152,7 @@ export const preprocessSentenceForAudio = (text: string): string => {
 };
 
 /**
+
  * Splits text into sentences and groups them into blocks suitable for TTS processing
  * 
  * @param {string} text - The text to split into sentences
