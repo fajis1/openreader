@@ -492,6 +492,7 @@ export function SmartAudioSettings() {
             </div>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => downloadCSV(pronunciations, 'pronunciations.csv')} className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded cursor-pointer hover:bg-blue-200">Export</button>
+              <button onClick={() => { if (confirm('Are you sure you want to clear all learned pronunciations?')) setPronunciations([]); }} className="text-xs bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 px-2 py-1 rounded cursor-pointer hover:bg-red-200">Clear All</button>
               <label className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-2 py-1 rounded cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600">
                 Import CSV
                 <input type="file" accept=".csv" className="hidden" onChange={(e) => handleCSVUpload(e, pronunciations, setPronunciations)} />
