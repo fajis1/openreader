@@ -354,6 +354,8 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               const changelogName = `${String(chapter.index + 1).padStart(4, '0')}__changelog.txt`;
               await putAudiobookObject(bookId, userId, changelogName, Buffer.from(workerResult.changelog, 'utf8'), 'text/plain; charset=utf-8', testNamespace).catch(() => {});
             }
+          } else if (workerResult.status === "error") {
+            throw new Error(`Python worker returned error: ${workerResult.message}`);
           }
         } catch (e) {
           serverLogger.error({ event: 'audiobook.queue.smart_audio.failed', error: e }, 'Smart audio processing failed. Aborting generation.');
