@@ -620,7 +620,7 @@ export async function POST(request: NextRequest) {
     
     // ONLY run the Python worker if the frontend toggle is switched ON
     if (useSmartAudio) {
-        const profilesDocument = readSmartAudioProfilesDocument();
+        const profilesDocument = await readSmartAudioProfilesDocument(storageUserId);
         const selectedProfile = findSmartAudioProfileById(profilesDocument, smartAudioProfileId);
         const geminiApiKey = (selectedProfile?.geminiApiKey || '').trim();
         try {
@@ -686,7 +686,7 @@ export async function POST(request: NextRequest) {
                 }
                 return p;
               });
-              writeSmartAudioProfilesDocument({
+              await writeSmartAudioProfilesDocument(storageUserId, {
                 selectedProfileId: profilesDocument.selectedProfileId,
                 profiles: updatedProfiles,
               });

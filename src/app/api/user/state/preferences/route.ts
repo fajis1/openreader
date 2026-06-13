@@ -80,7 +80,10 @@ export async function GET(req: NextRequest) {
     const row = rows[0];
     const stored = parseStoredPreferences(row?.dataJson, normalizationContext);
     const storedPatch = stored.patch;
-    const storedPayload = withUserPreferencesMeta(storedPatch, stored.meta);
+    const rawExistingData = typeof row?.dataJson === 'string'
+      ? JSON.parse(row.dataJson)
+      : (row?.dataJson || {});
+    const storedPayload = withUserPreferencesMeta({ ...rawExistingData, ...storedPatch }, stored.meta);
     const clientUpdatedAtMs = Number(row?.clientUpdatedAtMs ?? 0);
 
     if (row && stored.migrated) {
@@ -160,8 +163,11 @@ export async function PUT(req: NextRequest) {
       });
     }
 
+    const rawExistingData = typeof existing?.dataJson === 'string'
+      ? JSON.parse(existing.dataJson)
+      : (existing?.dataJson || {});
     const mergedPatch = { ...existingPatch, ...patch };
-    const payloadWithMeta = withUserPreferencesMeta(mergedPatch, existingStored.meta);
+    const payloadWithMeta = withUserPreferencesMeta({ ...rawExistingData, ...mergedPatch }, existingStored.meta);
     const dataJson = serializePreferencesForDb(payloadWithMeta);
     const updatedAt = nowTimestampMs();
 

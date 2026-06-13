@@ -1,22 +1,17 @@
 import fs from 'fs';
 import path from 'path';
+import { db } from '@/db';
+import { userPreferences } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 import type { SmartAudioProfile } from '@/types/client';
 import defaultProfilesData from './default_smart_audio_profiles.json';
 
 const configDir = path.join(process.cwd(), 'config');
-const smartAudioProfilesPath = path.join(configDir, 'smart_audio_profiles.json');
-const globalKeyPath = path.join(configDir, 'global_api_key.json');
 const defaultProfileSourcePath = path.join(configDir, 'default_book_tts_settings.json');
 
 export interface SmartAudioProfilesDocument {
   selectedProfileId: string;
   profiles: SmartAudioProfile[];
-}
-
-function ensureConfigDir(): void {
-  if (!fs.existsSync(configDir)) {
-    fs.mkdirSync(configDir, { recursive: true });
-  }
 }
 
 function slugifyProfileName(name: string): string {
@@ -65,43 +60,61 @@ export function getDefaultSmartAudioProfile(): SmartAudioProfile {
   });
 }
 
+const fallbackProfilesDocument: SmartAudioProfilesDocument = {
+  selectedProfileId: defaultProfilesData.selectedProfileId,
+  profiles: defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>)),
+};
 
-
-export function readSmartAudioProfilesDocument(): SmartAudioProfilesDocument {
-  try {
-    if (!fs.existsSync(smartAudioProfilesPath)) {
-      return {
-        selectedProfileId: defaultProfilesData.selectedProfileId,
-        profiles: defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>)),
-      };
+function parseDataJson(val: unknown): Record<string, any> {
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      if (typeof parsed === 'object' && parsed !== null) return parsed;
+    } catch {
+      return {};
     }
+  } else if (typeof val === 'object' && val !== null) {
+    return val as Record<string, any>;
+  }
+  return {};
+}
 
-    const raw = JSON.parse(fs.readFileSync(smartAudioProfilesPath, 'utf8')) as Partial<SmartAudioProfilesDocument>;
-    const profiles = Array.isArray(raw.profiles)
-      ? raw.profiles.map((profile) => sanitizeProfile(profile as SmartAudioProfile))
-      : defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>));
+function serializeDataJson(val: Record<string, any>): string | Record<string, any> {
+  return process.env.POSTGRES_URL ? val : JSON.stringify(val);
+}
+
+export async function readSmartAudioProfilesDocument(userId?: string | null): Promise<SmartAudioProfilesDocument> {
+  if (!userId) return fallbackProfilesDocument;
+  
+  try {
+    const rows = await db.select({ dataJson: userPreferences.dataJson }).from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
+    if (!rows || rows.length === 0) return fallbackProfilesDocument;
+    
+    const data = parseDataJson(rows[0].dataJson);
+    const raw = data.smartAudioProfiles as Partial<SmartAudioProfilesDocument> | undefined;
+    
+    if (!raw || !Array.isArray(raw.profiles)) return fallbackProfilesDocument;
+    
+    const profiles = raw.profiles.map((profile) => sanitizeProfile(profile as SmartAudioProfile));
     const selectedProfileId = typeof raw.selectedProfileId === 'string' && raw.selectedProfileId.trim()
       ? raw.selectedProfileId.trim()
       : profiles[0]?.id || defaultProfilesData.selectedProfileId;
 
     return {
       selectedProfileId,
-      profiles: profiles.length > 0 ? profiles : defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>)),
+      profiles: profiles.length > 0 ? profiles : fallbackProfilesDocument.profiles,
     };
-  } catch {
-    return {
-      selectedProfileId: defaultProfilesData.selectedProfileId,
-      profiles: defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>)),
-    };
+  } catch (error) {
+    return fallbackProfilesDocument;
   }
 }
 
-export function writeSmartAudioProfilesDocument(document: SmartAudioProfilesDocument): SmartAudioProfilesDocument {
-  ensureConfigDir();
+export async function writeSmartAudioProfilesDocument(userId: string | null | undefined, document: SmartAudioProfilesDocument): Promise<SmartAudioProfilesDocument> {
+  if (!userId) return document;
 
   const profiles = document.profiles.length > 0
     ? document.profiles.map((profile) => sanitizeProfile(profile))
-    : defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>));
+    : fallbackProfilesDocument.profiles;
   const selectedProfileId = profiles.some((profile) => profile.id === document.selectedProfileId)
     ? document.selectedProfileId
     : profiles[0].id;
@@ -111,7 +124,26 @@ export function writeSmartAudioProfilesDocument(document: SmartAudioProfilesDocu
     profiles,
   };
 
-  fs.writeFileSync(smartAudioProfilesPath, JSON.stringify(sanitizedDocument, null, 2));
+  try {
+    const rows = await db.select({ dataJson: userPreferences.dataJson }).from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
+    const currentDataJson = rows && rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
+    
+    currentDataJson.smartAudioProfiles = sanitizedDocument;
+    
+    await db.insert(userPreferences)
+      .values({
+        userId,
+        dataJson: serializeDataJson(currentDataJson),
+      })
+      .onConflictDoUpdate({
+        target: [userPreferences.userId],
+        set: {
+          dataJson: serializeDataJson(currentDataJson),
+        }
+      });
+  } catch (error) {
+    console.error('Failed to write smart audio profiles', error);
+  }
   return sanitizedDocument;
 }
 

@@ -298,7 +298,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       const useSmartAudio = Boolean(settings.useSmartAudio);
       if (useSmartAudio && nc && sc) {
         const smartAudioProfileId = String(settings.smartAudioProfileId || '');
-        const profilesDocument = readSmartAudioProfilesDocument();
+        const profilesDocument = await readSmartAudioProfilesDocument(userId);
         const selectedProfile = findSmartAudioProfileById(profilesDocument, smartAudioProfileId);
         
         try {
@@ -338,11 +338,11 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             if (workerResult.new_pronunciations && Object.keys(workerResult.new_pronunciations).length > 0 && selectedProfile) {
               try {
                 // Must read fresh just in case it was updated during generation
-                const updatedDoc = readSmartAudioProfilesDocument();
+                const updatedDoc = await readSmartAudioProfilesDocument(userId);
                 const profileToUpdate = updatedDoc.profiles.find(p => p.id === selectedProfile.id);
                 if (profileToUpdate) {
                   profileToUpdate.pronunciations = { ...profileToUpdate.pronunciations, ...workerResult.new_pronunciations };
-                  writeSmartAudioProfilesDocument(updatedDoc);
+                  await writeSmartAudioProfilesDocument(userId, updatedDoc);
                   serverLogger.info({ event: 'audiobook.queue.smart_audio.learned_pronunciations', count: Object.keys(workerResult.new_pronunciations).length }, 'Saved new learned pronunciations to smart audio profile');
                 }
               } catch (saveErr) {

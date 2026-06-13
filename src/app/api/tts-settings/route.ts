@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
@@ -9,17 +9,22 @@ import {
 } from '@/lib/server/smart-audio-profiles';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { serverLogger } from '@/lib/server/logger';
+import { requireAuthContext } from '@/lib/server/auth/auth';
 
 export const dynamic = 'force-dynamic';
 
 const configDir = path.join(process.cwd(), 'config');
 
 // --- GET: Fetch the masked global key for the UI ---
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const ctxOrRes = await requireAuthContext(request);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+    const userId = ctxOrRes.userId;
+
     if (!fs.existsSync(configDir)) fs.mkdirSync(configDir);
 
-    const profilesDocument = readSmartAudioProfilesDocument();
+    const profilesDocument = await readSmartAudioProfilesDocument(userId);
 
     return NextResponse.json({
       smartAudioProfiles: profilesDocument.profiles,
@@ -38,39 +43,26 @@ export async function GET() {
 }
 
 // --- POST: Save book settings and update global key ---
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
+    const ctxOrRes = await requireAuthContext(request);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+    const userId = ctxOrRes.userId;
     const body = await request.json();
-    const targetBook = body.bookId || "default";
-    
-    if (!fs.existsSync(configDir)) fs.mkdirSync(configDir);
 
     if (Array.isArray(body.smartAudioProfiles)) {
       const selectedSmartAudioProfileId = typeof body.selectedSmartAudioProfileId === 'string'
         ? body.selectedSmartAudioProfileId
         : undefined;
-      writeSmartAudioProfilesDocument({
-        selectedProfileId: selectedSmartAudioProfileId || readSmartAudioProfilesDocument().selectedProfileId,
+      const currentDoc = await readSmartAudioProfilesDocument(userId);
+      await writeSmartAudioProfilesDocument(userId, {
+        selectedProfileId: selectedSmartAudioProfileId || currentDoc.selectedProfileId,
         profiles: body.smartAudioProfiles,
       });
     }
 
-    // 2. Save the Book-Specific Settings (excluding the raw API key for security)
-    const bookSettings = {
-      aiModel: body.aiModel,
-      customTtsPrompt: body.customTtsPrompt,
-      abbreviations: body.abbreviations,
-      pronunciations: body.pronunciations,
-      books: body.books
-    };
-    
-    const fileName = `${targetBook}_tts_settings.json`;
-    const filePath = path.join(configDir, fileName);
-    fs.writeFileSync(filePath, JSON.stringify(bookSettings, null, 2));
-
-    serverLogger.info({ event: 'tts_settings.saved', targetBook }, 'Saved smart audio settings');
-    return NextResponse.json({ success: true, message: `Settings saved for ${targetBook}.` });
-
+    serverLogger.info({ event: 'tts_settings.saved' }, 'Saved smart audio settings');
+    return NextResponse.json({ success: true, message: `Settings saved.` });
   } catch (error) {
     serverLogger.error({ event: 'tts_settings.save.failed', error }, 'Error processing smart audio settings');
     return errorResponse(error, {
