@@ -608,7 +608,7 @@ async function main() {
         
         pyWorkerProc = spawn(
           venvPython,
-          ['audiobook_worker.py'],
+          ['-u', 'audiobook_worker.py'],
           {
             cwd: process.cwd(),
             env: runtimeEnv,
