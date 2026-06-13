@@ -25,6 +25,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing documentId' }, { status: 400 });
     }
 
+    const now = Date.now();
+    const existingJobs = await db.select().from(audiobookJobs)
+      .where(and(eq(audiobookJobs.userId, userId), eq(audiobookJobs.documentId, documentId)));
+    
+    // Check if an active job already exists or one was just created within 5 seconds
+    const activeOrRecent = existingJobs.find(j => 
+      j.status === 'queued' || 
+      j.status === 'running' || 
+      j.status === 'waiting_for_pdf' || 
+      j.status === 'paused' ||
+      (now - (j.createdAt || 0) < 5000)
+    );
+
+    if (activeOrRecent) {
+      return NextResponse.json({ jobId: activeOrRecent.id });
+    }
+
     const jobId = randomUUID();
     const testNamespace = req.headers.get('x-openreader-test-namespace');
     const settingsJson = { ...(settings || {}) };
