@@ -4,9 +4,7 @@ import path from 'path';
 
 import {
   getDefaultSmartAudioProfile,
-  readGlobalGeminiApiKey,
   readSmartAudioProfilesDocument,
-  writeGlobalGeminiApiKey,
   writeSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
 import { errorResponse } from '@/lib/server/errors/next-response';
@@ -21,12 +19,9 @@ export async function GET() {
   try {
     if (!fs.existsSync(configDir)) fs.mkdirSync(configDir);
 
-    const key = readGlobalGeminiApiKey();
     const profilesDocument = readSmartAudioProfilesDocument();
-    const maskedKey = key.length > 4 ? `••••••••••••${key.slice(-4)}` : null;
 
     return NextResponse.json({
-      maskedKey,
       smartAudioProfiles: profilesDocument.profiles,
       selectedSmartAudioProfileId: profilesDocument.selectedProfileId,
       defaultSmartAudioProfileId: getDefaultSmartAudioProfile().id,
@@ -35,7 +30,6 @@ export async function GET() {
     serverLogger.warn({ event: 'tts_settings.read.failed', error }, 'Error reading smart audio settings');
     const defaultProfile = getDefaultSmartAudioProfile();
     return NextResponse.json({
-      maskedKey: null,
       smartAudioProfiles: [defaultProfile],
       selectedSmartAudioProfileId: defaultProfile.id,
       defaultSmartAudioProfileId: defaultProfile.id,
@@ -50,11 +44,6 @@ export async function POST(request: Request) {
     const targetBook = body.bookId || "default";
     
     if (!fs.existsSync(configDir)) fs.mkdirSync(configDir);
-
-    // 1. If the user typed a NEW API key, save it globally
-    if (body.geminiApiKey && body.geminiApiKey.trim() !== "") {
-      writeGlobalGeminiApiKey(body.geminiApiKey.trim());
-    }
 
     if (Array.isArray(body.smartAudioProfiles)) {
       const selectedSmartAudioProfileId = typeof body.selectedSmartAudioProfileId === 'string'

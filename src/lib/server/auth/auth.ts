@@ -111,6 +111,8 @@ const createAuth = () => betterAuth({
           assertUserSignupAllowed({
             enableUserSignups: runtimeConfig.enableUserSignups,
             isAnonymous: Boolean((user as { isAnonymous?: boolean }).isAnonymous),
+            email: user.email,
+            allowedEmails: (runtimeConfig as Record<string, unknown>).allowedEmails as string[] ?? [],
           });
           // Stamp newly-created users with the correct isAdmin value if their
           // email matches ADMIN_EMAILS. This avoids a follow-up UPDATE on
@@ -140,6 +142,14 @@ const createAuth = () => betterAuth({
       google: {
         clientId: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        // Only show the account picker on repeat logins, not the full consent screen.
+        // Remove this if you need offline access / refresh tokens.
+        authorization: {
+          params: {
+            prompt: 'select_account',
+            access_type: 'online',
+          },
+        },
       },
     }),
   },

@@ -1,0 +1,27 @@
+# Python environments (if you have any inside here)
+venv/
+.env/
+__pycache__/
+
+# Node and Next.js heavy folders
+node_modules/
+.next/
+
+# Playwright testing binaries
+test-results/
+playwright-report/
+blob-report/
+
+# Large media files (since this is a read-along app)
+*.mkv
+*.mp4
+*.m4b
+*.mp3
+*.pdf
+*.epub
+
+# Database and Docker data
+data/
+*.sqlite
+*.sqlite3
+*.db

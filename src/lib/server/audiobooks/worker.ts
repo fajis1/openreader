@@ -300,7 +300,6 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         const smartAudioProfileId = String(settings.smartAudioProfileId || '');
         const profilesDocument = readSmartAudioProfilesDocument();
         const selectedProfile = findSmartAudioProfileById(profilesDocument, smartAudioProfileId);
-        const geminiApiKey = readGlobalGeminiApiKey();
         
         try {
           serverLogger.info({ event: 'audiobook.queue.smart_audio.enabled', bookId, chapter: chapter.index }, 'Triggering Python Gemini worker...');

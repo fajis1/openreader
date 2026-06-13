@@ -191,6 +191,7 @@ export function SmartAudioSettings() {
         setApiKey('');
       }
       alert('Smart audio profile saved.');
+      window.dispatchEvent(new CustomEvent('smart-audio-profiles-updated'));
     } catch (error) {
       console.error('Error saving smart audio settings:', error);
       alert('Failed to save smart audio settings. Check the server logs.');

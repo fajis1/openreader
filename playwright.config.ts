@@ -33,7 +33,7 @@ export default defineConfig({
     // Disable auth rate limiting for tests to support parallel workers creating sessions.
     // ENABLE_TEST_NAMESPACE opts the production build into honoring the
     // x-openreader-test-namespace header (ignored on real prod deployments).
-    command: `pnpm build && DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true pnpm start`,
+    command: `USE_ANONYMOUS_AUTH_SESSIONS=true pnpm build && DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true USE_ANONYMOUS_AUTH_SESSIONS=true pnpm start`,
     url: 'http://localhost:3003',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,

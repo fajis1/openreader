@@ -65,20 +65,7 @@ export function getDefaultSmartAudioProfile(): SmartAudioProfile {
   });
 }
 
-export function readGlobalGeminiApiKey(): string {
-  try {
-    if (!fs.existsSync(globalKeyPath)) return '';
-    const globalData = JSON.parse(fs.readFileSync(globalKeyPath, 'utf8')) as { geminiApiKey?: string };
-    return (globalData.geminiApiKey || '').trim();
-  } catch {
-    return '';
-  }
-}
 
-export function writeGlobalGeminiApiKey(apiKey: string): void {
-  ensureConfigDir();
-  fs.writeFileSync(globalKeyPath, JSON.stringify({ geminiApiKey: apiKey.trim() }, null, 2));
-}
 
 export function readSmartAudioProfilesDocument(): SmartAudioProfilesDocument {
   try {

@@ -36,6 +36,7 @@ import {
 import { useRuntimeConfig } from '@/contexts/RuntimeConfigContext';
 import { AdminProvidersPanel } from '@/components/admin/AdminProvidersPanel';
 import { AdminFeaturesPanel } from '@/components/admin/AdminFeaturesPanel';
+import { AdminAccessPanel } from '@/components/admin/AdminAccessPanel';
 import { AdminTasksPanel } from '@/components/admin/AdminTasksPanel';
 import { useSharedProviders } from '@/hooks/useSharedProviders';
 import { flushUserPreferencesSync } from '@/lib/client/api/user-state';
@@ -1019,14 +1020,16 @@ export function SettingsModal({
                             options={[
                               { value: 'providers', label: 'Shared providers' },
                               { value: 'features', label: 'Site features' },
+                              { value: 'access', label: 'Access' },
                               { value: 'tasks', label: 'Tasks' },
                             ]}
                             onChange={setAdminSubTab}
                             ariaLabel="Admin tab"
-                            className="grid-cols-3"
+                            className="grid-cols-4"
                           />
                           {adminSubTab === 'providers' && <AdminProvidersPanel />}
                           {adminSubTab === 'features' && <AdminFeaturesPanel />}
+                          {adminSubTab === 'access' && <AdminAccessPanel />}
                           {adminSubTab === 'tasks' && <AdminTasksPanel />}
                         </div>
                       )}

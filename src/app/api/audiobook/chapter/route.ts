@@ -47,7 +47,6 @@ import {
 import { errorResponse } from '@/lib/server/errors/next-response';
 import {
   findSmartAudioProfileById,
-  readGlobalGeminiApiKey,
   readSmartAudioProfilesDocument,
   writeSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
@@ -623,7 +622,7 @@ export async function POST(request: NextRequest) {
     if (useSmartAudio) {
         const profilesDocument = readSmartAudioProfilesDocument();
         const selectedProfile = findSmartAudioProfileById(profilesDocument, smartAudioProfileId);
-        const geminiApiKey = readGlobalGeminiApiKey();
+        const geminiApiKey = (selectedProfile?.geminiApiKey || '').trim();
         try {
           serverLogger.info(
             { event: 'audiobook.chapter.smart_audio.enabled', bookId, smartAudioProfileId: selectedProfile?.id },

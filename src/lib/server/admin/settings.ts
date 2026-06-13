@@ -61,6 +61,17 @@ function positiveIntValue(defaultValue: number): RuntimeConfigKeyDef<number> {
   };
 }
 
+function stringArrayValue(defaultValue: string[]): RuntimeConfigKeyDef<string[]> {
+  return {
+    default: defaultValue,
+    validate(value) {
+      if (!Array.isArray(value)) return undefined;
+      if (!value.every((item) => typeof item === 'string')) return undefined;
+      return value.map((s) => s.trim().toLowerCase()).filter(Boolean);
+    },
+  };
+}
+
 export const RUNTIME_CONFIG_SCHEMA = {
   defaultTtsProvider: stringValue('custom-openai'),
   changelogFeedUrl: stringValue('https://docs.openreader.richardr.dev/changelog/manifest.json'),
@@ -93,6 +104,10 @@ export const RUNTIME_CONFIG_SCHEMA = {
   computeParseSustainedWindowSec: positiveIntValue(600),
   // Maximum size (MB) accepted for a single document upload.
   maxUploadMb: positiveIntValue(200),
+  // Email allowlist: when non-empty, only these addresses may create accounts.
+  // Can also be set via the ALLOWED_EMAILS env var (comma-separated).
+  // The effective list is the union of the DB list and the env var list.
+  allowedEmails: stringArrayValue([]),
 } as const satisfies Record<string, RuntimeConfigKeyDef<unknown>>;
 
 export type RuntimeConfigKey = keyof typeof RUNTIME_CONFIG_SCHEMA;

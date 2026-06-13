@@ -115,7 +115,16 @@ export function AudiobookExportModal({
     };
 
     void loadProfiles();
-    return () => controller.abort();
+
+    const handleUpdate = () => {
+      void loadProfiles();
+    };
+    window.addEventListener('smart-audio-profiles-updated', handleUpdate);
+
+    return () => {
+      controller.abort();
+      window.removeEventListener('smart-audio-profiles-updated', handleUpdate);
+    };
   }, [smartAudioProfileId]);
 
   const hasExistingAudiobook = Boolean(bookId) || chapters.length > 0;

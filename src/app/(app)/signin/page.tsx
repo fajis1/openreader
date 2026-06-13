@@ -82,7 +82,6 @@ function SignInContent() {
     } catch (err) {
       console.error('Sign in error:', err);
       setError('Unable to connect. Please try again.');
-    } finally {
       setLoadingEmail(false);
     }
   };
@@ -95,7 +94,8 @@ function SignInContent() {
         provider: 'github',
         callbackURL: '/app'
       });
-    } finally {
+    } catch (err) {
+      console.error('Github sign in error:', err);
       setLoadingGithub(false);
     }
   };
@@ -108,7 +108,8 @@ function SignInContent() {
         provider: 'google',
         callbackURL: '/app'
       });
-    } finally {
+    } catch (err) {
+      console.error('Google sign in error:', err);
       setLoadingGoogle(false);
     }
   };
@@ -121,10 +122,9 @@ function SignInContent() {
       await client.signIn.anonymous();
       await refreshRateLimit();
       window.location.href = '/app';
-    } catch (e) {
-      console.error('Anonymous sign-in failed:', e);
-      setError('Unable to continue anonymously. Please try again.');
-    } finally {
+    } catch (err) {
+      console.error('Anonymous sign in error:', err);
+      setError('Unable to start reading session. Please try again.');
       setLoadingAnonymous(false);
     }
   };

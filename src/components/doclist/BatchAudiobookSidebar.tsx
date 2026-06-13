@@ -110,9 +110,18 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
         setIsLoadingProfiles(false);
       }
     };
+
     void load();
-    return () => controller.abort();
-  // Run once on mount — smartAudioProfileId is the user's saved preference
+
+    const handleUpdate = () => {
+      void load();
+    };
+    window.addEventListener('smart-audio-profiles-updated', handleUpdate);
+
+    return () => {
+      controller.abort();
+      window.removeEventListener('smart-audio-profiles-updated', handleUpdate);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
