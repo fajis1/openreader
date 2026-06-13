@@ -668,14 +668,16 @@ export function AudiobookExportModal({
 			                                </div>
 			                              ) : (
 			                                <div className="space-y-4">
-			                                  {/* Voice & Format row */}
 			                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 			                                    <div className="space-y-1.5">
 			                                      <label className="text-[11px] uppercase tracking-wider font-medium text-soft">Voice</label>
 			                                      <VoicesControlBase
 			                                        availableVoices={availableVoices}
 			                                        voice={audiobookVoice}
-			                                        onChangeVoice={setAudiobookVoice}
+			                                        onChangeVoice={(newVoice) => {
+			                                          setAudiobookVoice(newVoice);
+			                                          updateConfigKey('voice', newVoice);
+			                                        }}
 			                                        providerType={providerType}
 			                                        ttsModel={ttsModel}
 			                                        dropdownDirection="down"
