@@ -142,14 +142,6 @@ const createAuth = () => betterAuth({
       google: {
         clientId: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        // Only show the account picker on repeat logins, not the full consent screen.
-        // Remove this if you need offline access / refresh tokens.
-        authorization: {
-          params: {
-            prompt: 'select_account',
-            access_type: 'online',
-          },
-        },
       },
     }),
   },

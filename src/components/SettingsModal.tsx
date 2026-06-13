@@ -169,7 +169,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
   { id: 'admin', label: 'Admin', icon: SettingsIcon, authOnly: true, adminOnly: true },
 ];
 
-type AdminSubTab = 'providers' | 'features' | 'tasks';
+type AdminSubTab = 'providers' | 'features' | 'tasks' | 'access';
 
 export function SettingsTrigger({
   className = '',

@@ -125,11 +125,10 @@ export function AdminAccessPanel() {
 
   return (
     <div className="space-y-4 mt-2">
-      <Section>
+      <Section title="Email Allowlist">
         <div className="space-y-3">
           {/* Header + description */}
           <div>
-            <h3 className="text-sm font-semibold text-foreground">Email Allowlist</h3>
             <p className="text-xs text-soft mt-1">
               When this list is non-empty, only users with a matching email address can create an
               account. Leave it empty to use the &ldquo;Allow user signups&rdquo; toggle in Site Features instead.
