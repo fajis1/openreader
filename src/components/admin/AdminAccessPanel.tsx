@@ -8,7 +8,7 @@ import { Section, Button, Input } from '@/components/ui';
 const ADMIN_SETTINGS_QUERY_KEY = ['admin-settings'] as const;
 
 async function fetchAdminSettings(): Promise<{ values: Record<string, unknown> }> {
-  const res = await fetch('/api/admin/settings');
+  const res = await fetch('/api/admin/settings', { cache: 'no-store' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as { values: Record<string, unknown> };
 }
@@ -20,6 +20,12 @@ async function saveAllowedEmails(emails: string[]): Promise<void> {
     body: JSON.stringify({ updates: { allowedEmails: emails } }),
   });
   if (!res.ok && res.status !== 207) throw new Error(`HTTP ${res.status}`);
+  if (res.status === 207) {
+    const data = await res.json();
+    if (data.errors?.length > 0) {
+      throw new Error(data.errors[0].message);
+    }
+  }
 }
 
 function parseEmailInput(raw: string): string[] {
