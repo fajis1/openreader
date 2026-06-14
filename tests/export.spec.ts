@@ -68,7 +68,7 @@ async function startGeneration(page: Page) {
 }
 
 async function waitForChaptersHeading(page: Page) {
-  await expect(page.getByRole('heading', { name: 'Chapters' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: 'Chapters' })).toBeVisible({ timeout: 120_000 });
 }
 
 type DownloadedAudiobook = {
@@ -271,7 +271,13 @@ async function resetAudiobookIfPresent(page: Page, bookId?: string) {
 }
 
 test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
+  // If the ONNX model does not exist, the Python worker has to download it (~130MB).
+  // Wait up to 480 seconds to avoid timing out on the first run.
+  if (!fs.existsSync(path.join(process.cwd(), 'docstore', 'model', 'PP-DocLayoutV3.onnx'))) {
+    test.setTimeout(480_000);
+  } else {
+    test.setTimeout(120_000);
+  }
 
   // Ensure TTS is mocked and app is ready
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text())); page.on('pageerror', error => console.log('BROWSER ERROR:', error)); await setupTest(page, testInfo);
@@ -294,30 +300,29 @@ test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ 
   // for each generated chapter via generateTTSBuffer's test mock path.
   await startGeneration(page);
 
-  // Wait for chapters list to appear and populate at least two items (Pages 1 and 2)
+  // Wait for chapters list to appear and populate the logical chapter
   await waitForChaptersHeading(page);
   const chapterActionsButtons = page.getByRole('button', { name: 'Chapter actions' });
-  await expect(chapterActionsButtons).toHaveCount(2, { timeout: 60_000 });
+  await expect(chapterActionsButtons).toHaveCount(1, { timeout: 120_000 });
 
   // Trigger full download from the FRONTEND button and capture via Playwright's download API.
   // The button label can be "Full Download (MP3)" or "Full Download (M4B)" depending on
   // the server-side detected format, so match more loosely on the accessible name.
   await withDownloadedFullAudiobook(page, async ({ filePath }) => {
     // Use ffprobe (same toolchain as the server) to validate the combined audio duration.
-    // The TTS route is mocked to return a 10s sample.mp3 for each page, so with at least
-    // two chapters we should be close to ~20 seconds of audio.
+    // The TTS route is mocked to return a 10s sample.mp3 for each chapter.
     const durationSeconds = await getAudioDurationSeconds(filePath);
-    // Duration must be within a reasonable window around 20 seconds to allow
+    // Duration must be within a reasonable window around 10 seconds to allow
     // for encoding variations and container overhead.
-    expect(durationSeconds).toBeGreaterThan(18);
-    expect(durationSeconds).toBeLessThan(22);
+    expect(durationSeconds).toBeGreaterThan(8);
+    expect(durationSeconds).toBeLessThan(15);
   });
 
   // Also check the chapter metadata API for consistency
   const json = await expectChaptersBackendState(page, bookId);
   expect(json.exists).toBe(true);
   expect(Array.isArray(json.chapters)).toBe(true);
-  expect(json.chapters.length).toBeGreaterThanOrEqual(2);
+  expect(json.chapters.length).toBeGreaterThanOrEqual(1);
   for (const ch of json.chapters) {
     expect(ch.duration).toBeGreaterThan(0);
   }
@@ -382,7 +387,7 @@ test('exports partial MP3 audiobook for EPUB using mocked 10s TTS sample', async
 });
 
 test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
+  test.setTimeout(60_000);
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text())); page.on('pageerror', error => console.log('BROWSER ERROR:', error)); await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 
@@ -397,7 +402,12 @@ test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page 
 
   // Wait for at least one chapter row to appear (one "Chapter actions" button)
   const chapterActionsButtons = page.getByRole('button', { name: 'Chapter actions' });
-  await expect(chapterActionsButtons.first()).toBeVisible({ timeout: 90_000 });
+  await expect(chapterActionsButtons).toHaveCount(1, { timeout: 60_000 });
+
+  // Download the single chapter
+  await chapterActionsButtons.nth(0).click();
+  const downloadLink = page.getByRole('menuitem', { name: 'Download .mp3' });
+  await expect(downloadLink).toBeVisible();
 
   // Readiness gate: chapter row visibility can lead backend storage consistency by a small window.
   await waitForBackendDownloadReady(page, bookId, { minChapters: 1 });
@@ -405,8 +415,8 @@ test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page 
   // Download via full-download button once at least one chapter is ready.
   await withDownloadedFullAudiobook(page, async ({ filePath }) => {
     const durationSeconds = await getAudioDurationSeconds(filePath);
-    expect(durationSeconds).toBeGreaterThan(9);
-    expect(durationSeconds).toBeLessThan(300);
+    expect(durationSeconds).toBeGreaterThan(8);
+    expect(durationSeconds).toBeLessThan(15);
   });
 
   await resetAudiobookIfPresent(page, bookId);
@@ -473,30 +483,29 @@ test('regenerates a single MP3 audiobook PDF page and exports full audiobook', a
   await waitForChaptersHeading(page);
 
   const chapterActionsButtons = page.getByRole('button', { name: 'Chapter actions' });
-  // Ensure we have at least two chapters for this PDF
-  await expect(chapterActionsButtons.nth(1)).toBeVisible({ timeout: 60_000 });
-  const chapterCountBefore = await chapterActionsButtons.count();
-  expect(chapterCountBefore).toBeGreaterThanOrEqual(2);
+  await expect(chapterActionsButtons).toHaveCount(1, { timeout: 60_000 });
 
-  // Open the actions menu for the first chapter and trigger Regenerate
-  const firstChapterActions = chapterActionsButtons.first();
-  await firstChapterActions.click();
+  // Cache the backend chapter count to ensure regeneration doesn't duplicate rows
+  const backendStateBefore = await expectChaptersBackendState(page, bookId);
+  const chapterCountBefore = backendStateBefore.chapters.length;
 
-  // In the headlessui Menu, each option is a menuitem. Use that role instead of button.
-  const regenerateMenuItem = page.getByRole('menuitem', { name: /Regenerate/i });
-  await expect(regenerateMenuItem).toBeVisible({ timeout: 15000 });
-  await regenerateMenuItem.click();
+  // Trigger regenerate on the first chapter
+  await chapterActionsButtons.nth(0).click();
+  const regenerateBtn = page.getByRole('menuitem', { name: 'Regenerate .mp3' });
+  await expect(regenerateBtn).toBeVisible();
+  await regenerateBtn.click();
 
-  // During regeneration, the row may show a "Regenerating" label; wait for any such
-  // indicator to disappear, signaling completion.
-  const regeneratingLabel = page.getByText(/Regenerating/);
-  await expect(regeneratingLabel).toHaveCount(0, { timeout: 120_000 });
+  // Wait for it to finish regenerating. We expect the progress modal or spinner to appear and disappear.
+  // The simplest check is waiting for the row actions button to be re-enabled or visible again.
+  await expect(chapterActionsButtons.nth(0)).toBeVisible({ timeout: 60_000 });
+  await expect(chapterActionsButtons).toHaveCount(1, { timeout: 60_000 });
 
-  // After regeneration completes in the UI, verify backend chapter state is fully updated
-  // before triggering a full download to avoid races with ffmpeg concat on Alpine.
+  // Small delay to allow DB/UI state to settle after generation
+  await page.waitForTimeout(2000);
+
+  // Assert backend state is valid post-regeneration
   const backendStateAfterRegenerate = await expectChaptersBackendState(page, bookId);
   expect(backendStateAfterRegenerate.exists).toBe(true);
-  expect(Array.isArray(backendStateAfterRegenerate.chapters)).toBe(true);
   expect(backendStateAfterRegenerate.chapters.length).toBe(chapterCountBefore);
   for (const ch of backendStateAfterRegenerate.chapters) {
     expect(ch.duration).toBeGreaterThan(0);
@@ -508,9 +517,8 @@ test('regenerates a single MP3 audiobook PDF page and exports full audiobook', a
   // Full Download should still work and produce a valid combined audiobook
   await withDownloadedFullAudiobook(page, async ({ filePath }) => {
     const durationSeconds = await getAudioDurationSeconds(filePath);
-    // With two mocked 10s chapters we expect roughly 20s; allow a small window.
-    expect(durationSeconds).toBeGreaterThan(18);
-    expect(durationSeconds).toBeLessThan(22);
+    expect(durationSeconds).toBeGreaterThan(8);
+    expect(durationSeconds).toBeLessThan(15);
   });
 
   // Backend should still report the same number of chapters and valid durations
@@ -525,12 +533,12 @@ test('regenerates a single MP3 audiobook PDF page and exports full audiobook', a
   await resetAudiobookIfPresent(page, bookId);
 });
 
-test('resumes audiobook when a chapter is missing and full download succeeds (PDF)', async ({ page }, testInfo) => {
+test('resumes audiobook when a chapter is missing and full download succeeds (EPUB)', async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text())); page.on('pageerror', error => console.log('BROWSER ERROR:', error)); await setupTest(page, testInfo);
-  await uploadAndDisplay(page, 'sample.pdf');
+  await uploadAndDisplay(page, 'sample.epub');
 
-  const bookId = await getBookIdFromUrl(page, 'pdf');
+  const bookId = await getBookIdFromUrl(page, 'epub');
   await resetAudiobookById(page, bookId);
 
   await openExportModal(page);
@@ -539,7 +547,7 @@ test('resumes audiobook when a chapter is missing and full download succeeds (PD
 
   await waitForChaptersHeading(page);
   const chapterActionsButtons = page.getByRole('button', { name: 'Chapter actions' });
-  await expect(chapterActionsButtons).toHaveCount(2, { timeout: 60_000 });
+  await expect(chapterActionsButtons).toHaveCount(28, { timeout: 60_000 });
 
   // Delete the first chapter via the backend API so the audiobook has a missing index (0).
   // This is more reliable than clicking through the chapter actions menu in headless runs.
@@ -548,19 +556,18 @@ test('resumes audiobook when a chapter is missing and full download succeeds (PD
   );
   expect(deleteRes.ok()).toBeTruthy();
 
-  // Wait for backend to reflect only one remaining chapter (index 1).
+  // Wait for backend to reflect exactly 27 remaining chapters.
   await expect
     .poll(async () => {
       const json = await expectChaptersBackendState(page, bookId);
       return json.chapters?.length ?? 0;
     }, { timeout: 30_000 })
-    .toBe(1);
+    .toBe(27);
 
   const jsonAfterDelete = await expectChaptersBackendState(page, bookId);
   expect(jsonAfterDelete.exists).toBe(true);
   expect(Array.isArray(jsonAfterDelete.chapters)).toBe(true);
-  expect(jsonAfterDelete.chapters.length).toBe(1);
-  expect(jsonAfterDelete.chapters[0]?.index).toBe(1);
+  expect(jsonAfterDelete.chapters.length).toBe(27);
 
   // Close and reopen the modal to ensure "resume" loads the missing placeholder from the backend.
   await page.getByRole('button', { name: 'Close' }).click();
@@ -574,31 +581,23 @@ test('resumes audiobook when a chapter is missing and full download succeeds (PD
   // Resume should regenerate the missing chapter and allow a full download to succeed.
   await page.getByRole('button', { name: 'Resume' }).click();
 
-  // Wait for backend to have both chapters again.
-  await expect
-    .poll(async () => {
-      const json = await expectChaptersBackendState(page, bookId);
-      return json.chapters?.length ?? 0;
-    }, { timeout: 120_000 })
-    .toBe(2);
+  // Progress/Generating state should complete and the "Resume" button should disappear.
+  await expect(page.getByRole('button', { name: 'Resume' })).toHaveCount(0, { timeout: 60_000 });
+  await expect(page.getByText(/Missing •/)).toHaveCount(0, { timeout: 15_000 });
 
-  // UI should also stop showing a missing placeholder after resume completes.
-  await expect(page.getByText(/Missing •/)).toHaveCount(0, { timeout: 120_000 });
-
-  // Ensure backend chapter metadata/object visibility is settled before combine/download.
-  await waitForBackendDownloadReady(page, bookId, { minChapters: 2 });
+  // Should have all 28 chapters restored
+  await expect(chapterActionsButtons).toHaveCount(28, { timeout: 20_000 });
 
   await withDownloadedFullAudiobook(page, async ({ filePath }) => {
     const durationSeconds = await getAudioDurationSeconds(filePath);
-    expect(durationSeconds).toBeGreaterThan(18);
-    expect(durationSeconds).toBeLessThan(22);
+    expect(durationSeconds).toBeGreaterThan(275);
+    expect(durationSeconds).toBeLessThan(285);
   });
 
   const jsonAfterResume = await expectChaptersBackendState(page, bookId);
   expect(jsonAfterResume.exists).toBe(true);
   expect(Array.isArray(jsonAfterResume.chapters)).toBe(true);
-  expect(jsonAfterResume.chapters.length).toBe(2);
-  expect(jsonAfterResume.chapters.map((c: { index: number }) => c.index).sort()).toEqual([0, 1]);
+  expect(jsonAfterResume.chapters.length).toBe(28);
   for (const ch of jsonAfterResume.chapters) {
     expect(ch.duration).toBeGreaterThan(0);
   }

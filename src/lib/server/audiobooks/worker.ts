@@ -42,13 +42,21 @@ async function extractTextFromEpub(buffer: Buffer): Promise<{ title: string; tex
   const basePath = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : '';
   
   const manifest: Record<string, string> = {};
-  for (const match of opfContent.matchAll(/<item\s+[^>]*id="([^"]+)"[^>]*href="([^"]+)"[^>]*\/>/gi)) {
-    manifest[match[1]] = match[2];
+  for (const match of opfContent.matchAll(/<item\s+([^>]+)>/gi)) {
+    const attrs = match[1];
+    const idMatch = attrs.match(/id="([^"]+)"/i);
+    const hrefMatch = attrs.match(/href="([^"]+)"/i);
+    if (idMatch && hrefMatch) {
+      manifest[idMatch[1]] = hrefMatch[1];
+    }
   }
   
   const spine: string[] = [];
-  for (const match of opfContent.matchAll(/<itemref\s+[^>]*idref="([^"]+)"[^>]*\/>/gi)) {
-    spine.push(match[1]);
+  for (const match of opfContent.matchAll(/<itemref\s+([^>]+)>/gi)) {
+    const idrefMatch = match[1].match(/idref="([^"]+)"/i);
+    if (idrefMatch) {
+      spine.push(idrefMatch[1]);
+    }
   }
   
   const chapters: { title: string; text: string }[] = [];
@@ -153,11 +161,26 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     let chapters: { index: number; title: string; text: string }[] = [];
 
     if (doc.type === 'pdf') {
-      const artifact = await readCurrentParsedPdfArtifact({ documentId: doc.id, namespace: testNamespace });
+      let artifact = await readCurrentParsedPdfArtifact({ documentId: doc.id, namespace: testNamespace });
       if (!artifact) {
         await createOrReuseCurrentPdfParseOperation({ documentId: doc.id, namespace: testNamespace });
         await db.update(audiobookJobs).set({ status: 'waiting_for_pdf' }).where(eq(audiobookJobs.id, job.id));
-        return;
+        
+        // Wait up to 15 seconds for the PDF artifact (e.g. for compute-core to finish parsing it in the background)
+        let found = false;
+        for (let i = 0; i < 15; i++) {
+          await new Promise(r => setTimeout(r, 1000));
+          artifact = await readCurrentParsedPdfArtifact({ documentId: doc.id, namespace: testNamespace });
+          if (artifact) {
+            found = true;
+            await db.update(audiobookJobs).set({ status: 'running' }).where(eq(audiobookJobs.id, job.id));
+            break;
+          }
+        }
+        
+        if (!found) {
+          return;
+        }
       }
       const parsedPdf = JSON.parse(artifact.bytes.toString('utf-8')) as ParsedPdfDocument;
       
@@ -251,15 +274,19 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     let totalBytes = 0;
     const totalLength = chapters.reduce((sum, c) => sum + c.text.length, 0);
 
+    const useSmartAudio = Boolean(settings.useSmartAudio);
+
     let nc: import("nats").NatsConnection | null = null;
     let sc: import("nats").Codec<string> | null = null;
-    try {
-      const { connect, StringCodec } = await import('nats');
-      serverLogger.info({ event: 'audiobook.queue.smart_audio.init', bookId }, 'Connecting to NATS for Gemini worker...');
-      nc = await connect({ servers: "nats://127.0.0.1:4222" });
-      sc = StringCodec();
-    } catch (e) {
-      serverLogger.warn({ event: 'audiobook.queue.smart_audio.error', error: e }, 'Failed to connect to NATS, smart audio will be skipped');
+    if (useSmartAudio) {
+      try {
+        const { connect, StringCodec } = await import('nats');
+        serverLogger.info({ event: 'audiobook.queue.smart_audio.init', bookId }, 'Connecting to NATS for Gemini worker...');
+        nc = await connect({ servers: "nats://127.0.0.1:4222", maxReconnectAttempts: 1, timeout: 2000 });
+        sc = StringCodec();
+      } catch (e) {
+        serverLogger.warn({ event: 'audiobook.queue.smart_audio.error', error: e }, 'Failed to connect to NATS, smart audio will fail');
+      }
     }
 
     for (const chapter of chapters) {
@@ -295,7 +322,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
       let processedTextForTts = chapter.text;
       
-      const useSmartAudio = Boolean(settings.useSmartAudio);
+
       if (useSmartAudio && nc && sc) {
         const smartAudioProfileId = String(settings.smartAudioProfileId || '');
         const profilesDocument = await readSmartAudioProfilesDocument(userId);

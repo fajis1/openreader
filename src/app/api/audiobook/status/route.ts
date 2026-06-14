@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { audiobooks, audiobookChapters } from '@/db/schema';
+import { audiobooks, audiobookChapters, audiobookJobs } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { getAudiobookObjectBuffer, isMissingBlobError, listAudiobookObjects } from '@/lib/server/audiobooks/blobstore';
 import { decodeChapterFileName } from '@/lib/server/audiobooks/chapters';
@@ -131,8 +131,16 @@ export async function GET(request: NextRequest) {
     const exists = chapters.length > 0 || hasComplete || settings !== null;
 
     if (!exists) {
-      // Deleting the audiobook row cascades to audiobookChapters via bookFk
-      await db.delete(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, storageUserId)));
+      // Check if there's an active job before deleting to prevent race condition
+      const activeJobs = await db
+        .select({ id: audiobookJobs.id })
+        .from(audiobookJobs)
+        .where(and(eq(audiobookJobs.documentId, bookId), eq(audiobookJobs.userId, storageUserId)));
+      
+      if (activeJobs.length === 0) {
+        // Deleting the audiobook row cascades to audiobookChapters via bookFk
+        await db.delete(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, storageUserId)));
+      }
       return NextResponse.json({
         chapters: [],
         exists: false,

@@ -33,10 +33,12 @@ export default defineConfig({
     // Disable auth rate limiting for tests to support parallel workers creating sessions.
     // ENABLE_TEST_NAMESPACE opts the production build into honoring the
     // x-openreader-test-namespace header (ignored on real prod deployments).
-    command: `USE_ANONYMOUS_AUTH_SESSIONS=true pnpm build && DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true USE_ANONYMOUS_AUTH_SESSIONS=true pnpm start`,
+    command: `BASE_URL=http://localhost:3003 USE_ANONYMOUS_AUTH_SESSIONS=true pnpm build && (S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test COMPUTE_WORKER_TOKEN=local-compute-token pnpm --filter @openreader/compute-worker start & S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test COMPUTE_WORKER_TOKEN=local-compute-token BASE_URL=http://localhost:3003 DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true USE_ANONYMOUS_AUTH_SESSIONS=true pnpm start)`,
     url: 'http://localhost:3003',
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
+    timeout: 240 * 1000,
+    stdout: 'pipe',
+    stderr: 'pipe',
   },
 
   /* Configure projects for major browsers */

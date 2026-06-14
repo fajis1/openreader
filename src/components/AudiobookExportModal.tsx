@@ -233,21 +233,28 @@ export function AudiobookExportModal({
       const qRes = await fetch('/api/audiobooks/queue');
       if (qRes.ok) {
         const qData = await qRes.json();
-        const activeJob = qData.jobs?.find((j: { documentId: string; status: string; progress?: number }) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running'));
+        const activeJob = qData.jobs?.find((j: { documentId: string; status: string; progress?: number }) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running' || j.status === 'waiting_for_pdf'));
         if (activeJob) {
           setIsGenerating(true);
           if (activeJob.progress !== undefined) setProgress(activeJob.progress);
           if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
+          else if (activeJob.status === 'waiting_for_pdf') setCurrentChapter('Waiting for PDF parsing...');
           else setCurrentChapter('Generating on server...');
-        } else if (isGenerating) {
-          // It was generating but now it's gone from the active queue
+        } else {
+          // If no active job on the server, ensure we are not in a generating state.
           setIsGenerating(false);
         }
       }
     } catch {
       // Ignored
     }
-  }, [documentId, setProgress, isGenerating]);
+  }, [documentId, setProgress]);
+
+  // Keep latest fetchExistingChapters function to avoid resetting interval on every progress/state update
+  const fetchExistingChaptersRef = useRef(fetchExistingChapters);
+  useEffect(() => {
+    fetchExistingChaptersRef.current = fetchExistingChapters;
+  }, [fetchExistingChapters]);
 
   // Fetch existing chapters when modal opens
   useEffect(() => {
@@ -260,11 +267,11 @@ export function AudiobookExportModal({
   useEffect(() => {
     if (isOpen && documentId && isGenerating) {
       const interval = setInterval(() => {
-        fetchExistingChapters(true);
+        fetchExistingChaptersRef.current(true);
       }, 3000);
       return () => clearInterval(interval);
     }
-  }, [isOpen, documentId, isGenerating, fetchExistingChapters]);
+  }, [isOpen, documentId, isGenerating]);
 
   const handleChapterComplete = useCallback((chapter: TTSAudiobookChapter) => {
     setChapters(prev => {

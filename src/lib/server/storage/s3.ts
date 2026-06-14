@@ -67,6 +67,7 @@ function loadS3ConfigFromEnv(): S3Config | null {
 }
 
 export function isS3Configured(): boolean {
+  if (isEmbeddedWeedMiniEnabled()) return true;
   return loadS3ConfigFromEnv() !== null;
 }
 
@@ -74,6 +75,18 @@ export function getS3Config(): S3Config {
   if (cachedConfig) return cachedConfig;
   const config = loadS3ConfigFromEnv();
   if (!config) {
+    if (isEmbeddedWeedMiniEnabled()) {
+      cachedConfig = {
+        bucket: 'openreader',
+        region: 'us-east-1',
+        endpoint: loopbackEndpoint(process.env.S3_ENDPOINT) || 'http://127.0.0.1:8333',
+        accessKeyId: process.env.S3_ACCESS_KEY_ID || 'test',
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || 'test',
+        forcePathStyle: true,
+        prefix: 'openreader',
+      };
+      return cachedConfig;
+    }
     throw new Error(
       'S3 is not configured. Required env vars: S3_BUCKET, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY.',
     );

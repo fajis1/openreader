@@ -464,9 +464,6 @@ async function main() {
           `-dir=${runtimeEnv.WEED_MINI_DIR}`,
         ];
         weedArgs.push(`-s3.port=${parsedEndpoint.port}`);
-        if (runningInDocker) {
-          weedArgs.push('-ip.bind=0.0.0.0');
-        }
 
         weedProc = spawn('weed', weedArgs, {
           env: runtimeEnv,
