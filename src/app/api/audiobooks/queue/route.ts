@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       .where(and(eq(audiobookJobs.userId, userId), eq(audiobookJobs.documentId, documentId)));
     
     // Check if an active job already exists or one was just created within 5 seconds
-    const activeOrRecent = existingJobs.find(j => 
+    const activeOrRecent = existingJobs.find((j: typeof audiobookJobs.$inferSelect) => 
       j.status === 'queued' || 
       j.status === 'running' || 
       j.status === 'waiting_for_pdf' || 

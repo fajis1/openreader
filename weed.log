@@ -1,0 +1,11 @@
+I0614 00:39:50.024209 master.go:282 current: 127.0.0.1:9333 peers:
+I0614 00:39:50.025335 file_util.go:27 Folder docstore/seaweedfs Permission: -rwxrwxr-x
+I0614 00:39:50.025563 file_util.go:27 Folder docstore/seaweedfs Permission: -rwxrwxr-x
+I0614 00:39:50.025633 master.go:282 current: 127.0.0.1:9333 peers:127.0.0.1:9333
+I0614 00:39:50.026160 master_server.go:134 Volume Size Limit is 30000 MB
+I0614 00:39:50.026833 master.go:163 Start Seaweed Master 30GB 3.80 7b3c0e937f83d3b49799b5d5dcb98b0043461c25 at 127.0.0.1:9333
+I0614 00:39:50.027250 raft_server.go:119 Starting RaftServer with 127.0.0.1:9333
+I0614 00:39:50.028025 volume_grpc_client_to_master.go:43 checkWithMaster 127.0.0.1:9333: get master 127.0.0.1:9333 configuration: rpc error: code = Unavailable desc = connection error: desc = "transport: Error while dialing: dial tcp 127.0.0.1:19333: connect: connection refused"
+I0614 00:39:50.039237 raft_server.go:168 current cluster leader: 
+I0614 00:39:51.820919 volume_grpc_client_to_master.go:43 checkWithMaster 127.0.0.1:9333: get master 127.0.0.1:9333 configuration: rpc error: code = Unavailable desc = connection error: desc = "transport: Error while dialing: dial tcp 127.0.0.1:19333: connect: connection refused"
+I0614 00:39:52.027614 s3.go:217 wait to connect to filer 127.0.0.1:8888 grpc address 127.0.0.1:18888

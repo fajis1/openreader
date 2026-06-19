@@ -85,7 +85,7 @@ export function DocumentTile({
   });
   const generatedAudiobookIds = audiobooksData?.audiobooks || [];
   const smartAudiobookIds = audiobooksData?.smartAudiobookIds || [];
-  const audiobookSizes = audiobooksData?.audiobookSizes || {};
+
 
   const hasAudiobook = generatedAudiobookIds?.includes(doc.id) ?? false;
   const hasSmartAudio = smartAudiobookIds?.includes(doc.id) ?? false;

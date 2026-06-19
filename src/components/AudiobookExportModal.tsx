@@ -191,6 +191,28 @@ export function AudiobookExportModal({
     } else {
       setIsLoadingExisting(true);
     }
+
+    let serverIsGenerating = false;
+    // Check server queue status FIRST to prevent race conditions where a job completes
+    // between fetching chapters and checking the queue, which would cause us to miss the final chapters.
+    try {
+      const qRes = await fetch('/api/audiobooks/queue');
+      if (qRes.ok) {
+        const qData = await qRes.json();
+        const activeJob = qData.jobs?.find((j: { documentId: string; status: string; progress?: number }) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running' || j.status === 'waiting_for_pdf'));
+        if (activeJob) {
+          serverIsGenerating = true;
+          setIsGenerating(true);
+          if (activeJob.progress !== undefined) setProgress(activeJob.progress);
+          if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
+          else if (activeJob.status === 'waiting_for_pdf') setCurrentChapter('Waiting for PDF parsing...');
+          else setCurrentChapter('Generating on server...');
+        }
+      }
+    } catch {
+      // Ignored
+    }
+
     try {
       const data = await getAudiobookStatus(documentId);
       if (data.exists) {
@@ -227,26 +249,10 @@ export function AudiobookExportModal({
         setIsLoadingExisting(false);
       }
     }
-    
-    // Check server queue status
-    try {
-      const qRes = await fetch('/api/audiobooks/queue');
-      if (qRes.ok) {
-        const qData = await qRes.json();
-        const activeJob = qData.jobs?.find((j: { documentId: string; status: string; progress?: number }) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running' || j.status === 'waiting_for_pdf'));
-        if (activeJob) {
-          setIsGenerating(true);
-          if (activeJob.progress !== undefined) setProgress(activeJob.progress);
-          if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
-          else if (activeJob.status === 'waiting_for_pdf') setCurrentChapter('Waiting for PDF parsing...');
-          else setCurrentChapter('Generating on server...');
-        } else {
-          // If no active job on the server, ensure we are not in a generating state.
-          setIsGenerating(false);
-        }
-      }
-    } catch {
-      // Ignored
+
+    if (!serverIsGenerating) {
+      // If no active job on the server, ensure we are not in a generating state.
+      setIsGenerating(false);
     }
   }, [documentId, setProgress]);
 

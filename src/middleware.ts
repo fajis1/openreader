@@ -23,6 +23,7 @@ const COUNTRY_HEADER_NAMES = [
  */
 const PUBLIC_PATH_PREFIXES = [
   '/api/auth',   // Better Auth endpoints (sign-in, sign-up, callbacks, etc.)
+  '/api/rate-limit/status',
   '/signin',
   '/signup',
   '/privacy',

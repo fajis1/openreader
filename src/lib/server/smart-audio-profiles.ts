@@ -65,7 +65,7 @@ const fallbackProfilesDocument: SmartAudioProfilesDocument = {
   profiles: defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>)),
 };
 
-function parseDataJson(val: unknown): Record<string, any> {
+function parseDataJson(val: unknown): Record<string, unknown> {
   if (typeof val === 'string') {
     try {
       const parsed = JSON.parse(val);
@@ -74,12 +74,12 @@ function parseDataJson(val: unknown): Record<string, any> {
       return {};
     }
   } else if (typeof val === 'object' && val !== null) {
-    return val as Record<string, any>;
+    return val as Record<string, unknown>;
   }
   return {};
 }
 
-function serializeDataJson(val: Record<string, any>): string | Record<string, any> {
+function serializeDataJson(val: Record<string, unknown>): string | Record<string, unknown> {
   return process.env.POSTGRES_URL ? val : JSON.stringify(val);
 }
 
@@ -104,7 +104,7 @@ export async function readSmartAudioProfilesDocument(userId?: string | null): Pr
       selectedProfileId,
       profiles: profiles.length > 0 ? profiles : fallbackProfilesDocument.profiles,
     };
-  } catch (error) {
+  } catch {
     return fallbackProfilesDocument;
   }
 }
@@ -142,6 +142,7 @@ export async function writeSmartAudioProfilesDocument(userId: string | null | un
         }
       });
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error('Failed to write smart audio profiles', error);
   }
   return sanitizedDocument;

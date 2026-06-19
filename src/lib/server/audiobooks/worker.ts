@@ -182,6 +182,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           return;
         }
       }
+      if (!artifact) {
+        return;
+      }
       const parsedPdf = JSON.parse(artifact.bytes.toString('utf-8')) as ParsedPdfDocument;
       
       const allBlocks = parsedPdf.pages.flatMap(p => p.blocks);

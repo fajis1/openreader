@@ -1,0 +1,225 @@
+[batchPreparedChapters] Analyzing chapter "Cooked: Baked, Toasted, Fried". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "NOTES". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "THE CEREAL OFFERING (2:1–16)". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Natural Grain". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Raw Flour". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Injunctions Concerning Leaven, Honey, and Salt". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 0. Text length: 2430
+[batchPreparedChapters] ⚠️ Found unusually large paragraph (44417 chars) at paragraph index 0. This will be passed intact as its own batch.
+[batchPreparedChapters] Analyzing chapter "2. [The priest]. Moved up from 2b for clarity.". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] ⚠️ Found unusually large paragraph (8354 chars) at paragraph index 0. This will be passed intact as its own batch.
+[batchPreparedChapters] Creating batch 1. Text length: 8354
+[batchPreparedChapters] Analyzing chapter "COMMENT THE CEREAL OFFERING: FUNCTION, NAME, TYPES, AND DEVELOPMENT". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] ⚠️ Found unusually large paragraph (23995 chars) at paragraph index 0. This will be passed intact as its own batch.
+[batchPreparedChapters] Creating batch 2. Text length: 44417
+[batchPreparedChapters] Creating final batch 3. Text length: 23995
+[batchPreparedChapters] Analyzing chapter "THE CEREAL OFFERING (2:1–16)". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Raw Flour". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Cooked: Baked, Toasted, Fried". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Natural Grain". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Injunctions Concerning Leaven, Honey, and Salt". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "NOTES". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] ⚠️ Found unusually large paragraph (8354 chars) at paragraph index 0. This will be passed intact as its own batch.
+[batchPreparedChapters] Creating batch 0. Text length: 2430
+[batchPreparedChapters] Analyzing chapter "2. [The priest]. Moved up from 2b for clarity.". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] ⚠️ Found unusually large paragraph (44417 chars) at paragraph index 0. This will be passed intact as its own batch.
+[batchPreparedChapters] Creating batch 1. Text length: 8354
+[batchPreparedChapters] Analyzing chapter "COMMENT THE CEREAL OFFERING: FUNCTION, NAME, TYPES, AND DEVELOPMENT". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] ⚠️ Found unusually large paragraph (23995 chars) at paragraph index 0. This will be passed intact as its own batch.
+[batchPreparedChapters] Creating batch 2. Text length: 44417
+[batchPreparedChapters] Creating final batch 3. Text length: 23995
+[batchPreparedChapters] Analyzing chapter "Natural Grain". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Cooked: Baked, Toasted, Fried". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Raw Flour". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "NOTES". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Injunctions Concerning Leaven, Honey, and Salt". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "THE CEREAL OFFERING (2:1–16)". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] ⚠️ Found unusually large paragraph (8354 chars) at paragraph index 0. This will be passed intact as its own batch.
+[batchPreparedChapters] Creating batch 0. Text length: 2430
+[batchPreparedChapters] Analyzing chapter "2. [The priest]. Moved up from 2b for clarity.". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] ⚠️ Found unusually large paragraph (44417 chars) at paragraph index 0. This will be passed intact as its own batch.
+[batchPreparedChapters] Analyzing chapter "COMMENT THE CEREAL OFFERING: FUNCTION, NAME, TYPES, AND DEVELOPMENT". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 1. Text length: 8354
+[batchPreparedChapters] ⚠️ Found unusually large paragraph (23995 chars) at paragraph index 0. This will be passed intact as its own batch.
+[batchPreparedChapters] Creating batch 2. Text length: 44417
+[batchPreparedChapters] Creating final batch 3. Text length: 23995
+[batchPreparedChapters] Analyzing chapter "Injunctions Concerning Leaven, Honey, and Salt". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Cooked: Baked, Toasted, Fried". Found 5 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Raw Flour". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Natural Grain". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "NOTES". Found 14 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "THE CEREAL OFFERING (2:1–16)". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 0. Text length: 3946
+[batchPreparedChapters] Analyzing chapter "2. [The priest]. Moved up from 2b for clarity.". Found 73 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 1. Text length: 3813
+[batchPreparedChapters] Creating batch 2. Text length: 3838
+[batchPreparedChapters] Creating batch 3. Text length: 3547
+[batchPreparedChapters] Creating batch 4. Text length: 3811
+[batchPreparedChapters] Creating batch 5. Text length: 3663
+[batchPreparedChapters] Creating batch 6. Text length: 3797
+[batchPreparedChapters] Creating batch 7. Text length: 3738
+[batchPreparedChapters] Creating batch 8. Text length: 3985
+[batchPreparedChapters] Creating batch 9. Text length: 2724
+[batchPreparedChapters] Creating batch 10. Text length: 3775
+[batchPreparedChapters] Creating batch 11. Text length: 3389
+[batchPreparedChapters] Creating batch 12. Text length: 3881
+[batchPreparedChapters] Creating batch 13. Text length: 3763
+[batchPreparedChapters] Analyzing chapter "COMMENT THE CEREAL OFFERING: FUNCTION, NAME, TYPES, AND DEVELOPMENT". Found 37 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 14. Text length: 3758
+[batchPreparedChapters] Creating batch 15. Text length: 3861
+[batchPreparedChapters] Creating batch 16. Text length: 3644
+[batchPreparedChapters] Creating batch 17. Text length: 3249
+[batchPreparedChapters] Creating batch 18. Text length: 2973
+[batchPreparedChapters] Creating batch 20. Text length: 3248
+[batchPreparedChapters] Creating batch 19. Text length: 3724
+[batchPreparedChapters] Creating final batch 21. Text length: 3161
+[batchPreparedChapters] Analyzing chapter "Injunctions Concerning Leaven, Honey, and Salt". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "THE CEREAL OFFERING (2:1–16)". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Natural Grain". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Raw Flour". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Cooked: Baked, Toasted, Fried". Found 5 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "NOTES". Found 14 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 0. Text length: 3946
+[batchPreparedChapters] Creating batch 1. Text length: 3813
+[batchPreparedChapters] Analyzing chapter "2. [The priest]. Moved up from 2b for clarity.". Found 73 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 2. Text length: 3838
+[batchPreparedChapters] Creating batch 3. Text length: 3547
+[batchPreparedChapters] Creating batch 4. Text length: 3811
+[batchPreparedChapters] Creating batch 5. Text length: 3663
+[batchPreparedChapters] Creating batch 6. Text length: 3797
+[batchPreparedChapters] Creating batch 8. Text length: 3985
+[batchPreparedChapters] Creating batch 7. Text length: 3738
+[batchPreparedChapters] Creating batch 10. Text length: 3775
+[batchPreparedChapters] Creating batch 9. Text length: 2724
+[batchPreparedChapters] Creating batch 11. Text length: 3389
+[batchPreparedChapters] Creating batch 12. Text length: 3881
+[batchPreparedChapters] Creating batch 13. Text length: 3763
+[batchPreparedChapters] Creating batch 14. Text length: 3758
+[batchPreparedChapters] Analyzing chapter "COMMENT THE CEREAL OFFERING: FUNCTION, NAME, TYPES, AND DEVELOPMENT". Found 37 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 15. Text length: 3861
+[batchPreparedChapters] Creating batch 16. Text length: 3644
+[batchPreparedChapters] Creating batch 17. Text length: 3249
+[batchPreparedChapters] Creating batch 18. Text length: 2973
+[batchPreparedChapters] Creating batch 19. Text length: 3724
+[batchPreparedChapters] Creating batch 20. Text length: 3248
+[batchPreparedChapters] Creating final batch 21. Text length: 3161
+[batchPreparedChapters] Analyzing chapter "Injunctions Concerning Leaven, Honey, and Salt". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Cooked: Baked, Toasted, Fried". Found 5 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "THE CEREAL OFFERING (2:1–16)". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Raw Flour". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Natural Grain". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "NOTES". Found 14 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 0. Text length: 3946
+[batchPreparedChapters] Creating batch 1. Text length: 3813
+[batchPreparedChapters] Analyzing chapter "2. [The priest]. Moved up from 2b for clarity.". Found 73 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 2. Text length: 3838
+[batchPreparedChapters] Creating batch 3. Text length: 3547
+[batchPreparedChapters] Creating batch 4. Text length: 3811
+[batchPreparedChapters] Creating batch 5. Text length: 3663
+[batchPreparedChapters] Creating batch 9. Text length: 2724
+[batchPreparedChapters] Creating batch 6. Text length: 3797
+[batchPreparedChapters] Creating batch 7. Text length: 3738
+[batchPreparedChapters] Creating batch 8. Text length: 3985
+[batchPreparedChapters] Creating batch 10. Text length: 3775
+[batchPreparedChapters] Creating batch 11. Text length: 3389
+[batchPreparedChapters] Creating batch 12. Text length: 3881
+[batchPreparedChapters] Creating batch 13. Text length: 3763
+[batchPreparedChapters] Analyzing chapter "COMMENT THE CEREAL OFFERING: FUNCTION, NAME, TYPES, AND DEVELOPMENT". Found 37 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 14. Text length: 3758
+[batchPreparedChapters] Creating batch 15. Text length: 3861
+[batchPreparedChapters] Creating batch 16. Text length: 3644
+[batchPreparedChapters] Creating final batch 21. Text length: 3161
+[batchPreparedChapters] Creating batch 17. Text length: 3249
+[batchPreparedChapters] Creating batch 18. Text length: 2973
+[batchPreparedChapters] Creating batch 19. Text length: 3724
+[batchPreparedChapters] Creating batch 20. Text length: 3248
+[batchPreparedChapters] Analyzing chapter "NOTES". Found 14 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Injunctions Concerning Leaven, Honey, and Salt". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Cooked: Baked, Toasted, Fried". Found 5 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "THE CEREAL OFFERING (2:1–16)". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Natural Grain". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Raw Flour". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 0. Text length: 3946
+[batchPreparedChapters] Creating batch 1. Text length: 3813
+[batchPreparedChapters] Creating batch 3. Text length: 3547
+[batchPreparedChapters] Creating batch 2. Text length: 3838
+[batchPreparedChapters] Creating batch 4. Text length: 3811
+[batchPreparedChapters] Analyzing chapter "2. [The priest]. Moved up from 2b for clarity.". Found 73 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 5. Text length: 3663
+[batchPreparedChapters] Creating batch 8. Text length: 3985
+[batchPreparedChapters] Creating batch 6. Text length: 3797
+[batchPreparedChapters] Creating batch 10. Text length: 3775
+[batchPreparedChapters] Creating batch 7. Text length: 3738
+[batchPreparedChapters] Creating batch 9. Text length: 2724
+[batchPreparedChapters] Creating batch 11. Text length: 3389
+[batchPreparedChapters] Creating batch 14. Text length: 3758
+[batchPreparedChapters] Creating batch 12. Text length: 3881
+[batchPreparedChapters] Creating batch 13. Text length: 3763
+[batchPreparedChapters] Analyzing chapter "COMMENT THE CEREAL OFFERING: FUNCTION, NAME, TYPES, AND DEVELOPMENT". Found 37 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 15. Text length: 3861
+[batchPreparedChapters] Creating batch 16. Text length: 3644
+[batchPreparedChapters] Creating batch 17. Text length: 3249
+[batchPreparedChapters] Creating batch 18. Text length: 2973
+[batchPreparedChapters] Creating batch 19. Text length: 3724
+[batchPreparedChapters] Creating batch 20. Text length: 3248
+[batchPreparedChapters] Creating final batch 21. Text length: 3161
+[batchPreparedChapters] Analyzing chapter "Natural Grain". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "NOTES". Found 14 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Raw Flour". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "THE CEREAL OFFERING (2:1–16)". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Cooked: Baked, Toasted, Fried". Found 5 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Injunctions Concerning Leaven, Honey, and Salt". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 0. Text length: 3946
+[batchPreparedChapters] Creating batch 4. Text length: 3811
+[batchPreparedChapters] Creating batch 1. Text length: 3813
+[batchPreparedChapters] Analyzing chapter "2. [The priest]. Moved up from 2b for clarity.". Found 73 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 2. Text length: 3838
+[batchPreparedChapters] Creating batch 3. Text length: 3547
+[batchPreparedChapters] Creating batch 5. Text length: 3663
+[batchPreparedChapters] Creating batch 6. Text length: 3797
+[batchPreparedChapters] Creating batch 9. Text length: 2724
+[batchPreparedChapters] Creating batch 10. Text length: 3775
+[batchPreparedChapters] Creating batch 7. Text length: 3738
+[batchPreparedChapters] Creating batch 8. Text length: 3985
+[batchPreparedChapters] Creating batch 11. Text length: 3389
+[batchPreparedChapters] Creating batch 12. Text length: 3881
+[batchPreparedChapters] Creating batch 13. Text length: 3763
+[batchPreparedChapters] Analyzing chapter "COMMENT THE CEREAL OFFERING: FUNCTION, NAME, TYPES, AND DEVELOPMENT". Found 37 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 14. Text length: 3758
+[batchPreparedChapters] Creating batch 15. Text length: 3861
+[batchPreparedChapters] Creating batch 16. Text length: 3644
+[batchPreparedChapters] Creating batch 17. Text length: 3249
+[batchPreparedChapters] Creating batch 18. Text length: 2973
+[batchPreparedChapters] Creating batch 20. Text length: 3248
+[batchPreparedChapters] Creating final batch 21. Text length: 3161
+[batchPreparedChapters] Creating batch 19. Text length: 3724
+[batchPreparedChapters] Analyzing chapter "Natural Grain". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "THE CEREAL OFFERING (2:1–16)". Found 1 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Injunctions Concerning Leaven, Honey, and Salt". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Raw Flour". Found 2 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "NOTES". Found 14 paragraphs separated by \n\n.
+[batchPreparedChapters] Analyzing chapter "Cooked: Baked, Toasted, Fried". Found 5 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 0. Text length: 3946
+[batchPreparedChapters] Creating batch 1. Text length: 3813
+[batchPreparedChapters] Analyzing chapter "2. [The priest]. Moved up from 2b for clarity.". Found 73 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 2. Text length: 3838
+[batchPreparedChapters] Creating batch 3. Text length: 3547
+[batchPreparedChapters] Creating batch 4. Text length: 3811
+[batchPreparedChapters] Creating batch 5. Text length: 3663
+[batchPreparedChapters] Creating batch 6. Text length: 3797
+[batchPreparedChapters] Creating batch 7. Text length: 3738
+[batchPreparedChapters] Creating batch 8. Text length: 3985
+[batchPreparedChapters] Creating batch 9. Text length: 2724
+[batchPreparedChapters] Creating batch 10. Text length: 3775
+[batchPreparedChapters] Creating batch 11. Text length: 3389
+[batchPreparedChapters] Creating batch 12. Text length: 3881
+[batchPreparedChapters] Creating batch 13. Text length: 3763
+[batchPreparedChapters] Analyzing chapter "COMMENT THE CEREAL OFFERING: FUNCTION, NAME, TYPES, AND DEVELOPMENT". Found 37 paragraphs separated by \n\n.
+[batchPreparedChapters] Creating batch 14. Text length: 3758
+[batchPreparedChapters] Creating batch 15. Text length: 3861
+[batchPreparedChapters] Creating batch 16. Text length: 3644
+[batchPreparedChapters] Creating batch 17. Text length: 3249
+[batchPreparedChapters] Creating batch 18. Text length: 2973
+[batchPreparedChapters] Creating batch 19. Text length: 3724
+[batchPreparedChapters] Creating batch 20. Text length: 3248
+[batchPreparedChapters] Creating final batch 21. Text length: 3161

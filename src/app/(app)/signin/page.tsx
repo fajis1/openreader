@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getAuthClient } from '@/lib/client/auth-client';
 import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
@@ -23,7 +23,6 @@ function SessionExpiredLoader({ setSessionExpired, setErrorFromUrl }: { setSessi
 }
 
 function SignInContent() {
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loadingEmail, setLoadingEmail] = useState(false);
