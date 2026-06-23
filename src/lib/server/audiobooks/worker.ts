@@ -285,7 +285,8 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       try {
         const { connect, StringCodec } = await import('nats');
         serverLogger.info({ event: 'audiobook.queue.smart_audio.init', bookId }, 'Connecting to NATS for Gemini worker...');
-        nc = await connect({ servers: "nats://127.0.0.1:4222", maxReconnectAttempts: 1, timeout: 2000 });
+        const natsUrl = process.env.NATS_URL || "nats://127.0.0.1:4222";
+        nc = await connect({ servers: natsUrl, maxReconnectAttempts: 1, timeout: 2000 });
         sc = StringCodec();
       } catch (e) {
         serverLogger.warn({ event: 'audiobook.queue.smart_audio.error', error: e }, 'Failed to connect to NATS, smart audio will fail');
@@ -316,7 +317,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       const chapterFileName = encodeChapterFileName(chapter.index, chapter.title, format);
       
       // CRASH RECOVERY: Check if chapter already exists in DB
-      const existing = await db.select().from(audiobookChapters).where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.chapterIndex, chapter.index)));
+      const existing = await db.select().from(audiobookChapters).where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, userId), eq(audiobookChapters.chapterIndex, chapter.index)));
       if (existing.length > 0) {
         processedLength += chapter.text.length;
         await updateProgress(Math.floor((processedLength / totalLength) * 100));

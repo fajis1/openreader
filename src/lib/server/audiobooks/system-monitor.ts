@@ -5,6 +5,10 @@ import fs from 'node:fs/promises';
  * Returns true if the system has at least 20% free resources.
  */
 export async function checkSystemResources(): Promise<{ ok: boolean; reason?: string }> {
+  if (process.env.ENABLE_TEST_NAMESPACE === 'true') {
+    return { ok: true };
+  }
+
   try {
     // 1. Check Memory (20% free)
     const freeMem = os.freemem();

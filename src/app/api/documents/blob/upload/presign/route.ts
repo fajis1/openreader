@@ -38,6 +38,7 @@ function parseUploads(body: unknown): PresignUpload[] {
 
 export async function POST(req: NextRequest) {
   try {
+    console.log("S3 CONFIGURED:", isS3Configured(), "ENV:", process.env.USE_EMBEDDED_WEED_MINI);
     if (!isS3Configured()) {
       return NextResponse.json(
         { error: 'Documents storage is not configured. Set S3_* environment variables.' },

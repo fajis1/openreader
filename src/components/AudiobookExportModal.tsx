@@ -269,14 +269,14 @@ export function AudiobookExportModal({
     }
   }, [isOpen, documentId, isGenerating, fetchExistingChapters]);
 
-  // Poll server queue if generating
+  // Poll for status updates
   useEffect(() => {
-    if (isOpen && documentId && isGenerating) {
-      const interval = setInterval(() => {
-        fetchExistingChaptersRef.current(true);
-      }, 3000);
-      return () => clearInterval(interval);
-    }
+    if (!isOpen || !isGenerating) return;
+
+    const interval = setInterval(() => {
+      fetchExistingChaptersRef.current(true);
+    }, 3000);
+    return () => clearInterval(interval);
   }, [isOpen, documentId, isGenerating]);
 
   const handleChapterComplete = useCallback((chapter: TTSAudiobookChapter) => {

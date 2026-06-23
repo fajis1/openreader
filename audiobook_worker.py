@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import os
 from nats.aio.client import Client as NATS
 from google import genai
 
@@ -189,7 +190,8 @@ async def process_message(msg):
 async def main():
     nc = NATS()
     try:
-        await nc.connect("nats://127.0.0.1:4222")
+        nats_url = os.environ.get("NATS_URL", "nats://127.0.0.1:4222")
+        await nc.connect(nats_url)
         print("==========================================")
         print("  PYTHON AUDIOBOOK WORKER IS ONLINE")
         print("  [Loaded: Regex Engine, Auto-Sync Module]")

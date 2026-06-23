@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { expectDocumentListed } from './helpers';
 import { setupTest, uploadFiles, expectNoDocumentLink, deleteDocumentByName } from './helpers';
 
 test.describe('Document deletion flow', () => {

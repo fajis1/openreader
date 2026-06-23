@@ -237,8 +237,10 @@ async function cancelGenerationIfVisible(page: Page): Promise<void> {
 }
 
 async function resetAudiobookById(page: Page, bookId: string) {
-  const res = await requestWithRetry(() => page.request.delete(`/api/audiobook?bookId=${bookId}`));
-  expect(res.ok() || res.status() === 404).toBeTruthy();
+  await requestWithRetry(() => page.evaluate(async (id) => {
+    const r = await fetch(`/api/audiobook?bookId=${id}`, { method: 'DELETE' });
+    if (!r.ok && r.status !== 404) throw new Error(`HTTP ${r.status}`);
+  }, bookId));
 }
 
 async function resetAudiobookIfPresent(page: Page, bookId?: string) {

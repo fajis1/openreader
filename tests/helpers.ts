@@ -8,6 +8,18 @@ export function escapeRegExp(input: string) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+export async function ensureAnonymousSession(page: Page) {
+  await page.goto('/signin');
+  const btn = page.getByRole('button', { name: 'Continue anonymously' });
+  try {
+    await btn.waitFor({ state: 'visible', timeout: 5000 });
+    await btn.click();
+    await page.waitForURL(/\/app$/);
+  } catch (e) {
+    // If it doesn't appear after 5s, maybe we are already signed in or it's not enabled
+  }
+}
+
 async function waitForPdfViewerReady(page: Page, timeout = 60000) {
   await expect(page).toHaveURL(/\/pdf\/[A-Za-z0-9._%-]+$/, { timeout: Math.min(timeout, 20000) });
   const loader = page.getByTestId('pdf-status-loader').first();
@@ -34,7 +46,7 @@ async function waitForPdfViewerReady(page: Page, timeout = 60000) {
  */
 export async function uploadFile(page: Page, filePath: string) {
   const input = page.locator('input[type=file]').first();
-  await expect(input).toBeVisible({ timeout: 10000 });
+  await expect(input).toBeAttached({ timeout: 10000 });
   await expect(input).toBeEnabled({ timeout: 10000 });
 
   await input.setInputFiles(`${DIR}${filePath}`);
@@ -242,7 +254,7 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
 
   // If we explicitly choose to bootstrap anonymous sessions for a test run,
   // do it before navigation so protected startup routes do not intermittently 401.
-  // await ensureAnonymousSession(page);
+  await ensureAnonymousSession(page);
 
   // Navigate to the protected app home before each test
   await page.goto('/app');

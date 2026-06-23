@@ -25,6 +25,7 @@ async function listKeysByPrefix(prefix: string): Promise<string[]> {
   const keys: string[] = [];
 
   do {
+    console.log("Teardown using bucket:", config.bucket);
     const response = await client.send(
       new ListObjectsV2Command({
         Bucket: config.bucket,

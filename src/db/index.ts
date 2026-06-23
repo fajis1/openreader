@@ -79,7 +79,7 @@ function getDrizzleDB() {
     const { drizzle: drizzleSqlite } = require('drizzle-orm/better-sqlite3');
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Database = require('better-sqlite3');
-    const dbPath = path.join(process.cwd(), 'docstore', 'sqlite3.db');
+    const dbPath = process.env.SQLITE_DB_PATH ? path.resolve(process.env.SQLITE_DB_PATH) : path.join(process.cwd(), 'docstore', 'sqlite3.db');
     const dir = path.dirname(dbPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });

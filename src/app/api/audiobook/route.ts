@@ -343,7 +343,7 @@ export async function GET(request: NextRequest) {
     if (format === 'mp3') {
       try {
         await runFFmpeg(
-          ['-f', 'concat', '-safe', '0', '-i', listPath, '-map_metadata', '-1', '-c:a', 'copy', outputPath],
+          ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-map_metadata', '-1', '-c:a', 'copy', outputPath],
           request.signal,
         );
       } catch (copyError) {
@@ -354,7 +354,7 @@ export async function GET(request: NextRequest) {
           error: errorToLog(copyError),
         }, 'MP3 concat copy failed; falling back to re-encode');
         await runFFmpeg(
-          ['-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-b:a', '64k', outputPath],
+          ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-b:a', '64k', outputPath],
           request.signal,
         );
       }
@@ -362,6 +362,7 @@ export async function GET(request: NextRequest) {
       try {
         await runFFmpeg(
           [
+            '-y',
             '-f',
             'concat',
             '-safe',
@@ -391,6 +392,7 @@ export async function GET(request: NextRequest) {
         }, 'M4B concat copy failed; falling back to re-encode');
         await runFFmpeg(
           [
+            '-y',
             '-f',
             'concat',
             '-safe',

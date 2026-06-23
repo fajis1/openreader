@@ -8,6 +8,6 @@ export default {
   out: './drizzle/sqlite',
   dialect: 'sqlite',
   dbCredentials: {
-    url: 'docstore/sqlite3.db',
+    url: process.env.SQLITE_DB_PATH || 'docstore/sqlite3.db',
   },
 } satisfies Config;
