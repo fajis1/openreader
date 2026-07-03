@@ -42,7 +42,7 @@ export default defineConfig({
     command: `export BETTER_AUTH_URL=http://127.0.0.1:3005 API_KEY=test API_BASE=http://127.0.0.1:3005 BASE_URL=http://127.0.0.1:3005 USE_ANONYMOUS_AUTH_SESSIONS=true S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test COMPUTE_WORKER_TOKEN=local-compute-token PORT=3005 S3_ENDPOINT=http://127.0.0.1:8335 EMBEDDED_NATS_PORT=4224 NATS_URL=nats://127.0.0.1:4224 EMBEDDED_NATS_MONITOR_PORT=8224 EMBEDDED_COMPUTE_WORKER_PORT=8083 WEED_MINI_DIR=docstore/test-seaweedfs EMBEDDED_NATS_STORE_DIR=docstore/test-nats SQLITE_DB_PATH=docstore/test-sqlite3.db DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true && mkdir -p docstore && pnpm migrate && pnpm build && node scripts/openreader-entrypoint.mjs -- next start -p 3005 > /tmp/webserver.log 2>&1`,
     url: 'http://127.0.0.1:3005',
     reuseExistingServer: true,
-    timeout: 240 * 1000,
+    timeout: 600 * 1000,
     stdout: 'pipe',
     stderr: 'pipe',
   },

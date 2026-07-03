@@ -143,16 +143,21 @@ async function downloadFullAudiobook(page: Page, timeoutMs = 60_000): Promise<Do
 }
 
 async function getAudioDurationSeconds(filePath: string) {
-  const { stdout } = await execFileAsync('ffprobe', [
-    '-v',
-    'error',
-    '-show_entries',
-    'format=duration',
-    '-of',
-    'csv=p=0',
-    filePath,
-  ]);
-  return parseFloat(stdout.trim());
+  const ffmpeg = require('ffmpeg-static');
+  try {
+    // ffmpeg -i outputs metadata to stderr
+    await execFileAsync(ffmpeg, ['-i', filePath]);
+  } catch (error: any) {
+    const stderr = error.stderr || '';
+    const match = stderr.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d+)/);
+    if (match) {
+      const hours = parseFloat(match[1]);
+      const minutes = parseFloat(match[2]);
+      const seconds = parseFloat(match[3]);
+      return hours * 3600 + minutes * 60 + seconds;
+    }
+  }
+  return 0;
 }
 
 async function expectChaptersBackendState(page: Page, bookId: string) {
@@ -237,10 +242,18 @@ async function cancelGenerationIfVisible(page: Page): Promise<void> {
 }
 
 async function resetAudiobookById(page: Page, bookId: string) {
-  await requestWithRetry(() => page.evaluate(async (id) => {
-    const r = await fetch(`/api/audiobook?bookId=${id}`, { method: 'DELETE' });
-    if (!r.ok && r.status !== 404) throw new Error(`HTTP ${r.status}`);
-  }, bookId));
+  for (let i = 0; i < 3; i++) {
+    try {
+      await page.evaluate(async (id) => {
+        const r = await fetch(`/api/audiobook?bookId=${id}`, { method: 'DELETE' });
+        if (!r.ok && r.status !== 404) throw new Error(`HTTP ${r.status}`);
+      }, bookId);
+      return;
+    } catch (e) {
+      if (i === 2) throw e;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
 }
 
 async function resetAudiobookIfPresent(page: Page, bookId?: string) {
@@ -306,6 +319,17 @@ test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ 
   await waitForChaptersHeading(page);
   const chapterActionsButtons = page.getByRole('button', { name: 'Chapter actions' });
   await expect(chapterActionsButtons).toHaveCount(1, { timeout: 120_000 });
+
+  page.on('request', request => {
+    if (request.url().includes('/api/audiobook')) {
+      console.log('PLAYWRIGHT REQUEST:', request.method(), request.url(), request.headers());
+    }
+  });
+  page.on('response', response => {
+    if (response.url().includes('/api/audiobook')) {
+      console.log('PLAYWRIGHT RESPONSE:', response.status(), response.url());
+    }
+  });
 
   // Trigger full download from the FRONTEND button and capture via Playwright's download API.
   // The button label can be "Full Download (MP3)" or "Full Download (M4B)" depending on

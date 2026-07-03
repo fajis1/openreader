@@ -241,6 +241,13 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
     // Isolate server-side storage per test run (scoped by project/worker/retry/test)
     // to avoid cross-test flake from in-flight server-side writes.
     await page.context().setExtraHTTPHeaders({ 'x-openreader-test-namespace': namespace });
+    // Also set it as a cookie so that native navigations (like downloads) inherit it!
+    await page.context().addCookies([{
+      name: 'x-openreader-test-namespace',
+      value: namespace,
+      domain: '127.0.0.1',
+      path: '/'
+    }]);
   }
 
   // Pre-seed consent to prevent the cookie banner from blocking interactions.

@@ -7,7 +7,7 @@ import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { audiobooks, audiobookChapters } from '@/db/schema';
+import { audiobooks, audiobookChapters, adminSettings } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { rateLimiter, resolveRateLimitThresholds } from '@/lib/server/rate-limit/rate-limiter';
 import { getClientIp } from '@/lib/server/rate-limit/request-ip';
@@ -628,21 +628,39 @@ export async function POST(request: NextRequest) {
             { event: 'audiobook.chapter.smart_audio.enabled', bookId, smartAudioProfileId: selectedProfile?.id },
             'Smart Audio Toggle is ON. Triggering Python Gemini worker...'
           );
-          const nc = await connect({ servers: "nats://127.0.0.1:4222" });
+          const natsUrl = process.env.NATS_URL || "nats://127.0.0.1:4222";
+          const nc = await connect({ servers: natsUrl });
           const sc = StringCodec();
           
+          let finalPronunciations = selectedProfile?.pronunciations || {};
+          if (selectedProfile?.useGlobalPronunciations) {
+            const globalSettingsRow = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_pronunciations')).limit(1);
+            if (globalSettingsRow && globalSettingsRow.length > 0) {
+              try {
+                const globalPronunciations = JSON.parse(globalSettingsRow[0].valueJson);
+                finalPronunciations = { ...globalPronunciations, ...finalPronunciations }; // Profile overrides global
+              } catch (e) {
+                // Ignore parse errors
+              }
+            }
+          }
+
           const payload = JSON.stringify({
             user_id: storageUserId,
             api_key: geminiApiKey,
-            ai_model: selectedProfile?.aiModel || 'gemini-2.5-flash',
+            ai_model: selectedProfile?.aiModel || 'gemini-3.5-flash',
             prompt: selectedProfile?.customTtsPrompt || "You are an expert audiobook preparation assistant...",
             raw_text: data.text,
-            pronunciations: selectedProfile?.pronunciations || {}, 
+            pronunciations: finalPronunciations,
             abbreviations: selectedProfile?.abbreviations || {},
             books: selectedProfile?.books || {}
           });
 
-          const msg = await nc.request("audiobooks.gemini.clean", sc.encode(payload), { timeout: 60000 });
+          const queueName = selectedProfile?.name?.toLowerCase().includes("definition")
+            ? "audiobooks.scholar.clean"
+            : "audiobooks.gemini.clean";
+
+          const msg = await nc.request(queueName, sc.encode(payload), { timeout: 60000 });
           const workerResult = JSON.parse(sc.decode(msg.data));
 
           if (workerResult.status === "success" && workerResult.cleaned_text) {

@@ -34,6 +34,7 @@ function sanitizeProfile(profile: Partial<SmartAudioProfile> & { id?: string; na
     abbreviations: profile.abbreviations || {},
     pronunciations: profile.pronunciations || {},
     books: profile.books || {},
+    useGlobalPronunciations: profile.useGlobalPronunciations ?? false,
     // Keep the key if already stored; never default to a non-empty string
     geminiApiKey: (profile.geminiApiKey || '').trim() || undefined,
   };

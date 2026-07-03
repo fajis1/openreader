@@ -442,6 +442,21 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       totalBytes += ttsBuffer.length;
       await putAudiobookObject(bookId, userId, chapterFileName, ttsBuffer, contentType, testNamespace);
 
+      let duration = 0;
+      try {
+        const { tmpdir } = await import('os');
+        const { join } = await import('path');
+        const { writeFile, rm } = await import('fs/promises');
+        const { ffprobeAudio } = await import('@/lib/server/audiobooks/chapters');
+        const tmpPath = join(tmpdir(), 'worker-probe-' + randomUUID() + '.mp3');
+        await writeFile(tmpPath, ttsBuffer);
+        const probe = await ffprobeAudio(tmpPath);
+        duration = probe.durationSec || 0;
+        await rm(tmpPath).catch(() => {});
+      } catch (e) {
+        serverLogger.warn({ event: 'audiobook.queue.probe.failed', error: String(e) }, 'Failed to probe duration');
+      }
+
       try {
         await db.insert(audiobookChapters).values({
           id: randomUUID(),
@@ -449,7 +464,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           userId,
           chapterIndex: chapter.index,
           title: chapter.title,
-          duration: 0,
+          duration,
           filePath: chapterFileName,
           format,
         });
@@ -476,6 +491,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     // Fire-and-forget internal request to pre-compile the .m4b so the user doesn't have to wait
     const baseUrl = process.env.BASE_URL || `http://127.0.0.1:${process.env.PORT || 3003}`;
     fetch(`${baseUrl}/api/audiobook?bookId=${bookId}&format=m4b&userId=${userId}`, {
+      method: 'POST',
       headers: { 'x-internal-secret': INTERNAL_WORKER_SECRET }
     }).catch((e) => {
       serverLogger.warn({ event: 'audiobook.queue.precompile.error', error: String(e) }, 'Failed to trigger background m4b compilation');

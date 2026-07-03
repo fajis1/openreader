@@ -191,6 +191,7 @@ export async function GET(request: NextRequest) {
       .from(audiobooks)
       .where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, storageUserId)));
     if (existingBookRows.length === 0) {
+      console.log('DEBUG 404: Book not found', { bookId, storageUserId });
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
@@ -198,6 +199,7 @@ export async function GET(request: NextRequest) {
     const objectNames = objects.map((item) => item.fileName);
     const chapters = listChapterObjects(objectNames);
     if (chapters.length === 0) {
+      console.log('DEBUG 404: No chapters found', { bookId, storageUserId, testNamespace, objectNames, objectsLength: objects.length });
       return NextResponse.json({ error: 'No chapters found' }, { status: 404 });
     }
 

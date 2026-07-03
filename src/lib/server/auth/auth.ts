@@ -259,6 +259,7 @@ export async function requireAuthContext(
   const ctx = await getAuthContext(request);
 
   if (!ctx.userId) {
+    console.log('DEBUG 401: Unauthorized in requireAuthContext', { url: request.headers.get('referer') || 'unknown' });
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

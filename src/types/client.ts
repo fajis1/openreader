@@ -68,6 +68,8 @@ export interface SmartAudioProfile {
   abbreviations: Record<string, string>;
   pronunciations: Record<string, string>;
   books: Record<string, string>;
+  /** Whether to merge in the globally defined pronunciations. */
+  useGlobalPronunciations?: boolean;
   /** Per-profile Gemini API key. Never exposed to other users. */
   geminiApiKey?: string;
 }

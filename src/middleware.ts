@@ -117,6 +117,7 @@ export function middleware(request: NextRequest) {
   const hasSession = SESSION_COOKIE_NAMES.some((name) => request.cookies.has(name));
 
   if (!hasSession) {
+    console.log('DEBUG MIDDLEWARE 401:', { pathname });
     // API routes get a 401 instead of a redirect.
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

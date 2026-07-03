@@ -362,6 +362,8 @@ async function main() {
   let workerExitPromise = Promise.resolve();
   let pyWorkerProc = null;
   let pyWorkerExitPromise = Promise.resolve();
+  let pyScholarWorkerProc = null;
+  let pyScholarWorkerExitPromise = Promise.resolve();
   let appProc = null;
   let shutdownPromise = null;
   let isShuttingDown = false;
@@ -374,6 +376,8 @@ async function main() {
   let stopWorkerStderrForward = () => { };
   let stopPyWorkerStdoutForward = () => { };
   let stopPyWorkerStderrForward = () => { };
+  let stopPyScholarWorkerStdoutForward = () => { };
+  let stopPyScholarWorkerStderrForward = () => { };
   let didExit = false;
 
   const exitOnce = (code) => {
@@ -403,6 +407,7 @@ async function main() {
         terminateChild(appProc, signal, 4000),
         terminateChild(workerProc, 'SIGTERM', 4000),
         terminateChild(pyWorkerProc, 'SIGTERM', 4000),
+        terminateChild(pyScholarWorkerProc, 'SIGTERM', 4000),
         terminateChild(natsProc, 'SIGTERM', 4000),
         terminateChild(weedProc, 'SIGTERM', 4000),
       ]);
@@ -410,6 +415,7 @@ async function main() {
       await natsExitPromise;
       await workerExitPromise;
       await pyWorkerExitPromise;
+      await pyScholarWorkerExitPromise;
       stopWeedStdoutForward();
       stopWeedStderrForward();
       stopNatsStdoutForward();
@@ -418,6 +424,8 @@ async function main() {
       stopWorkerStderrForward();
       stopPyWorkerStdoutForward();
       stopPyWorkerStderrForward();
+      stopPyScholarWorkerStdoutForward();
+      stopPyScholarWorkerStderrForward();
     })();
     return shutdownPromise;
   };
@@ -626,6 +634,33 @@ async function main() {
         pyWorkerProc.on('error', (error) => {
           console.error(`Embedded python worker failed to start: ${error instanceof Error ? error.message : String(error)}`);
         });
+
+        if (fs.existsSync(path.join(process.cwd(), 'biblical_scholar_worker.py'))) {
+          console.log(`Starting embedded biblical scholar audio worker...`);
+          pyScholarWorkerProc = spawn(
+            venvPython,
+            ['-u', 'biblical_scholar_worker.py'],
+            {
+              cwd: process.cwd(),
+              env: runtimeEnv,
+              stdio: ['ignore', 'pipe', 'pipe'],
+            },
+          );
+          stopPyScholarWorkerStdoutForward = forwardChildStream(pyScholarWorkerProc.stdout, process.stdout);
+          stopPyScholarWorkerStderrForward = forwardChildStream(pyScholarWorkerProc.stderr, process.stderr);
+          pyScholarWorkerExitPromise = once(pyScholarWorkerProc, 'exit').then(() => undefined).catch(() => undefined);
+          pyScholarWorkerProc.on('exit', (code, signal) => {
+            if (isShuttingDown) return;
+            if (typeof code === 'number' && code !== 0) {
+              console.error(`Embedded biblical scholar worker exited with code ${code}.`);
+            } else if (signal) {
+              console.error(`Embedded biblical scholar worker exited due to signal ${signal}.`);
+            }
+          });
+          pyScholarWorkerProc.on('error', (error) => {
+            console.error(`Embedded biblical scholar worker failed to start: ${error instanceof Error ? error.message : String(error)}`);
+          });
+        }
       } else {
         console.warn('audiobook_worker.py not found in project root. Skipping python smart audio worker.');
       }
