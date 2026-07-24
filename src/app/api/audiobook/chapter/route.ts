@@ -656,9 +656,13 @@ export async function POST(request: NextRequest) {
             books: selectedProfile?.books || {}
           });
 
-          const queueName = selectedProfile?.name?.toLowerCase().includes("definition")
-            ? "audiobooks.scholar.clean"
-            : "audiobooks.gemini.clean";
+          const queueName = (
+            selectedProfile?.workerMode === 'scholar' ||
+            // Legacy fallback: profiles created before workerMode existed used "definition" in the name.
+            (selectedProfile?.workerMode == null && selectedProfile?.name?.toLowerCase().includes('definition'))
+          )
+            ? 'audiobooks.scholar.clean'
+            : 'audiobooks.gemini.clean';
 
           const msg = await nc.request(queueName, sc.encode(payload), { timeout: 60000 });
           const workerResult = JSON.parse(sc.decode(msg.data));

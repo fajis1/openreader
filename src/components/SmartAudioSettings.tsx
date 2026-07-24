@@ -13,7 +13,29 @@ const EMPTY_PROFILE = (): SmartAudioProfile => ({
   abbreviations: {},
   pronunciations: {},
   books: {},
+  workerMode: 'standard',
 });
+
+const WORKER_MODES = [
+  {
+    id: 'standard' as const,
+    icon: '⚡',
+    label: 'Standard AI Cleaner',
+    badge: 'General purpose',
+    description: 'Cleans formatting, fixes OCR errors, expands Bible citations (e.g. "Jn 3:16" → "John chapter 3 verse 16"), and applies your custom abbreviation and pronunciation lists. Best for general audiobooks, novels, and non-fiction.',
+    features: ['OCR & hyphenation repair', 'Bible citation expansion', 'Custom abbreviations & pronunciations', 'TTS cadence optimization', 'Kokoro IPA markup for Greek & Hebrew'],
+    presetName: 'Standard Audiobook Cleaner',
+  },
+  {
+    id: 'scholar' as const,
+    icon: '📖',
+    label: 'Biblical Scholar & Theology',
+    badge: 'Academic & ancient languages',
+    description: 'Uses a specialized multi-pass pipeline. First, a dedicated AI pass identifies isolated Koine Greek and Biblical Hebrew words and inserts inline English definitions/glosses for listening clarity. Then the main cleaning pass applies strict Erasmian Greek and Academic Hebrew Kokoro IPA phonetic markup, prunes long foreign-language quotations, strips dense footnotes, and generates a full line-by-line changelog. Best for commentaries, study Bibles, and academic papers.',
+    features: ['Everything in Standard', 'Greek & Hebrew lexical definition injection', 'Strict Erasmian + Academic Hebrew IPA markup', 'Inline English gloss preservation', 'Full changelog / diff generation', 'Phonetic auto-learning (saves new IPA to your profile)'],
+    presetName: 'Biblical Scholar & Theology',
+  },
+];
 
 function objectToEntries(value: Record<string, string>): Array<{ key: string; value: string }> {
   return Object.entries(value).map(([key, val]) => ({ key, value: val }));
@@ -33,6 +55,7 @@ export function SmartAudioSettings() {
   const [apiKey, setApiKey] = useState('');
   const [maskedKey, setMaskedKey] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<SmartAudioProfile[]>([]);
+  const [workerMode, setWorkerMode] = useState<'standard' | 'scholar'>('standard');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [profileName, setProfileName] = useState('');
   const [aiModel, setAiModel] = useState(PRESET_MODELS[0]?.id || 'gemini-2.5-flash');
@@ -87,17 +110,36 @@ export function SmartAudioSettings() {
   useEffect(() => {
     if (!activeProfile) return;
     setProfileName(activeProfile.name);
+    setWorkerMode(activeProfile.workerMode ?? 'standard');
     setAiModel(activeProfile.aiModel || PRESET_MODELS[0]?.id || 'gemini-2.5-flash');
     setCustomModelId(activeProfile.aiModel && PRESET_MODELS.some((model) => model.id === activeProfile.aiModel) ? '' : activeProfile.aiModel);
-    const matchedPreset = PRESET_PROMPTS.find((preset) => preset.content.trim() === (activeProfile.customTtsPrompt || '').trim());
+
+    const savedPrompt = activeProfile.customTtsPrompt || '';
+
+    // --- Legacy migration ---
+    // Old profiles stored a prompt that began with a "NOTE:" UI annotation.
+    // Detect that pattern and silently upgrade to the clean new preset so the
+    // stale NOTE never gets sent to Gemini again.
+    const isLegacyScholarPrompt =
+      savedPrompt.trimStart().startsWith('NOTE:') ||
+      savedPrompt.includes('automatically inject English definitions');
+
+    const matchedPreset = isLegacyScholarPrompt
+      ? PRESET_PROMPTS.find((p) => p.workerMode === 'scholar')
+      : PRESET_PROMPTS.find((preset) => preset.content.trim() === savedPrompt.trim());
+
     if (matchedPreset) {
       setPromptMode('preset');
       setSelectedPromptName(matchedPreset.name);
       setPrompt(matchedPreset.content);
+      // If we just auto-migrated, also set the worker mode card correctly.
+      if (isLegacyScholarPrompt) {
+        setWorkerMode('scholar');
+      }
     } else {
       setPromptMode('custom');
       setSelectedPromptName('');
-      setPrompt(activeProfile.customTtsPrompt || '');
+      setPrompt(savedPrompt);
     }
     setAbbreviations(objectToEntries(activeProfile.abbreviations || {}));
     setPronunciations(objectToEntries(activeProfile.pronunciations || {}));
@@ -119,10 +161,25 @@ export function SmartAudioSettings() {
       abbreviations: entriesToObject(abbreviations),
       pronunciations: entriesToObject(pronunciations),
       books: entriesToObject(books),
+      workerMode,
       // Preserve stored key; overwrite only if user typed a new one
       geminiApiKey: apiKey.trim() || activeProfile?.geminiApiKey || undefined,
     };
-  }, [apiKey, aiModel, customModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, activeProfile]);
+  }, [apiKey, aiModel, customModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, workerMode, activeProfile]);
+
+  // When the user clicks a worker mode card, always switch to the matching
+  // preset for that engine. This ensures clicking a card is always a clean
+  // one-click reset to the correct prompt template.
+  const handleWorkerModeChange = useCallback((mode: 'standard' | 'scholar') => {
+    setWorkerMode(mode);
+    const targetMode = WORKER_MODES.find((m) => m.id === mode);
+    const matchingPreset = PRESET_PROMPTS.find((p) => p.name === targetMode?.presetName);
+    if (matchingPreset) {
+      setPromptMode('preset');
+      setSelectedPromptName(matchingPreset.name);
+      setPrompt(matchingPreset.content);
+    }
+  }, []);
 
   const handleNewProfile = useCallback(() => {
     const profile = EMPTY_PROFILE();
@@ -305,6 +362,70 @@ export function SmartAudioSettings() {
           <button onClick={handleDeleteProfile} className="px-3 py-2 rounded bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-sm font-medium text-red-700 dark:text-red-300">
             Delete
           </button>
+        </div>
+      </div>
+
+      {/* ── AI Processing Engine cards ── */}
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-base font-semibold">AI Processing Engine</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            Choose which background Python worker handles AI text cleaning for this profile.
+            Switching engines will automatically update the prompt template if you are using a preset.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {WORKER_MODES.map((mode) => {
+            const isSelected = workerMode === mode.id;
+            return (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => handleWorkerModeChange(mode.id)}
+                className={`text-left p-4 rounded-xl border-2 transition-all duration-150 ${
+                  isSelected
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 shadow-md'
+                    : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-sm'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl mt-0.5">{mode.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`font-semibold text-sm ${
+                        isSelected ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-gray-100'
+                      }`}>
+                        {mode.label}
+                      </span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        isSelected
+                          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300'
+                          : 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                      }`}>
+                        {mode.badge}
+                      </span>
+                      {isSelected && (
+                        <span className="ml-auto text-blue-500 dark:text-blue-400 text-base">✓</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5 leading-relaxed">
+                      {mode.description}
+                    </p>
+                    <ul className="mt-2 space-y-0.5">
+                      {mode.features.map((f) => (
+                        <li key={f} className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                          <span className={`text-xs ${
+                            isSelected ? 'text-blue-400' : 'text-gray-400'
+                          }`}>•</span>
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
