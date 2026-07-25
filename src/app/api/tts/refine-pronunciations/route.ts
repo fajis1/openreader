@@ -67,18 +67,34 @@ export async function POST(req: NextRequest) {
       .set({ valueJson: JSON.stringify(examples) })
       .where(eq(adminSettings.key, 'pronunciation_feedback_examples'));
 
-    // 2. Resolve Gemini model and key
+    // 2. Resolve Gemini model and keys (Primary & Backup)
     const profilesDoc = await readSmartAudioProfilesDocument(userId);
     const activeProfile = findSmartAudioProfileById(profilesDoc, profilesDoc.selectedProfileId);
     
-    if (!activeProfile?.geminiApiKey) {
-      return NextResponse.json({ error: 'Gemini API key not configured in active profile' }, { status: 400 });
+    // Look up system fallback keys in adminSettings if profile backup key is empty
+    let primaryKey = (activeProfile?.geminiApiKey || '').trim();
+    let backupKey = '';
+
+    const backupRow = await db.select().from(adminSettings).where(eq(adminSettings.key, 'backupGeminiApiKey')).limit(1);
+    if (backupRow.length > 0 && backupRow[0].valueJson) {
+      try { backupKey = JSON.parse(backupRow[0].valueJson); } catch (e) { backupKey = backupRow[0].valueJson; }
+    }
+
+    if (!primaryKey) {
+      const primaryRow = await db.select().from(adminSettings).where(eq(adminSettings.key, 'geminiApiKey')).limit(1);
+      if (primaryRow.length > 0 && primaryRow[0].valueJson) {
+        try { primaryKey = JSON.parse(primaryRow[0].valueJson); } catch (e) { primaryKey = primaryRow[0].valueJson; }
+      }
+    }
+
+    if (!primaryKey) {
+      return NextResponse.json({ error: 'Gemini API key not configured. Please enter your API key in Smart Audio Settings.' }, { status: 400 });
     }
 
     const model = activeProfile?.aiModel || 'gemini-3.6-flash';
-    const apiKey = activeProfile.geminiApiKey;
+    const keysToTry = [primaryKey, backupKey].filter((k, idx, arr) => k && arr.indexOf(k) === idx);
 
-    // 3. Call Gemini
+    // 3. Call Gemini with automatic key failover
     const prompt = `The user wants to adjust the Kokoro IPA pronunciation for the word '${word}'.
 User Feedback: '${feedback}'.
 DO NOT generate any of the following previous choices: ${JSON.stringify(currentChoices || [])}.
@@ -88,49 +104,46 @@ Return a JSON object: { "newChoices": ["pron1", "pron2", "pron3", "pron4", "pron
 
     let res: Response | null = null;
     let errText = '';
-    let retryDelay = 2; // initial wait 2 seconds
+    let retryDelay = 2;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json" }
-          })
-        });
+    for (let keyIdx = 0; keyIdx < keysToTry.length; keyIdx++) {
+      const apiKey = keysToTry[keyIdx];
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              generationConfig: { responseMimeType: "application/json" }
+            })
+          });
 
-        if (res.ok) break;
+          if (res.ok) break;
 
-        errText = await res.text();
-        console.warn(`Gemini API attempt ${attempt} failed (${res.status}):`, errText);
+          errText = await res.text();
+          console.warn(`Gemini API key ${keyIdx + 1} attempt ${attempt} failed (${res.status}):`, errText);
 
-        // If rate limited or overloaded (429 / 503 / 500) and we have retries left, wait and retry
-        if ((res.status === 429 || res.status === 503 || res.status === 500) && attempt < 3) {
-          // Check if Gemini specified a retryDelay
-          try {
-            const errObj = JSON.parse(errText);
-            const detailDelay = errObj.error?.details?.find((d: any) => d.retryDelay)?.retryDelay;
-            if (detailDelay) {
-              const seconds = parseInt(detailDelay.replace('s', ''), 10);
-              if (!isNaN(seconds)) retryDelay = Math.min(seconds, 15);
-            }
-          } catch (e) {}
+          if ((res.status === 429 || res.status === 503) && keyIdx < keysToTry.length - 1) {
+            console.info(`Switching to backup Gemini API key due to HTTP ${res.status}...`);
+            break; // Switch to backup key!
+          }
 
-          await new Promise(resolve => setTimeout(resolve, retryDelay * 1000));
-          retryDelay *= 2; // Exponential backoff
-          continue;
-        } else {
-          break;
-        }
-      } catch (networkErr: any) {
-        console.error(`Gemini fetch error on attempt ${attempt}:`, networkErr);
-        if (attempt < 3) {
-          await new Promise(resolve => setTimeout(resolve, retryDelay * 1000));
-          retryDelay *= 2;
+          if ((res.status === 429 || res.status === 503 || res.status === 500) && attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, retryDelay * 1000));
+            retryDelay *= 2;
+            continue;
+          } else {
+            break;
+          }
+        } catch (networkErr: any) {
+          console.error(`Gemini fetch error on attempt ${attempt}:`, networkErr);
+          if (attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, retryDelay * 1000));
+          }
         }
       }
+      if (res && res.ok) break;
     }
 
     if (!res || !res.ok) {
