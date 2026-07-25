@@ -163,9 +163,8 @@ export function ScanForeignWordsModal({
     }
   };
 
-  const handleRefine = async (word: string) => {
-    const feedback = refineInput[word];
-    if (!feedback) return;
+  const handleRefine = async (word: string, customPrompt?: string) => {
+    const feedback = customPrompt || refineInput[word] || "Generate 5 clean, standard Kokoro IPA pronunciations for this word";
 
     setRefineStatus(prev => ({ ...prev, [word]: 'Step 1/2: Asking Gemini 3.6 Flash for 5 new variations based on your feedback...' }));
     
@@ -377,7 +376,13 @@ export function ScanForeignWordsModal({
                         <button
                           type="button"
                           className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline flex items-center gap-1"
-                          onClick={() => setRefineExpanded(prev => ({ ...prev, [w.word]: !prev[w.word] }))}
+                          onClick={() => {
+                            const isOpening = !refineExpanded[w.word];
+                            setRefineExpanded(prev => ({ ...prev, [w.word]: isOpening }));
+                            if (isOpening && (!w.pronunciations || w.pronunciations.length === 0)) {
+                              void handleRefine(w.word);
+                            }
+                          }}
                         >
                           {refineExpanded[w.word] ? '▼ Hide Refinement' : '▶ Refine with AI'}
                         </button>
@@ -401,7 +406,10 @@ export function ScanForeignWordsModal({
                                       key={idx}
                                       type="button"
                                       className="px-2 py-1 text-[10px] bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-left border border-gray-200 dark:border-gray-700 max-w-full truncate"
-                                      onClick={() => setRefineInput(prev => ({ ...prev, [w.word]: ex }))}
+                                      onClick={() => {
+                                        setRefineInput(prev => ({ ...prev, [w.word]: ex }));
+                                        void handleRefine(w.word, ex);
+                                      }}
                                       title={ex}
                                     >
                                       {ex}
@@ -415,7 +423,7 @@ export function ScanForeignWordsModal({
                               type="button"
                               className="self-start mt-1 px-3 py-1.5 text-xs font-semibold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-300 dark:border-purple-800 rounded hover:bg-purple-200 dark:hover:bg-purple-900/60 transition-colors disabled:opacity-50"
                               onClick={() => handleRefine(w.word)}
-                              disabled={!refineInput[w.word] || !!refineStatus[w.word]}
+                              disabled={!!refineStatus[w.word]}
                             >
                               Generate 5 New Variations ✨
                             </button>

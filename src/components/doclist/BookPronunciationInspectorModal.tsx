@@ -110,17 +110,16 @@ export function BookPronunciationInspectorModal({
   };
 
   const handleRefine = async (word: string) => {
-    const prompt = refineInput[word];
-    if (!prompt) return;
-    setRefineStatus(prev => ({ ...prev, [word]: 'Generating variations...' }));
+    const prompt = refineInput[word] || "Generate 5 clean, standard Kokoro IPA pronunciations for this word";
+    setRefineStatus(prev => ({ ...prev, [word]: 'Asking Gemini 3.6 Flash for 5 new options...' }));
     try {
       const res = await fetch('/api/tts/refine-pronunciations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word, prompt })
+        body: JSON.stringify({ word, feedback: prompt, currentChoices: [] })
       });
       if (res.ok) {
-        setRefineStatus(prev => ({ ...prev, [word]: 'Done! Refreshing...' }));
+        setRefineStatus(prev => ({ ...prev, [word]: 'Done! Pre-cached audio ready.' }));
         fetchPronunciations(selectedBookId, letterFilter);
       }
     } catch (e) {
@@ -206,27 +205,33 @@ export function BookPronunciationInspectorModal({
                       </button>
                       <div className="mt-2">
                         <button
-                          className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                          onClick={() => setRefineExpanded(prev => ({ ...prev, [w.word]: !prev[w.word] }))}
+                          className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline text-left flex items-center gap-1"
+                          onClick={() => {
+                            const isOpening = !refineExpanded[w.word];
+                            setRefineExpanded(prev => ({ ...prev, [w.word]: isOpening }));
+                            if (isOpening && (!w.globalChoices || w.globalChoices.length === 0)) {
+                              void handleRefine(w.word);
+                            }
+                          }}
                         >
                           Refine with AI Prompt ▼
                         </button>
                         {refineExpanded[w.word] && (
                           <div className="mt-1 flex flex-col gap-1">
                             <textarea
-                              className="w-full p-1 text-xs border rounded bg-white dark:bg-gray-800 dark:border-gray-700"
+                              className="w-full p-1 text-xs border rounded bg-white dark:bg-gray-800 dark:border-gray-700 text-gray-900 dark:text-gray-100"
                               placeholder="e.g. Make the ending sound like -een"
                               value={refineInput[w.word] || ''}
                               onChange={e => setRefineInput(prev => ({ ...prev, [w.word]: e.target.value }))}
                             />
                             <button
-                              className="self-start px-2 py-1 text-[10px] font-semibold bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 rounded"
+                              className="self-start px-2 py-1 text-[10px] font-semibold bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 rounded disabled:opacity-50"
                               onClick={() => handleRefine(w.word)}
-                              disabled={!refineInput[w.word]}
+                              disabled={!!refineStatus[w.word]}
                             >
                               Generate 5 AI Options ✨
                             </button>
-                            {refineStatus[w.word] && <div className="text-[10px] text-amber-600">{refineStatus[w.word]}</div>}
+                            {refineStatus[w.word] && <div className="text-[10px] text-amber-600 dark:text-amber-400 animate-pulse">{refineStatus[w.word]}</div>}
                           </div>
                         )}
                       </div>
