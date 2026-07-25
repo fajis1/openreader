@@ -26,6 +26,7 @@ export function JobsInlineView() {
     } catch {}
   };
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [activeGlobalJob, setActiveGlobalJob] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now());
 
@@ -34,17 +35,19 @@ export function JobsInlineView() {
     return () => clearInterval(interval);
   }, []);
 
-  const formatTimeRemaining = (now: number, startedAt: number, updatedAt: number, progressPercent: number) => {
+  const getRemainingMs = (now: number, startedAt: number, updatedAt: number, progressPercent: number) => {
     const activeMsAtLastUpdate = Math.max(0, updatedAt - startedAt);
-    if (progressPercent <= 0 || activeMsAtLastUpdate <= 0) return 'Calculating...';
+    if (progressPercent <= 0 || activeMsAtLastUpdate <= 0) return -1;
     const totalEstimatedMs = activeMsAtLastUpdate / (progressPercent / 100);
     const elapsedSinceStart = now - startedAt;
-    const remainingMs = totalEstimatedMs - elapsedSinceStart;
-    if (remainingMs <= 0) return 'Almost done...';
-    
+    return Math.max(0, totalEstimatedMs - elapsedSinceStart);
+  };
+
+  const formatMs = (remainingMs: number) => {
+    if (remainingMs < 0) return 'Calculating...';
+    if (remainingMs === 0) return 'Almost done...';
     const remainingMins = Math.floor(remainingMs / 60000);
     const remainingSecs = Math.floor((remainingMs % 60000) / 1000);
-    
     if (remainingMins > 60) {
       const hrs = Math.floor(remainingMins / 60);
       const mins = remainingMins % 60;
@@ -59,6 +62,7 @@ export function JobsInlineView() {
       if (res.ok) {
         const data = await res.json();
         setJobs(data.jobs || []);
+        setActiveGlobalJob(data.activeGlobalJob || null);
       }
     } catch (e) {
       console.error(e);
@@ -88,7 +92,17 @@ export function JobsInlineView() {
           <div className="space-y-4">
             {jobs.map((job) => {
               const isQueued = job.status === 'queued' || job.status === 'waiting_for_pdf';
-              const position = isQueued ? jobs.filter(j => j.status === 'queued' && j.createdAt <= job.createdAt).length : null;
+              const globalPosition = (job as any).globalQueuePosition;
+              
+              let queueEtaStr = '';
+              if (isQueued && globalPosition && activeGlobalJob && typeof activeGlobalJob.progress === 'number' && activeGlobalJob.progress > 0) {
+                const activeRemainingMs = getRemainingMs(now, activeGlobalJob.startedAt, activeGlobalJob.updatedAt || activeGlobalJob.startedAt, activeGlobalJob.progress);
+                if (activeRemainingMs >= 0) {
+                  const activeTotalMs = activeRemainingMs + (now - activeGlobalJob.startedAt);
+                  const myWaitMs = activeRemainingMs + (activeTotalMs * (globalPosition - 1));
+                  queueEtaStr = formatMs(myWaitMs);
+                }
+              }
 
               return (
                 <div key={job.id} className="bg-surface p-4 rounded-lg border border-line shadow-sm flex items-center justify-between">
@@ -97,12 +111,17 @@ export function JobsInlineView() {
                     <div className="text-sm text-soft mt-2 flex flex-col gap-2">
                       <div className="flex items-center">
                         Status: <span className="uppercase font-semibold text-accent ml-1">{job.status}</span>
-                        {isQueued && position && (
-                          <span className="ml-3 px-2 py-0.5 rounded-full bg-surface-sunken border border-line text-xs">Position: #{position}</span>
-                        )}
-                        {job.status === 'running' && job.startedAt && job.progress ? (
+                        {isQueued && globalPosition ? (
+                          <span className="ml-3 px-2 py-0.5 rounded-full bg-surface-sunken border border-line text-xs">Queue Position: #{globalPosition}</span>
+                        ) : null}
+                        {queueEtaStr ? (
                           <span className="ml-3 text-faint">
-                            (~{formatTimeRemaining(now, job.startedAt, job.updatedAt || job.startedAt, job.progress)} remaining)
+                            (~{queueEtaStr} remaining before processing)
+                          </span>
+                        ) : null}
+                        {job.status === 'running' && job.startedAt && typeof job.progress === 'number' ? (
+                          <span className="ml-3 text-faint">
+                            (~{formatMs(getRemainingMs(now, job.startedAt, job.updatedAt || job.startedAt, job.progress))} remaining)
                           </span>
                         ) : null}
                       </div>

@@ -114,9 +114,26 @@ export async function GET(req: NextRequest) {
     const userJobs = userJobsRaw.map((row: typeof userJobsRaw[0]) => ({
       ...row.job,
       documentTitle: row.documentTitle,
+      globalQueuePosition: 0
     }));
 
-    return NextResponse.json({ jobs: userJobs });
+    const runningJobs = await db
+      .select({ startedAt: audiobookJobs.startedAt, updatedAt: audiobookJobs.updatedAt, progress: audiobookJobs.progress })
+      .from(audiobookJobs)
+      .where(eq(audiobookJobs.status, 'running'))
+      .limit(1);
+
+    for (const job of userJobs) {
+      if (job.status === 'queued' || job.status === 'waiting_for_pdf') {
+        const olderJobs = await db
+          .select({ id: audiobookJobs.id })
+          .from(audiobookJobs)
+          .where(and(eq(audiobookJobs.status, 'queued'), lt(audiobookJobs.createdAt, job.createdAt!)));
+        job.globalQueuePosition = olderJobs.length + 1;
+      }
+    }
+
+    return NextResponse.json({ jobs: userJobs, activeGlobalJob: runningJobs.length > 0 ? runningJobs[0] : null });
   } catch (error) {
     serverLogger.error({ event: 'audiobook.queue.get.error', error: errorToLog(error) }, 'Failed to list audiobook jobs');
     return errorResponse(error, { apiErrorMessage: 'Failed to list audiobook jobs' });

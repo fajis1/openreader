@@ -29,14 +29,16 @@ function sanitizeProfile(profile: Partial<SmartAudioProfile> & { id?: string; na
   return {
     id,
     name,
-    aiModel: (profile.aiModel || 'gemini-2.5-flash').trim(),
+    aiModel: (profile.aiModel || 'gemini-3.6-flash').trim(),
     customTtsPrompt: profile.customTtsPrompt || '',
     abbreviations: profile.abbreviations || {},
     pronunciations: profile.pronunciations || {},
     books: profile.books || {},
     useGlobalPronunciations: profile.useGlobalPronunciations ?? false,
+    workerMode: profile.workerMode || 'scholar',
     // Keep the key if already stored; never default to a non-empty string
     geminiApiKey: (profile.geminiApiKey || '').trim() || undefined,
+    backupGeminiApiKey: (profile.backupGeminiApiKey || '').trim() || undefined,
   };
 }
 

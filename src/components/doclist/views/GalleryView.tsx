@@ -16,6 +16,8 @@ interface GalleryViewProps {
   documents: DocumentListDocument[];
   folderNameById?: Record<string, string>;
   onDeleteDoc: (doc: DocumentListDocument) => void;
+  onScanDoc?: (doc: DocumentListDocument) => void;
+  onInspectDoc?: (doc: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
   isAudiobookView?: boolean;
 }
@@ -155,6 +157,8 @@ export function GalleryView({
   documents,
   folderNameById,
   onDeleteDoc,
+  onScanDoc,
+  onInspectDoc,
   onMergeIntoFolder,
   isAudiobookView,
 }: GalleryViewProps) {
@@ -291,6 +295,16 @@ export function GalleryView({
                   >
                     Download
                   </ButtonLink>
+                )}
+                {activeDoc.type === 'pdf' && onScanDoc && (
+                  <Button
+                    type="button"
+                    onClick={() => onScanDoc(activeDoc)}
+                    variant="secondary"
+                    size="sm"
+                  >
+                    Pre-Scan Foreign Words
+                  </Button>
                 )}
                 <Button
                   type="button"

@@ -638,7 +638,15 @@ export async function POST(request: NextRequest) {
             if (globalSettingsRow && globalSettingsRow.length > 0) {
               try {
                 const globalPronunciations = JSON.parse(globalSettingsRow[0].valueJson);
-                finalPronunciations = { ...globalPronunciations, ...finalPronunciations }; // Profile overrides global
+                const resolvedGlobal: Record<string, string> = {};
+                for (const [key, val] of Object.entries(globalPronunciations)) {
+                  if (Array.isArray(val) && val.length > 0) {
+                    resolvedGlobal[key] = val[0];
+                  } else if (typeof val === 'string') {
+                    resolvedGlobal[key] = val;
+                  }
+                }
+                finalPronunciations = { ...resolvedGlobal, ...finalPronunciations }; // Profile overrides global
               } catch (e) {
                 // Ignore parse errors
               }

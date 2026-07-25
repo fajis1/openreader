@@ -230,7 +230,14 @@ export const getVoices = async (headers: HeadersInit): Promise<VoicesResponse> =
     headers,
   });
 
-  if (!response.ok) throw new Error('Failed to fetch voices');
+  if (!response.ok) {
+    let errorData;
+    try {
+      errorData = await response.json();
+    } catch {}
+    const errorMessage = errorData?.error?.message || errorData?.error || 'Failed to fetch voices';
+    throw new Error(errorMessage);
+  }
   return await response.json();
 };
 

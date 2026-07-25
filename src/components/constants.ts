@@ -93,8 +93,8 @@ Follow these rules STRICTLY:
    - SUFFIX EXPANSION: Expand common name suffixes to their full words (e.g., change "Jr." to "Junior" and "Sr." to "Senior").
 
 2. STRICT SEMINARY PRONUNCIATION (KOKORO MARKUP): When encountering Hebrew or Greek words, you MUST use Kokoro's phonetic markup syntax to ensure correct pronunciation and stress. 
-   - Format: \`[Original Text](/IPA_Transcription/)\` (e.g., \`[καταλλάσσω](/kɑtɑlˈlɑsoʊ/)\`, \`[בְּרִית](/bəˈɹiθ/)\`).
-   - You must use English-compatible IPA (e.g., use \`/k/\` or \`/x/\` for gutturals, do not use true pharyngeal fricatives that will break an English TTS voice). Always include the primary stress marker \`ˈ\` on the correct syllable.
+   - Format: \`[Original Text](/IPA_Transcription/)\` (e.g., \`[καταλλάσσω](/kɑtɑlɑsoʊ/)\`, \`[בְּרִית](/bəɹiθ/)\`).
+   - You must use English-compatible IPA (e.g., use \`/k/\` or \`/x/\` for gutturals, do not use true pharyngeal fricatives that will break an English TTS voice). NEVER use the primary stress marker (\`ˈ\`) anywhere in the IPA, as it causes Kokoro to hallucinate ghost syllables.
    - HEBREW ROOT EXCEPTION: If a 3-letter Hebrew root is presented in English caps (e.g., "K-P-R" or "KPR"), DO NOT use IPA. Format it with commas and spaces so the engine reads the individual letters: "K, P, R".
    - NO SINGLE-LETTER CAPS: In phonetic syllables, do not put a single capital letter between hyphens (e.g., do NOT use "a-B-c"). Combine them into multi-letter syllables.
    (See Phonetic Reference Guide Below)
@@ -215,11 +215,11 @@ Follow these rules STRICTLY:
    - SUFFIX EXPANSION: Expand common name suffixes to their full words (e.g., change "Jr." to "Junior" and "Sr." to "Senior").
 
 2. STRICT SEMINARY PRONUNCIATION (KOKORO MARKUP — ERASMIAN GREEK & ACADEMIC HEBREW): When encountering Hebrew or Greek words, you MUST wrap them in Kokoro's phonetic markup syntax using Strict Erasmian Greek pronunciation and Standard Academic Hebrew vowel points.
-   - Format: \`[Original Text](/IPA_Transcription/)\` (e.g., \`[καταλλάσσω](/kɑtɑlˈlɑsoʊ/)\`, \`[בְּרִית](/bəˈɹiθ/)\`).
-   - You must use English-compatible IPA only (e.g., use \`/k/\` or \`/x/\` for gutturals; do not use true pharyngeal fricatives). Always include the primary stress marker \`ˈ\` on the correct syllable.
+   - Format: \`[Original Text](/IPA_Transcription/)\` (e.g., \`[καταλλάσσω](/kɑtɑlɑsoʊ/)\`, \`[בְּרִית](/bəɹiθ/)\`).
+   - You must use English-compatible IPA only (e.g., use \`/k/\` or \`/x/\` for gutturals; do not use true pharyngeal fricatives). NEVER use the primary stress marker (\`ˈ\`) anywhere in the IPA, as it causes Kokoro to hallucinate ghost syllables.
    - HEBREW ROOT EXCEPTION: If a 3-letter Hebrew root is presented in English caps (e.g., "K-P-R" or "KPR"), DO NOT use IPA. Format it with commas and spaces so the engine reads individual letters: "K, P, R".
    - NO SINGLE-LETTER CAPS: Do not put a single capital letter between hyphens in phonetic syllables (e.g., do NOT use "a-B-c"). Combine them into multi-letter syllables.
-   - INLINE DEFINITION PRESERVATION: When a foreign word already has an inline definition (e.g., "λόγος, word,"), apply Kokoro markup to the foreign term only and preserve the English definition that follows (e.g., "[λόγος](/ˈlɒɡɒs/), word,").
+   - INLINE DEFINITION PRESERVATION: When a foreign word already has an inline definition (e.g., "λόγος, word,"), apply Kokoro markup to the foreign term only and preserve the English definition that follows (e.g., "[λόγος](/lɒɡɒs/), word,").
    (See Phonetic Reference Guide Below)
 
 3. SMART CITATION FILTERING: Handle biblical and academic citations based on context:
@@ -268,7 +268,7 @@ RAW TEXT (already enriched by pre-processor):
 The term λόγος, word, is central to John's prologue.
 
 OPTIMIZED TEXT:
-The term [λόγος](/ˈlɒɡɒs/), word, is central to John's prologue.
+The term [λόγος](/lɒɡɒs/), word, is central to John's prologue.
 (Why: The foreign word receives Kokoro IPA markup; the inline English definition "word" is preserved exactly as-is for the TTS listener).
 
 --- EXAMPLE 2 (Number Ranges & OCR Fixing) ---
@@ -281,10 +281,10 @@ He read verses 4 through 9 to effect change.
 
 --- EXAMPLE 3 (Navigational Pruning & Foreign Sentence Pruning) ---
 RAW TEXT:
-The concept of holy, [qādôš](/kɑˈdoʊʃ/), holiness, is defined by the phrase das Heilige ist ganz andere, which means separate. For further discussion, see the Introduction, §F.
+The concept of holy, [qādôš](/kɑdoʊʃ/), holiness, is defined by the phrase das Heilige ist ganz andere, which means separate. For further discussion, see the Introduction, §F.
 
 OPTIMIZED TEXT:
-The concept of holy, [qādôš](/kɑˈdoʊʃ/), holiness, is defined by the phrase... which means separate.
+The concept of holy, [qādôš](/kɑdoʊʃ/), holiness, is defined by the phrase... which means separate.
 (Why: The Hebrew term already has Kokoro IPA from the pre-processor, the long German quote is replaced by an ellipsis, and the navigational cross-reference is destroyed).
 
 --- EXAMPLE 4 (Header Pacing) ---

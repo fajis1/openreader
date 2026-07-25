@@ -15,6 +15,8 @@ interface DocumentTileProps {
   doc: DocumentListDocument;
   iconSize: IconSize;
   onDelete: (doc: DocumentListDocument) => void;
+  onScanDoc?: (doc: DocumentListDocument) => void;
+  onInspectDoc?: (doc: DocumentListDocument) => void;
   /** Fired when two unfoldered docs are dropped together → caller should open a "create folder" dialog. */
   onMergeIntoFolder: (source: DocumentListDocument[], target: DocumentListDocument) => void;
   isAudiobookView?: boolean;
@@ -68,6 +70,8 @@ export function DocumentTile({
   doc,
   iconSize,
   onDelete,
+  onScanDoc,
+  onInspectDoc,
   onMergeIntoFolder,
   isAudiobookView,
 }: DocumentTileProps) {
@@ -245,6 +249,11 @@ export function DocumentTile({
                         window.location.href = `/api/audiobook/changelog?bookId=${encodeURIComponent(doc.id)}&download=true`;
                       }}
                       >Download as File</MenuActionItem>
+                    {onInspectDoc && (
+                      <MenuActionItem
+                        onClick={(e) => { e.stopPropagation(); onInspectDoc(doc); }}
+                        >Inspect Pronunciations 📚</MenuActionItem>
+                    )}
                   </MenuItemsSurface>
                 </MenuTransition>
               </MenuRoot>
@@ -265,18 +274,33 @@ export function DocumentTile({
           </>
         )}
         {!isAudiobookView && (
-          <a
-            href={`/api/documents/blob/get/fallback?id=${encodeURIComponent(doc.id)}&download=true`}
-            download
-            onClick={(e) => e.stopPropagation()}
-            className={`${TRASH_BTN_CLASSES[iconSize]} flex items-center justify-center text-foreground hover:text-white hover:bg-accent transition-colors`}
-            aria-label={`Download ${doc.name}`}
-            title="Download Original Document"
-          >
-            <svg className={TRASH_ICON_CLASSES[iconSize]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-          </a>
+          <>
+            {doc.type === 'pdf' && onScanDoc && (
+              <IconButton
+                onClick={(e) => { e.stopPropagation(); onScanDoc(doc); }}
+                size="xs"
+                className={TRASH_BTN_CLASSES[iconSize]}
+                aria-label={`Pre-Scan Foreign Words for ${doc.name}`}
+                title="Pre-Scan Foreign Words"
+              >
+                <svg className={TRASH_ICON_CLASSES[iconSize]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </IconButton>
+            )}
+            <a
+              href={`/api/documents/blob/get/fallback?id=${encodeURIComponent(doc.id)}&download=true`}
+              download
+              onClick={(e) => e.stopPropagation()}
+              className={`${TRASH_BTN_CLASSES[iconSize]} flex items-center justify-center text-foreground hover:text-white hover:bg-accent transition-colors`}
+              aria-label={`Download ${doc.name}`}
+              title="Download Original Document"
+            >
+              <svg className={TRASH_ICON_CLASSES[iconSize]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+            </a>
+          </>
         )}
         {showDeleteButton && (
           <IconButton

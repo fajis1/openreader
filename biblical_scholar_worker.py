@@ -83,7 +83,7 @@ def extract_learned_words(cleaned_text, existing_dict):
             new_words[name] = ipa
     return new_words
 
-async def enrich_text_with_semantics(chunk, api_key, model_name="gemini-3.5-flash"):
+async def enrich_text_with_semantics(chunk, api_key, backup_api_key=None, model_name="gemini-3.5-flash"):
     """Uses Gemini to inject English definitions next to Greek/Hebrew words."""
     if not api_key:
         return chunk, []
@@ -119,6 +119,9 @@ async def enrich_text_with_semantics(chunk, api_key, model_name="gemini-3.5-flas
         return modified_text, words_defined
         
     except Exception as e:
+        if backup_api_key:
+            print(f"    [🔄] Semantic enrichment hit error with primary key: {e}. Trying backup key...")
+            return await enrich_text_with_semantics(chunk, backup_api_key, None, model_name)
         print(f"    [GEMINI ERROR] Semantic enrichment failed: {e}")
         return chunk, []
 
@@ -126,6 +129,7 @@ async def process_message(msg):
     data = json.loads(msg.data.decode())
     user_id = data.get("user_id", "Unknown")
     api_key = data.get("api_key")
+    backup_api_key = data.get("backup_api_key")
     prompt = data.get("prompt")
     raw_text = data.get("raw_text")
     
@@ -152,7 +156,7 @@ async def process_message(msg):
         
         # PHASE 2: Semantic Enrichment (Biblical Language Scholar Profile)
         print("  -> Running Semantic Enrichment via Gemini...")
-        enriched_text, words_defined = await enrich_text_with_semantics(pre_cleaned_text, api_key, ai_model)
+        enriched_text, words_defined = await enrich_text_with_semantics(pre_cleaned_text, api_key, backup_api_key, ai_model)
         
         if words_defined:
             print(f"  -> [SEMANTICS] Enriched {len(words_defined)} biblical words with English definitions.")
@@ -212,6 +216,13 @@ async def process_message(msg):
                 except Exception as e:
                     error_msg = str(e).lower()
                     if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg or "503" in error_msg:
+                        if backup_api_key and backup_api_key != api_key:
+                            print(f"  -> [🔄] Primary API Limit Hit! Falling back to backup key...")
+                            api_key = backup_api_key
+                            client = genai.Client(api_key=api_key)
+                            api_state = API_STATES.setdefault(api_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})
+                            continue
+
                         if api_state["current_delay"] == 0:
                             api_state["current_delay"] = MIN_DELAY
                         else:

@@ -268,12 +268,33 @@ function documentParsedKey(id: string, namespace: string | null, prefix: string)
   return `${prefix}/documents_v1/parsed_v2/${nsSegment}${id}/${encodeParserVersion(PDF_PARSER_VERSION)}.json`;
 }
 
+function isEmbeddedWeedMiniEnabled(): boolean {
+  const raw = process.env.USE_EMBEDDED_WEED_MINI;
+  if (raw == null || raw.trim() === '') return true;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function loopbackEndpoint(endpoint: string | undefined): string | undefined {
+  if (!endpoint) return endpoint;
+  try {
+    const parsed = new URL(endpoint);
+    parsed.hostname = '127.0.0.1';
+    return `${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}`;
+  } catch {
+    return endpoint;
+  }
+}
+
 function buildS3Client(): S3Client {
   const bucket = requireEnv('S3_BUCKET');
   const region = requireEnv('S3_REGION');
   const accessKeyId = requireEnv('S3_ACCESS_KEY_ID');
   const secretAccessKey = requireEnv('S3_SECRET_ACCESS_KEY');
-  const endpoint = process.env.S3_ENDPOINT?.trim() || undefined;
+  let endpoint = process.env.S3_ENDPOINT?.trim() || undefined;
+  if (isEmbeddedWeedMiniEnabled()) {
+    endpoint = loopbackEndpoint(endpoint);
+  }
   const forcePathStyle = parseBoolEnv('S3_FORCE_PATH_STYLE', false);
 
   void bucket;

@@ -10,6 +10,8 @@ interface IconsViewProps {
   documents: DocumentListDocument[];
   iconSize: IconSize;
   onDeleteDoc: (doc: DocumentListDocument) => void;
+  onScanDoc?: (doc: DocumentListDocument) => void;
+  onInspectDoc?: (doc: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
   isAudiobookView?: boolean;
 }

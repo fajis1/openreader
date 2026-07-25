@@ -57,6 +57,7 @@ async def process_message(msg):
     data = json.loads(msg.data.decode())
     user_id = data.get("user_id", "Unknown")
     api_key = data.get("api_key")
+    backup_api_key = data.get("backup_api_key")
     prompt = data.get("prompt")
     raw_text = data.get("raw_text")
     
@@ -144,6 +145,13 @@ async def process_message(msg):
                     error_msg = str(e).lower()
                     # Check if it's a rate limit or quota error
                     if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg or "503" in error_msg:
+                        if backup_api_key and backup_api_key != api_key:
+                            print(f"  -> [🔄] Primary API Limit Hit! Falling back to backup key...")
+                            api_key = backup_api_key
+                            client = genai.Client(api_key=api_key)
+                            api_state = API_STATES.setdefault(api_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})
+                            continue
+                            
                         # 3. FAILURE! Spike the delay (up to 5 mins max)
                         if api_state["current_delay"] == 0:
                             api_state["current_delay"] = MIN_DELAY

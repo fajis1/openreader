@@ -40,6 +40,8 @@ import { IconsView } from './views/IconsView';
 import { ListView } from './views/ListView';
 import { GalleryView } from './views/GalleryView';
 import { JobsInlineView } from './views/JobsInlineView';
+import { ScanForeignWordsModal } from './ScanForeignWordsModal';
+import { BookPronunciationInspectorModal } from './BookPronunciationInspectorModal';
 
 let cachedDocumentListState: DocumentListState | null = null;
 
@@ -229,6 +231,8 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const [bulkDeleteAudiobooksPrompt, setBulkDeleteAudiobooksPrompt] = useState(false);
   const [showBatchAudiobookSidebar, setShowBatchAudiobookSidebar] = useState(false);
   const [backgroundJobs, setBackgroundJobs] = useState<{ id: string, documentId: string, status: string, progress: number }[] | null>(null);
+  const [docToScan, setDocToScan] = useState<DocumentListDocument | null>(null);
+  const [docToInspect, setDocToInspect] = useState<DocumentListDocument | null>(null);
 
   useEffect(() => {
     // Also check if there's an old legacy localStorage batch, clear it.
@@ -483,7 +487,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     try {
       if (documentToDelete.isAudiobookView) {
         const res = await fetch(`/api/audiobook?bookId=${encodeURIComponent(documentToDelete.id)}`, { method: 'DELETE' });
-        if (!res.ok) throw new Error('Failed to delete audiobook');
+        if (!res.ok && res.status !== 404) throw new Error('Failed to delete audiobook');
         await mutate('/api/audiobooks');
       } else {
         await deleteDocument(documentToDelete.id);
@@ -505,6 +509,14 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const handleDeleteDoc = useCallback((doc: DocumentListDocument) => {
     setDocumentToDelete({ id: doc.id, name: doc.name, type: doc.type, isAudiobookView: sidebarFilter === 'audiobooks' });
   }, [sidebarFilter]);
+
+  const handleScanDoc = useCallback((doc: DocumentListDocument) => {
+    setDocToScan(doc);
+  }, []);
+
+  const handleInspectDoc = useCallback((doc: DocumentListDocument) => {
+    setDocToInspect(doc);
+  }, []);
 
   const handleBulkDeleteAudiobooks = useCallback(async () => {
     const selectedDocs = selection.getSelectedDocs();
@@ -756,23 +768,59 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
           summary={summary}
           actions={
             visibleSelectedCount > 0 && sidebarFilter === 'audiobooks' ? (
-              <>
-                <Button size="xs" variant="primary" onClick={handleDownloadSelected}>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const selected = selection.getSelectedDocs();
+                    if (selected.length > 0) setDocToScan(selected[0]);
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-md shadow transition-all flex items-center gap-1.5"
+                >
+                  🔍 Pre-Scan Foreign Words
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadSelected}
+                  className="px-4 py-2 bg-accent hover:bg-secondary-accent text-background font-bold text-sm rounded-md shadow transition-all"
+                >
                   Download {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Audiobooks
-                </Button>
-                <Button size="xs" variant="danger" onClick={() => setBulkDeleteAudiobooksPrompt(true)}>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkDeleteAudiobooksPrompt(true)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-md shadow transition-all"
+                >
                   Delete {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Audiobooks
-                </Button>
-              </>
+                </button>
+              </div>
             ) : visibleSelectedCount > 0 && sidebarFilter !== 'audiobooks' ? (
-              <>
-                <Button size="xs" variant="secondary" onClick={handleDownloadSelectedOriginals}>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const selected = selection.getSelectedDocs();
+                    if (selected.length > 0) setDocToScan(selected[0]);
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-md shadow transition-all flex items-center gap-1.5"
+                >
+                  🔍 Pre-Scan Foreign Words
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadSelectedOriginals}
+                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-bold text-sm rounded-md shadow transition-all"
+                >
                   Download {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Originals
-                </Button>
-                <Button size="xs" variant="primary" onClick={() => setShowBatchAudiobookSidebar(true)}>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowBatchAudiobookSidebar(true)}
+                  className="px-4 py-2 bg-accent hover:bg-secondary-accent text-background font-bold text-sm rounded-md shadow transition-all"
+                >
                   Generate Audiobook{visibleSelectedCount > 1 ? 's' : ''}
-                </Button>
-              </>
+                </button>
+              </div>
             ) : null
           }
         />
@@ -844,6 +892,8 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               documents={sortedVisible}
               iconSize={iconSize}
               onDeleteDoc={handleDeleteDoc}
+              onScanDoc={handleScanDoc}
+              onInspectDoc={handleInspectDoc}
               onMergeIntoFolder={handleMergeIntoFolder}
               isAudiobookView={sidebarFilter === 'audiobooks'}
             />
@@ -858,6 +908,8 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
                 setSortDirection(d);
               }}
               onDeleteDoc={handleDeleteDoc}
+              onScanDoc={handleScanDoc}
+              onInspectDoc={handleInspectDoc}
               onMergeIntoFolder={handleMergeIntoFolder}
               isAudiobookView={sidebarFilter === 'audiobooks'}
             />
@@ -867,6 +919,8 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               documents={sortedVisible}
               folderNameById={folderNameById}
               onDeleteDoc={handleDeleteDoc}
+              onScanDoc={handleScanDoc}
+              onInspectDoc={handleInspectDoc}
               onMergeIntoFolder={handleMergeIntoFolder}
               isAudiobookView={sidebarFilter === 'audiobooks'}
             />
@@ -905,6 +959,23 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
           }
         }}
       />
+
+      {docToScan && (
+        <ScanForeignWordsModal
+          isOpen={true}
+          onClose={() => setDocToScan(null)}
+          documentId={docToScan.id}
+          documentName={docToScan.name}
+        />
+      )}
+
+      {docToInspect && (
+        <BookPronunciationInspectorModal
+          isOpen={true}
+          onClose={() => setDocToInspect(null)}
+          initialBookId={docToInspect.id}
+        />
+      )}
 
       <ConfirmDialog
         isOpen={documentToDelete !== null}

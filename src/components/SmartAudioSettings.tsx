@@ -4,6 +4,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BASE_ABBREVIATIONS, BASE_BOOKS, PRESET_MODELS, PRESET_PROMPTS } from './constants';
 import type { SmartAudioProfile } from '@/types/client';
+import { toast } from 'react-hot-toast';
+import { ScanForeignWordsModal } from './doclist/ScanForeignWordsModal';
+import { BookPronunciationInspectorModal } from './doclist/BookPronunciationInspectorModal';
 
 const EMPTY_PROFILE = (): SmartAudioProfile => ({
   id: `profile-${Date.now()}`,
@@ -54,8 +57,11 @@ function entriesToObject(entries: Array<{ key: string; value: string }>): Record
 export function SmartAudioSettings() {
   const [apiKey, setApiKey] = useState('');
   const [maskedKey, setMaskedKey] = useState<string | null>(null);
+  const [backupApiKey, setBackupApiKey] = useState('');
+  const [maskedBackupKey, setMaskedBackupKey] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<SmartAudioProfile[]>([]);
-  const [workerMode, setWorkerMode] = useState<'standard' | 'scholar'>('standard');
+  const [workerMode, setWorkerMode] = useState<'standard' | 'scholar'>('scholar');
+  const [useGlobalPronunciations, setUseGlobalPronunciations] = useState<boolean>(true);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [profileName, setProfileName] = useState('');
   const [aiModel, setAiModel] = useState(PRESET_MODELS[0]?.id || 'gemini-2.5-flash');
@@ -73,6 +79,14 @@ export function SmartAudioSettings() {
   const [newPronun, setNewPronun] = useState({ key: '', value: '' });
   const [newBook, setNewBook] = useState({ key: '', value: '' });
   const [isLoading, setIsLoading] = useState(true);
+
+  const [isGlobalModalOpen, setIsGlobalModalOpen] = useState(false);
+  const [globalPronunciations, setGlobalPronunciations] = useState<{key: string; values: string[]}[]>([]);
+  const [isLoadingGlobal, setIsLoadingGlobal] = useState(false);
+  const [playingKey, setPlayingKey] = useState<string | null>(null);
+
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isInspectorOpen, setIsInspectorOpen] = useState(false);
 
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) || profiles[0] || null,
@@ -107,10 +121,70 @@ export function SmartAudioSettings() {
     void loadProfiles();
   }, [loadProfiles]);
 
+  const loadGlobalPronunciations = async () => {
+    setIsLoadingGlobal(true);
+    setIsGlobalModalOpen(true);
+    try {
+      const res = await fetch('/api/tts/global-pronunciations');
+      const data = await res.json();
+      setGlobalPronunciations(Object.entries(data).map(([key, value]) => ({ key, values: Array.isArray(value) ? value as string[] : [String(value)] })));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoadingGlobal(false);
+    }
+  };
+
+  const handleAdoptGlobal = async (word: string, phonetic: string) => {
+    setPronunciations((prev) => {
+      const filtered = prev.filter(p => p.key !== word);
+      return [{ key: word, value: phonetic }, ...filtered];
+    });
+
+    try {
+      await fetch('/api/tts/global-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word, phonetic })
+      });
+      loadGlobalPronunciations();
+    } catch(e) {
+      console.error(e);
+    }
+  };
+
+  const playPreview = async (word: string, phonetic: string) => {
+    try {
+      setPlayingKey(word);
+      const textToSynthesize = phonetic.startsWith('/') ? `[${word}](${phonetic})` : phonetic;
+      const res = await fetch('/api/tts/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: textToSynthesize })
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Preview failed');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setPlayingKey(null);
+      };
+      await audio.play();
+    } catch (err) {
+      console.error(err);
+      setPlayingKey(null);
+    }
+  };
+
   useEffect(() => {
     if (!activeProfile) return;
     setProfileName(activeProfile.name);
-    setWorkerMode(activeProfile.workerMode ?? 'standard');
+    setWorkerMode(activeProfile.workerMode ?? 'scholar');
+    setUseGlobalPronunciations(activeProfile.useGlobalPronunciations ?? true);
     setAiModel(activeProfile.aiModel || PRESET_MODELS[0]?.id || 'gemini-2.5-flash');
     setCustomModelId(activeProfile.aiModel && PRESET_MODELS.some((model) => model.id === activeProfile.aiModel) ? '' : activeProfile.aiModel);
 
@@ -147,6 +221,8 @@ export function SmartAudioSettings() {
     // Load this profile's key — show masked placeholder if already saved
     setApiKey('');
     setMaskedKey(activeProfile.geminiApiKey ? `••••••••••••${activeProfile.geminiApiKey.slice(-4)}` : null);
+    setBackupApiKey('');
+    setMaskedBackupKey(activeProfile.backupGeminiApiKey ? `••••••••••••${activeProfile.backupGeminiApiKey.slice(-4)}` : null);
   }, [activeProfile]);
 
   const buildCurrentProfile = useCallback((): SmartAudioProfile | null => {
@@ -161,11 +237,13 @@ export function SmartAudioSettings() {
       abbreviations: entriesToObject(abbreviations),
       pronunciations: entriesToObject(pronunciations),
       books: entriesToObject(books),
+      useGlobalPronunciations,
       workerMode,
       // Preserve stored key; overwrite only if user typed a new one
       geminiApiKey: apiKey.trim() || activeProfile?.geminiApiKey || undefined,
+      backupGeminiApiKey: backupApiKey.trim() || activeProfile?.backupGeminiApiKey || undefined,
     };
-  }, [apiKey, aiModel, customModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, workerMode, activeProfile]);
+  }, [apiKey, backupApiKey, aiModel, customModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, useGlobalPronunciations, workerMode, activeProfile]);
 
   // When the user clicks a worker mode card, always switch to the matching
   // preset for that engine. This ensures clicking a card is always a clean
@@ -246,6 +324,10 @@ export function SmartAudioSettings() {
       if (apiKey) {
         setMaskedKey(`••••••••••••${apiKey.slice(-4)}`);
         setApiKey('');
+      }
+      if (backupApiKey) {
+        setMaskedBackupKey(`••••••••••••${backupApiKey.slice(-4)}`);
+        setBackupApiKey('');
       }
       alert('Smart audio profile saved.');
       window.dispatchEvent(new CustomEvent('smart-audio-profiles-updated'));
@@ -429,6 +511,51 @@ export function SmartAudioSettings() {
         </div>
       </div>
 
+      <div className={`p-4 rounded-xl border-2 transition-all duration-150 flex items-center justify-between gap-4 cursor-pointer ${
+        useGlobalPronunciations
+          ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20 shadow-md'
+          : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-sm'
+      }`}
+      onClick={() => setUseGlobalPronunciations(!useGlobalPronunciations)}>
+        <div className="flex items-start gap-3">
+          <span className="text-3xl mt-1">🌍</span>
+          <div>
+            <h3 className={`text-base font-semibold ${useGlobalPronunciations ? 'text-purple-800 dark:text-purple-300' : 'text-gray-900 dark:text-gray-100'}`}>
+              Global Learned Dictionary
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Automatically apply crowdsourced global pronunciations learned across all user audiobooks. Includes up to 5 alternative choices per word that you can review and adopt to your own profile!
+            </p>
+          </div>
+        </div>
+        <div className="shrink-0 flex flex-col sm:flex-row items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setIsScannerOpen(true); }}
+            className="text-xs font-semibold px-3 py-1.5 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors sm:mr-2"
+          >
+            Pre-Scan a Document 🔍
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setIsInspectorOpen(true); }}
+            className="text-xs font-semibold px-3 py-1.5 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors sm:mr-2"
+          >
+            Inspect Book Pronunciations 📚
+          </button>
+          <button 
+            type="button" 
+            onClick={(e) => { e.stopPropagation(); loadGlobalPronunciations(); }} 
+            className="text-xs font-semibold px-3 py-1.5 bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200 rounded hover:bg-purple-300 dark:hover:bg-purple-700 transition-colors sm:mr-2"
+          >
+            View Global List
+          </button>
+          <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${useGlobalPronunciations ? 'bg-purple-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${useGlobalPronunciations ? 'translate-x-6' : 'translate-x-1'}`} />
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="space-y-4 p-4 border rounded dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
           <div className="space-y-2">
@@ -456,7 +583,7 @@ export function SmartAudioSettings() {
 
           <div className="space-y-2">
             <div className="flex justify-between items-end gap-2">
-              <label className="block text-sm font-semibold">Google Gemini API Key</label>
+              <label className="block text-sm font-semibold">Primary Gemini API Key (e.g. Free Tier)</label>
               {maskedKey && (
                 <span className="text-xs font-mono bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded">Active: {maskedKey}</span>
               )}
@@ -464,12 +591,28 @@ export function SmartAudioSettings() {
             <input
               type="password"
               className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-800 dark:border-gray-700 text-gray-900 dark:text-gray-100"
-              placeholder={maskedKey ? 'Enter a new key to overwrite...' : 'Enter your API key...'}
+              placeholder={maskedKey ? 'Enter a new primary key to overwrite...' : 'Enter your API key...'}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
             />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex justify-between items-end gap-2">
+              <label className="block text-sm font-semibold">Backup Gemini API Key (e.g. Paid Tier)</label>
+              {maskedBackupKey && (
+                <span className="text-xs font-mono bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 px-2 py-0.5 rounded">Active: {maskedBackupKey}</span>
+              )}
+            </div>
+            <input
+              type="password"
+              className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-800 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+              placeholder={maskedBackupKey ? 'Enter a new backup key to overwrite...' : 'Enter your backup API key...'}
+              value={backupApiKey}
+              onChange={(e) => setBackupApiKey(e.target.value)}
+            />
             <p className="text-xs text-gray-400">
-              {maskedKey ? 'Leave blank to keep using the saved key for this profile.' : 'Required. This key is saved securely to this specific profile.'}
+              {maskedKey || maskedBackupKey ? 'Leave blank to keep using the saved key for this profile.' : 'Required. Keys are saved securely to this profile. The backup key is automatically used if the primary key hits a rate limit.'}
             </p>
           </div>
         </div>
@@ -611,6 +754,15 @@ export function SmartAudioSettings() {
               <h3 className="font-semibold text-lg">Pronunciations</h3>
               <p className="text-xs text-gray-500">Force specific phonetics.</p>
             </div>
+            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 font-medium cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useGlobalPronunciations}
+                onChange={(e) => setUseGlobalPronunciations(e.target.checked)}
+                className="rounded border-gray-300 dark:border-gray-700 text-purple-600 focus:ring-purple-500"
+              />
+              Include Global Learned Pronunciations
+            </label>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => downloadCSV(pronunciations, 'pronunciations.csv')} className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded cursor-pointer hover:bg-blue-200">Export</button>
               <button onClick={() => { if (confirm('Are you sure you want to clear all learned pronunciations?')) setPronunciations([]); }} className="text-xs bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 px-2 py-1 rounded cursor-pointer hover:bg-red-200">Clear All</button>
@@ -618,6 +770,9 @@ export function SmartAudioSettings() {
                 Import CSV
                 <input type="file" accept=".csv" className="hidden" onChange={(e) => handleCSVUpload(e, pronunciations, setPronunciations)} />
               </label>
+              <button onClick={loadGlobalPronunciations} className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-2 py-1 rounded cursor-pointer hover:bg-purple-200">
+                View Global
+              </button>
             </div>
           </div>
           <div className="flex gap-2">
@@ -682,6 +837,55 @@ export function SmartAudioSettings() {
           Save Profile
         </button>
       </div>
+
+      {isGlobalModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b dark:border-gray-800 flex justify-between items-center">
+              <h3 className="text-lg font-bold">Global Pronunciations</h3>
+              <button onClick={() => setIsGlobalModalOpen(false)} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">✕</button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              {isLoadingGlobal ? (
+                <div className="flex justify-center p-8"><span className="text-gray-500">Loading...</span></div>
+              ) : globalPronunciations.length === 0 ? (
+                <div className="text-center p-8 text-gray-500">No global pronunciations found.</div>
+              ) : (
+                <ul className="space-y-3">
+                  {globalPronunciations.map((item) => (
+                    <li key={item.key} className="flex flex-col gap-2 bg-gray-50 dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-700">
+                      <strong className="block text-sm">{item.key}</strong>
+                      <div className="flex flex-col gap-2">
+                        {item.values.map((phonetic, idx) => (
+                          <div key={idx} className="flex items-center gap-3 bg-white dark:bg-gray-900 p-2 rounded border border-gray-200 dark:border-gray-700">
+                            <code className="flex-1 text-xs text-purple-600 dark:text-purple-400">{phonetic}</code>
+                            <button
+                              onClick={() => playPreview(item.key, phonetic)}
+                              disabled={playingKey === item.key}
+                              className="px-2 py-1 bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-semibold disabled:opacity-50"
+                            >
+                              {playingKey === item.key ? 'Playing...' : 'Listen'}
+                            </button>
+                            <button
+                              onClick={() => handleAdoptGlobal(item.key, phonetic)}
+                              className="px-2 py-1 bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs font-semibold"
+                            >
+                              Adopt to My Profile
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="p-4 border-t dark:border-gray-800 flex justify-end">
+              <button onClick={() => setIsGlobalModalOpen(false)} className="px-4 py-2 bg-gray-200 dark:bg-gray-800 rounded font-semibold text-sm">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

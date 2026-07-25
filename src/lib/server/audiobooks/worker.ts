@@ -2,7 +2,7 @@
 import { readSmartAudioProfilesDocument, findSmartAudioProfileById, writeSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
 import { eq, and, asc, lt, inArray } from 'drizzle-orm';
 import { db } from '@/db';
-import { audiobookJobs, documents, audiobooks, audiobookChapters } from '@/db/schema';
+import { audiobookJobs, documents, audiobooks, audiobookChapters, adminSettings } from '@/db/schema';
 import { readCurrentParsedPdfArtifact } from '@/lib/server/pdf-parse/artifact';
 import { getDocumentBlob } from '@/lib/server/documents/blobstore';
 import { checkSystemResources } from '@/lib/server/audiobooks/system-monitor';
@@ -163,7 +163,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     if (doc.type === 'pdf') {
       let artifact = await readCurrentParsedPdfArtifact({ documentId: doc.id, namespace: testNamespace });
       if (!artifact) {
-        await createOrReuseCurrentPdfParseOperation({ documentId: doc.id, namespace: testNamespace });
+        const opState = await createOrReuseCurrentPdfParseOperation({ documentId: doc.id, namespace: testNamespace });
+        if (opState.status === 'failed') {
+          throw new Error(opState.error?.message || 'PDF layout operation failed');
+        }
         await db.update(audiobookJobs).set({ status: 'waiting_for_pdf' }).where(eq(audiobookJobs.id, job.id));
         
         // Wait up to 15 seconds for the PDF artifact (e.g. for compute-core to finish parsing it in the background)
@@ -339,7 +342,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           // the Python worker to return {status:"error"} and skip smart audio.
           const geminiApiKey = (selectedProfile?.geminiApiKey || '').trim();
 
+          const backupGeminiApiKey = (selectedProfile?.backupGeminiApiKey || '').trim();
+
           const payload = JSON.stringify({
+            backup_api_key: backupGeminiApiKey,
             user_id: userId,
             api_key: geminiApiKey,
             ai_model: selectedProfile?.aiModel || 'gemini-2.5-flash',
@@ -365,7 +371,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           if (workerResult.status === "success" && workerResult.cleaned_text) {
             processedTextForTts = workerResult.cleaned_text;
             
-            // Save newly discovered pronunciations back to the profile!
+            // Save newly discovered pronunciations back to the profile AND the global registry!
             if (workerResult.new_pronunciations && Object.keys(workerResult.new_pronunciations).length > 0 && selectedProfile) {
               try {
                 // Must read fresh just in case it was updated during generation
@@ -376,6 +382,40 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
                   await writeSmartAudioProfilesDocument(userId, updatedDoc);
                   serverLogger.info({ event: 'audiobook.queue.smart_audio.learned_pronunciations', count: Object.keys(workerResult.new_pronunciations).length }, 'Saved new learned pronunciations to smart audio profile');
                 }
+                
+                // Save to Global Pronunciations
+                try {
+                  const globalRow = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_pronunciations')).limit(1);
+                  let currentGlobal: Record<string, string[]> = {};
+                  if (globalRow && globalRow.length > 0) {
+                    try {
+                      const parsed = JSON.parse(globalRow[0].valueJson);
+                      for (const [key, val] of Object.entries(parsed)) {
+                        if (Array.isArray(val)) currentGlobal[key] = val;
+                        else if (typeof val === 'string') currentGlobal[key] = [val];
+                      }
+                    } catch(e) {}
+                  }
+                  
+                  const updatedGlobal = { ...currentGlobal };
+                  for (const [key, val] of Object.entries(workerResult.new_pronunciations as Record<string, string>)) {
+                    const existing = updatedGlobal[key] || [];
+                    const filtered = existing.filter(p => p !== val);
+                    updatedGlobal[key] = [val, ...filtered].slice(0, 5);
+                  }
+                  
+                  await db.insert(adminSettings).values({
+                    key: 'global_pronunciations',
+                    valueJson: JSON.stringify(updatedGlobal)
+                  }).onConflictDoUpdate({
+                    target: adminSettings.key,
+                    set: { valueJson: JSON.stringify(updatedGlobal) }
+                  });
+                  serverLogger.info({ event: 'audiobook.queue.smart_audio.global_learned', count: Object.keys(workerResult.new_pronunciations).length }, 'Appended learned pronunciations to global registry');
+                } catch (globalErr) {
+                  serverLogger.warn({ event: 'audiobook.queue.smart_audio.global_learned_failed', error: globalErr }, 'Failed to save to global pronunciations registry');
+                }
+                
               } catch (saveErr) {
                 serverLogger.warn({ event: 'audiobook.queue.smart_audio.learned_pronunciations_failed', error: saveErr }, 'Failed to save learned pronunciations');
               }

@@ -21,6 +21,8 @@ interface ListViewProps {
   sortDirection: SortDirection;
   onSortChange: (sortBy: SortBy, direction: SortDirection) => void;
   onDeleteDoc: (doc: DocumentListDocument) => void;
+  onScanDoc?: (doc: DocumentListDocument) => void;
+  onInspectDoc?: (doc: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
   isAudiobookView?: boolean;
 }
@@ -80,11 +82,15 @@ function HeaderCell({
 function DocRow({
   doc,
   onDeleteDoc,
+  onScanDoc,
+  onInspectDoc,
   onMergeIntoFolder,
   isAudiobookView,
 }: {
   doc: DocumentListDocument;
   onDeleteDoc: (d: DocumentListDocument) => void;
+  onScanDoc?: (d: DocumentListDocument) => void;
+  onInspectDoc?: (d: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
   isAudiobookView?: boolean;
 }) {
@@ -251,18 +257,32 @@ function DocRow({
           </>
         )}
         {!isAudiobookView && (
-          <a
-            href={`/api/documents/blob/get/fallback?id=${encodeURIComponent(doc.id)}&download=true`}
-            download
-            onClick={(e) => e.stopPropagation()}
-            className="flex items-center justify-center w-8 h-8 text-foreground hover:bg-accent hover:text-white transition-colors rounded-md"
-            aria-label={`Download ${doc.name}`}
-            title="Download Original Document"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-          </a>
+          <>
+            {doc.type === 'pdf' && onScanDoc && (
+              <IconButton
+                onClick={(e: React.MouseEvent) => { e.stopPropagation(); onScanDoc(doc); }}
+                size="sm"
+                aria-label={`Pre-Scan Foreign Words for ${doc.name}`}
+                title="Pre-Scan Foreign Words"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </IconButton>
+            )}
+            <a
+              href={`/api/documents/blob/get/fallback?id=${encodeURIComponent(doc.id)}&download=true`}
+              download
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center justify-center w-8 h-8 text-foreground hover:bg-accent hover:text-white transition-colors rounded-md"
+              aria-label={`Download ${doc.name}`}
+              title="Download Original Document"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+            </a>
+          </>
         )}
         <IconButton
           onClick={(e: React.MouseEvent) => {
@@ -292,6 +312,8 @@ export function ListView({
   sortDirection,
   onSortChange,
   onDeleteDoc,
+  onScanDoc,
+  onInspectDoc,
   onMergeIntoFolder,
   isAudiobookView,
 }: ListViewProps) {
@@ -324,6 +346,8 @@ export function ListView({
             key={`${doc.type}-${doc.id}`}
             doc={doc}
             onDeleteDoc={onDeleteDoc}
+            onScanDoc={onScanDoc}
+            onInspectDoc={onInspectDoc}
             onMergeIntoFolder={onMergeIntoFolder}
             isAudiobookView={isAudiobookView}
           />

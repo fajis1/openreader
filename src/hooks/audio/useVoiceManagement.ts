@@ -48,7 +48,7 @@ export function useVoiceManagement(
         model: ttsModel || 'tts-1',
       }).defaultVoices);
     } catch (error) {
-      console.error('Error fetching voices:', error);
+      console.warn('Could not fetch custom voices, falling back to defaults:', error instanceof Error ? error.message : error);
       if (fetchSeq !== fetchSeqRef.current) return;
       setAvailableVoices(resolveTtsProviderModelPolicy({
         providerRef: providerRef || '',

@@ -72,6 +72,7 @@ export interface SmartAudioProfile {
   useGlobalPronunciations?: boolean;
   /** Per-profile Gemini API key. Never exposed to other users. */
   geminiApiKey?: string;
+  backupGeminiApiKey?: string;
   /**
    * Which Python worker pipeline to use for AI text cleaning.
    * 'standard' → audiobook_worker.py (fast, general-purpose)
