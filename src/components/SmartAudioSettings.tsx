@@ -199,7 +199,11 @@ export function SmartAudioSettings() {
     try {
       const res = await fetch('/api/tts/global-pronunciations');
       const data = await res.json();
-      setGlobalPronunciations(Object.entries(data).map(([key, value]) => ({ key, values: Array.isArray(value) ? value as string[] : [String(value)] })));
+      setGlobalPronunciations(Object.entries(data).map(([key, value]) => {
+        const rawArr = Array.isArray(value) ? value : [value];
+        const stringValues = rawArr.map((v: any) => typeof v === 'object' && v !== null ? (v.phonetic || JSON.stringify(v)) : String(v));
+        return { key, values: stringValues };
+      }));
     } catch (err) {
       console.error(err);
     } finally {
