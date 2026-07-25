@@ -180,7 +180,10 @@ export function ScanForeignWordsModal({
       
       setRefineStatus(prev => ({ ...prev, [word]: 'Step 2/2: Pre-rendering Kokoro audio buffers for instant playback...' }));
       
-      if (!res.ok) throw new Error('Refinement failed');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Refinement failed');
+      }
       const data = await res.json();
       
       if (data.feedbackExamples) {
@@ -196,10 +199,15 @@ export function ScanForeignWordsModal({
           return w;
         }));
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to refine', e);
+      const errMsg = e.message || 'Failed to generate choices';
+      toast.error(errMsg, { duration: 6000 });
+      setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg}` }));
+      setTimeout(() => {
+        setRefineStatus(prev => ({ ...prev, [word]: '' }));
+      }, 8000);
     } finally {
-      setRefineStatus(prev => ({ ...prev, [word]: '' }));
       setRefineInput(prev => ({ ...prev, [word]: '' }));
     }
   };

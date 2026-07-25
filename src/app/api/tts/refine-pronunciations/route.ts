@@ -96,8 +96,23 @@ Return a JSON object: { "newChoices": ["pron1", "pron2", "pron3", "pron4", "pron
     });
 
     if (!res.ok) {
-      console.error('Gemini API returned error status:', res.status, await res.text());
-      return NextResponse.json({ error: 'Failed to generate choices' }, { status: 500 });
+      const errText = await res.text();
+      console.error('Gemini API returned error status:', res.status, errText);
+      let errorMessage = 'Failed to generate choices from Gemini API';
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.error && errJson.error.message) {
+          errorMessage = errJson.error.message;
+        }
+      } catch (e) {}
+
+      if (res.status === 429 || errorMessage.toLowerCase().includes('quota')) {
+        return NextResponse.json({
+          error: `Gemini API Quota Exceeded (429): You have run out of API credits or hit your daily/per-minute rate limit for this model. Please check your billing details or wait a minute before retrying. Full details: ${errorMessage}`
+        }, { status: 429 });
+      }
+
+      return NextResponse.json({ error: errorMessage }, { status: res.status || 500 });
     }
 
     const data = await res.json();

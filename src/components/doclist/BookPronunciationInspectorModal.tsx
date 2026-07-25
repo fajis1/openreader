@@ -121,14 +121,21 @@ export function BookPronunciationInspectorModal({
       if (res.ok) {
         setRefineStatus(prev => ({ ...prev, [word]: 'Done! Pre-cached audio ready.' }));
         fetchPronunciations(selectedBookId, letterFilter);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || 'Refinement failed';
+        toast.error(errMsg, { duration: 6000 });
+        setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg}` }));
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      setRefineStatus(prev => ({ ...prev, [word]: 'Failed.' }));
+      const errMsg = e.message || 'Failed.';
+      toast.error(errMsg, { duration: 6000 });
+      setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg}` }));
     }
     setTimeout(() => {
       setRefineStatus(prev => { const n = { ...prev }; delete n[word]; return n; });
-    }, 3000);
+    }, 8000);
   };
 
   if (!isOpen) return null;
