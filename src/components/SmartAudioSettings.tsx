@@ -7,11 +7,12 @@ import type { SmartAudioProfile } from '@/types/client';
 import { toast } from 'react-hot-toast';
 import { ScanForeignWordsModal } from './doclist/ScanForeignWordsModal';
 import { BookPronunciationInspectorModal } from './doclist/BookPronunciationInspectorModal';
+import { SmartAudioWizardModal } from './SmartAudioWizardModal';
 
 const EMPTY_PROFILE = (): SmartAudioProfile => ({
   id: `profile-${Date.now()}`,
   name: 'New Profile',
-  aiModel: PRESET_MODELS[0]?.id || 'gemini-2.5-flash',
+  aiModel: PRESET_MODELS[0]?.id || 'gemini-3.6-flash',
   customTtsPrompt: '',
   abbreviations: {},
   pronunciations: {},
@@ -64,7 +65,7 @@ export function SmartAudioSettings() {
   const [useGlobalPronunciations, setUseGlobalPronunciations] = useState<boolean>(true);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [profileName, setProfileName] = useState('');
-  const [aiModel, setAiModel] = useState(PRESET_MODELS[0]?.id || 'gemini-2.5-flash');
+  const [aiModel, setAiModel] = useState(PRESET_MODELS[0]?.id || 'gemini-3.6-flash');
   const [customModelId, setCustomModelId] = useState('');
   const [promptMode, setPromptMode] = useState<'preset' | 'custom'>('preset');
   const [selectedPromptName, setSelectedPromptName] = useState<string>(PRESET_PROMPTS[0]?.name || '');
@@ -87,6 +88,77 @@ export function SmartAudioSettings() {
 
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
+
+  const handleSaveUniversalSetup = async (config: {
+    universalApiKey: string;
+    backupApiKey: string;
+    selectedModel: string;
+    chosenWorkerMode: 'standard' | 'scholar';
+    useGlobal: boolean;
+    importGlobal: boolean;
+  }) => {
+    try {
+      // 1. Update API key in settings if provided
+      if (config.universalApiKey) {
+        await fetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'geminiApiKey', value: config.universalApiKey })
+        });
+      }
+      if (config.backupApiKey) {
+        await fetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'backupGeminiApiKey', value: config.backupApiKey })
+        });
+      }
+
+      // 2. Cascade API Key and Model to ALL profiles
+      const updatedProfiles = profiles.map(p => ({
+        ...p,
+        geminiApiKey: config.universalApiKey || p.geminiApiKey,
+        aiModel: config.selectedModel,
+        workerMode: config.chosenWorkerMode
+      }));
+
+      // If user chose importGlobal, fetch global pronunciations and merge
+      if (config.importGlobal) {
+        const res = await fetch('/api/tts/global-pronunciations');
+        if (res.ok) {
+          const globalData = await res.json();
+          const resolvedGlobal: Record<string, string> = {};
+          for (const [key, val] of Object.entries(globalData)) {
+            if (Array.isArray(val) && val.length > 0) resolvedGlobal[key] = val[0] as string;
+            else if (typeof val === 'string') resolvedGlobal[key] = val;
+          }
+          if (updatedProfiles[0]) {
+            updatedProfiles[0].pronunciations = { ...resolvedGlobal, ...updatedProfiles[0].pronunciations };
+          }
+        }
+      }
+
+      setProfiles(updatedProfiles);
+      setUseGlobalPronunciations(config.useGlobal);
+
+      // Save profiles back to server
+      await fetch('/api/tts-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedSmartAudioProfileId: selectedProfileId || updatedProfiles[0]?.id || '',
+          smartAudioProfiles: updatedProfiles
+        })
+      });
+
+      toast.success('Universal Setup applied across all profiles!');
+      void loadProfiles();
+    } catch (e) {
+      console.error('Failed to save universal setup', e);
+      toast.error('Failed to save setup');
+    }
+  };
 
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) || profiles[0] || null,
@@ -447,7 +519,25 @@ export function SmartAudioSettings() {
         </div>
       </div>
 
-      {/* ── AI Processing Engine cards ── */}
+      {/* Top Banner & Guided Setup Launcher */}
+      <div className="p-4 bg-gradient-to-r from-purple-950 via-indigo-900 to-slate-900 text-white rounded-2xl shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 border border-purple-800/50">
+        <div className="flex items-center gap-3">
+          <span className="text-4xl">🪄</span>
+          <div>
+            <h2 className="text-lg font-bold">Smart Audio Profile Wizard & Universal Key Setup</h2>
+            <p className="text-xs text-purple-200 mt-0.5">
+              Set up your Universal Gemini API key, choose your default model (Gemini 3.6 Flash), configure Biblical Scholar vs Standard settings, and explore the 12-point prompt walkthrough.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsWizardOpen(true)}
+          className="px-5 py-2.5 bg-purple-500 hover:bg-purple-400 text-white font-bold text-xs rounded-xl shadow-lg transition-all shrink-0 flex items-center gap-2 border border-purple-300/30"
+        >
+          <span>✨</span> Launch Guided Setup Wizard
+        </button>
+      </div>
       <div className="space-y-3">
         <div>
           <h3 className="text-base font-semibold">AI Processing Engine</h3>
@@ -885,6 +975,14 @@ export function SmartAudioSettings() {
             </div>
           </div>
         </div>
+      )}
+      {isWizardOpen && (
+        <SmartAudioWizardModal
+          isOpen={isWizardOpen}
+          onClose={() => setIsWizardOpen(false)}
+          currentApiKey={apiKey || maskedKey || ''}
+          onSaveUniversalSetup={handleSaveUniversalSetup}
+        />
       )}
     </div>
   );
