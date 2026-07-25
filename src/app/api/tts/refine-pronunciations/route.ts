@@ -86,18 +86,55 @@ Generate 5 NEW distinct, plausible Kokoro IPA pronunciation variations that addr
 Strictly follow Kokoro IPA constraints: no stress markers '\\u02c8', no standalone '/o/', no syllable boundary periods between vowels.
 Return a JSON object: { "newChoices": ["pron1", "pron2", "pron3", "pron4", "pron5"] }`;
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" }
-      })
-    });
+    let res: Response | null = null;
+    let errText = '';
+    let retryDelay = 2; // initial wait 2 seconds
 
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error('Gemini API returned error status:', res.status, errText);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json" }
+          })
+        });
+
+        if (res.ok) break;
+
+        errText = await res.text();
+        console.warn(`Gemini API attempt ${attempt} failed (${res.status}):`, errText);
+
+        // If rate limited or overloaded (429 / 503 / 500) and we have retries left, wait and retry
+        if ((res.status === 429 || res.status === 503 || res.status === 500) && attempt < 3) {
+          // Check if Gemini specified a retryDelay
+          try {
+            const errObj = JSON.parse(errText);
+            const detailDelay = errObj.error?.details?.find((d: any) => d.retryDelay)?.retryDelay;
+            if (detailDelay) {
+              const seconds = parseInt(detailDelay.replace('s', ''), 10);
+              if (!isNaN(seconds)) retryDelay = Math.min(seconds, 15);
+            }
+          } catch (e) {}
+
+          await new Promise(resolve => setTimeout(resolve, retryDelay * 1000));
+          retryDelay *= 2; // Exponential backoff
+          continue;
+        } else {
+          break;
+        }
+      } catch (networkErr: any) {
+        console.error(`Gemini fetch error on attempt ${attempt}:`, networkErr);
+        if (attempt < 3) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay * 1000));
+          retryDelay *= 2;
+        }
+      }
+    }
+
+    if (!res || !res.ok) {
+      console.error('Gemini API returned final error status:', res?.status, errText);
       let errorMessage = 'Failed to generate choices from Gemini API';
       try {
         const errJson = JSON.parse(errText);
@@ -106,13 +143,21 @@ Return a JSON object: { "newChoices": ["pron1", "pron2", "pron3", "pron4", "pron
         }
       } catch (e) {}
 
-      if (res.status === 429 || errorMessage.toLowerCase().includes('quota')) {
+      if (res?.status === 429 || errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('rate')) {
         return NextResponse.json({
-          error: `Gemini API Quota Exceeded (429): You have run out of API credits or hit your daily/per-minute rate limit for this model. Please check your billing details or wait a minute before retrying. Full details: ${errorMessage}`
+          error: `Gemini API Quota/Rate Limit Exceeded (429): Free/Paid tier limit reached. Please wait a minute or check billing. ${errorMessage}`,
+          retryAfter: 60
         }, { status: 429 });
       }
 
-      return NextResponse.json({ error: errorMessage }, { status: res.status || 500 });
+      if (res?.status === 503 || errorMessage.toLowerCase().includes('overloaded') || errorMessage.toLowerCase().includes('unavailable')) {
+        return NextResponse.json({
+          error: `Gemini AI Server Overloaded (503): Google Gemini servers are experiencing temporary high load. Please try again in a few seconds. ${errorMessage}`,
+          retryAfter: 10
+        }, { status: 503 });
+      }
+
+      return NextResponse.json({ error: errorMessage }, { status: res?.status || 500 });
     }
 
     const data = await res.json();

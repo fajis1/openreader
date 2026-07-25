@@ -203,10 +203,20 @@ export function ScanForeignWordsModal({
       console.error('Failed to refine', e);
       const errMsg = e.message || 'Failed to generate choices';
       toast.error(errMsg, { duration: 6000 });
-      setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg}` }));
-      setTimeout(() => {
-        setRefineStatus(prev => ({ ...prev, [word]: '' }));
-      }, 8000);
+
+      // Live countdown timer for rate limits / server overload
+      let secondsLeft = errMsg.includes('503') || errMsg.toLowerCase().includes('overloaded') ? 10 : 50;
+      setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg} (Retrying reset in ${secondsLeft}s...)` }));
+
+      const timer = setInterval(() => {
+        secondsLeft -= 1;
+        if (secondsLeft <= 0) {
+          clearInterval(timer);
+          setRefineStatus(prev => ({ ...prev, [word]: '' }));
+        } else {
+          setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg} (Ready in ${secondsLeft}s...)` }));
+        }
+      }, 1000);
     } finally {
       setRefineInput(prev => ({ ...prev, [word]: '' }));
     }

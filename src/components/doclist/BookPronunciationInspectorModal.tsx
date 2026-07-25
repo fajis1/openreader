@@ -125,7 +125,19 @@ export function BookPronunciationInspectorModal({
         const errData = await res.json().catch(() => ({}));
         const errMsg = errData.error || 'Refinement failed';
         toast.error(errMsg, { duration: 6000 });
-        setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg}` }));
+
+        let secondsLeft = errMsg.includes('503') || errMsg.toLowerCase().includes('overloaded') ? 10 : 50;
+        setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg} (Retrying reset in ${secondsLeft}s...)` }));
+
+        const timer = setInterval(() => {
+          secondsLeft -= 1;
+          if (secondsLeft <= 0) {
+            clearInterval(timer);
+            setRefineStatus(prev => ({ ...prev, [word]: '' }));
+          } else {
+            setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg} (Ready in ${secondsLeft}s...)` }));
+          }
+        }, 1000);
       }
     } catch (e: any) {
       console.error(e);
@@ -133,9 +145,6 @@ export function BookPronunciationInspectorModal({
       toast.error(errMsg, { duration: 6000 });
       setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg}` }));
     }
-    setTimeout(() => {
-      setRefineStatus(prev => { const n = { ...prev }; delete n[word]; return n; });
-    }, 8000);
   };
 
   if (!isOpen) return null;
