@@ -35,7 +35,7 @@ STOP_WORDS = {
 }
 
 def load_pdf_text(pdf_path):
-    """Extract text from a PDF file using pypdf or pdfplumber if available."""
+    """Extract text from a PDF file using pypdf or PyMuPDF if available."""
     try:
         import pypdf
         reader = pypdf.PdfReader(pdf_path)
@@ -44,8 +44,9 @@ def load_pdf_text(pdf_path):
             t = page.extract_text()
             if t:
                 text += t + "\n"
-        return text
-    except ImportError:
+        if text.strip():
+            return text
+    except Exception:
         pass
 
     try:
@@ -55,7 +56,7 @@ def load_pdf_text(pdf_path):
         for page in doc:
             text += page.get_text() + "\n"
         return text
-    except ImportError:
+    except Exception:
         pass
 
     raise RuntimeError("Please install pypdf or PyMuPDF (pymupdf) in your Python environment: pip install pypdf")

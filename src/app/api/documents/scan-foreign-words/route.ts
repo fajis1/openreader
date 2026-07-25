@@ -56,7 +56,10 @@ export async function POST(req: NextRequest) {
         args.push('--query', query);
       }
 
-      const result = await execFileAsync(pythonBin, args, { cwd: process.cwd() });
+      const result = await execFileAsync(pythonBin, args, {
+        cwd: process.cwd(),
+        maxBuffer: 10 * 1024 * 1024
+      });
       stdout = result.stdout;
       serverLogger.info({ event: 'pdf.scan.completed', documentId }, 'PDF foreign words pre-scan Python process completed');
     } finally {
@@ -195,7 +198,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ words: enriched });
   } catch (error: any) {
+    serverLogger.error({ event: 'pdf.scan.failed', error }, 'Scan foreign words error');
     console.error('Scan foreign words error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: error?.message || 'Failed to scan document' }, { status: 500 });
   }
 }
