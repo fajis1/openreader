@@ -171,19 +171,26 @@ export async function POST(req: NextRequest) {
         });
 
         if (!('error' in creds)) {
-          const cachePromises = allPhoneticsToCache.map(({ word, phonetic }) => {
-            const textToSynthesize = phonetic.startsWith('/') ? `[${word}](${phonetic})` : `[${word}](/${phonetic}/)`;
-            return generateTTSBuffer({
-              text: textToSynthesize,
-              voice: 'af_heart',
-              speed: 1,
-              format: 'mp3',
-              provider: creds.provider,
-              apiKey: creds.apiKey,
-              baseUrl: creds.baseUrl,
-            }).catch(e => console.error('Failed to pre-cache', word, phonetic, e));
-          });
-          await Promise.all(cachePromises);
+          // Pre-cache in the background to avoid blocking the HTTP response and crashing the route
+          (async () => {
+            const batchSize = 10;
+            for (let i = 0; i < allPhoneticsToCache.length; i += batchSize) {
+              const batch = allPhoneticsToCache.slice(i, i + batchSize);
+              const cachePromises = batch.map(({ word, phonetic }) => {
+                const textToSynthesize = phonetic.startsWith('/') ? `[${word}](${phonetic})` : `[${word}](/${phonetic}/)`;
+                return generateTTSBuffer({
+                  text: textToSynthesize,
+                  voice: 'af_heart',
+                  speed: 1,
+                  format: 'mp3',
+                  provider: creds.provider,
+                  apiKey: creds.apiKey,
+                  baseUrl: creds.baseUrl,
+                }).catch(e => console.error('Failed to pre-cache', word, e?.message || e));
+              });
+              await Promise.all(cachePromises);
+            }
+          })().catch(e => console.error('Background pre-caching error:', e));
         }
       } catch (e) {
         console.error('Error in pre-caching audio', e);
