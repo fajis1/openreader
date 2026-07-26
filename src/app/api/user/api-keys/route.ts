@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { db } from '@/db';
 import { userApiKeys } from '@/db/schema';
-import { getAuthSession } from '@/lib/auth';
+import { getAuthContext } from '@/lib/server/auth/auth';
 import { eq } from 'drizzle-orm';
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getAuthSession(req);
-    if (!session?.user?.id) {
+    const session = await getAuthContext(req);
+    if (!session?.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
         lastUsedAt: userApiKeys.lastUsedAt,
       })
       .from(userApiKeys)
-      .where(eq(userApiKeys.userId, session.user.id));
+      .where(eq(userApiKeys.userId, session.userId));
 
     return NextResponse.json({ keys });
   } catch (error: any) {
@@ -33,8 +33,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getAuthSession(req);
-    if (!session?.user?.id) {
+    const session = await getAuthContext(req);
+    if (!session?.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
 
     await db.insert(userApiKeys).values({
       id: keyId,
-      userId: session.user.id,
+      userId: session.userId,
       name: name.trim(),
       keyHash,
       keyLast4,
@@ -85,8 +85,8 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const session = await getAuthSession(req);
-    if (!session?.user?.id) {
+    const session = await getAuthContext(req);
+    if (!session?.userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

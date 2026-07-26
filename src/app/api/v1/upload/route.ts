@@ -3,7 +3,8 @@ import crypto from 'crypto';
 import { db } from '@/db';
 import { userApiKeys, documents } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { storeDocumentFile } from '@/lib/server/docstore';
+import { putDocumentBlob } from '@/lib/server/documents/blobstore';
+import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 
 export async function POST(req: NextRequest) {
   try {
@@ -56,13 +57,10 @@ export async function POST(req: NextRequest) {
     const fileExt = file.name.split('.').pop()?.toLowerCase() || 'pdf';
     const documentId = crypto.createHash('sha256').update(buffer).digest('hex');
 
+    const namespace = getOpenReaderTestNamespace(req.headers);
+
     // Store in docstore (S3 / SeaweedFS / local filesystem based on OpenReader config)
-    const filePath = await storeDocumentFile({
-      userId,
-      documentId,
-      filename: file.name,
-      buffer,
-    });
+    const objectKey = await putDocumentBlob(documentId, buffer, file.type || 'application/octet-stream', namespace);
 
     // 4. Insert Document into Database
     const now = Date.now();
@@ -73,7 +71,7 @@ export async function POST(req: NextRequest) {
       type: fileExt,
       size: file.size,
       lastModified: now,
-      filePath,
+      filePath: objectKey,
       createdAt: now,
     } as any).onConflictDoNothing();
 

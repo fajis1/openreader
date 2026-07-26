@@ -785,18 +785,13 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    const selected = selection.getSelectedDocs();
-                    if (selected.length > 0) setDocToScan(selected[0]);
-                  }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-md shadow transition-all flex items-center gap-1.5"
+                  onClick={() => setBulkDeleteAudiobooksPrompt(true)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-md shadow transition-all flex items-center gap-1.5"
                 >
-                  🔍 Pre-Scan Foreign Words
+                  🗑️ Delete Audiobook{visibleSelectedCount > 1 ? 's' : ''}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadSelected}
-            sidebarFilter !== 'audiobooks' ? (
+              </div>
+            ) : sidebarFilter !== 'audiobooks' ? (
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -852,6 +847,49 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
                 >
                   Download {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Originals
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const selected = selection.getSelectedDocs();
+                    if (selected.length > 0) {
+                      setShowBatchAudiobookSidebar(true);
+                    } else {
+                      if (allDocuments.length > 0) {
+                        setSelectionModalProps({
+                          title: 'Select Documents for Audiobook Generation',
+                          confirmLabel: 'Proceed to Audiobook Setup',
+                          defaultSelected: false,
+                          onConfirmAction: (docs) => {
+                            selection.selectDocs(docs);
+                            setShowBatchAudiobookSidebar(true);
+                          },
+                        });
+                        setIsActionSelectionModalOpen(true);
+                      } else {
+                        toast('Please upload a document first.', { icon: 'ℹ️' });
+                      }
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-accent hover:bg-secondary-accent text-background font-bold text-xs rounded-md shadow transition-all"
+                >
+                  Generate Audiobook{visibleSelectedCount > 1 ? 's' : ''}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Trigger Settings modal directly to the API Keys section
+                    const settingsBtn = document.querySelector('[aria-label="Settings"]') as HTMLButtonElement | null;
+                    if (settingsBtn) settingsBtn.click();
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-md shadow transition-all flex items-center gap-1"
+                >
+                  🔑 API & Integrations
+                </button>
+              </div>
+            ) : null
+          }
+        />
+      }
                 <button
                   type="button"
                   onClick={() => {
