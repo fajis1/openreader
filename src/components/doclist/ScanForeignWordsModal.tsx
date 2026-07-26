@@ -337,7 +337,12 @@ export function ScanForeignWordsModal({
               </div>
             </div>
           ) : loading ? (
-            <div className="flex items-center justify-center p-8 text-gray-500">Scanning document (this may take a minute)...</div>
+            <div className="flex flex-col items-center justify-center p-12 text-center">
+              <div className="text-gray-900 dark:text-gray-100 font-semibold mb-2 text-lg">Scanning document (this may take a minute)...</div>
+              <p className="text-gray-500 dark:text-gray-400 text-sm max-w-md">
+                You can safely close this modal or navigate away. The scan will continue in the background, and all LLM pronunciation generations will automatically be saved to your database for when you return!
+              </p>
+            </div>
           ) : error ? (
             <div className="p-4 text-red-600 bg-red-50 dark:bg-red-950/40 rounded">{error}</div>
           ) : words.length === 0 ? (
