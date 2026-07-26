@@ -106,11 +106,12 @@ RUN chmod +x /usr/local/bin/nats-server
 # Include OpenAI Whisper license text for runtime-downloaded ONNX artifacts.
 COPY --from=app-builder /app/compute/core/src/whisper/assets/LICENSE.txt /licenses/openai-whisper-LICENSE.txt
 
-# Copy smart audio Python worker and install its dependencies into a venv.
+# Copy smart audio Python worker & scan_pdf_foreign_words script, and install dependencies into a venv.
 # The entrypoint checks for .venv/bin/python first, then falls back to python3.
 COPY --from=app-builder /app/audiobook_worker.py ./audiobook_worker.py
+COPY --from=app-builder /app/scan_pdf_foreign_words.py ./scan_pdf_foreign_words.py
 RUN python3 -m venv .venv && \
-    .venv/bin/pip install --no-cache-dir nats-py google-genai
+    .venv/bin/pip install --no-cache-dir nats-py google-genai pypdf nltk
 
 # Match the app's historical container port now that standalone server.js
 # is started directly instead of `next start -p 3003`.
