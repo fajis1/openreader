@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ModalFrame } from '@/components/ui';
+import toast from 'react-hot-toast';
 
 export function ScanForeignWordsModal({
   isOpen,

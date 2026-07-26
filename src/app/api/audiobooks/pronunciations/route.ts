@@ -40,17 +40,17 @@ export async function GET(request: NextRequest) {
     const activeProfile = profilesDoc.profiles.find(p => p.id === profilesDoc.selectedProfileId) || profilesDoc.profiles[0];
     const userPronunciations = activeProfile?.pronunciations || {};
 
-    const allUserBooks = await db.select({ id: audiobooks.id, name: audiobooks.name }).from(audiobooks).where(eq(audiobooks.userId, userId as string));
+    const allUserBooks = await db.select({ id: audiobooks.id, title: audiobooks.title }).from(audiobooks).where(eq(audiobooks.userId, userId as string));
 
     const wordMap: Record<string, { word: string, phonetic: string, count: number, globalChoices: string[], userOverride: string | null }> = {};
 
     if (bookId) {
-      const objects = await listAudiobookObjects(bookId, userId, null);
+      const objects = await listAudiobookObjects(bookId, userId);
       const textFiles = objects.filter(o => o.fileName.endsWith('.txt') || o.fileName.endsWith('.md') || o.fileName.endsWith('.json') || o.fileName.endsWith('.xml') || o.fileName.endsWith('.html'));
 
       for (const obj of textFiles) {
         try {
-          const buf = await getAudiobookObjectBuffer(bookId, userId, obj.fileName, null);
+          const buf = await getAudiobookObjectBuffer(bookId, userId, obj.fileName);
           const text = buf.toString('utf-8');
           
           const regex = /\[([^\]]+)\]\(\/([^\/]+)\/\)/g;

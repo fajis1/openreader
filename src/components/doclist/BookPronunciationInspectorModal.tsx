@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ModalFrame } from '@/components/ui';
+import toast from 'react-hot-toast';
 
 export function BookPronunciationInspectorModal({
   isOpen,
@@ -152,7 +153,7 @@ export function BookPronunciationInspectorModal({
   const filteredWords = words.filter(w => w.word.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
-    <ModalFrame open={isOpen} onClose={onClose} title="Pronunciation Inspector 📚">
+    <ModalFrame open={isOpen} onClose={onClose}>
       <div className="flex flex-col h-full max-h-[80vh] min-w-[600px] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-4">
         
         <div className="flex gap-4 mb-4 items-center flex-wrap">

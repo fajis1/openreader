@@ -7,7 +7,10 @@ import { v4 as uuidv4 } from 'uuid';
 
 export async function GET(req: Request) {
   try {
-    const { user } = await requireAuthContext(req);
+    const authResult = await requireAuthContext(req);
+    if (authResult instanceof Response) return authResult;
+    const { user } = authResult;
+    
     // In a real app we might check if user is admin, but for now we'll allow authenticated users
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
