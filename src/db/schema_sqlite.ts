@@ -313,6 +313,7 @@ export const ttsSegmentVariants = sqliteTable('tts_segment_variants', {
 
 export const systemLogs = sqliteTable('system_logs', {
   id: text('id').primaryKey(),
+  userId: text('user_id'),
   severity: text('severity').notNull(), // 'info', 'warning', 'error'
   context: text('context').notNull(), // 'api', 'worker', 'system', 'download'
   message: text('message').notNull(),

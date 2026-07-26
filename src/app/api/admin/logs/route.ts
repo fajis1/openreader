@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db';
 import { systemLogs } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function GET(req: Request) {
@@ -12,7 +12,14 @@ export async function GET(req: Request) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    const logs = await db.select().from(systemLogs).orderBy(desc(systemLogs.createdAt)).limit(100);
+    const isAdmin = (user as any).role === 'admin' || (user as any).isAdmin;
+    let query = db.select().from(systemLogs);
+    
+    if (!isAdmin) {
+      query = query.where(eq(systemLogs.userId, user.id));
+    }
+    
+    const logs = await query.orderBy(desc(systemLogs.createdAt)).limit(100);
     return NextResponse.json(logs);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

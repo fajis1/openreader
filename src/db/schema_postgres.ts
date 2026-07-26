@@ -294,6 +294,7 @@ export const ttsSegmentVariants = pgTable('tts_segment_variants', {
 
 export const systemLogs = pgTable('system_logs', {
   id: text('id').primaryKey(),
+  userId: text('user_id'),
   severity: text('severity').notNull(),
   context: text('context').notNull(),
   message: text('message').notNull(),

@@ -153,7 +153,7 @@ function ThemeChoice({
   );
 }
 
-type SectionId = 'api' | 'api-keys' | 'theme' | 'docs' | 'account' | 'admin';
+type SectionId = 'api' | 'api-keys' | 'theme' | 'docs' | 'account' | 'logs' | 'admin';
 
 type SidebarSection = {
   id: SectionId;
@@ -169,10 +169,11 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
   { id: 'theme', label: 'Appearance', icon: PaletteIcon },
   { id: 'docs', label: 'Documents', icon: DocumentIcon },
   { id: 'account', label: 'Account', icon: UserIcon, authOnly: true },
+  { id: 'logs', label: 'Logs', icon: DocumentIcon, authOnly: true },
   { id: 'admin', label: 'Admin', icon: SettingsIcon, authOnly: true, adminOnly: true },
 ];
 
-type AdminSubTab = 'providers' | 'features' | 'tasks' | 'access' | 'logs';
+type AdminSubTab = 'providers' | 'features' | 'tasks' | 'access';
 
 export function SettingsTrigger({
   className = '',
@@ -1030,18 +1031,21 @@ export function SettingsModal({
                               { value: 'features', label: 'Site features' },
                               { value: 'access', label: 'Access' },
                               { value: 'tasks', label: 'Tasks' },
-                              { value: 'logs', label: 'Logs' },
                             ]}
                             onChange={setAdminSubTab}
                             ariaLabel="Admin tab"
-                            className="grid-cols-5"
+                            className="grid-cols-4"
                           />
                           {adminSubTab === 'providers' && <AdminProvidersPanel />}
                           {adminSubTab === 'features' && <AdminFeaturesPanel />}
                           {adminSubTab === 'access' && <AdminAccessPanel />}
                           {adminSubTab === 'tasks' && <AdminTasksPanel />}
-                          {adminSubTab === 'logs' && <AdminLogsPanel />}
                         </div>
+                      )}
+
+                      {/* Logs Section */}
+                      {activeSection === 'logs' && (
+                        <AdminLogsPanel />
                       )}
 
                       {/* Account Section */}
