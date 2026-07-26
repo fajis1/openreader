@@ -38,6 +38,7 @@ import { AdminProvidersPanel } from '@/components/admin/AdminProvidersPanel';
 import { AdminFeaturesPanel } from '@/components/admin/AdminFeaturesPanel';
 import { AdminAccessPanel } from '@/components/admin/AdminAccessPanel';
 import { AdminTasksPanel } from '@/components/admin/AdminTasksPanel';
+import { ApiKeysManagementPanel } from '@/components/ApiKeysManagementPanel';
 import { useSharedProviders } from '@/hooks/useSharedProviders';
 import { flushUserPreferencesSync } from '@/lib/client/api/user-state';
 import toast from 'react-hot-toast';
@@ -151,7 +152,7 @@ function ThemeChoice({
   );
 }
 
-type SectionId = 'api' | 'theme' | 'docs' | 'account' | 'admin';
+type SectionId = 'api' | 'api-keys' | 'theme' | 'docs' | 'account' | 'admin';
 
 type SidebarSection = {
   id: SectionId;
@@ -163,6 +164,7 @@ type SidebarSection = {
 
 const SIDEBAR_SECTIONS: SidebarSection[] = [
   { id: 'api', label: 'TTS Provider', icon: KeyIcon },
+  { id: 'api-keys', label: 'API Keys', icon: KeyIcon },
   { id: 'theme', label: 'Appearance', icon: PaletteIcon },
   { id: 'docs', label: 'Documents', icon: DocumentIcon },
   { id: 'account', label: 'Account', icon: UserIcon, authOnly: true },
@@ -825,6 +827,11 @@ export function SettingsModal({
                             </Button>
                           </div>
                         </div>
+                      )}
+
+                      {/* API Keys Management Section */}
+                      {activeSection === 'api-keys' && (
+                        <ApiKeysManagementPanel />
                       )}
 
                       {/* Theme / Appearance Section */}

@@ -3,6 +3,24 @@ import { db } from '@/db';
 import { adminSettings } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 
+const DEFAULT_SEED_PRONUNCIATIONS: Record<string, string[]> = {
+  "Eather": ["/iːθər/"],
+  "Yin Lime": ["/jɪn laɪm/"],
+  "Eatheral": ["/iːθərəl/"],
+  "Aetherian": ["/iːθərɪən/"],
+  "stumbled": ["/stʌmbəld/"],
+  "bottomed-out": ["/bɒtəmd aʊt/"],
+  "launched": ["/lɔːntʃt/"],
+  "face-planted": ["/feɪs plæntəd/"],
+  "Aetherians": ["/iːθərɪən/"],
+  "Avinian": ["/əvɪniən/"],
+  "qŏdāšîm": ["/koʊdɑʃim/"],
+  "qādôš": ["/kɑdoʊʃ/"],
+  "λόγος": ["/lɒɡɒs/"],
+  "καταλλάσσω": ["/kɑtɑlɑsoʊ/"],
+  "בְּרִית": ["/bəɹiθ/"]
+};
+
 export async function GET() {
   try {
     const rows = await db
@@ -11,12 +29,24 @@ export async function GET() {
       .where(eq(adminSettings.key, 'global_pronunciations'))
       .limit(1);
 
+    let parsed: Record<string, any> = {};
     if (!rows || rows.length === 0 || !rows[0].valueJson) {
-      return NextResponse.json({});
+      // Seed initial global dictionary with default prepopulated pronunciations
+      parsed = DEFAULT_SEED_PRONUNCIATIONS;
+      await db.insert(adminSettings).values({
+        key: 'global_pronunciations',
+        valueJson: JSON.stringify(DEFAULT_SEED_PRONUNCIATIONS)
+      }).onConflictDoUpdate({
+        target: adminSettings.key,
+        set: { valueJson: JSON.stringify(DEFAULT_SEED_PRONUNCIATIONS) }
+      });
+    } else {
+      const value = rows[0].valueJson;
+      parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      if (!parsed || Object.keys(parsed).length === 0) {
+        parsed = DEFAULT_SEED_PRONUNCIATIONS;
+      }
     }
-
-    const value = rows[0].valueJson;
-    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
 
     // Normalize to new object schema
     const normalized: Record<string, any[]> = {};

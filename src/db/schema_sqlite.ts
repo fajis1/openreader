@@ -272,6 +272,20 @@ export const documentBlobLeases = sqliteTable('document_blob_leases', {
   leaseUntilMs: integer('lease_until_ms').notNull(),
 });
 
+export const userApiKeys = sqliteTable('user_api_keys', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  keyHash: text('key_hash').notNull().unique(),
+  keyLast4: text('key_last4').notNull(),
+  expiresAt: integer('expires_at'),
+  createdAt: integer('created_at').notNull().default(SQLITE_NOW_MS),
+  lastUsedAt: integer('last_used_at'),
+}, (table) => [
+  index('idx_user_api_keys_user_id').on(table.userId),
+  index('idx_user_api_keys_hash').on(table.keyHash),
+]);
+
 export const ttsSegmentVariants = sqliteTable('tts_segment_variants', {
   segmentId: text('segment_id').notNull(),
   userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),

@@ -253,6 +253,20 @@ export const documentBlobLeases = pgTable('document_blob_leases', {
   leaseUntilMs: bigint('lease_until_ms', { mode: 'number' }).notNull(),
 });
 
+export const userApiKeys = pgTable('user_api_keys', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  keyHash: text('key_hash').notNull().unique(),
+  keyLast4: text('key_last4').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull().default(PG_NOW_MS),
+  lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+}, (table) => [
+  index('idx_user_api_keys_user_id').on(table.userId),
+  index('idx_user_api_keys_hash').on(table.keyHash),
+]);
+
 export const ttsSegmentVariants = pgTable('tts_segment_variants', {
   segmentId: text('segment_id').notNull(),
   userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),

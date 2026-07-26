@@ -42,6 +42,8 @@ import { GalleryView } from './views/GalleryView';
 import { JobsInlineView } from './views/JobsInlineView';
 import { ScanForeignWordsModal } from './ScanForeignWordsModal';
 import { BookPronunciationInspectorModal } from './BookPronunciationInspectorModal';
+import { DocumentSelectionModal } from '@/components/documents/DocumentSelectionModal';
+import toast from 'react-hot-toast';
 
 let cachedDocumentListState: DocumentListState | null = null;
 
@@ -233,6 +235,18 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const [backgroundJobs, setBackgroundJobs] = useState<{ id: string, documentId: string, status: string, progress: number }[] | null>(null);
   const [docToScan, setDocToScan] = useState<DocumentListDocument | null>(null);
   const [docToInspect, setDocToInspect] = useState<DocumentListDocument | null>(null);
+  const [isActionSelectionModalOpen, setIsActionSelectionModalOpen] = useState(false);
+  const [selectionModalProps, setSelectionModalProps] = useState<{
+    title: string;
+    confirmLabel: string;
+    defaultSelected: boolean;
+    onConfirmAction: (docs: DocumentListDocument[]) => void;
+  }>({
+    title: '',
+    confirmLabel: '',
+    defaultSelected: false,
+    onConfirmAction: () => {},
+  });
 
   useEffect(() => {
     // Also check if there's an old legacy localStorage batch, clear it.
@@ -782,43 +796,99 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
                 <button
                   type="button"
                   onClick={handleDownloadSelected}
-                  className="px-4 py-2 bg-accent hover:bg-secondary-accent text-background font-bold text-sm rounded-md shadow transition-all"
-                >
-                  Download {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Audiobooks
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBulkDeleteAudiobooksPrompt(true)}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-md shadow transition-all"
-                >
-                  Delete {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Audiobooks
-                </button>
-              </div>
-            ) : visibleSelectedCount > 0 && sidebarFilter !== 'audiobooks' ? (
+            sidebarFilter !== 'audiobooks' ? (
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
                     const selected = selection.getSelectedDocs();
-                    if (selected.length > 0) setDocToScan(selected[0]);
+                    if (selected.length > 0) {
+                      setDocToScan(selected[0]);
+                    } else {
+                      // Open selection modal prompt if no doc selected
+                      if (allDocuments.length > 0) {
+                        setSelectionModalProps({
+                          title: 'Select Document to Pre-Scan',
+                          confirmLabel: 'Pre-Scan Selected',
+                          defaultSelected: false,
+                          onConfirmAction: (docs) => {
+                            if (docs.length > 0) setDocToScan(docs[0]);
+                          },
+                        });
+                        setIsActionSelectionModalOpen(true);
+                      } else {
+                        toast('Please upload a document first.', { icon: 'ℹ️' });
+                      }
+                    }
                   }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-md shadow transition-all flex items-center gap-1.5"
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-md shadow transition-all flex items-center gap-1.5"
                 >
                   🔍 Pre-Scan Foreign Words
                 </button>
                 <button
                   type="button"
-                  onClick={handleDownloadSelectedOriginals}
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-bold text-sm rounded-md shadow transition-all"
+                  onClick={() => {
+                    const selected = selection.getSelectedDocs();
+                    if (selected.length > 0) {
+                      handleDownloadSelectedOriginals();
+                    } else {
+                      if (allDocuments.length > 0) {
+                        setSelectionModalProps({
+                          title: 'Select Documents to Download',
+                          confirmLabel: 'Download Selected',
+                          defaultSelected: false,
+                          onConfirmAction: (docs) => {
+                            selection.selectDocs(docs);
+                            setTimeout(() => handleDownloadSelectedOriginals(), 50);
+                          },
+                        });
+                        setIsActionSelectionModalOpen(true);
+                      } else {
+                        toast('Please upload a document first.', { icon: 'ℹ️' });
+                      }
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-bold text-xs rounded-md shadow transition-all"
                 >
                   Download {visibleSelectedCount > 1 ? `${visibleSelectedCount} ` : ''}Originals
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowBatchAudiobookSidebar(true)}
-                  className="px-4 py-2 bg-accent hover:bg-secondary-accent text-background font-bold text-sm rounded-md shadow transition-all"
+                  onClick={() => {
+                    const selected = selection.getSelectedDocs();
+                    if (selected.length > 0) {
+                      setShowBatchAudiobookSidebar(true);
+                    } else {
+                      if (allDocuments.length > 0) {
+                        setSelectionModalProps({
+                          title: 'Select Documents for Audiobook Generation',
+                          confirmLabel: 'Proceed to Audiobook Setup',
+                          defaultSelected: false,
+                          onConfirmAction: (docs) => {
+                            selection.selectDocs(docs);
+                            setShowBatchAudiobookSidebar(true);
+                          },
+                        });
+                        setIsActionSelectionModalOpen(true);
+                      } else {
+                        toast('Please upload a document first.', { icon: 'ℹ️' });
+                      }
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-accent hover:bg-secondary-accent text-background font-bold text-xs rounded-md shadow transition-all"
                 >
                   Generate Audiobook{visibleSelectedCount > 1 ? 's' : ''}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Trigger Settings modal directly to the API Keys section
+                    const settingsBtn = document.querySelector('[aria-label="Settings"]') as HTMLButtonElement | null;
+                    if (settingsBtn) settingsBtn.click();
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-md shadow transition-all flex items-center gap-1"
+                >
+                  🔑 API & Integrations
                 </button>
               </div>
             ) : null
@@ -1017,6 +1087,20 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
         isOpen={isUploadDialogOpen}
         onClose={() => setIsUploadDialogOpen(false)}
         onUploadBatchChange={handleUploadBatchChange}
+      />
+
+      <DocumentSelectionModal
+        isOpen={isActionSelectionModalOpen}
+        onClose={() => setIsActionSelectionModalOpen(false)}
+        onConfirm={(docs) => {
+          setIsActionSelectionModalOpen(false);
+          selectionModalProps.onConfirmAction(docs as DocumentListDocument[]);
+        }}
+        title={selectionModalProps.title}
+        confirmLabel={selectionModalProps.confirmLabel}
+        isProcessing={false}
+        defaultSelected={selectionModalProps.defaultSelected}
+        files={allDocuments}
       />
     </FinderWindow>
   );
