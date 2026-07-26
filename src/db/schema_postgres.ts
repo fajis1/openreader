@@ -291,3 +291,12 @@ export const ttsSegmentVariants = pgTable('tts_segment_variants', {
   index('idx_tts_segment_variants_status').on(table.userId, table.status),
   index('idx_tts_segment_variants_unique_settings').on(table.userId, table.segmentEntryId, table.settingsHash),
 ]);
+
+export const systemLogs = pgTable('system_logs', {
+  id: text('id').primaryKey(),
+  severity: text('severity').notNull(),
+  context: text('context').notNull(),
+  message: text('message').notNull(),
+  details: text('details'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull().default(PG_NOW_MS),
+});

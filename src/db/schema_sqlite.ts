@@ -310,3 +310,12 @@ export const ttsSegmentVariants = sqliteTable('tts_segment_variants', {
   index('idx_tts_segment_variants_status').on(table.userId, table.status),
   index('idx_tts_segment_variants_unique_settings').on(table.userId, table.segmentEntryId, table.settingsHash),
 ]);
+
+export const systemLogs = sqliteTable('system_logs', {
+  id: text('id').primaryKey(),
+  severity: text('severity').notNull(), // 'info', 'warning', 'error'
+  context: text('context').notNull(), // 'api', 'worker', 'system', 'download'
+  message: text('message').notNull(),
+  details: text('details'), // JSON string or stack trace
+  createdAt: integer('created_at').notNull().default(SQLITE_NOW_MS),
+});

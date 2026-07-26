@@ -38,6 +38,7 @@ import { AdminProvidersPanel } from '@/components/admin/AdminProvidersPanel';
 import { AdminFeaturesPanel } from '@/components/admin/AdminFeaturesPanel';
 import { AdminAccessPanel } from '@/components/admin/AdminAccessPanel';
 import { AdminTasksPanel } from '@/components/admin/AdminTasksPanel';
+import { AdminLogsPanel } from '@/components/admin/AdminLogsPanel';
 import { ApiKeysManagementPanel } from '@/components/ApiKeysManagementPanel';
 import { useSharedProviders } from '@/hooks/useSharedProviders';
 import { flushUserPreferencesSync } from '@/lib/client/api/user-state';
@@ -171,7 +172,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
   { id: 'admin', label: 'Admin', icon: SettingsIcon, authOnly: true, adminOnly: true },
 ];
 
-type AdminSubTab = 'providers' | 'features' | 'tasks' | 'access';
+type AdminSubTab = 'providers' | 'features' | 'tasks' | 'access' | 'logs';
 
 export function SettingsTrigger({
   className = '',
@@ -1029,15 +1030,17 @@ export function SettingsModal({
                               { value: 'features', label: 'Site features' },
                               { value: 'access', label: 'Access' },
                               { value: 'tasks', label: 'Tasks' },
+                              { value: 'logs', label: 'Logs' },
                             ]}
                             onChange={setAdminSubTab}
                             ariaLabel="Admin tab"
-                            className="grid-cols-4"
+                            className="grid-cols-5"
                           />
                           {adminSubTab === 'providers' && <AdminProvidersPanel />}
                           {adminSubTab === 'features' && <AdminFeaturesPanel />}
                           {adminSubTab === 'access' && <AdminAccessPanel />}
                           {adminSubTab === 'tasks' && <AdminTasksPanel />}
+                          {adminSubTab === 'logs' && <AdminLogsPanel />}
                         </div>
                       )}
 

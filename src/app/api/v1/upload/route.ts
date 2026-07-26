@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       db.update(userApiKeys)
         .set({ lastUsedAt: now })
         .where(eq(userApiKeys.id, apiKeyRecordId))
-        .catch((err) => console.warn('Failed to update API key lastUsedAt:', err));
+        .catch((err: any) => console.warn('Failed to update API key lastUsedAt:', err));
     }
 
     return NextResponse.json({

@@ -833,7 +833,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
                           confirmLabel: 'Download Selected',
                           defaultSelected: false,
                           onConfirmAction: (docs) => {
-                            selection.selectDocs(docs);
+                            selection.replace(docs);
                             setTimeout(() => handleDownloadSelectedOriginals(), 50);
                           },
                         });
@@ -860,7 +860,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
                           confirmLabel: 'Proceed to Audiobook Setup',
                           defaultSelected: false,
                           onConfirmAction: (docs) => {
-                            selection.selectDocs(docs);
+                            selection.replace(docs);
                             setShowBatchAudiobookSidebar(true);
                           },
                         });
@@ -890,49 +890,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
           }
         />
       }
-                <button
-                  type="button"
-                  onClick={() => {
-                    const selected = selection.getSelectedDocs();
-                    if (selected.length > 0) {
-                      setShowBatchAudiobookSidebar(true);
-                    } else {
-                      if (allDocuments.length > 0) {
-                        setSelectionModalProps({
-                          title: 'Select Documents for Audiobook Generation',
-                          confirmLabel: 'Proceed to Audiobook Setup',
-                          defaultSelected: false,
-                          onConfirmAction: (docs) => {
-                            selection.selectDocs(docs);
-                            setShowBatchAudiobookSidebar(true);
-                          },
-                        });
-                        setIsActionSelectionModalOpen(true);
-                      } else {
-                        toast('Please upload a document first.', { icon: 'ℹ️' });
-                      }
-                    }
-                  }}
-                  className="px-3 py-1.5 bg-accent hover:bg-secondary-accent text-background font-bold text-xs rounded-md shadow transition-all"
-                >
-                  Generate Audiobook{visibleSelectedCount > 1 ? 's' : ''}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    // Trigger Settings modal directly to the API Keys section
-                    const settingsBtn = document.querySelector('[aria-label="Settings"]') as HTMLButtonElement | null;
-                    if (settingsBtn) settingsBtn.click();
-                  }}
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-md shadow transition-all flex items-center gap-1"
-                >
-                  🔑 API & Integrations
-                </button>
-              </div>
-            ) : null
-          }
-        />
-      }
+
       sidebarOpen={effectiveSidebarOpen}
       onRequestSidebarClose={() => {
         if (isNarrow) setMobileSidebarOpen(false);

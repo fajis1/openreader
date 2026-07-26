@@ -146,15 +146,16 @@ export function ApiKeysManagementPanel() {
           </div>
           <div>
             <label className="block text-xs font-medium text-soft mb-1">Expiration</label>
-            <Select
+            <select
               value={expirationDays.toString()}
               onChange={(e) => setExpirationDays(parseInt(e.target.value, 10))}
+              className="w-full bg-surface-sunken border border-line rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent-line hover:bg-accent-wash transition-colors duration-fast ease-standard"
             >
               <option value="0">Never Expires</option>
               <option value="30">30 Days</option>
               <option value="90">90 Days</option>
               <option value="365">1 Year</option>
-            </Select>
+            </select>
           </div>
         </div>
         <Button type="submit" variant="primary" size="sm" disabled={isCreating || !keyName.trim()}>
