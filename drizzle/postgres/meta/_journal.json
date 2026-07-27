@@ -92,6 +92,20 @@
       "when": 1781215504187,
       "tag": "0012_third_exodus",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785108714987,
+      "tag": "0013_big_mandarin",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785108896701,
+      "tag": "0014_tan_the_watchers",
+      "breakpoints": true
     }
   ]
 }
