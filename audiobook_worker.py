@@ -4,6 +4,7 @@ import re
 import os
 from nats.aio.client import Client as NATS
 from google import genai
+from gemini_rate_limiter import refresh_gemini_cooldown
 
 # --- PER-KEY RATE LIMITER STATE ---
 # Maps api_key -> {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0}
@@ -99,11 +100,12 @@ async def process_message(msg):
         api_state = API_STATES.setdefault(api_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})
         
         import time
-        if time.time() < api_state["resume_at"]:
+        cooldown_remaining = refresh_gemini_cooldown(api_state)
+        if cooldown_remaining > 0:
             print(f"  -> [⏳] API Key is in penalty box. Rejecting so Node can re-queue.")
             await msg.respond(json.dumps({
                 "status": "rate_limit", 
-                "message": f"API is ratelimited. Resumes in {int(api_state['resume_at'] - time.time())}s"
+                "message": f"API is ratelimited. Resumes in {cooldown_remaining}s"
             }).encode())
             return
         

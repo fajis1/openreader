@@ -14,6 +14,62 @@ export interface SmartAudioProfilesDocument {
   profiles: SmartAudioProfile[];
 }
 
+export function redactSmartAudioProfileSecrets(profile: SmartAudioProfile): SmartAudioProfile {
+  return {
+    id: profile.id,
+    name: profile.name,
+    aiModel: profile.aiModel,
+    customTtsPrompt: profile.customTtsPrompt,
+    abbreviations: profile.abbreviations,
+    pronunciations: profile.pronunciations,
+    books: profile.books,
+    useGlobalPronunciations: profile.useGlobalPronunciations,
+    pronunciationPromptMode: profile.pronunciationPromptMode,
+    customPronunciationPrompt: profile.customPronunciationPrompt,
+    workerMode: profile.workerMode,
+    geminiApiKeyConfigured: Boolean(profile.geminiApiKey),
+    geminiApiKeyLast4: profile.geminiApiKey ? profile.geminiApiKey.slice(-4) : undefined,
+    backupGeminiApiKeyConfigured: Boolean(profile.backupGeminiApiKey),
+    backupGeminiApiKeyLast4: profile.backupGeminiApiKey
+      ? profile.backupGeminiApiKey.slice(-4)
+      : undefined,
+  };
+}
+
+export function redactSmartAudioProfilesDocument(
+  document: SmartAudioProfilesDocument,
+): SmartAudioProfilesDocument {
+  return {
+    selectedProfileId: document.selectedProfileId,
+    profiles: document.profiles.map(redactSmartAudioProfileSecrets),
+  };
+}
+
+export function mergeStoredSmartAudioProfileSecrets(
+  incomingProfiles: SmartAudioProfile[],
+  storedProfiles: SmartAudioProfile[],
+): SmartAudioProfile[] {
+  const storedById = new Map(storedProfiles.map((profile) => [profile.id, profile]));
+
+  return incomingProfiles.map((profile) => {
+    const storedProfile = storedById.get(profile.id);
+    const primarySourceProfile = profile.geminiApiKeySourceProfileId
+      ? storedById.get(profile.geminiApiKeySourceProfileId) || storedProfile
+      : storedProfile;
+    const backupSourceProfile = profile.backupGeminiApiKeySourceProfileId
+      ? storedById.get(profile.backupGeminiApiKeySourceProfileId) || storedProfile
+      : storedProfile;
+    const suppliedPrimaryKey = (profile.geminiApiKey || '').trim();
+    const suppliedBackupKey = (profile.backupGeminiApiKey || '').trim();
+
+    return {
+      ...profile,
+      geminiApiKey: suppliedPrimaryKey || primarySourceProfile?.geminiApiKey,
+      backupGeminiApiKey: suppliedBackupKey || backupSourceProfile?.backupGeminiApiKey,
+    };
+  });
+}
+
 function slugifyProfileName(name: string): string {
   const slug = name
     .trim()

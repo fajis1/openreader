@@ -244,7 +244,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
                     setUseSmartAudio(false);
                   } else if (e.target.checked) {
                     const currentProfile = smartAudioProfiles.find(p => p.id === selectedSmartAudioProfileId) || smartAudioProfiles[0];
-                    if (!currentProfile?.geminiApiKey) {
+                    if (!currentProfile?.geminiApiKeyConfigured) {
                       window.alert('The selected Smart AI profile does not have a Gemini API key configured. Please add one in the Smart AI profile settings.');
                       window.dispatchEvent(new CustomEvent('open-smart-ai-profiles'));
                       setUseSmartAudio(false);
@@ -281,7 +281,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
                     onChange={(e) => {
                       const newProfileId = e.target.value;
                       const newProfile = smartAudioProfiles.find(p => p.id === newProfileId);
-                      if (!newProfile?.geminiApiKey) {
+                      if (!newProfile?.geminiApiKeyConfigured) {
                         window.alert('This Smart AI profile does not have a Gemini API key configured. Please add one in the Smart AI profile settings.');
                         window.dispatchEvent(new CustomEvent('open-smart-ai-profiles'));
                         setUseSmartAudio(false);

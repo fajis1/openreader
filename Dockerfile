@@ -110,6 +110,8 @@ COPY --from=app-builder /app/compute/core/src/whisper/assets/LICENSE.txt /licens
 # Copy smart audio Python worker & scan_pdf_foreign_words script, and install dependencies into a venv.
 # The entrypoint checks for .venv/bin/python first, then falls back to python3.
 COPY --from=app-builder /app/audiobook_worker.py ./audiobook_worker.py
+COPY --from=app-builder /app/biblical_scholar_worker.py ./biblical_scholar_worker.py
+COPY --from=app-builder /app/gemini_rate_limiter.py ./gemini_rate_limiter.py
 COPY --from=app-builder /app/scan_pdf_foreign_words.py ./scan_pdf_foreign_words.py
 RUN python3 -m venv .venv && \
     .venv/bin/pip install --no-cache-dir nats-py google-genai pypdf nltk

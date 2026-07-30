@@ -59,6 +59,11 @@ function entriesToObject(entries: Array<{ key: string; value: string }>): Record
   }, {});
 }
 
+function formatMaskedKey(configured?: boolean, last4?: string): string | null {
+  if (!configured) return null;
+  return `••••••••••••${last4 || ''}`;
+}
+
 export function SmartAudioSettings() {
   const [apiKey, setApiKey] = useState('');
   const [maskedKey, setMaskedKey] = useState<string | null>(null);
@@ -103,6 +108,13 @@ export function SmartAudioSettings() {
     importGlobal: boolean;
   }) => {
     try {
+      const primaryKeySourceProfileId = activeProfile?.geminiApiKeySourceProfileId
+        || activeProfile?.id
+        || selectedProfileId;
+      const backupKeySourceProfileId = activeProfile?.backupGeminiApiKeySourceProfileId
+        || activeProfile?.id
+        || selectedProfileId;
+
       // 1. Update API key in settings if provided
       if (config.universalApiKey) {
         await fetch('/api/admin/settings', {
@@ -122,7 +134,16 @@ export function SmartAudioSettings() {
       // 2. Cascade API Key and Model to ALL profiles
       const updatedProfiles = profiles.map(p => ({
         ...p,
-        geminiApiKey: config.universalApiKey || p.geminiApiKey,
+        ...(config.universalApiKey.trim()
+          ? { geminiApiKey: config.universalApiKey.trim() }
+          : (primaryKeySourceProfileId && activeProfile?.geminiApiKeyConfigured
+            ? { geminiApiKeySourceProfileId: primaryKeySourceProfileId }
+            : {})),
+        ...(config.backupApiKey.trim()
+          ? { backupGeminiApiKey: config.backupApiKey.trim() }
+          : (backupKeySourceProfileId && activeProfile?.backupGeminiApiKeyConfigured
+            ? { backupGeminiApiKeySourceProfileId: backupKeySourceProfileId }
+            : {})),
         aiModel: config.selectedModel,
         workerMode: config.chosenWorkerMode
       }));
@@ -143,11 +164,10 @@ export function SmartAudioSettings() {
         }
       }
 
-      setProfiles(updatedProfiles);
       setUseGlobalPronunciations(config.useGlobal);
 
       // Save profiles back to server
-      await fetch('/api/tts-settings', {
+      const response = await fetch('/api/tts-settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -155,9 +175,16 @@ export function SmartAudioSettings() {
           smartAudioProfiles: updatedProfiles
         })
       });
+      if (!response.ok) throw new Error('Failed to save Smart Audio profiles');
+      const saved = await response.json();
+      setProfiles(Array.isArray(saved.smartAudioProfiles) ? saved.smartAudioProfiles : []);
+      setSelectedProfileId(
+        typeof saved.selectedSmartAudioProfileId === 'string'
+          ? saved.selectedSmartAudioProfileId
+          : selectedProfileId,
+      );
 
       toast.success('Universal Setup applied across all profiles!');
-      void loadProfiles();
     } catch (e) {
       console.error('Failed to save universal setup', e);
       toast.error('Failed to save setup');
@@ -173,8 +200,8 @@ export function SmartAudioSettings() {
     setIsLoading(true);
     try {
       const response = await fetch('/api/tts-settings');
+      if (!response.ok) throw new Error('Failed to load Smart Audio profiles');
       const data = await response.json();
-      setMaskedKey(data.maskedKey ?? null);
       setProfiles(Array.isArray(data.smartAudioProfiles) ? data.smartAudioProfiles : []);
       const nextSelected = typeof data.selectedSmartAudioProfileId === 'string' && data.selectedSmartAudioProfileId
         ? data.selectedSmartAudioProfileId
@@ -304,11 +331,18 @@ export function SmartAudioSettings() {
     setAbbreviations(objectToEntries(activeProfile.abbreviations || {}));
     setPronunciations(objectToEntries(activeProfile.pronunciations || {}));
     setBooks(objectToEntries(activeProfile.books || {}));
-    // Load this profile's key — show masked placeholder if already saved
-    setApiKey('');
-    setMaskedKey(activeProfile.geminiApiKey ? `••••••••••••${activeProfile.geminiApiKey.slice(-4)}` : null);
-    setBackupApiKey('');
-    setMaskedBackupKey(activeProfile.backupGeminiApiKey ? `••••••••••••${activeProfile.backupGeminiApiKey.slice(-4)}` : null);
+    // API-loaded profiles contain no keys. Locally duplicated, unsaved profiles
+    // may still contain a key the user just typed, which must remain editable.
+    setApiKey(activeProfile.geminiApiKey || '');
+    setMaskedKey(formatMaskedKey(
+      activeProfile.geminiApiKeyConfigured,
+      activeProfile.geminiApiKeyLast4,
+    ));
+    setBackupApiKey(activeProfile.backupGeminiApiKey || '');
+    setMaskedBackupKey(formatMaskedKey(
+      activeProfile.backupGeminiApiKeyConfigured,
+      activeProfile.backupGeminiApiKeyLast4,
+    ));
   }, [activeProfile]);
 
   const buildCurrentProfile = useCallback((): SmartAudioProfile | null => {
@@ -327,9 +361,15 @@ export function SmartAudioSettings() {
       pronunciationPromptMode,
       customPronunciationPrompt: pronunciationPromptMode === 'custom' ? customPronunciationPrompt.trim() : '',
       workerMode,
-      // Preserve stored key; overwrite only if user typed a new one
-      geminiApiKey: apiKey.trim() || activeProfile?.geminiApiKey || undefined,
-      backupGeminiApiKey: backupApiKey.trim() || activeProfile?.backupGeminiApiKey || undefined,
+      geminiApiKeyConfigured: activeProfile?.geminiApiKeyConfigured,
+      geminiApiKeyLast4: activeProfile?.geminiApiKeyLast4,
+      backupGeminiApiKeyConfigured: activeProfile?.backupGeminiApiKeyConfigured,
+      backupGeminiApiKeyLast4: activeProfile?.backupGeminiApiKeyLast4,
+      geminiApiKeySourceProfileId: activeProfile?.geminiApiKeySourceProfileId,
+      backupGeminiApiKeySourceProfileId: activeProfile?.backupGeminiApiKeySourceProfileId,
+      // Blank/omitted key fields tell the server to preserve the stored secrets.
+      ...(apiKey.trim() ? { geminiApiKey: apiKey.trim() } : {}),
+      ...(backupApiKey.trim() ? { backupGeminiApiKey: backupApiKey.trim() } : {}),
     };
   }, [apiKey, backupApiKey, aiModel, customModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, useGlobalPronunciations, pronunciationPromptMode, customPronunciationPrompt, workerMode, activeProfile]);
 
@@ -369,6 +409,21 @@ export function SmartAudioSettings() {
       ...current,
       id: `${current.id}-copy-${Date.now()}`,
       name: `${current.name} Copy`,
+      geminiApiKeyConfigured: Boolean(
+        current.geminiApiKey || current.geminiApiKeyConfigured,
+      ),
+      geminiApiKeyLast4: current.geminiApiKey
+        ? current.geminiApiKey.slice(-4)
+        : current.geminiApiKeyLast4,
+      backupGeminiApiKeyConfigured: Boolean(
+        current.backupGeminiApiKey || current.backupGeminiApiKeyConfigured,
+      ),
+      backupGeminiApiKeyLast4: current.backupGeminiApiKey
+        ? current.backupGeminiApiKey.slice(-4)
+        : current.backupGeminiApiKeyLast4,
+      geminiApiKeySourceProfileId: current.geminiApiKeySourceProfileId || current.id,
+      backupGeminiApiKeySourceProfileId:
+        current.backupGeminiApiKeySourceProfileId || current.id,
     };
     setProfiles((existing) => [duplicate, ...existing]);
     setSelectedProfileId(duplicate.id);
@@ -409,23 +464,22 @@ export function SmartAudioSettings() {
         throw new Error('Failed to save smart audio settings');
       }
 
-      setProfiles(nextProfiles);
-      setSelectedProfileId(current.id);
-      if (apiKey) {
-        setMaskedKey(`••••••••••••${apiKey.slice(-4)}`);
-        setApiKey('');
-      }
-      if (backupApiKey) {
-        setMaskedBackupKey(`••••••••••••${backupApiKey.slice(-4)}`);
-        setBackupApiKey('');
-      }
+      const saved = await response.json();
+      setProfiles(Array.isArray(saved.smartAudioProfiles) ? saved.smartAudioProfiles : []);
+      setSelectedProfileId(
+        typeof saved.selectedSmartAudioProfileId === 'string'
+          ? saved.selectedSmartAudioProfileId
+          : current.id,
+      );
+      setApiKey('');
+      setBackupApiKey('');
       alert('Smart audio profile saved.');
       window.dispatchEvent(new CustomEvent('smart-audio-profiles-updated'));
     } catch (error) {
       console.error('Error saving smart audio settings:', error);
       alert('Failed to save smart audio settings. Check the server logs.');
     }
-  }, [apiKey, backupApiKey, buildCurrentProfile, profiles]);
+  }, [buildCurrentProfile, profiles]);
 
   const handleProfileChange = useCallback((nextProfileId: string) => {
     setSelectedProfileId(nextProfileId);
@@ -1006,7 +1060,8 @@ export function SmartAudioSettings() {
         <SmartAudioWizardModal
           isOpen={isWizardOpen}
           onClose={() => setIsWizardOpen(false)}
-          currentApiKey={apiKey || maskedKey || ''}
+          currentApiKey={apiKey}
+          currentApiKeyConfigured={Boolean(activeProfile?.geminiApiKeyConfigured)}
           onSaveUniversalSetup={handleSaveUniversalSetup}
         />
       )}

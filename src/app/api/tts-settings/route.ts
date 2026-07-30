@@ -4,9 +4,13 @@ import path from 'path';
 
 import {
   getDefaultSmartAudioProfile,
+  mergeStoredSmartAudioProfileSecrets,
   readSmartAudioProfilesDocument,
+  redactSmartAudioProfileSecrets,
+  redactSmartAudioProfilesDocument,
   writeSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
+import type { SmartAudioProfile } from '@/types/client';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { serverLogger } from '@/lib/server/logger';
 import { requireAuthContext } from '@/lib/server/auth/auth';
@@ -15,7 +19,7 @@ export const dynamic = 'force-dynamic';
 
 const configDir = path.join(process.cwd(), 'config');
 
-// --- GET: Fetch the masked global key for the UI ---
+// --- GET: Fetch profiles with key status metadata, never stored key values ---
 export async function GET(request: NextRequest) {
   try {
     const ctxOrRes = await requireAuthContext(request);
@@ -24,7 +28,9 @@ export async function GET(request: NextRequest) {
 
     if (!fs.existsSync(configDir)) fs.mkdirSync(configDir);
 
-    const profilesDocument = await readSmartAudioProfilesDocument(userId);
+    const profilesDocument = redactSmartAudioProfilesDocument(
+      await readSmartAudioProfilesDocument(userId),
+    );
 
     return NextResponse.json({
       smartAudioProfiles: profilesDocument.profiles,
@@ -35,7 +41,7 @@ export async function GET(request: NextRequest) {
     serverLogger.warn({ event: 'tts_settings.read.failed', error }, 'Error reading smart audio settings');
     const defaultProfile = getDefaultSmartAudioProfile();
     return NextResponse.json({
-      smartAudioProfiles: [defaultProfile],
+      smartAudioProfiles: [redactSmartAudioProfileSecrets(defaultProfile)],
       selectedSmartAudioProfileId: defaultProfile.id,
       defaultSmartAudioProfileId: defaultProfile.id,
     });
@@ -50,19 +56,29 @@ export async function POST(request: NextRequest) {
     const userId = ctxOrRes.userId;
     const body = await request.json();
 
+    const currentDoc = await readSmartAudioProfilesDocument(userId);
+    let savedDoc = currentDoc;
+
     if (Array.isArray(body.smartAudioProfiles)) {
       const selectedSmartAudioProfileId = typeof body.selectedSmartAudioProfileId === 'string'
         ? body.selectedSmartAudioProfileId
         : undefined;
-      const currentDoc = await readSmartAudioProfilesDocument(userId);
-      await writeSmartAudioProfilesDocument(userId, {
+      const incomingProfiles = body.smartAudioProfiles as SmartAudioProfile[];
+      savedDoc = await writeSmartAudioProfilesDocument(userId, {
         selectedProfileId: selectedSmartAudioProfileId || currentDoc.selectedProfileId,
-        profiles: body.smartAudioProfiles,
+        profiles: mergeStoredSmartAudioProfileSecrets(incomingProfiles, currentDoc.profiles),
       });
     }
 
     serverLogger.info({ event: 'tts_settings.saved' }, 'Saved smart audio settings');
-    return NextResponse.json({ success: true, message: `Settings saved.` });
+    const safeDocument = redactSmartAudioProfilesDocument(savedDoc);
+    return NextResponse.json({
+      success: true,
+      message: 'Settings saved.',
+      smartAudioProfiles: safeDocument.profiles,
+      selectedSmartAudioProfileId: safeDocument.selectedProfileId,
+      defaultSmartAudioProfileId: getDefaultSmartAudioProfile().id,
+    });
   } catch (error) {
     serverLogger.error({ event: 'tts_settings.save.failed', error }, 'Error processing smart audio settings');
     return errorResponse(error, {

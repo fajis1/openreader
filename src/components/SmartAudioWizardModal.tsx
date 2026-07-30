@@ -6,6 +6,7 @@ interface SmartAudioWizardModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentApiKey?: string;
+  currentApiKeyConfigured?: boolean;
   onSaveUniversalSetup: (config: {
     universalApiKey: string;
     backupApiKey: string;
@@ -20,6 +21,7 @@ export function SmartAudioWizardModal({
   isOpen,
   onClose,
   currentApiKey = '',
+  currentApiKeyConfigured = false,
   onSaveUniversalSetup,
 }: SmartAudioWizardModalProps) {
   const [step, setStep] = useState<number>(1);
@@ -394,7 +396,7 @@ export function SmartAudioWizardModal({
             <button
               type="button"
               onClick={() => setStep(step + 1)}
-              disabled={step === 1 && !universalApiKey.trim()}
+              disabled={step === 1 && !universalApiKey.trim() && !currentApiKeyConfigured}
               className="px-5 py-2 bg-purple-600 text-white font-bold text-xs rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
             >
               Next Step &rarr;

@@ -77,6 +77,15 @@ export interface SmartAudioProfile {
   /** Per-profile Gemini API key. Never exposed to other users. */
   geminiApiKey?: string;
   backupGeminiApiKey?: string;
+  /** Safe client metadata returned instead of the stored primary key. */
+  geminiApiKeyConfigured?: boolean;
+  geminiApiKeyLast4?: string;
+  /** Safe client metadata returned instead of the stored backup key. */
+  backupGeminiApiKeyConfigured?: boolean;
+  backupGeminiApiKeyLast4?: string;
+  /** Write-only request metadata for copying a stored key without exposing it. */
+  geminiApiKeySourceProfileId?: string;
+  backupGeminiApiKeySourceProfileId?: string;
   /**
    * Which Python worker pipeline to use for AI text cleaning.
    * 'standard' → audiobook_worker.py (fast, general-purpose)
