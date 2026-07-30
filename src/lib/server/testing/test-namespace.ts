@@ -5,6 +5,36 @@ import { ensureSystemUserExists } from '@/db';
 const TEST_NAMESPACE_HEADER = 'x-openreader-test-namespace';
 const SAFE_NAMESPACE_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
 
+function sanitizeTestNamespace(raw: string | null): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+
+  const safe = value.replace(/[^a-zA-Z0-9._-]/g, '');
+  if (!safe || safe === '.' || safe === '..' || safe.includes('..')) return null;
+  if (!SAFE_NAMESPACE_REGEX.test(safe)) return null;
+
+  return safe;
+}
+
+function getTestNamespaceCookie(headers: Headers): string | null {
+  const cookie = headers.get('cookie');
+  if (!cookie) return null;
+
+  for (const entry of cookie.split(';')) {
+    const [name, ...valueParts] = entry.trim().split('=');
+    if (name !== TEST_NAMESPACE_HEADER) continue;
+
+    const encodedValue = valueParts.join('=');
+    try {
+      return decodeURIComponent(encodedValue);
+    } catch {
+      return encodedValue;
+    }
+  }
+
+  return null;
+}
+
 /**
  * The test-namespace header is test/CI scaffolding and must never be honored on
  * a real production deployment. It is enabled when `ENABLE_TEST_NAMESPACE=true`
@@ -23,14 +53,9 @@ function isTestNamespaceEnabled(): boolean {
 export function getOpenReaderTestNamespace(headers: Headers): string | null {
   if (!isTestNamespaceEnabled()) return null;
 
-  const raw = headers.get(TEST_NAMESPACE_HEADER)?.trim();
-  if (!raw) return null;
-
-  const safe = raw.replace(/[^a-zA-Z0-9._-]/g, '');
-  if (!safe || safe === '.' || safe === '..' || safe.includes('..')) return null;
-  if (!SAFE_NAMESPACE_REGEX.test(safe)) return null;
-
-  return safe;
+  return sanitizeTestNamespace(
+    headers.get(TEST_NAMESPACE_HEADER) ?? getTestNamespaceCookie(headers),
+  );
 }
 
 export function applyOpenReaderTestNamespacePath(baseDir: string, namespace: string | null): string {
@@ -46,4 +71,3 @@ export function getUnclaimedUserIdForNamespace(namespace: string | null): string
   ensureSystemUserExists(userId);
   return userId;
 }
-

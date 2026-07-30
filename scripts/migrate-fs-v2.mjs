@@ -688,7 +688,9 @@ function openDatabase() {
     };
   }
 
-  const dbPath = path.join(process.cwd(), 'docstore', 'sqlite3.db');
+  const dbPath = process.env.SQLITE_DB_PATH
+    ? path.resolve(process.env.SQLITE_DB_PATH)
+    : path.join(process.cwd(), 'docstore', 'sqlite3.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const sqlite = new BetterSqlite3(dbPath);
   return {

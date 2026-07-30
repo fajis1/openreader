@@ -532,7 +532,12 @@ export function AudiobookExportModal({
     setIsCombining(true);
     try {
       const url = `/api/audiobook?bookId=${bookId}&format=${format}`;
-      window.location.assign(url);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       
       // Delay disabling the loading state so the browser has time to start the download
       await new Promise(resolve => setTimeout(resolve, 2000));

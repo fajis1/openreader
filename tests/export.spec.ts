@@ -430,13 +430,19 @@ test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page 
   const chapterActionsButtons = page.getByRole('button', { name: 'Chapter actions' });
   await expect(chapterActionsButtons).toHaveCount(1, { timeout: 60_000 });
 
-  // Download the single chapter
-  await chapterActionsButtons.nth(0).click();
-  const downloadLink = page.getByRole('menuitem', { name: 'Download .mp3' });
-  await expect(downloadLink).toBeVisible();
-
-  // Readiness gate: chapter row visibility can lead backend storage consistency by a small window.
+  // A completed chapter row can appear before the overall generation job becomes
+  // idle. Wait until the completed audiobook controls are available before
+  // opening its action menu.
   await waitForBackendDownloadReady(page, bookId, { minChapters: 1 });
+
+  // Verify the single-chapter download action is exposed. WebKit handles direct
+  // MP3 links in its media plug-in rather than emitting a Playwright download,
+  // so close the menu before validating the portable full-download path below.
+  await chapterActionsButtons.nth(0).click();
+  const downloadLink = page.getByRole('menuitem', { name: 'Download' });
+  await expect(downloadLink).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(downloadLink).toHaveCount(0);
 
   // Download via full-download button once at least one chapter is ready.
   await withDownloadedFullAudiobook(page, async ({ filePath }) => {
@@ -515,9 +521,13 @@ test('regenerates a single MP3 audiobook PDF page and exports full audiobook', a
   const backendStateBefore = await expectChaptersBackendState(page, bookId);
   const chapterCountBefore = backendStateBefore.chapters.length;
 
+  // The chapter row can complete just before the overall job changes to idle.
+  // Regeneration is intentionally unavailable until that transition finishes.
+  await waitForBackendDownloadReady(page, bookId, { minChapters: chapterCountBefore });
+
   // Trigger regenerate on the first chapter
   await chapterActionsButtons.nth(0).click();
-  const regenerateBtn = page.getByRole('menuitem', { name: 'Regenerate .mp3' });
+  const regenerateBtn = page.getByRole('menuitem', { name: 'Regenerate' });
   await expect(regenerateBtn).toBeVisible();
   await regenerateBtn.click();
 

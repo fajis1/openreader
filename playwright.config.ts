@@ -1,11 +1,17 @@
 import { defineConfig, devices } from '@playwright/test';
+import path from 'node:path';
 import 'dotenv/config';
+
+const playwrightSqliteDbPath = process.env.PLAYWRIGHT_SQLITE_DB_PATH?.trim()
+  ? path.resolve(process.env.PLAYWRIGHT_SQLITE_DB_PATH)
+  : path.resolve(process.cwd(), 'docstore/test-sqlite3.db');
 
 process.env.USE_EMBEDDED_WEED_MINI = 'true';
 process.env.S3_ACCESS_KEY_ID = 'test';
 process.env.S3_SECRET_ACCESS_KEY = 'test';
 process.env.S3_ENDPOINT = 'http://127.0.0.1:8335';
 process.env.S3_BUCKET = 'openreader';
+process.env.SQLITE_DB_PATH = playwrightSqliteDbPath;
 
 /**
  * See https://playwright.dev/docs/test-configuration.
@@ -21,7 +27,9 @@ export default defineConfig({
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  // workers: '50%',
+  // PDF parsing is handled by one embedded compute worker. Keeping CI browser
+  // concurrency bounded prevents its queue from exhausting per-test timeouts.
+  workers: process.env.CI ? 2 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
@@ -39,9 +47,9 @@ export default defineConfig({
     // Disable auth rate limiting for tests to support parallel workers creating sessions.
     // ENABLE_TEST_NAMESPACE opts the production build into honoring the
     // x-openreader-test-namespace header (ignored on real prod deployments).
-    command: `export BETTER_AUTH_URL=http://127.0.0.1:3005 API_KEY=test API_BASE=http://127.0.0.1:3005 BASE_URL=http://127.0.0.1:3005 USE_ANONYMOUS_AUTH_SESSIONS=true S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test S3_REGION=us-east-1 COMPUTE_WORKER_TOKEN=local-compute-token PORT=3005 S3_ENDPOINT=http://127.0.0.1:8335 EMBEDDED_NATS_PORT=4224 NATS_URL=nats://127.0.0.1:4224 EMBEDDED_NATS_MONITOR_PORT=8224 EMBEDDED_COMPUTE_WORKER_PORT=8083 WEED_MINI_DIR=docstore/test-seaweedfs EMBEDDED_NATS_STORE_DIR=docstore/test-nats SQLITE_DB_PATH=docstore/test-sqlite3.db DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true && mkdir -p docstore && node scripts/openreader-entrypoint.mjs -- node .next/standalone/server.js > /tmp/webserver.log 2>&1`,
+    command: `export BETTER_AUTH_URL=http://127.0.0.1:3005 API_KEY=test API_BASE=http://127.0.0.1:3005 BASE_URL=http://127.0.0.1:3005 USE_ANONYMOUS_AUTH_SESSIONS=true S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test S3_REGION=us-east-1 COMPUTE_WORKER_TOKEN=local-compute-token PORT=3005 S3_ENDPOINT=http://127.0.0.1:8335 EMBEDDED_NATS_PORT=4224 NATS_URL=nats://127.0.0.1:4224 EMBEDDED_NATS_MONITOR_PORT=8224 EMBEDDED_COMPUTE_WORKER_PORT=8083 WEED_MINI_DIR=docstore/test-seaweedfs EMBEDDED_NATS_STORE_DIR=docstore/test-nats SQLITE_DB_PATH="${playwrightSqliteDbPath}" DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true && mkdir -p docstore .next/standalone/.next/static .next/standalone/public && cp -R .next/static/. .next/standalone/.next/static/ && cp -R public/. .next/standalone/public/ && node scripts/openreader-entrypoint.mjs -- node .next/standalone/server.js`,
     url: 'http://127.0.0.1:3005',
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
     timeout: 600 * 1000,
     stdout: 'pipe',
     stderr: 'pipe',

@@ -26,7 +26,11 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libreoffice-writer ffmpeg
+        sudo apt-get install -y libreoffice-writer ffmpeg python3-venv
+    - name: Install Python worker dependencies
+      run: |
+        python3 -m venv .venv
+        .venv/bin/pip install --disable-pip-version-check nats-py google-genai pypdf nltk
     - name: Install SeaweedFS weed binary
       run: |
         WEED_PATH=$(docker run --rm --entrypoint sh chrislusf/seaweedfs:4.18 -lc 'command -v weed')
