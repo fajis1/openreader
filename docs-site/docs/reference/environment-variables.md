@@ -49,12 +49,24 @@ Runtime site features are seeded with `RUNTIME_SEED_JSON` / `RUNTIME_SEED_JSON_P
 | `NATS_URL` | Compute | `nats://127.0.0.1:4222` in embedded startup | Override embedded startup or set standalone worker URL |
 | `COMPUTE_LOG_LEVEL` | Compute | `info` | Compute worker log level |
 | `COMPUTE_JOB_CONCURRENCY` | Compute | `1` | Shared compute concurrency cap |
+| `COMPUTE_ONNX_EXECUTION_PROVIDER` | Compute | `cpu` | Default ONNX provider: `cpu`, required `cuda`, or `auto` with optional fallback |
+| `PDF_LAYOUT_ONNX_EXECUTION_PROVIDER` | Compute | inherited | Override the ONNX provider for PP-DocLayoutV3 |
+| `WHISPER_ONNX_EXECUTION_PROVIDER` | Compute | inherited | Override the ONNX provider for Whisper alignment |
+| `COMPUTE_CUDA_DEVICE_ID` | Compute | `0` | NVIDIA device index visible inside the compute worker |
+| `COMPUTE_CUDA_ALLOW_CPU_FALLBACK` | Compute | `true` | In `auto` mode, retry session creation on CPU when CUDA initialization fails; ignored by required `cuda` mode |
+| `COMPUTE_RELEASE_ONNX_SESSIONS_AFTER_JOB` | Compute | `false` | Release cached model sessions after each job when concurrency is `1` |
+| `COMPUTE_GPU_LOCK_DIR` | Compute | unset | Shared host-backed directory for cooperative GPU serialization |
+| `COMPUTE_GPU_LOCK_NAME` | Compute | `openreader-gpu` | Cooperative GPU lease name shared by participating services |
+| `COMPUTE_GPU_LOCK_POLL_MS` | Compute | `1000` | Cooperative GPU lease polling interval |
+| `COMPUTE_GPU_LOCK_TIMEOUT_MS` | Compute | `86400000` | Maximum wait for the cooperative GPU lease |
+| `COMPUTE_GPU_LOCK_STALE_MS` | Compute | `7200000` | Reclaim a lease whose heartbeat is older than this |
+| `COMPUTE_GPU_LOCK_SETTLEMENT_GRACE_MS` | Compute | `60000` | Exit and restart after a timed-out native GPU call remains unsettled this long |
 | `COMPUTE_WHISPER_TIMEOUT_MS` | Compute | `30000` | Whisper alignment timeout budget |
 | `COMPUTE_PDF_TIMEOUT_MS` | Compute | `300000` | PDF parse timeout budget |
 | `COMPUTE_PDF_JOB_ATTEMPTS` | Compute | `1` | Max JetStream deliveries for PDF layout jobs |
 | `COMPUTE_OP_STALE_MS` | Compute | `max(30m, 4x max compute timeout)` | Shared stale window for compute op replacement |
 | `WHISPER_MODEL_BASE_URL` | Compute model source | onnx-community default | Override Whisper ONNX model base URL |
-| `PDF_LAYOUT_MODEL_BASE_URL` | Compute model source | PP-DocLayoutV3 default | Override PDF layout ONNX model base URL |
+| `PDF_LAYOUT_MODEL_BASE_URL` | Compute model source | pinned PP-DocLayoutV3 revision | Override PDF layout ONNX model base URL |
 | `COMPUTE_WORKER_URL` | External compute mode | unset | Set only for standalone external worker mode |
 | `COMPUTE_WORKER_TOKEN` | External compute mode | unset | Required for standalone external worker auth |
 | `FFMPEG_BIN` | Audio runtime | auto-detected (`ffmpeg-static`) | Override ffmpeg binary path |

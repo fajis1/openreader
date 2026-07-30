@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui';
+import { isGeminiRateLimitPause } from '@/lib/shared/audiobook-job-status';
 
 interface Job {
   id: string;
@@ -55,6 +56,7 @@ export function JobsClientPage() {
         <div className="space-y-4">
           {jobs.map((job) => {
             const isQueued = job.status === 'queued';
+            const isGeminiPaused = isQueued && isGeminiRateLimitPause(job.error);
             const position = isQueued ? jobs.filter(j => j.status === 'queued' && j.createdAt <= job.createdAt).length : null;
 
             return (
@@ -73,7 +75,14 @@ export function JobsClientPage() {
                 </div>
                 <div className="text-right text-xs text-soft">
                   Created: {new Date(job.createdAt).toLocaleString()}
-                  {job.error && <p className="text-danger mt-1">Error: {job.error}</p>}
+                  {isGeminiPaused && (
+                    <p className="max-w-md text-warning mt-1">
+                      {job.error}
+                    </p>
+                  )}
+                  {job.error && !isGeminiPaused && (
+                    <p className="text-danger mt-1">Error: {job.error}</p>
+                  )}
                 </div>
               </div>
             );

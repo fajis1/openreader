@@ -5,7 +5,8 @@ import { readFileSync } from 'fs';
 import { access, mkdir, rename, writeFile, readFile, unlink, copyFile } from 'fs/promises';
 import { DOCSTORE_DIR } from '../platform/docstore';
 
-const DEFAULT_MODEL_BASE_URL = 'https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/main';
+const PDF_LAYOUT_MODEL_REVISION = 'ff677269004f03007705f3e7f1bc8d0f4546d299';
+const DEFAULT_MODEL_BASE_URL = `https://huggingface.co/Bei0001/PP-DocLayoutV3-ONNX/resolve/${PDF_LAYOUT_MODEL_REVISION}`;
 const PDF_LAYOUT_MODEL_BASE_URL_ENV = 'PDF_LAYOUT_MODEL_BASE_URL';
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const MODEL_DIR = path.join(DOCSTORE_DIR, 'model');

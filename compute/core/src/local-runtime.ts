@@ -1,7 +1,18 @@
 import { ensureWhisperModel } from './whisper/model';
-import { alignAudioWithText } from './whisper/align';
+import { alignAudioWithText, releaseWhisperRuntime } from './whisper/align';
 import { ensureModel as ensurePdfLayoutModel } from './pdf/model';
 import { parsePdf } from './pdf/parse';
+import { releaseLayoutModelSession } from './pdf/runLayoutModel';
+import {
+  clearSelectedOnnxProvider,
+  getOnnxExecutionProviderConfig,
+} from './config/onnx-execution-provider';
+import { getComputeJobConcurrency } from './config/cpu-budget';
+
+function shouldReleaseOnnxSessionsAfterJob(workload: 'pdf-layout' | 'whisper'): boolean {
+  return getComputeJobConcurrency() === 1
+    && getOnnxExecutionProviderConfig(workload).releaseAfterJob;
+}
 
 export async function ensureComputeModels(): Promise<void> {
   await Promise.all([ensureWhisperModel(), ensurePdfLayoutModel()]);
@@ -13,13 +24,20 @@ export async function runWhisperAlignmentFromAudioBuffer(input: {
   cacheKey?: string;
   lang?: string;
 }) {
-  const alignments = await alignAudioWithText(
-    input.audioBuffer,
-    input.text,
-    input.cacheKey,
-    { lang: input.lang },
-  );
-  return { alignments };
+  try {
+    const alignments = await alignAudioWithText(
+      input.audioBuffer,
+      input.text,
+      input.cacheKey,
+      { lang: input.lang },
+    );
+    return { alignments };
+  } finally {
+    if (shouldReleaseOnnxSessionsAfterJob('whisper')) {
+      await releaseWhisperRuntime();
+      clearSelectedOnnxProvider('whisper');
+    }
+  }
 }
 
 export async function runPdfLayoutFromPdfBuffer(input: {
@@ -35,11 +53,18 @@ export async function runPdfLayoutFromPdfBuffer(input: {
     pageMs: number;
   }) => void | Promise<void>;
 }) {
-  const parsed = await parsePdf({
-    documentId: input.documentId,
-    pdfBytes: input.pdfBytes,
-    onPageStarted: input.onPageStarted,
-    onPageParsed: input.onPageParsed,
-  });
-  return { parsed };
+  try {
+    const parsed = await parsePdf({
+      documentId: input.documentId,
+      pdfBytes: input.pdfBytes,
+      onPageStarted: input.onPageStarted,
+      onPageParsed: input.onPageParsed,
+    });
+    return { parsed };
+  } finally {
+    if (shouldReleaseOnnxSessionsAfterJob('pdf-layout')) {
+      await releaseLayoutModelSession();
+      clearSelectedOnnxProvider('pdf-layout');
+    }
+  }
 }

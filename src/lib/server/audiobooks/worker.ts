@@ -22,6 +22,7 @@ import {
   buildKokoroPronunciationInstructions,
   filterKokoroCompatiblePronunciationRecord,
 } from '@/lib/shared/kokoro-pronunciation-policy';
+import { GEMINI_RATE_LIMIT_PAUSE_MESSAGE } from '@/lib/shared/audiobook-job-status';
 
 function stripHtmlTags(html: string): string {
   return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -118,7 +119,7 @@ export async function processAudiobookQueue() {
   
   const jobIds = rows.map((r: typeof rows[0]) => r.id);
   const updateResult = await db.update(audiobookJobs)
-    .set({ status: 'running', startedAt: Date.now() })
+    .set({ status: 'running', startedAt: Date.now(), error: null })
     .where(and(inArray(audiobookJobs.id, jobIds), inArray(audiobookJobs.status, ['queued', 'waiting_for_pdf'])))
     .returning();
     
@@ -368,7 +369,12 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             serverLogger.warn({ event: 'audiobook.queue.smart_audio.rate_limit', bookId }, 'Python worker reported rate limit. Moving job to back of queue.');
             if (nc) await nc.close();
             await db.update(audiobookJobs)
-              .set({ status: 'queued', createdAt: Date.now() })
+              .set({
+                status: 'queued',
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                error: GEMINI_RATE_LIMIT_PAUSE_MESSAGE,
+              })
               .where(eq(audiobookJobs.id, job.id));
             return;
           }

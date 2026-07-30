@@ -35,6 +35,8 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('warmGeminiDefaults');
     expect(source).toContain('warmRemainingAudio');
     expect(source).toContain('Preparing additional pronunciation audio in the background');
+    expect(source).toContain('Gemini generated {scanJobGeneratedChoices} choices for');
+    expect(source).toContain('No Gemini pronunciation was generated for this word');
   });
 
   test('labels library pronunciations and new Gemini recommendations distinctly', () => {

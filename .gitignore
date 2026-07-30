@@ -68,6 +68,17 @@ __pycache__/
 *.js
 !scripts/
 !next.config.js
+
+# Local root-level diagnostic scratch files
+/check_*.ts
+/check_*.mjs
+/dump_*.ts
+/get_*_events.ts
+/patch_*.py
+/test_*.ts
+/test_*.mjs
+/sqlite.db
+
 AGENTS.md
 AI-HANDOFF.md
 GEMINI.md

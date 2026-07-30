@@ -1,0 +1,40 @@
+FROM node:22-bullseye AS deploy-stage
+
+RUN npm install -g pnpm@11.1.2
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=v11
+
+WORKDIR /workspace
+
+COPY .npmrc package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY compute/worker/package.json compute/worker/package.json
+COPY compute/core/package.json compute/core/package.json
+
+COPY compute/worker compute/worker
+COPY compute/core compute/core
+
+RUN pnpm --config.inject-workspace-packages=true --filter @openreader/compute-worker deploy /opt/compute-worker
+
+# ONNX Runtime 1.18.0's CUDA 11 package links to CUDA 11 and cuDNN 8 and
+# contains sm_60 device code for the Tesla P100. Pin the CUDA image index so
+# the runtime cannot drift independently of the native provider.
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04@sha256:85fb7ac694079fff1061a0140fd5b5a641997880e12112d92589c3bbb1e8b7ca
+
+COPY --from=deploy-stage /usr/local/bin/node /usr/local/bin/node
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libatomic1 libgcc-s1 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+COPY --from=deploy-stage /opt/compute-worker ./
+
+ENV COMPUTE_WORKER_HOST=0.0.0.0
+ENV PORT=8081
+ENV COMPUTE_JOB_CONCURRENCY=1
+ENV PDF_LAYOUT_ONNX_EXECUTION_PROVIDER=cuda
+ENV COMPUTE_CUDA_ALLOW_CPU_FALLBACK=false
+
+EXPOSE 8081
+
+CMD ["node", "--import", "tsx", "src/server.ts"]

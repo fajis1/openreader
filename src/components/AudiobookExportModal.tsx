@@ -13,6 +13,7 @@ import { VoicesControlBase } from '@/components/player/VoicesControlBase';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import { getTtsLanguageCompatibilityWarnings, resolveTtsLanguage } from '@/lib/shared/language';
+import { isGeminiRateLimitPause } from '@/lib/shared/audiobook-job-status';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, MenuRoot, MenuTransition, MenuTrigger, RangeInput, Select } from '@/components/ui';
 import { 
@@ -199,12 +200,19 @@ export function AudiobookExportModal({
       const qRes = await fetch('/api/audiobooks/queue');
       if (qRes.ok) {
         const qData = await qRes.json();
-        const activeJob = qData.jobs?.find((j: { documentId: string; status: string; progress?: number }) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running' || j.status === 'waiting_for_pdf'));
+        const activeJob = qData.jobs?.find((j: {
+          documentId: string;
+          status: string;
+          progress?: number;
+          error?: string | null;
+        }) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running' || j.status === 'waiting_for_pdf'));
         if (activeJob) {
           serverIsGenerating = true;
           setIsGenerating(true);
           if (activeJob.progress !== undefined) setProgress(activeJob.progress);
-          if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
+          if (activeJob.status === 'queued' && isGeminiRateLimitPause(activeJob.error)) {
+            setCurrentChapter(activeJob.error);
+          } else if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
           else if (activeJob.status === 'waiting_for_pdf') setCurrentChapter('Waiting for PDF parsing...');
           else setCurrentChapter('Generating on server...');
         }

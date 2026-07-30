@@ -19,6 +19,25 @@ export type IdleTimeoutAndHardCapInput<T> = {
   label: string;
 };
 
+const operationSettlement = Symbol('computeOperationSettlement');
+type TrackedTimeoutError = Error & {
+  [operationSettlement]: Promise<void>;
+};
+
+function trackedTimeoutError(message: string, operation: Promise<unknown>): TrackedTimeoutError {
+  const error = new Error(message) as TrackedTimeoutError;
+  error[operationSettlement] = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  return error;
+}
+
+export function getTimedOutOperationSettlement(error: unknown): Promise<void> | null {
+  if (!(error instanceof Error) || !(operationSettlement in error)) return null;
+  return (error as TrackedTimeoutError)[operationSettlement];
+}
+
 function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]?.trim();
   if (!raw) return fallback;
@@ -70,6 +89,26 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, lab
   }
 }
 
+export async function withTimeoutAndSettlement<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(trackedTimeoutError(`${label} timed out after ${timeoutMs}ms`, promise));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function withIdleTimeoutAndHardCap<T>(input: IdleTimeoutAndHardCapInput<T>): Promise<T> {
   let idleTimer: NodeJS.Timeout | null = null;
   let hardCapTimer: NodeJS.Timeout | null = null;
@@ -108,6 +147,61 @@ export async function withIdleTimeoutAndHardCap<T>(input: IdleTimeoutAndHardCapI
 
   try {
     const result = await Promise.race([input.run(touchProgress), timeoutPromise]);
+    settled = true;
+    clearTimers();
+    return result as T;
+  } catch (error) {
+    settled = true;
+    clearTimers();
+    throw error;
+  }
+}
+
+export async function withIdleTimeoutAndHardCapAndSettlement<T>(
+  input: IdleTimeoutAndHardCapInput<T>,
+): Promise<T> {
+  let idleTimer: NodeJS.Timeout | null = null;
+  let hardCapTimer: NodeJS.Timeout | null = null;
+  let settled = false;
+  let rejectTimeout!: (reason: unknown) => void;
+  let operationPromise!: Promise<T>;
+
+  const clearTimers = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+    if (hardCapTimer) {
+      clearTimeout(hardCapTimer);
+      hardCapTimer = null;
+    }
+  };
+
+  const failTimeout = (kind: 'idle' | 'hard cap', timeoutMs: number) => {
+    if (settled) return;
+    settled = true;
+    clearTimers();
+    rejectTimeout(trackedTimeoutError(
+      `${input.label} ${kind} timed out after ${timeoutMs}ms`,
+      operationPromise,
+    ));
+  };
+
+  const touchProgress = () => {
+    if (settled) return;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => failTimeout('idle', input.idleTimeoutMs), input.idleTimeoutMs);
+  };
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    rejectTimeout = reject;
+    hardCapTimer = setTimeout(() => failTimeout('hard cap', input.hardCapMs), input.hardCapMs);
+  });
+
+  try {
+    operationPromise = input.run(touchProgress);
+    touchProgress();
+    const result = await Promise.race([operationPromise, timeoutPromise]);
     settled = true;
     clearTimers();
     return result as T;

@@ -48,7 +48,7 @@ export default defineConfig({
         test: {
           name: 'compute-core',
           environment: 'node',
-          include: ['compute/core/tests/control-plane/**/*.test.ts'],
+          include: ['compute/core/tests/**/*.test.ts'],
         },
       },
       {

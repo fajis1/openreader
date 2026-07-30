@@ -28,14 +28,20 @@ import {
 import {
   getComputeTimeoutConfig,
   getComputeOpStaleMs,
+  getTimedOutOperationSettlement,
   getAvailableCpuCores,
   getOnnxThreadsPerJob,
+  getOnnxExecutionProviderConfig,
+  getSelectedOnnxProvider,
+  rememberSelectedOnnxProvider,
   PDF_PARSER_VERSION,
   encodeParserVersion,
-  withIdleTimeoutAndHardCap,
+  encodeSseFrame,
+  OperationOrchestrator,
+  withIdleTimeoutAndHardCapAndSettlement,
   withTimeout,
+  withTimeoutAndSettlement,
 } from '@openreader/compute-core';
-import { encodeSseFrame, OperationOrchestrator } from '@openreader/compute-core/control-plane';
 import type {
   PdfLayoutJobRequest,
   PdfLayoutJobResult,
@@ -71,6 +77,25 @@ import {
 import { buildInferProgressForPageParsed, buildInferProgressForPageStart } from './pdf-progress';
 import { buildQueueWaitTiming, decideRetryAction } from './worker-loop-policy';
 import { persistParsedPdfWhileSourceExists } from './pdf-artifact-persistence';
+import {
+  createGpuLeaseProviderObserver,
+  getGpuLeaseConfig,
+  shouldAcquireGpuLease,
+  withGpuLease,
+} from './gpu-lease';
+import { startIsolatedInference } from './isolated-inference';
+
+type OnnxProviderSelection = {
+  workload: 'pdf-layout' | 'whisper';
+  provider: 'cpu' | 'cuda';
+};
+
+type ComputeRunHooks = {
+  isolateNative?: boolean;
+  reuseIsolatedProcess?: boolean;
+  onProgress?: (progress: PdfLayoutProgress) => Promise<void>;
+  onProviderSelection?: (selection: OnnxProviderSelection) => void | Promise<void>;
+};
 
 const JOBS_STREAM_NAME = 'compute_jobs';
 const WHISPER_JOBS_SUBJECT = 'jobs.whisper';
@@ -82,6 +107,7 @@ const COMPUTE_STATE_BUCKET = 'compute_state';
 const COMPUTE_STATE_TTL_MS = 24 * 60 * 60 * 1000;
 const LOOP_ERROR_BACKOFF_MS = 500;
 const RUNNING_HEARTBEAT_MS = 5000;
+const GPU_LEASE_ACK_HEARTBEAT_MS = 10_000;
 const OP_EVENTS_KEEPALIVE_MS = 15_000;
 // Reconnection delay handed to the browser EventSource via the SSE `retry:`
 // directive. When a silent stream is torn down for idle sleep, this keeps the
@@ -570,6 +596,9 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   const jobStatesMaxBytes = readIntEnv('COMPUTE_JOB_STATES_MAX_BYTES', 64 * 1024 * 1024);
   const natsReplicas = normalizeNatsReplicas(readIntEnv('COMPUTE_NATS_REPLICAS', 1));
   const opStaleMs = getComputeOpStaleMs();
+  const gpuLeaseConfig = getGpuLeaseConfig();
+  const pdfOnnxProvider = getOnnxExecutionProviderConfig('pdf-layout');
+  const whisperOnnxProvider = getOnnxExecutionProviderConfig('whisper');
 
   const connectOpts: Parameters<typeof connect>[0] = { servers: natsUrl };
   const natsCreds = process.env.NATS_CREDS?.trim();
@@ -838,6 +867,9 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     natsReplicas,
     eventsStreamMaxBytes,
     pdfLayoutHardCapMs: pdfHardCapMs,
+    pdfOnnxProvider,
+    whisperOnnxProvider,
+    gpuLeasePath: gpuLeaseConfig?.lockPath ?? null,
   }, 'compute runtime config');
 
   const whisperJobCodec = createJsonCodec<QueuedJob<WhisperAlignJobRequest>>();
@@ -983,7 +1015,14 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   // reconnect (and keep) the connection open, defeating idle sleep, so we only
   // report the current connection state. The worker reconnects lazily on the next
   // /ops request regardless of what this returns.
-  app.get('/health/ready', async () => ({ ok: true, natsConnected: session !== null }));
+  app.get('/health/ready', async () => ({
+    ok: true,
+    natsConnected: session !== null,
+    onnx: {
+      pdfLayout: pdfOnnxProvider,
+      whisper: whisperOnnxProvider,
+    },
+  }));
 
   app.post('/ops', async (request, reply) => {
     const parsed = operationCreateSchema.safeParse(request.body);
@@ -1193,6 +1232,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   const runWhisper = async (
     payload: WhisperAlignJobRequest,
     queueWaitMs: number,
+    hooks?: ComputeRunHooks,
   ): Promise<WhisperAlignJobResult> => {
     const parsed = alignSchema.parse(payload);
 
@@ -1205,16 +1245,36 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     const s3FetchMs = Date.now() - s3FetchStartedAt;
 
     const computeStartedAt = Date.now();
-    const result = await withTimeout(
-      runWhisperAlignmentFromAudioBuffer({
-        audioBuffer,
-        text: parsed.text,
-        cacheKey: parsed.cacheKey,
-        lang: parsed.lang,
-      }),
-      whisperTimeoutMs,
-      'whisper alignment job',
-    );
+    const isolated = hooks?.isolateNative
+      ? startIsolatedInference<Awaited<ReturnType<typeof runWhisperAlignmentFromAudioBuffer>>>({
+        request: {
+          kind: 'whisper',
+          audioBuffer,
+          text: parsed.text,
+          cacheKey: parsed.cacheKey,
+          lang: parsed.lang,
+        },
+        onProviderSelection: hooks.onProviderSelection,
+        reuseProcess: hooks.reuseIsolatedProcess,
+      })
+      : null;
+    const nativeWork = isolated?.promise ?? runWhisperAlignmentFromAudioBuffer({
+      audioBuffer,
+      text: parsed.text,
+      cacheKey: parsed.cacheKey,
+      lang: parsed.lang,
+    });
+    let result;
+    try {
+      result = await withTimeoutAndSettlement(
+        nativeWork,
+        whisperTimeoutMs,
+        'whisper alignment job',
+      );
+    } catch (error) {
+      if (isolated && getTimedOutOperationSettlement(error)) isolated.terminate();
+      throw error;
+    }
 
     const computeMs = Date.now() - computeStartedAt;
     return {
@@ -1230,7 +1290,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   const runLayout = async (
     payload: PdfLayoutJobRequest,
     queueWaitMs: number,
-    hooks?: { onProgress?: (progress: PdfLayoutProgress) => Promise<void> },
+    hooks?: ComputeRunHooks,
   ): Promise<PdfLayoutJobResult> => {
     const parsed = layoutSchema.parse(payload);
 
@@ -1245,14 +1305,18 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     let lastTotalPages = 0;
     let lastPagesParsed = 0;
     const computeStartedAt = Date.now();
-    const result = await withIdleTimeoutAndHardCap({
+    let isolated: ReturnType<typeof startIsolatedInference<
+      Awaited<ReturnType<typeof runPdfLayoutFromPdfBuffer>>
+    >> | null = null;
+    const result = await withIdleTimeoutAndHardCapAndSettlement({
       idleTimeoutMs: Math.max(pdfTimeoutMs, 1_000),
       hardCapMs: pdfHardCapMs,
       label: 'pdf layout job',
-      run: async (touchProgress) => runPdfLayoutFromPdfBuffer({
-        documentId: parsed.documentId,
-        pdfBytes,
-        onPageStarted: async ({ pageNumber, totalPages }) => {
+      run: async (touchProgress) => {
+        const onPageStarted = async ({ pageNumber, totalPages }: {
+          pageNumber: number;
+          totalPages: number;
+        }) => {
           touchProgress();
           lastTotalPages = totalPages;
           if (!hooks?.onProgress) return;
@@ -1260,8 +1324,11 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
             pageNumber,
             totalPages,
           }));
-        },
-        onPageParsed: async ({ pageNumber, totalPages }) => {
+        };
+        const onPageParsed = async ({ pageNumber, totalPages }: {
+          pageNumber: number;
+          totalPages: number;
+        }) => {
           touchProgress();
           lastTotalPages = totalPages;
           lastPagesParsed = pageNumber;
@@ -1270,8 +1337,31 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
             pageNumber,
             totalPages,
           }));
-        },
-      }),
+        };
+        if (hooks?.isolateNative) {
+          isolated = startIsolatedInference({
+            request: {
+              kind: 'pdf-layout',
+              documentId: parsed.documentId,
+              pdfBytes,
+            },
+            onPageStarted,
+            onPageParsed,
+            onProviderSelection: hooks.onProviderSelection,
+            reuseProcess: hooks.reuseIsolatedProcess,
+          });
+          return isolated.promise;
+        }
+        return runPdfLayoutFromPdfBuffer({
+          documentId: parsed.documentId,
+          pdfBytes,
+          onPageStarted,
+          onPageParsed,
+        });
+      },
+    }).catch((error) => {
+      if (isolated && getTimedOutOperationSettlement(error)) isolated.terminate();
+      throw error;
     });
 
     const computeMs = Date.now() - computeStartedAt;
@@ -1305,7 +1395,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     run: (
       payload: TPayload,
       queueWaitMs: number,
-      hooks?: { onProgress?: (progress: PdfLayoutProgress) => Promise<void> },
+      hooks?: ComputeRunHooks,
     ) => Promise<TResult>;
     workerLabel: string;
   };
@@ -1497,22 +1587,124 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
         });
       }, RUNNING_HEARTBEAT_MS);
 
-      const result = await input.run(decoded.payload, context.queueWaitTiming?.queueWaitMs ?? 0, {
-        onProgress: async (progress) => {
-          try {
-            input.msg.working();
-          } catch (ackError) {
-            app.log.warn({
-              worker: input.workerLabel,
-              kind: context?.decoded.kind,
-              opId: context?.decoded.opId,
-              jobId: context?.decoded.jobId,
-              error: toErrorMessage(ackError),
-            }, 'failed to extend JetStream ack wait on progress');
-          }
-          await markProgress(context!, progress, Date.now());
-        },
+      const runJob = async (
+        nativeHooks?: Pick<
+          ComputeRunHooks,
+          'isolateNative' | 'reuseIsolatedProcess' | 'onProviderSelection'
+        >,
+      ) => input.run(decoded.payload, context!.queueWaitTiming?.queueWaitMs ?? 0, {
+          ...nativeHooks,
+          onProgress: async (progress) => {
+            try {
+              input.msg.working();
+            } catch (ackError) {
+              app.log.warn({
+                worker: input.workerLabel,
+                kind: context?.decoded.kind,
+                opId: context?.decoded.opId,
+                jobId: context?.decoded.jobId,
+                error: toErrorMessage(ackError),
+              }, 'failed to extend JetStream ack wait on progress');
+            }
+            await markProgress(context!, progress, Date.now());
+          },
+        });
+      const workload = decoded.kind === 'pdf_layout' ? 'pdf-layout' : 'whisper';
+      const providerConfig = decoded.kind === 'pdf_layout'
+        ? pdfOnnxProvider
+        : whisperOnnxProvider;
+      const selectedProvider = getSelectedOnnxProvider(workload);
+      const canReuseSelectedProvider = selectedProvider === 'cpu'
+        && !providerConfig.releaseAfterJob
+        && jobConcurrency === 1;
+      const usesGpu = shouldAcquireGpuLease({
+        mode: providerConfig.mode,
+        selectedProvider,
+        canReuseSelectedProvider,
       });
+      let leaseAckHeartbeat: ReturnType<typeof setInterval> | null = null;
+      const stopLeaseAckHeartbeat = () => {
+        if (leaseAckHeartbeat) {
+          clearInterval(leaseAckHeartbeat);
+          leaseAckHeartbeat = null;
+        }
+      };
+      const extendAckWhileUsingGpuLease = () => {
+        try {
+          input.msg.working();
+        } catch (ackError) {
+          app.log.warn({
+            worker: input.workerLabel,
+            kind: decoded.kind,
+            opId: decoded.opId,
+            jobId: decoded.jobId,
+            error: toErrorMessage(ackError),
+          }, 'failed to extend JetStream ack wait while using shared GPU lease');
+        }
+      };
+
+      let result;
+      try {
+        if (usesGpu) {
+          extendAckWhileUsingGpuLease();
+          leaseAckHeartbeat = setInterval(
+            extendAckWhileUsingGpuLease,
+            GPU_LEASE_ACK_HEARTBEAT_MS,
+          );
+        }
+        result = usesGpu
+          ? await withGpuLease({
+            label: `${decoded.kind}:${decoded.opId}`,
+            holdAfterError: getTimedOutOperationSettlement,
+            onHoldExpired: () => {
+              app.log.fatal({
+                worker: input.workerLabel,
+                kind: decoded.kind,
+                opId: decoded.opId,
+                jobId: decoded.jobId,
+              }, 'timed-out native GPU work exceeded its settlement grace; restarting worker');
+              process.exit(1);
+            },
+            onWait: ({ lockPath, owner }) => {
+              app.log.info({
+                worker: input.workerLabel,
+                kind: decoded.kind,
+                opId: decoded.opId,
+                lockPath,
+                owner,
+              }, 'job waiting for shared GPU lease');
+            },
+            run: async (lease) => {
+              const observeProvider = createGpuLeaseProviderObserver({
+                workload,
+                selectedProvider,
+                release: lease.release,
+              });
+              const reuseIsolatedProcess = !providerConfig.releaseAfterJob && jobConcurrency === 1;
+              return await runJob({
+                isolateNative: true,
+                reuseIsolatedProcess,
+                onProviderSelection: async (selection) => {
+                  if (reuseIsolatedProcess) {
+                    rememberSelectedOnnxProvider(selection.workload, selection.provider);
+                  }
+                  await observeProvider(selection);
+                },
+              });
+            },
+          })
+          : canReuseSelectedProvider
+            ? await runJob({
+              isolateNative: true,
+              reuseIsolatedProcess: true,
+              onProviderSelection: (selection) => {
+                rememberSelectedOnnxProvider(selection.workload, selection.provider);
+              },
+            })
+            : await runJob();
+      } finally {
+        stopLeaseAckHeartbeat();
+      }
       const resultTiming = extractTiming(result);
       const now = Date.now();
 
@@ -1565,7 +1757,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     run: (
       payload: TPayload,
       queueWaitMs: number,
-      hooks?: { onProgress?: (progress: PdfLayoutProgress) => Promise<void> },
+      hooks?: ComputeRunHooks,
     ) => Promise<TResult>;
     workerLabel: string;
   }): Promise<void> {

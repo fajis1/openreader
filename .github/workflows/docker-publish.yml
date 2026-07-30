@@ -27,6 +27,7 @@ jobs:
       web_image_name: ${{ steps.image-name.outputs.web_image_name }}
       web_legacy_image_name: ${{ steps.image-name.outputs.web_legacy_image_name }}
       compute_worker_image_name: ${{ steps.image-name.outputs.compute_worker_image_name }}
+      compute_worker_cuda_image_name: ${{ steps.image-name.outputs.compute_worker_cuda_image_name }}
     steps:
       - name: Compute Docker image names
         id: image-name
@@ -35,6 +36,7 @@ jobs:
           echo "web_image_name=${owner}/openreader" >> "$GITHUB_OUTPUT"
           echo "web_legacy_image_name=${owner}/openreader-webui" >> "$GITHUB_OUTPUT"
           echo "compute_worker_image_name=${owner}/openreader-compute-worker" >> "$GITHUB_OUTPUT"
+          echo "compute_worker_cuda_image_name=${owner}/openreader-compute-worker-cuda" >> "$GITHUB_OUTPUT"
 
   build:
     needs: prepare
@@ -71,6 +73,12 @@ jobs:
             runner: ubuntu-24.04-arm
             context: .
             dockerfile: ./compute/worker/Dockerfile
+          - image_target: compute-worker-cuda
+            arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+            context: .
+            dockerfile: ./compute/worker/Dockerfile.gpu
 
     steps:
       - name: Checkout repository
@@ -92,11 +100,11 @@ jobs:
       - name: Select image name
         id: image
         run: |
-          if [ "${{ matrix.image_target }}" = "web" ]; then
-            echo "image_name=${{ needs.prepare.outputs.web_image_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "image_name=${{ needs.prepare.outputs.compute_worker_image_name }}" >> "$GITHUB_OUTPUT"
-          fi
+          case "${{ matrix.image_target }}" in
+            web) echo "image_name=${{ needs.prepare.outputs.web_image_name }}" >> "$GITHUB_OUTPUT" ;;
+            compute-worker-cuda) echo "image_name=${{ needs.prepare.outputs.compute_worker_cuda_image_name }}" >> "$GITHUB_OUTPUT" ;;
+            *) echo "image_name=${{ needs.prepare.outputs.compute_worker_image_name }}" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Build and push Docker image (${{ matrix.image_target }} / ${{ matrix.arch }})
         id: build
@@ -139,6 +147,8 @@ jobs:
             runner: ubuntu-24.04
           - image_target: compute-worker
             runner: ubuntu-24.04
+          - image_target: compute-worker-cuda
+            runner: ubuntu-24.04
 
     steps:
       - name: Download digests
@@ -161,16 +171,23 @@ jobs:
       - name: Select image names
         id: image
         run: |
-          if [ "${{ matrix.image_target }}" = "web" ]; then
-            echo "image_name=${{ needs.prepare.outputs.web_image_name }}" >> "$GITHUB_OUTPUT"
-            echo "metadata_images<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${{ env.REGISTRY }}/${{ needs.prepare.outputs.web_image_name }}" >> "$GITHUB_OUTPUT"
-            echo "${{ env.REGISTRY }}/${{ needs.prepare.outputs.web_legacy_image_name }}" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-          else
-            echo "image_name=${{ needs.prepare.outputs.compute_worker_image_name }}" >> "$GITHUB_OUTPUT"
-            echo "metadata_images=${{ env.REGISTRY }}/${{ needs.prepare.outputs.compute_worker_image_name }}" >> "$GITHUB_OUTPUT"
-          fi
+          case "${{ matrix.image_target }}" in
+            web)
+              echo "image_name=${{ needs.prepare.outputs.web_image_name }}" >> "$GITHUB_OUTPUT"
+              echo "metadata_images<<EOF" >> "$GITHUB_OUTPUT"
+              echo "${{ env.REGISTRY }}/${{ needs.prepare.outputs.web_image_name }}" >> "$GITHUB_OUTPUT"
+              echo "${{ env.REGISTRY }}/${{ needs.prepare.outputs.web_legacy_image_name }}" >> "$GITHUB_OUTPUT"
+              echo "EOF" >> "$GITHUB_OUTPUT"
+              ;;
+            compute-worker-cuda)
+              echo "image_name=${{ needs.prepare.outputs.compute_worker_cuda_image_name }}" >> "$GITHUB_OUTPUT"
+              echo "metadata_images=${{ env.REGISTRY }}/${{ needs.prepare.outputs.compute_worker_cuda_image_name }}" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "image_name=${{ needs.prepare.outputs.compute_worker_image_name }}" >> "$GITHUB_OUTPUT"
+              echo "metadata_images=${{ env.REGISTRY }}/${{ needs.prepare.outputs.compute_worker_image_name }}" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta

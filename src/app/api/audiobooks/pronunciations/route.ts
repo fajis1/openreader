@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
   try {
     const ctx = await requireAuthContext(request);
     if (ctx instanceof Response) return ctx;
+    if (!ctx.userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const userId = ctx.userId;
 
     const url = new URL(request.url);
@@ -45,12 +46,12 @@ export async function GET(request: NextRequest) {
     const wordMap: Record<string, { word: string, phonetic: string, count: number, globalChoices: string[], userOverride: string | null }> = {};
 
     if (bookId) {
-      const objects = await listAudiobookObjects(bookId, userId);
+      const objects = await listAudiobookObjects(bookId, userId, null);
       const textFiles = objects.filter(o => o.fileName.endsWith('.txt') || o.fileName.endsWith('.md') || o.fileName.endsWith('.json') || o.fileName.endsWith('.xml') || o.fileName.endsWith('.html'));
 
       for (const obj of textFiles) {
         try {
-          const buf = await getAudiobookObjectBuffer(bookId, userId, obj.fileName);
+          const buf = await getAudiobookObjectBuffer(bookId, userId, obj.fileName, null);
           const text = buf.toString('utf-8');
           
           const regex = /\[([^\]]+)\]\(\/([^\/]+)\/\)/g;

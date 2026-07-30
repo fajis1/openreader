@@ -150,8 +150,12 @@ export async function POST(req: NextRequest) {
       try {
         await saveJob({ status: 'running' });
         let updatedGlobal = false;
+        let acceptedChoices = 0;
 
-        if (wordsMissingOptions.length > 0 && activeProfile?.geminiApiKey) {
+        if (wordsMissingOptions.length > 0) {
+          if (!activeProfile?.geminiApiKey) {
+            throw new Error('Gemini API key is not configured for the selected Smart Audio profile.');
+          }
       const model = activeProfile?.aiModel || 'gemini-3.6-flash';
       const apiKey = activeProfile.geminiApiKey;
       
@@ -175,29 +179,49 @@ Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
               generationConfig: { responseMimeType: "application/json" }
             })
           });
-          const data = await res.json();
-          if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
-            const generated = JSON.parse(data.candidates[0].content.parts[0].text);
-            for (const [w, prons] of Object.entries(generated)) {
-              if (Array.isArray(prons)) {
-                const current = globalDict[w] || [];
-                const existingPhonetics = new Set(current.map(c => c.phonetic));
-                
-                for (const p of prons) {
-                  if (isKokoroCompatiblePronunciation(p) && !existingPhonetics.has(p) && current.length < 5) {
-                    if (!geminiRecommendations[w]) geminiRecommendations[w] = p;
-                    current.push({ phonetic: p, usageCount: 0, isUserCustom: false, timestamp: Date.now() });
-                    existingPhonetics.add(p);
-                    updatedGlobal = true;
-                  }
+          const data = await res.json().catch(() => null);
+          if (!res.ok) {
+            throw new Error(`Gemini request failed (HTTP ${res.status}).`);
+          }
+          const generatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!generatedText) {
+            throw new Error('Gemini returned no pronunciation choices.');
+          }
+          const generated = JSON.parse(generatedText);
+          let acceptedOptions = 0;
+          const acceptedWords = new Set<string>();
+          for (const [w, prons] of Object.entries(generated)) {
+            if (Array.isArray(prons) && chunk.includes(w)) {
+              const current = globalDict[w] || [];
+              const existingPhonetics = new Set(current.map(c => c.phonetic));
+
+              for (const p of prons) {
+                if (isKokoroCompatiblePronunciation(p) && !existingPhonetics.has(p) && current.length < 5) {
+                  if (!geminiRecommendations[w]) geminiRecommendations[w] = p;
+                  current.push({ phonetic: p, usageCount: 0, isUserCustom: false, timestamp: Date.now() });
+                  existingPhonetics.add(p);
+                  acceptedOptions += 1;
+                  acceptedChoices += 1;
+                  acceptedWords.add(w);
+                  updatedGlobal = true;
                 }
-                globalDict[w] = current;
               }
+              globalDict[w] = current;
             }
           }
+          if (acceptedOptions === 0) {
+            throw new Error('Gemini returned no Kokoro-compatible pronunciation choices for this batch.');
+          }
+          const omittedWords = chunk.filter((word: string) => !acceptedWords.has(word));
+          if (omittedWords.length > 0) {
+            throw new Error(
+              `Gemini returned no accepted pronunciation choices for: ${omittedWords.join(', ')}.`,
+            );
+          }
         } catch (err) {
-          console.error("Gemini API error:", err);
-          const errors = Array.isArray(jobState.errors) ? [...jobState.errors, `Gemini batch ${i / chunkSize + 1} failed`] : [`Gemini batch ${i / chunkSize + 1} failed`];
+          const message = err instanceof Error ? err.message : 'Unknown Gemini error';
+          serverLogger.error({ event: 'pdf.scan.gemini.batch.failed', error: err, jobId, batch: i / chunkSize + 1 }, 'Gemini pronunciation batch failed');
+          const errors = Array.isArray(jobState.errors) ? [...jobState.errors, `Gemini batch ${i / chunkSize + 1}: ${message}`] : [`Gemini batch ${i / chunkSize + 1}: ${message}`];
           await saveJob({ errors, completed: Math.min(i + chunk.length, wordsMissingOptions.length) });
         }
         await saveJob({ completed: Math.min(i + chunk.length, wordsMissingOptions.length) });
@@ -258,7 +282,16 @@ Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
       }
     }
 
-        await saveJob({ status: 'completed', completed: wordsMissingOptions.length, words: enrichWords() });
+        const generated = Object.keys(geminiRecommendations).length;
+        const errors = Array.isArray(jobState.errors) ? jobState.errors : [];
+        await saveJob({
+          status: 'completed',
+          completed: wordsMissingOptions.length,
+          generated,
+          generatedChoices: acceptedChoices,
+          error: errors.length > 0 ? `${errors.length} Gemini batch${errors.length === 1 ? '' : 'es'} failed. ${errors[0]}` : null,
+          words: enrichWords(),
+        });
       } catch (error) {
         serverLogger.error({ event: 'pdf.scan.pronunciations.failed', error, jobId }, 'Background foreign-word pronunciation generation failed');
         await saveJob({ status: 'failed', error: error instanceof Error ? error.message : 'Background pronunciation generation failed' }).catch(() => {});

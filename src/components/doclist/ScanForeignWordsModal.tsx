@@ -36,6 +36,8 @@ export function ScanForeignWordsModal({
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const [scanJobStatus, setScanJobStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed'>('idle');
   const [scanJobProgress, setScanJobProgress] = useState({ completed: 0, total: 0 });
+  const [scanJobGenerated, setScanJobGenerated] = useState(0);
+  const [scanJobGeneratedChoices, setScanJobGeneratedChoices] = useState(0);
   const [scanJobError, setScanJobError] = useState<string | null>(null);
   const [audioWarmStatus, setAudioWarmStatus] = useState<'idle' | 'warming' | 'ready'>('idle');
   const panelRef = useRef<HTMLDivElement>(null);
@@ -57,6 +59,8 @@ export function ScanForeignWordsModal({
       setPanelWidth(null);
       setScanJobStatus('idle');
       setScanJobProgress({ completed: 0, total: 0 });
+      setScanJobGenerated(0);
+      setScanJobGeneratedChoices(0);
       setScanJobError(null);
       setAudioWarmStatus('idle');
       warmedAudio.current.clear();
@@ -77,6 +81,8 @@ export function ScanForeignWordsModal({
       setPanelWidth(null);
       setScanJobStatus('idle');
       setScanJobProgress({ completed: 0, total: 0 });
+      setScanJobGenerated(0);
+      setScanJobGeneratedChoices(0);
       setScanJobError(null);
       setAudioWarmStatus('idle');
       warmedAudio.current.clear();
@@ -132,7 +138,9 @@ export function ScanForeignWordsModal({
       }
       if (job.status) setScanJobStatus(job.status);
       setScanJobProgress({ completed: Number(job.completed) || 0, total: Number(job.total) || 0 });
-      setScanJobError(job.error || null);
+      setScanJobGenerated(Number(job.generated) || 0);
+      setScanJobGeneratedChoices(Number(job.generatedChoices) || 0);
+      setScanJobError(job.error || (Array.isArray(job.errors) && job.errors.length > 0 ? job.errors.join(' ') : null));
       if (job.status === 'completed' || job.status === 'failed') stopScanPolling();
     } catch (pollError) {
       console.error('Failed to poll foreign-word scan job:', pollError);
@@ -224,6 +232,8 @@ export function ScanForeignWordsModal({
       setHasScanned(true);
       setScanJobStatus(data.scanStatus || 'completed');
       setScanJobProgress({ completed: 0, total: Number(data.scanTotal) || 0 });
+      setScanJobGenerated(0);
+      setScanJobGeneratedChoices(0);
       setScanJobError(null);
       stopScanPolling();
       if (data.scanJobId) {
@@ -436,7 +446,11 @@ export function ScanForeignWordsModal({
                   Gemini pronunciation generation: {scanJobProgress.total > 0 ? `${scanJobProgress.completed}/${scanJobProgress.total} words processed` : 'queued'}…
                 </p>
               ) : scanJobStatus === 'completed' && scanJobProgress.total > 0 ? (
-                <p className="text-[11px] text-green-700 dark:text-green-300">Gemini pronunciation generation complete.</p>
+                scanJobError ? (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300">Gemini generated {scanJobGeneratedChoices} choices for {scanJobGenerated}/{scanJobProgress.total} new words. {scanJobError}</p>
+                ) : (
+                  <p className="text-[11px] text-green-700 dark:text-green-300">Gemini generated {scanJobGeneratedChoices} choices for {scanJobGenerated}/{scanJobProgress.total} new words.</p>
+                )
               ) : scanJobStatus === 'failed' ? (
                 <p className="text-[11px] text-red-600 dark:text-red-400">Pronunciation generation failed: {scanJobError || 'check server logs'}</p>
               ) : null}
@@ -631,7 +645,11 @@ export function ScanForeignWordsModal({
                           );
                           })}
                         {(!w.pronunciations || w.pronunciations.length === 0) && (
-                          <span className="text-gray-500 text-xs italic">No AI pronunciations found.</span>
+                          <span className="text-gray-500 text-xs italic">
+                            {scanJobStatus === 'queued' || scanJobStatus === 'running'
+                              ? 'Waiting for Gemini pronunciation choices…'
+                              : 'No Gemini pronunciation was generated for this word; see the scan status above.'}
+                          </span>
                         )}
                         {onlyNewPronunciations && Array.isArray(w.pronunciations) && w.pronunciations.length > 0 && w.pronunciations.every((p: any) => p?.isInGlobalLibrary === true) && (
                           <span className="text-gray-500 text-xs italic">No pronunciations are new to the global list.</span>

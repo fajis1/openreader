@@ -22,6 +22,7 @@ The app server submits work to `POST /ops` and listens for updates on `GET /ops/
 ## Container image
 
 - `ghcr.io/richardr1126/openreader-compute-worker:latest`
+- NVIDIA CUDA (Linux amd64): `ghcr.io/richardr1126/openreader-compute-worker-cuda:latest`
 
 ## Worker environment
 
@@ -53,6 +54,11 @@ Common optional variables:
 - `LOG_FORMAT=json` and `COMPUTE_LOG_LEVEL=info`
 - `COMPUTE_PREWARM_MODELS=false` by default. Set it to `true` to pre-download ONNX models during worker startup.
 - `COMPUTE_JOB_CONCURRENCY=1`
+- `COMPUTE_ONNX_EXECUTION_PROVIDER=cpu` (`cpu`, `cuda`, or `auto`)
+- `PDF_LAYOUT_ONNX_EXECUTION_PROVIDER` and `WHISPER_ONNX_EXECUTION_PROVIDER` for per-model overrides
+- `COMPUTE_CUDA_DEVICE_ID=0`
+- `COMPUTE_CUDA_ALLOW_CPU_FALLBACK=true`
+- `COMPUTE_RELEASE_ONNX_SESSIONS_AFTER_JOB=false`
 - `COMPUTE_WHISPER_TIMEOUT_MS=30000`
 - `COMPUTE_PDF_TIMEOUT_MS=300000`
 - `COMPUTE_PDF_JOB_ATTEMPTS=1`
@@ -91,6 +97,68 @@ Notes:
 - Embedded `weed mini` is not supported for external worker mode.
 - Protect `COMPUTE_WORKER_TOKEN` and do not expose worker routes without auth.
 - The worker connects to NATS lazily and disconnects after 120 seconds of full idle time. That allows platforms like Railway to sleep the service, but the first request after a cold start will be slower.
+
+## NVIDIA GPU worker
+
+OpenReader's Linux x64 GPU worker pins `onnxruntime-node` 1.18.0, its CUDA 11 provider, NVIDIA CUDA 11.8.0 with cuDNN 8.9.6, and PP-DocLayoutV3 revision `ff677269004f03007705f3e7f1bc8d0f4546d299`. The ONNX Runtime provider contains `sm_60` device code, so this is the pinned stack for the Pascal-generation Tesla P100. The ordinary worker image remains CPU-only.
+
+Build and run the GPU compose override:
+
+```bash
+cd compute/worker
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+To use a published image instead, set `COMPUTE_WORKER_CUDA_IMAGE` to your registry path and omit `--build`.
+
+The override requires CUDA for PP-DocLayoutV3, keeps Whisper on CPU, limits OpenReader to one compute job at a time, and releases ONNX sessions after each job so idle OpenReader workers do not continue holding model VRAM. A missing or incompatible CUDA provider therefore fails at session initialization instead of silently using CPU. `GET /health/ready` reports the configured providers.
+
+Provider mode `cuda` means CUDA is required and never falls back. Use `auto` with `COMPUTE_CUDA_ALLOW_CPU_FALLBACK=true` only when intentional CPU fallback is preferable.
+
+For an external GPU worker, point the app at that worker:
+
+```env
+COMPUTE_WORKER_URL=http://<gpu-worker-address>:8081
+COMPUTE_WORKER_TOKEN=<same-token-as-worker>
+```
+
+The app and worker must still share NATS and S3/object storage as described above.
+
+### Proxmox LXC and a shared P100
+
+Attach the NVIDIA device and userspace runtime to the LXC that runs the external compute worker, then verify that Docker can see it before starting OpenReader:
+
+```bash
+nvidia-smi
+docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
+```
+
+Recommended worker settings for a P100 shared with other workloads:
+
+```env
+COMPUTE_JOB_CONCURRENCY=1
+PDF_LAYOUT_ONNX_EXECUTION_PROVIDER=cuda
+WHISPER_ONNX_EXECUTION_PROVIDER=cpu
+COMPUTE_CUDA_DEVICE_ID=0
+COMPUTE_CUDA_ALLOW_CPU_FALLBACK=false
+COMPUTE_RELEASE_ONNX_SESSIONS_AFTER_JOB=true
+```
+
+The P100 does not provide MIG hardware partitioning. Multiple LXCs can use it, but the driver does not prevent one process from exhausting VRAM. For cooperative serialization, bind-mount the same host directory into every participating LXC/container and configure:
+
+```env
+COMPUTE_GPU_LOCK_DIR=/shared/gpu-locks
+COMPUTE_GPU_LOCK_NAME=p100
+# Used by docker-compose.gpu.yml for the bind mount:
+COMPUTE_GPU_LOCK_HOST_DIR=/path/shared-by-gpu-services
+```
+
+OpenReader will hold `<lock-dir>/p100.lock` with a heartbeat for the duration of each CUDA job. Other GPU services, including a Surya worker, must honor the same lease before starting GPU work; configuring the lock in OpenReader alone cannot serialize an unrelated process. The default stale window is two hours and can be changed with `COMPUTE_GPU_LOCK_STALE_MS`.
+
+If a native GPU call times out but does not settle, the worker keeps the lease
+for `COMPUTE_GPU_LOCK_SETTLEMENT_GRACE_MS` (60 seconds by default) and then
+exits so the container supervisor can recreate a clean CUDA context. Use a
+restart policy such as `unless-stopped`.
 
 ## Health endpoints
 

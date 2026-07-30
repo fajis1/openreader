@@ -62,7 +62,7 @@
     "lru-cache": "^11.5.1",
     "nats": "^2.29.3",
     "next": "^15.5.19",
-    "onnxruntime-node": "^1.26.0",
+    "onnxruntime-node": "1.18.0",
     "openai": "^6.41.0",
     "pdfjs-dist": "4.8.69",
     "pg": "^8.21.0",

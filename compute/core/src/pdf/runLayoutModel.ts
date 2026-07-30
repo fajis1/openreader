@@ -3,6 +3,7 @@ import { readFile } from 'fs/promises';
 import type { LayoutRegion, PdfTextItem } from './types';
 import { ensureModel, MODEL_CONFIG_PATH, MODEL_PREPROCESSOR_PATH } from './model';
 import { getOnnxThreadsPerJob } from '../config/cpu-budget';
+import { createConfiguredOnnxSession } from '../config/onnx-execution-provider';
 
 interface RunLayoutInput {
   pageWidth: number;
@@ -117,19 +118,31 @@ async function getSession(): Promise<ort.InferenceSession> {
     sessionPromise = (async () => {
       const modelPath = await ensureModel();
       const onnxThreadsPerJob = getOnnxThreadsPerJob();
-      const stableSessionOptions: ort.InferenceSession.SessionOptions = {
-        executionProviders: ['cpu'],
+      const stableSessionOptions: Omit<ort.InferenceSession.SessionOptions, 'executionProviders'> = {
         graphOptimizationLevel: 'all',
         intraOpNumThreads: onnxThreadsPerJob,
         interOpNumThreads: 1,
         executionMode: 'sequential',
       };
-      return ort.InferenceSession.create(modelPath, {
-        ...stableSessionOptions,
+      return createConfiguredOnnxSession({
+        workload: 'pdf-layout',
+        modelPath,
+        sessionOptions: stableSessionOptions,
       });
-    })();
+    })().catch((error) => {
+      sessionPromise = null;
+      throw error;
+    });
   }
   return sessionPromise;
+}
+
+export async function releaseLayoutModelSession(): Promise<void> {
+  const pending = sessionPromise;
+  sessionPromise = null;
+  if (!pending) return;
+  const session = await pending.catch(() => null);
+  if (session) await session.release();
 }
 
 async function getIdToLabel(): Promise<Record<number, string>> {

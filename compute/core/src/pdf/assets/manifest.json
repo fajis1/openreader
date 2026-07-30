@@ -1,6 +1,6 @@
 {
   "name": "pp-doclayoutv3",
-  "version": "Bei0001/PP-DocLayoutV3-ONNX@main",
+  "version": "Bei0001/PP-DocLayoutV3-ONNX@ff677269004f03007705f3e7f1bc8d0f4546d299",
   "files": [
     {
       "path": "model.onnx",

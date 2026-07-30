@@ -12,6 +12,10 @@ import { getFFmpegPath } from '../platform/ffmpeg';
 import { getOnnxThreadsPerJob } from '../config/cpu-budget';
 import { getComputeTimeoutConfig } from '../config/timeout';
 import {
+  clearSelectedOnnxProvider,
+  createConfiguredOnnxSession,
+} from '../config/onnx-execution-provider';
+import {
   mapWordsToSentenceOffsets,
   type WhisperWord,
 } from './alignment-map';
@@ -593,8 +597,7 @@ async function getRuntime(): Promise<WhisperRuntime> {
     const transcribeToken = Number(transcribeFromForced ?? tokenizer.token_to_id('<|transcribe|>') ?? 50359);
 
     const onnxThreadsPerJob = getOnnxThreadsPerJob();
-    const stableSessionOptions: ort.InferenceSession.SessionOptions = {
-      executionProviders: ['cpu'],
+    const stableSessionOptions: Omit<ort.InferenceSession.SessionOptions, 'executionProviders'> = {
       // Keep Whisper graph opts disabled: this quantized timestamped model can
       // fail session init under ORT QDQ transform passes (missing *_scale).
       graphOptimizationLevel: 'disabled',
@@ -603,55 +606,80 @@ async function getRuntime(): Promise<WhisperRuntime> {
       executionMode: 'sequential',
     };
 
-    const encoder = await ort.InferenceSession.create(WHISPER_ENCODER_MODEL_PATH, stableSessionOptions);
-    const decoderMerged = await ort.InferenceSession.create(WHISPER_DECODER_MERGED_MODEL_PATH, stableSessionOptions);
-    const decoderWithPast = await ort.InferenceSession.create(WHISPER_DECODER_WITH_PAST_MODEL_PATH, stableSessionOptions);
+    let encoder: ort.InferenceSession | null = null;
+    let decoderMerged: ort.InferenceSession | null = null;
+    let decoderWithPast: ort.InferenceSession | null = null;
+    try {
+      encoder = await createConfiguredOnnxSession({
+        workload: 'whisper',
+        modelPath: WHISPER_ENCODER_MODEL_PATH,
+        sessionOptions: stableSessionOptions,
+      });
+      decoderMerged = await createConfiguredOnnxSession({
+        workload: 'whisper',
+        modelPath: WHISPER_DECODER_MERGED_MODEL_PATH,
+        sessionOptions: stableSessionOptions,
+      });
+      decoderWithPast = await createConfiguredOnnxSession({
+        workload: 'whisper',
+        modelPath: WHISPER_DECODER_WITH_PAST_MODEL_PATH,
+        sessionOptions: stableSessionOptions,
+      });
 
-    const alignmentLayers = [...new Set(alignmentHeads.map(([layer]) => layer))];
-    const prefillFetches: string[] = ['logits'];
-    const stepFetches: string[] = ['logits'];
-    const mergedOutputNames = new Set(decoderMerged.outputNames);
-    const withPastOutputNames = new Set(decoderWithPast.outputNames);
+      const alignmentLayers = [...new Set(alignmentHeads.map(([layer]) => layer))];
+      const prefillFetches: string[] = ['logits'];
+      const stepFetches: string[] = ['logits'];
+      const mergedOutputNames = new Set(decoderMerged.outputNames);
+      const withPastOutputNames = new Set(decoderWithPast.outputNames);
 
-    for (let i = 0; i < WHISPER_NUM_LAYERS; i += 1) {
-      const decoderKey = `present.${i}.decoder.key`;
-      const decoderValue = `present.${i}.decoder.value`;
-      if (mergedOutputNames.has(decoderKey)) prefillFetches.push(decoderKey);
-      if (mergedOutputNames.has(decoderValue)) prefillFetches.push(decoderValue);
-      if (withPastOutputNames.has(decoderKey)) stepFetches.push(decoderKey);
-      if (withPastOutputNames.has(decoderValue)) stepFetches.push(decoderValue);
+      for (let i = 0; i < WHISPER_NUM_LAYERS; i += 1) {
+        const decoderKey = `present.${i}.decoder.key`;
+        const decoderValue = `present.${i}.decoder.value`;
+        if (mergedOutputNames.has(decoderKey)) prefillFetches.push(decoderKey);
+        if (mergedOutputNames.has(decoderValue)) prefillFetches.push(decoderValue);
+        if (withPastOutputNames.has(decoderKey)) stepFetches.push(decoderKey);
+        if (withPastOutputNames.has(decoderValue)) stepFetches.push(decoderValue);
 
-      const encoderKey = `present.${i}.encoder.key`;
-      const encoderValue = `present.${i}.encoder.value`;
-      if (mergedOutputNames.has(encoderKey)) prefillFetches.push(encoderKey);
-      if (mergedOutputNames.has(encoderValue)) prefillFetches.push(encoderValue);
+        const encoderKey = `present.${i}.encoder.key`;
+        const encoderValue = `present.${i}.encoder.value`;
+        if (mergedOutputNames.has(encoderKey)) prefillFetches.push(encoderKey);
+        if (mergedOutputNames.has(encoderValue)) prefillFetches.push(encoderValue);
+      }
+
+      for (const layer of alignmentLayers) {
+        const key = `cross_attentions.${layer}`;
+        if (mergedOutputNames.has(key)) prefillFetches.push(key);
+        if (withPastOutputNames.has(key)) stepFetches.push(key);
+      }
+
+      return {
+        encoder,
+        decoderMerged,
+        decoderWithPast,
+        tokenizer,
+        promptStartToken,
+        defaultLanguageToken,
+        transcribeToken,
+        eosTokenId,
+        noTimestampsTokenId,
+        timestampBeginTokenId,
+        maxInitialTimestampIndex,
+        maxDecodeSteps,
+        suppressTokens: new Set((generationConfig.suppress_tokens ?? []).map((v) => Number(v))),
+        beginSuppressTokens: new Set((generationConfig.begin_suppress_tokens ?? []).map((v) => Number(v))),
+        alignmentHeads,
+        prefillFetches,
+        stepFetches,
+      };
+    } catch (error) {
+      await Promise.allSettled(
+        [encoder, decoderMerged, decoderWithPast]
+          .filter((session): session is ort.InferenceSession => session !== null)
+          .map((session) => session.release()),
+      );
+      clearSelectedOnnxProvider('whisper');
+      throw error;
     }
-
-    for (const layer of alignmentLayers) {
-      const key = `cross_attentions.${layer}`;
-      if (mergedOutputNames.has(key)) prefillFetches.push(key);
-      if (withPastOutputNames.has(key)) stepFetches.push(key);
-    }
-
-    return {
-      encoder,
-      decoderMerged,
-      decoderWithPast,
-      tokenizer,
-      promptStartToken,
-      defaultLanguageToken,
-      transcribeToken,
-      eosTokenId,
-      noTimestampsTokenId,
-      timestampBeginTokenId,
-      maxInitialTimestampIndex,
-      maxDecodeSteps,
-      suppressTokens: new Set((generationConfig.suppress_tokens ?? []).map((v) => Number(v))),
-      beginSuppressTokens: new Set((generationConfig.begin_suppress_tokens ?? []).map((v) => Number(v))),
-      alignmentHeads,
-      prefillFetches,
-      stepFetches,
-    };
   })().catch((error) => {
     state.runtimePromise = null;
     throw error;
@@ -756,20 +784,22 @@ async function runWhisperOnnx(
       use_cache_branch: prefillUseCacheBranch,
       ...emptyPastFeeds,
     };
+    let prefillOutputs: Record<string, ort.Tensor>;
     try {
       assertWithinDeadline(deadlineMs, timeoutMs);
-      outputs = await runtime.decoderMerged.run(prefillFeeds, runtime.prefillFetches);
+      prefillOutputs = await runtime.decoderMerged.run(prefillFeeds, runtime.prefillFetches);
+      outputs = prefillOutputs;
     } finally {
       disposeTensor(prefillInputIds);
       disposeTensor(prefillUseCacheBranch);
     }
-    captureCrossAttentions(outputs, true);
+    captureCrossAttentions(prefillOutputs, true);
 
     for (let i = 0; i < WHISPER_NUM_LAYERS; i += 1) {
-      encoderPast[`past_key_values.${i}.encoder.key`] = outputs[`present.${i}.encoder.key`];
-      encoderPast[`past_key_values.${i}.encoder.value`] = outputs[`present.${i}.encoder.value`];
-      decoderPast[`past_key_values.${i}.decoder.key`] = outputs[`present.${i}.decoder.key`];
-      decoderPast[`past_key_values.${i}.decoder.value`] = outputs[`present.${i}.decoder.value`];
+      encoderPast[`past_key_values.${i}.encoder.key`] = prefillOutputs[`present.${i}.encoder.key`];
+      encoderPast[`past_key_values.${i}.encoder.value`] = prefillOutputs[`present.${i}.encoder.value`];
+      decoderPast[`past_key_values.${i}.decoder.key`] = prefillOutputs[`present.${i}.decoder.key`];
+      decoderPast[`past_key_values.${i}.decoder.value`] = prefillOutputs[`present.${i}.decoder.value`];
     }
 
     for (let step = 0; step < decodeStepLimit; step += 1) {
@@ -999,6 +1029,23 @@ export async function alignAudioWithText(
     }
   });
   return run;
+}
+
+export async function releaseWhisperRuntime(): Promise<void> {
+  const pending = state.runtimePromise;
+  state.runtimePromise = null;
+  if (state.emptyPastFeedsTemplate) {
+    disposeTensorMap(state.emptyPastFeedsTemplate);
+    state.emptyPastFeedsTemplate = null;
+  }
+  if (!pending) return;
+  const runtime = await pending.catch(() => null);
+  if (!runtime) return;
+  await Promise.all([
+    runtime.encoder.release(),
+    runtime.decoderMerged.release(),
+    runtime.decoderWithPast.release(),
+  ]);
 }
 
 export function makeWhisperCacheKey(input: WhisperRequestBody): string {

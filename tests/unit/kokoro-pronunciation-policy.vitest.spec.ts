@@ -85,6 +85,11 @@ describe('Kokoro pronunciation policy', () => {
     expect(source).toContain('after(async () =>');
     expect(source).toContain('Object.entries(geminiRecommendations)');
     expect(source).toContain('Warm only Gemini');
+    expect(source).toContain('Gemini API key is not configured');
+    expect(source).toContain("event: 'pdf.scan.gemini.batch.failed'");
+    expect(source).toContain('acceptedChoices += 1');
+    expect(source).toContain('generatedChoices: acceptedChoices');
+    expect(source).not.toContain('wordsMissingOptions.reduce((total');
   });
 
   test('refinement exposes the configured paid backup key and explicit retry choice', () => {

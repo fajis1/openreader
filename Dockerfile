@@ -14,6 +14,7 @@ FROM node:lts-slim AS app-builder
 
 # Install pnpm globally
 RUN npm install -g pnpm@10.33.4
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 
 # Create app directory
 WORKDIR /app

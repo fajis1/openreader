@@ -1,0 +1,26 @@
+services:
+  compute-worker:
+    restart: unless-stopped
+    image: ${COMPUTE_WORKER_CUDA_IMAGE:-ghcr.io/richardr1126/openreader-compute-worker-cuda:latest}
+    build:
+      context: ../..
+      dockerfile: compute/worker/Dockerfile.gpu
+    environment:
+      COMPUTE_JOB_CONCURRENCY: ${COMPUTE_JOB_CONCURRENCY:-1}
+      PDF_LAYOUT_ONNX_EXECUTION_PROVIDER: ${PDF_LAYOUT_ONNX_EXECUTION_PROVIDER:-cuda}
+      WHISPER_ONNX_EXECUTION_PROVIDER: ${WHISPER_ONNX_EXECUTION_PROVIDER:-cpu}
+      COMPUTE_CUDA_DEVICE_ID: ${COMPUTE_CUDA_DEVICE_ID:-0}
+      COMPUTE_CUDA_ALLOW_CPU_FALLBACK: ${COMPUTE_CUDA_ALLOW_CPU_FALLBACK:-false}
+      COMPUTE_RELEASE_ONNX_SESSIONS_AFTER_JOB: ${COMPUTE_RELEASE_ONNX_SESSIONS_AFTER_JOB:-true}
+      COMPUTE_GPU_LOCK_DIR: /shared/gpu-locks
+      COMPUTE_GPU_LOCK_NAME: ${COMPUTE_GPU_LOCK_NAME:-p100}
+      COMPUTE_GPU_LOCK_SETTLEMENT_GRACE_MS: ${COMPUTE_GPU_LOCK_SETTLEMENT_GRACE_MS:-60000}
+    volumes:
+      - ${COMPUTE_GPU_LOCK_HOST_DIR:-./gpu-locks}:/shared/gpu-locks
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

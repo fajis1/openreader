@@ -1,6 +1,7 @@
 FROM node:lts AS deploy-stage
 
 RUN npm install -g pnpm@11.1.2
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 
 WORKDIR /workspace
 
