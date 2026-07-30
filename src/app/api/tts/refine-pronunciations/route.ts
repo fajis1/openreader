@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const { word, feedback, currentChoices } = body;
+    const useBackupKey = body.useBackupKey === true;
     if (!word || !feedback) {
       return NextResponse.json({ error: 'Missing word or feedback' }, { status: 400 });
     }
@@ -74,10 +75,10 @@ export async function POST(req: NextRequest) {
     
     // Look up system fallback keys in adminSettings if profile backup key is empty
     let primaryKey = (activeProfile?.geminiApiKey || '').trim();
-    let backupKey = '';
+    let backupKey = (activeProfile?.backupGeminiApiKey || '').trim();
 
     const backupRow = await db.select().from(adminSettings).where(eq(adminSettings.key, 'backupGeminiApiKey')).limit(1);
-    if (backupRow.length > 0 && backupRow[0].valueJson) {
+    if (!backupKey && backupRow.length > 0 && backupRow[0].valueJson) {
       try { backupKey = JSON.parse(backupRow[0].valueJson); } catch (e) { backupKey = backupRow[0].valueJson; }
     }
 
@@ -88,12 +89,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!primaryKey) {
-      return NextResponse.json({ error: 'Gemini API key not configured. Please enter your API key in Smart Audio Settings.' }, { status: 400 });
+    if (!primaryKey && !(useBackupKey && backupKey)) {
+      return NextResponse.json({ error: 'Gemini API key not configured. Please enter your API key in Smart Audio Settings.', canUseBackupKey: Boolean(backupKey) }, { status: 400 });
     }
 
     const model = activeProfile?.aiModel || 'gemini-3.6-flash';
-    const keysToTry = [primaryKey, backupKey].filter((k, idx, arr) => k && arr.indexOf(k) === idx);
+    const keysToTry = (useBackupKey ? [backupKey, primaryKey] : [primaryKey, backupKey])
+      .filter((k, idx, arr) => k && arr.indexOf(k) === idx);
 
     // 3. Call Gemini with automatic key failover
     const prompt = `${buildKokoroPronunciationInstructions(activeProfile)}
@@ -161,18 +163,20 @@ Return a JSON object: { "newChoices": ["/pron1/", "/pron2/", "/pron3/", "/pron4/
       if (res?.status === 429 || errorMessage.toLowerCase().includes('quota') || errorMessage.toLowerCase().includes('rate')) {
         return NextResponse.json({
           error: `Gemini API Quota/Rate Limit Exceeded (429): Free/Paid tier limit reached. Please wait a minute or check billing. ${errorMessage}`,
-          retryAfter: 60
+          retryAfter: 60,
+          canUseBackupKey: Boolean(backupKey),
         }, { status: 429 });
       }
 
       if (res?.status === 503 || errorMessage.toLowerCase().includes('overloaded') || errorMessage.toLowerCase().includes('unavailable')) {
         return NextResponse.json({
           error: `Gemini AI Server Overloaded (503): Google Gemini servers are experiencing temporary high load. Please try again in a few seconds. ${errorMessage}`,
-          retryAfter: 10
+          retryAfter: 10,
+          canUseBackupKey: Boolean(backupKey),
         }, { status: 503 });
       }
 
-      return NextResponse.json({ error: errorMessage }, { status: res?.status || 500 });
+      return NextResponse.json({ error: errorMessage, canUseBackupKey: Boolean(backupKey) }, { status: res?.status || 500 });
     }
 
     const data = await res.json();

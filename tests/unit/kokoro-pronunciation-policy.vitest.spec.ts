@@ -73,6 +73,16 @@ describe('Kokoro pronunciation policy', () => {
     expect(source).toContain('libraryPronunciation');
     expect(source).toContain('pronunciationSource');
     expect(source).toContain('Put the single best pronunciation first');
+    expect(source).toContain('generateOnlyForNewWords');
+    expect(source).toContain('globalChoices.slice(0, 1)');
+  });
+
+  test('refinement exposes the configured paid backup key and explicit retry choice', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/app/api/tts/refine-pronunciations/route.ts'), 'utf8');
+    expect(source).toContain('activeProfile?.backupGeminiApiKey');
+    expect(source).toContain('useBackupKey');
+    expect(source).toContain('canUseBackupKey');
+    expect(source).toContain('retryAfter: 60');
   });
 
   test('does not modify the established document-cleaning preset prompts', () => {

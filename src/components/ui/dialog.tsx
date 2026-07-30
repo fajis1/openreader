@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, type KeyboardEventHandler, type ReactNode } from 'react';
+import { Fragment, type CSSProperties, type KeyboardEventHandler, type ReactNode, type Ref } from 'react';
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react';
 import { variants } from './variants';
 import { cn } from './cn';
@@ -41,6 +41,8 @@ export function ModalFrame({
   size = 'md',
   className,
   panelClassName,
+  panelStyle,
+  panelRef,
   panelTestId,
   onKeyDown,
   afterLeave,
@@ -51,6 +53,8 @@ export function ModalFrame({
   size?: DialogSize;
   className?: string;
   panelClassName?: string;
+  panelStyle?: CSSProperties;
+  panelRef?: Ref<HTMLDivElement>;
   panelTestId?: string;
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   afterLeave?: () => void;
@@ -81,7 +85,7 @@ export function ModalFrame({
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <DialogPanel data-testid={panelTestId} className={dialogPanelStyles({ size, className: panelClassName })}>
+              <DialogPanel ref={panelRef} data-testid={panelTestId} style={panelStyle} className={dialogPanelStyles({ size, className: panelClassName })}>
                 {children}
               </DialogPanel>
             </TransitionChild>

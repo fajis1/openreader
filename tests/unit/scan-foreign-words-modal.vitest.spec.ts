@@ -22,11 +22,14 @@ describe('foreign-word scan modal', () => {
 
   test('opens wider, supports desktop resizing, and constrains long word cells', () => {
     expect(source).toContain('size="xl"');
-    expect(source).toContain('sm:resize-x');
+    expect(source).toContain('handleResizePointerDown');
+    expect(source).toContain('setPanelWidth(nextWidth)');
     expect(source).toContain('Drag the lower-right corner to resize this window.');
     expect(source).toContain('table-fixed');
     expect(source).toContain('<col className="w-[20%]" />');
     expect(source).toContain('[overflow-wrap:anywhere]');
+    expect(source).toContain('generateOnlyForNewWords');
+    expect(source).toContain('Generate 5 only for new words');
   });
 
   test('labels library pronunciations and new Gemini recommendations distinctly', () => {
@@ -36,5 +39,9 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('Gemini pick</span>');
     expect(source).toContain('text-green-700');
     expect(source).toContain('text-red-700');
+    expect(source).toContain('onlyNewPronunciations');
+    expect(source).toContain('isInGlobalLibrary');
+    expect(source).toContain('Try paid API key');
+    expect(source).toContain('[30, 60, 120, 240]');
   });
 });

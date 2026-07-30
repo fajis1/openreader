@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
     const mode = body.mode || 'all_foreign';
     const target = typeof body.target === 'number' ? body.target : 80.0;
     const query = body.query || null;
+    const generateOnlyForNewWords = body.generateOnlyForNewWords !== false;
 
     const testNamespace = getOpenReaderTestNamespace(req.headers);
     const pdfBlob = await getDocumentBlob(documentId, testNamespace);
@@ -93,7 +94,7 @@ export async function POST(req: NextRequest) {
     const geminiRecommendations: Record<string, string> = {};
 
     const wordsMissingOptions = words
-      .filter((w: any) => !overrides[w.word] && (!globalDict[w.word] || globalDict[w.word].length < 5))
+      .filter((w: any) => !overrides[w.word] && (!preExistingGlobalWords.has(w.word) || (!generateOnlyForNewWords && (!globalDict[w.word] || globalDict[w.word].length < 5))))
       .map((w: any) => w.word);
 
     let updatedGlobal = false;
@@ -215,10 +216,16 @@ Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
         ? globalDict[w.word]?.[0]?.phonetic || null
         : null;
       const libraryPronunciation = userPronunciation || globalPronunciation;
+      const globalChoices = (globalDict[w.word] || []).map((item: any) => ({
+        ...(typeof item === 'string' ? { phonetic: item } : item),
+        isInGlobalLibrary: preExistingGlobalWords.has(w.word),
+      }));
 
       return {
         ...w,
-        pronunciations: globalDict[w.word] || [],
+        pronunciations: generateOnlyForNewWords && preExistingGlobalWords.has(w.word)
+          ? globalChoices.slice(0, 1)
+          : globalChoices,
         userOverride: userPronunciation,
         libraryPronunciation,
         pronunciationSource: userPronunciation ? 'personal' : globalPronunciation ? 'global' : geminiRecommendations[w.word] ? 'gemini' : 'none',

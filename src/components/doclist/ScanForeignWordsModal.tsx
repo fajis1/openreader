@@ -30,6 +30,13 @@ export function ScanForeignWordsModal({
   const [refineInput, setRefineInput] = useState<{ [word: string]: string }>({});
   const [refineStatus, setRefineStatus] = useState<{ [word: string]: string }>({});
   const [refineExpanded, setRefineExpanded] = useState<{ [word: string]: boolean }>({});
+  const [refineRecovery, setRefineRecovery] = useState<Record<string, { message: string; feedback: string; canUseBackupKey: boolean; countdown?: number }>>({});
+  const [onlyNewPronunciations, setOnlyNewPronunciations] = useState(false);
+  const [generateOnlyForNewWords, setGenerateOnlyForNewWords] = useState(true);
+  const [panelWidth, setPanelWidth] = useState<number | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const resizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
+  const retryTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
   useEffect(() => {
     if (isOpen) {
@@ -37,6 +44,9 @@ export function ScanForeignWordsModal({
       setWords([]);
       setError(null);
       setHasScanned(false);
+      setOnlyNewPronunciations(false);
+      setGenerateOnlyForNewWords(true);
+      setPanelWidth(null);
       if (documentId) {
         setActiveDocId(documentId);
         setActiveDocName(documentName || null);
@@ -47,10 +57,17 @@ export function ScanForeignWordsModal({
       setWords([]);
       setError(null);
       setHasScanned(false);
+      setOnlyNewPronunciations(false);
+      setGenerateOnlyForNewWords(true);
+      setPanelWidth(null);
       setActiveDocId(null);
       setActiveDocName(null);
     }
   }, [isOpen, documentId, documentName]);
+
+  useEffect(() => () => {
+    Object.values(retryTimers.current).forEach(clearInterval);
+  }, []);
 
   const loadFeedbackExamples = async () => {
     try {
@@ -96,7 +113,8 @@ export function ScanForeignWordsModal({
           documentId: targetId,
           mode: modeToUse,
           target: coverageToUse,
-          query: queryToUse
+          query: queryToUse,
+          generateOnlyForNewWords,
         }),
       });
       if (!res.ok) throw new Error('Failed to scan document');
@@ -174,7 +192,21 @@ export function ScanForeignWordsModal({
     }
   };
 
-  const handleRefine = async (word: string, customPrompt?: string) => {
+  const clearRetryTimer = (word: string) => {
+    const timer = retryTimers.current[word];
+    if (timer) {
+      clearInterval(timer);
+      delete retryTimers.current[word];
+    }
+  };
+
+  const handleRefine = async (word: string, customPrompt?: string, useBackupKey = false) => {
+    clearRetryTimer(word);
+    setRefineRecovery(prev => {
+      const next = { ...prev };
+      delete next[word];
+      return next;
+    });
     const feedback = customPrompt || refineInput[word] || "Generate 5 clean, standard Kokoro IPA pronunciations for this word";
 
     setRefineStatus(prev => ({ ...prev, [word]: 'Step 1/2: Asking Gemini 3.6 Flash for 5 new variations based on your feedback...' }));
@@ -186,14 +218,16 @@ export function ScanForeignWordsModal({
       const res = await fetch('/api/tts/refine-pronunciations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word, feedback, currentChoices }),
+        body: JSON.stringify({ word, feedback, currentChoices, useBackupKey }),
       });
       
       setRefineStatus(prev => ({ ...prev, [word]: 'Step 2/2: Pre-rendering Kokoro audio buffers for instant playback...' }));
       
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Refinement failed');
+        const error = new Error(errData.error || 'Refinement failed') as Error & { canUseBackupKey?: boolean };
+        error.canUseBackupKey = Boolean(errData.canUseBackupKey);
+        throw error;
       }
       const data = await res.json();
       
@@ -214,23 +248,51 @@ export function ScanForeignWordsModal({
       console.error('Failed to refine', e);
       const errMsg = e.message || 'Failed to generate choices';
       toast.error(errMsg, { duration: 6000 });
-
-      // Live countdown timer for rate limits / server overload
-      let secondsLeft = errMsg.includes('503') || errMsg.toLowerCase().includes('overloaded') ? 10 : 50;
-      setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg} (Retrying reset in ${secondsLeft}s...)` }));
-
-      const timer = setInterval(() => {
-        secondsLeft -= 1;
-        if (secondsLeft <= 0) {
-          clearInterval(timer);
-          setRefineStatus(prev => ({ ...prev, [word]: '' }));
-        } else {
-          setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg} (Ready in ${secondsLeft}s...)` }));
-        }
-      }, 1000);
+      setRefineStatus(prev => ({ ...prev, [word]: '' }));
+      setRefineRecovery(prev => ({
+        ...prev,
+        [word]: { message: errMsg, feedback, canUseBackupKey: Boolean(e.canUseBackupKey) },
+      }));
     } finally {
       setRefineInput(prev => ({ ...prev, [word]: '' }));
     }
+  };
+
+  const scheduleRefineRetry = (word: string, delaySeconds: number) => {
+    clearRetryTimer(word);
+    setRefineRecovery(prev => ({ ...prev, [word]: { ...prev[word], countdown: delaySeconds } }));
+    let secondsLeft = delaySeconds;
+    retryTimers.current[word] = setInterval(() => {
+      secondsLeft -= 1;
+      if (secondsLeft <= 0) {
+        clearRetryTimer(word);
+        void handleRefine(word, refineRecovery[word]?.feedback);
+        return;
+      }
+      setRefineRecovery(prev => prev[word] ? { ...prev, [word]: { ...prev[word], countdown: secondsLeft } } : prev);
+    }, 1000);
+  };
+
+  const handleResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !panelRef.current) return;
+    resizeStart.current = {
+      startX: event.clientX,
+      startWidth: panelRef.current.getBoundingClientRect().width,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const handleResizePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!resizeStart.current) return;
+    const maxWidth = Math.max(320, window.innerWidth - 32);
+    const nextWidth = Math.min(maxWidth, Math.max(320, resizeStart.current.startWidth + event.clientX - resizeStart.current.startX));
+    setPanelWidth(nextWidth);
+  };
+
+  const handleResizePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    resizeStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
 
@@ -239,9 +301,12 @@ export function ScanForeignWordsModal({
       open={isOpen}
       onClose={onClose}
       size="xl"
-      panelClassName="!w-[56rem] !max-w-[calc(100vw-2rem)] sm:min-w-[32rem] sm:resize-x"
+      panelClassName="w-[56rem] !max-w-[calc(100vw-2rem)] sm:min-w-[32rem]"
+      panelStyle={panelWidth ? { width: `${panelWidth}px` } : undefined}
+      panelRef={panelRef}
+      panelTestId="scan-foreign-words-modal"
     >
-      <div className="flex flex-col max-h-[80vh]">
+      <div className="relative flex flex-col max-h-[80vh]">
         <div className="p-4 border-b dark:border-gray-800 flex flex-col gap-3">
           <div className="flex justify-between items-center">
             <div>
@@ -325,6 +390,26 @@ export function ScanForeignWordsModal({
                 >
                   {loading ? 'Scanning…' : hasScanned ? 'Scan Again' : 'Start Scan'}
                 </button>
+                <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap" title="Avoids extra Gemini calls for words that already have a global pronunciation.">
+                  <input
+                    type="checkbox"
+                    checked={generateOnlyForNewWords}
+                    onChange={(event) => setGenerateOnlyForNewWords(event.target.checked)}
+                    disabled={loading}
+                  />
+                  Generate 5 only for new words
+                </label>
+                {hasScanned && (
+                  <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={onlyNewPronunciations}
+                      onChange={(event) => setOnlyNewPronunciations(event.target.checked)}
+                      disabled={loading}
+                    />
+                    New global choices only
+                  </label>
+                )}
               </div>
             </div>
           )}
@@ -389,7 +474,9 @@ export function ScanForeignWordsModal({
                     <td className="px-4 py-3 text-right text-gray-500 align-top">{w.count}</td>
                     <td className="px-4 py-3 align-top">
                       <div className="flex flex-col gap-2">
-                        {(Array.isArray(w.pronunciations) ? w.pronunciations : []).map((p: any, idx: number) => {
+                        {(Array.isArray(w.pronunciations) ? w.pronunciations : [])
+                          .filter((p: any) => !onlyNewPronunciations || p?.isInGlobalLibrary !== true)
+                          .map((p: any, idx: number) => {
                           const phoneticStr = p.phonetic || p;
                           const isMatch = w.userOverride === phoneticStr;
                           const isLibraryPronunciation = w.libraryPronunciation === phoneticStr;
@@ -417,9 +504,12 @@ export function ScanForeignWordsModal({
                               </button>
                             </div>
                           );
-                        })}
+                          })}
                         {(!w.pronunciations || w.pronunciations.length === 0) && (
                           <span className="text-gray-500 text-xs italic">No AI pronunciations found.</span>
+                        )}
+                        {onlyNewPronunciations && Array.isArray(w.pronunciations) && w.pronunciations.length > 0 && w.pronunciations.every((p: any) => p?.isInGlobalLibrary === true) && (
+                          <span className="text-gray-500 text-xs italic">No pronunciations are new to the global list.</span>
                         )}
                       </div>
                       
@@ -484,6 +574,38 @@ export function ScanForeignWordsModal({
                               <span className="text-xs text-amber-600 dark:text-amber-400 font-medium animate-pulse mt-1">
                                 {refineStatus[w.word]}
                               </span>
+                            )}
+
+                            {refineRecovery[w.word] && (
+                              <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+                                <div className="font-medium">⚠️ {refineRecovery[w.word].message}</div>
+                                {refineRecovery[w.word].countdown ? (
+                                  <div className="mt-1">Retrying in {refineRecovery[w.word].countdown}s…</div>
+                                ) : (
+                                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                    {refineRecovery[w.word].canUseBackupKey && (
+                                      <button
+                                        type="button"
+                                        className="rounded bg-purple-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-purple-700"
+                                        onClick={() => void handleRefine(w.word, refineRecovery[w.word].feedback, true)}
+                                      >
+                                        Try paid API key
+                                      </button>
+                                    )}
+                                    <span className="text-[10px] font-semibold">Retry in:</span>
+                                    {[30, 60, 120, 240].map((delay) => (
+                                      <button
+                                        key={delay}
+                                        type="button"
+                                        className="rounded bg-amber-200 px-2 py-1 text-[10px] font-semibold text-amber-900 hover:bg-amber-300 dark:bg-amber-800 dark:text-amber-100"
+                                        onClick={() => scheduleRefineRetry(w.word, delay)}
+                                      >
+                                        {delay}s
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </div>
                         )}
@@ -550,6 +672,17 @@ export function ScanForeignWordsModal({
               </tbody>
             </table>
           )}
+        </div>
+        <div
+          role="separator"
+          aria-label="Resize pronunciation scan dialog"
+          className="absolute bottom-0 right-0 z-10 h-5 w-5 cursor-ew-resize touch-none"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerUp}
+          onPointerCancel={handleResizePointerUp}
+        >
+          <span className="absolute bottom-1 right-1 h-3 w-3 border-b-2 border-r-2 border-gray-400" />
         </div>
       </div>
     </ModalFrame>
