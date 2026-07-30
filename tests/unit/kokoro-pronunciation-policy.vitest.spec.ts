@@ -33,6 +33,13 @@ describe('Kokoro pronunciation policy', () => {
     expect(instructions.indexOf(KOKORO_COMPATIBILITY_POLICY)).toBeGreaterThan(instructions.indexOf('Profile-only guidance.'));
   });
 
+  test('teaches biblical-language initialism handling', () => {
+    expect(DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE).toContain('Greek and Hebrew initialisms');
+    expect(DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE).toContain('κτλ');
+    expect(DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE).toContain('K, T, L');
+    expect(DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE).toContain('takes precedence over the normal Greek/Hebrew IPA rule');
+  });
+
   test('rejects the explicitly unsupported Kokoro patterns', () => {
     expect(getKokoroPronunciationCompatibilityErrors('/loʊɡɒs/')).toEqual([]);
     expect(getKokoroPronunciationCompatibilityErrors('/o/')).toContain('Standalone /o/ is not supported.');

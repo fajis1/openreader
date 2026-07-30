@@ -1,6 +1,6 @@
 import type { SmartAudioProfile } from '@/types/client';
 
-export const KOKORO_PRONUNCIATION_POLICY_VERSION = 1;
+export const KOKORO_PRONUNCIATION_POLICY_VERSION = 2;
 
 export const KOKORO_COMPATIBILITY_POLICY = `KOKORO PRONUNCIATION COMPATIBILITY POLICY (REQUIRED, VERSION ${KOKORO_PRONUNCIATION_POLICY_VERSION}):
 - Use English-compatible IPA intended for Kokoro.
@@ -16,6 +16,7 @@ export const DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE = `DEFAULT KOKORO PRONUNCIATI
 Prefer clear, natural English-compatible phonetic approximations that Kokoro can synthesize reliably.
 For Koine Greek (Strict Erasmian), use these defaults where applicable: α=/ɑ/, ε=/ɛ/, η=/eɪ/, ι=/i/, ο=/oʊ/ or /ɒ/, υ=/u/, ω=/oʊ/, αι=/aɪ/, ει=/eɪ/, οι=/ɔɪ/, ου=/u/, ευ=/ju/, χ=/k/, θ=/θ/.
 For Biblical Hebrew (Standard Academic), use these defaults where applicable: Qamats/Patah=/ɑ/, Tsere/Segol=/ɛ/ or /eɪ/, Hireq=/i/, Holem=/oʊ/, Shureq/Qibbuts=/u/, Shewa=/ə/ when vocal, and Het/Khaf=/k/ or /x/.
+For Greek and Hebrew initialisms, abbreviations, and letter-based references, first determine from context whether the text is an abbreviation rather than a lexical word. Do not apply foreign-word IPA to an initialism. Transliterate the source letters into English letter names separated by commas and spaces so Kokoro speaks them individually; for example, Greek κτλ (the initialism of και τα λοιπά / “etc.”) becomes "K, T, L", and κ.τ.λ. follows the same rule. Do not expand the abbreviation unless the surrounding text explicitly provides its expansion. This initialism rule takes precedence over the normal Greek/Hebrew IPA rule.
 For fantasy names, proper nouns, and other languages, favor a readable English-compatible pronunciation over narrow or unsupported IPA.`;
 
 export interface PronunciationGuidanceProfile {
