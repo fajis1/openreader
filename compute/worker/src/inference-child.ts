@@ -2,7 +2,7 @@ import {
   runPdfLayoutFromPdfBuffer,
   runWhisperAlignmentFromAudioBuffer,
 } from '@openreader/compute-core/local-runtime';
-import { runWithOnnxProviderObserver } from '@openreader/compute-core';
+import { runWithOnnxProviderObserver } from '@openreader/compute-core/onnx-runtime';
 
 type Request =
   | {

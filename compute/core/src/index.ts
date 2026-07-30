@@ -5,18 +5,6 @@ export {
   getOnnxThreadsPerJob,
 } from './config/cpu-budget';
 export {
-  createConfiguredOnnxSession,
-  clearSelectedOnnxProvider,
-  getOnnxExecutionProviderConfig,
-  getSelectedOnnxProvider,
-  rememberSelectedOnnxProvider,
-  runWithOnnxProviderObserver,
-  type OnnxExecutionProviderConfig,
-  type OnnxExecutionProviderMode,
-  type OnnxWorkload,
-  type SelectedOnnxProvider,
-} from './config/onnx-execution-provider';
-export {
   getComputeTimeoutConfig,
   getComputeOpStaleMs,
   getTimedOutOperationSettlement,

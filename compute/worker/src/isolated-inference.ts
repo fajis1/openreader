@@ -1,7 +1,7 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import type { SelectedOnnxProvider } from '@openreader/compute-core';
+import type { SelectedOnnxProvider } from '@openreader/compute-core/onnx-runtime';
 
 type ProviderSelection = {
   workload: 'pdf-layout' | 'whisper';

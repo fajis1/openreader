@@ -46,6 +46,19 @@ const COMPUTE_CORE_IMPORT_PATTERNS = [
       "Use '@openreader/compute-core' root imports for light APIs. Allowed subpaths are '@openreader/compute-core/local-runtime', '@openreader/compute-core/types', and '@openreader/compute-core/api-contracts'.",
   },
 ];
+const COMPUTE_WORKER_IMPORT_PATTERNS = [
+  {
+    group: [
+      "@openreader/compute-core/*",
+      "!@openreader/compute-core/local-runtime",
+      "!@openreader/compute-core/onnx-runtime",
+      "!@openreader/compute-core/types",
+      "!@openreader/compute-core/api-contracts",
+    ],
+    message:
+      "Compute workers may use the explicit local and ONNX runtime subpaths; other code should use '@openreader/compute-core' root imports for light APIs.",
+  },
+];
 const UI_ARCHITECTURE_IMPORT_PATHS = [
   {
     name: "@/components/formPrimitives",
@@ -125,6 +138,17 @@ const eslintConfig = [
         "error",
         {
           patterns: COMPUTE_CORE_IMPORT_PATTERNS,
+        },
+      ],
+    },
+  },
+  {
+    files: ["compute/worker/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: COMPUTE_WORKER_IMPORT_PATTERNS,
         },
       ],
     },

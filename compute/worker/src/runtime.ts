@@ -31,9 +31,6 @@ import {
   getTimedOutOperationSettlement,
   getAvailableCpuCores,
   getOnnxThreadsPerJob,
-  getOnnxExecutionProviderConfig,
-  getSelectedOnnxProvider,
-  rememberSelectedOnnxProvider,
   PDF_PARSER_VERSION,
   encodeParserVersion,
   encodeSseFrame,
@@ -42,6 +39,11 @@ import {
   withTimeout,
   withTimeoutAndSettlement,
 } from '@openreader/compute-core';
+import {
+  getOnnxExecutionProviderConfig,
+  getSelectedOnnxProvider,
+  rememberSelectedOnnxProvider,
+} from '@openreader/compute-core/onnx-runtime';
 import type {
   PdfLayoutJobRequest,
   PdfLayoutJobResult,
