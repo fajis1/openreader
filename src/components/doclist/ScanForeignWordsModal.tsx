@@ -34,9 +34,17 @@ export function ScanForeignWordsModal({
   const [onlyNewPronunciations, setOnlyNewPronunciations] = useState(false);
   const [generateOnlyForNewWords, setGenerateOnlyForNewWords] = useState(true);
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
+  const [scanJobStatus, setScanJobStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed'>('idle');
+  const [scanJobProgress, setScanJobProgress] = useState({ completed: 0, total: 0 });
+  const [scanJobError, setScanJobError] = useState<string | null>(null);
+  const [audioWarmStatus, setAudioWarmStatus] = useState<'idle' | 'warming' | 'ready'>('idle');
   const panelRef = useRef<HTMLDivElement>(null);
   const resizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
   const retryTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  const scanPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const warmedAudio = useRef<Set<string>>(new Set());
+  const warmingAudio = useRef<Set<string>>(new Set());
+  const audioWarmStarted = useRef(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -47,6 +55,13 @@ export function ScanForeignWordsModal({
       setOnlyNewPronunciations(false);
       setGenerateOnlyForNewWords(true);
       setPanelWidth(null);
+      setScanJobStatus('idle');
+      setScanJobProgress({ completed: 0, total: 0 });
+      setScanJobError(null);
+      setAudioWarmStatus('idle');
+      warmedAudio.current.clear();
+      warmingAudio.current.clear();
+      audioWarmStarted.current = false;
       if (documentId) {
         setActiveDocId(documentId);
         setActiveDocName(documentName || null);
@@ -60,6 +75,13 @@ export function ScanForeignWordsModal({
       setOnlyNewPronunciations(false);
       setGenerateOnlyForNewWords(true);
       setPanelWidth(null);
+      setScanJobStatus('idle');
+      setScanJobProgress({ completed: 0, total: 0 });
+      setScanJobError(null);
+      setAudioWarmStatus('idle');
+      warmedAudio.current.clear();
+      warmingAudio.current.clear();
+      audioWarmStarted.current = false;
       setActiveDocId(null);
       setActiveDocName(null);
     }
@@ -67,6 +89,7 @@ export function ScanForeignWordsModal({
 
   useEffect(() => () => {
     Object.values(retryTimers.current).forEach(clearInterval);
+    if (scanPollTimer.current) clearInterval(scanPollTimer.current);
   }, []);
 
   const loadFeedbackExamples = async () => {
@@ -89,6 +112,84 @@ export function ScanForeignWordsModal({
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const stopScanPolling = () => {
+    if (scanPollTimer.current) {
+      clearInterval(scanPollTimer.current);
+      scanPollTimer.current = null;
+    }
+  };
+
+  const pollScanJob = async (jobId: string) => {
+    try {
+      const res = await fetch(`/api/documents/scan-foreign-words/status?jobId=${encodeURIComponent(jobId)}`);
+      if (!res.ok) return;
+      const job = await res.json();
+      if (Array.isArray(job.words)) {
+        setWords(job.words);
+        void warmGeminiDefaults(job.words);
+      }
+      if (job.status) setScanJobStatus(job.status);
+      setScanJobProgress({ completed: Number(job.completed) || 0, total: Number(job.total) || 0 });
+      setScanJobError(job.error || null);
+      if (job.status === 'completed' || job.status === 'failed') stopScanPolling();
+    } catch (pollError) {
+      console.error('Failed to poll foreign-word scan job:', pollError);
+    }
+  };
+
+  const warmPreview = async (word: string, phonetic: string) => {
+    const key = `${word}\u0000${phonetic}`;
+    if (!phonetic || warmedAudio.current.has(key) || warmingAudio.current.has(key)) return;
+    warmingAudio.current.add(key);
+    try {
+      const textToSynthesize = phonetic.startsWith('/') ? `[${word}](${phonetic})` : `[${word}](/${phonetic}/)`;
+      const res = await fetch('/api/tts/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: textToSynthesize, voice: 'af_heart' }),
+      });
+      if (res.ok) {
+        await res.arrayBuffer();
+        warmedAudio.current.add(key);
+      }
+    } catch (error) {
+      console.error('Failed to warm pronunciation audio', error);
+    } finally {
+      warmingAudio.current.delete(key);
+    }
+  };
+
+  const warmGeminiDefaults = async (nextWords: any[]) => {
+    const defaults = nextWords
+      .filter((w: any) => w.pronunciationSource === 'gemini' && w.geminiRecommendedPronunciation)
+      .map((w: any) => warmPreview(w.word, w.geminiRecommendedPronunciation));
+    if (defaults.length > 0) await Promise.all(defaults);
+  };
+
+  const warmRemainingAudio = async () => {
+    if (audioWarmStarted.current) return;
+    audioWarmStarted.current = true;
+    setAudioWarmStatus('warming');
+    const pending: Array<() => Promise<void>> = [];
+    for (const item of words) {
+      const choices = Array.isArray(item.pronunciations) ? item.pronunciations : [];
+      for (const choice of choices) {
+        const phonetic = choice?.phonetic || choice;
+        if (phonetic) pending.push(() => warmPreview(item.word, phonetic));
+      }
+      if (item.userOverride) pending.push(() => warmPreview(item.word, item.userOverride));
+    }
+    let next = 0;
+    const worker = async () => {
+      while (next < pending.length) {
+        const task = pending[next++];
+        await task();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, pending.length) }, worker));
+    setAudioWarmStatus('ready');
   };
 
   const [scanMode, setScanMode] = useState<'all_foreign' | 'fantasy_litrpg' | 'greek_hebrew' | 'custom'>('all_foreign');
@@ -121,6 +222,14 @@ export function ScanForeignWordsModal({
       const data = await res.json();
       setWords(data.words || []);
       setHasScanned(true);
+      setScanJobStatus(data.scanStatus || 'completed');
+      setScanJobProgress({ completed: 0, total: Number(data.scanTotal) || 0 });
+      setScanJobError(null);
+      stopScanPolling();
+      if (data.scanJobId) {
+        void pollScanJob(data.scanJobId);
+        scanPollTimer.current = setInterval(() => void pollScanJob(data.scanJobId), 2000);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -142,6 +251,7 @@ export function ScanForeignWordsModal({
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audio.play();
+      void warmRemainingAudio();
     } catch (e) {
       console.error('Failed to listen', e);
     }
@@ -321,6 +431,21 @@ export function ScanForeignWordsModal({
               <p className="hidden text-[11px] text-muted sm:block">
                 Drag the lower-right corner to resize this window.
               </p>
+              {scanJobStatus === 'queued' || scanJobStatus === 'running' ? (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  Gemini pronunciation generation: {scanJobProgress.total > 0 ? `${scanJobProgress.completed}/${scanJobProgress.total} words processed` : 'queued'}…
+                </p>
+              ) : scanJobStatus === 'completed' && scanJobProgress.total > 0 ? (
+                <p className="text-[11px] text-green-700 dark:text-green-300">Gemini pronunciation generation complete.</p>
+              ) : scanJobStatus === 'failed' ? (
+                <p className="text-[11px] text-red-600 dark:text-red-400">Pronunciation generation failed: {scanJobError || 'check server logs'}</p>
+              ) : null}
+              {audioWarmStatus === 'warming' && (
+                <p className="text-[11px] text-blue-600 dark:text-blue-400">Preparing additional pronunciation audio in the background…</p>
+              )}
+              {audioWarmStatus === 'ready' && (
+                <p className="text-[11px] text-green-700 dark:text-green-300">Additional pronunciation audio is ready.</p>
+              )}
             </div>
             <button onClick={onClose} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 text-lg font-bold">✕</button>
           </div>

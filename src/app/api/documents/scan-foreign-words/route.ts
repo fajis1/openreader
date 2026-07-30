@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { serverLogger } from '@/lib/server/logger';
 import { getDocumentBlob } from '@/lib/server/documents/blobstore';
@@ -97,10 +98,60 @@ export async function POST(req: NextRequest) {
       .filter((w: any) => !overrides[w.word] && (!preExistingGlobalWords.has(w.word) || (!generateOnlyForNewWords && (!globalDict[w.word] || globalDict[w.word].length < 5))))
       .map((w: any) => w.word);
 
-    let updatedGlobal = false;
-    let newPhoneticsToCache: { word: string; phonetic: string }[] = [];
+    const enrichWords = () => words.map((w: any) => {
+      const userPronunciation = overrides[w.word] || null;
+      const globalPronunciation = preExistingGlobalWords.has(w.word)
+        ? globalDict[w.word]?.[0]?.phonetic || null
+        : null;
+      const libraryPronunciation = userPronunciation || globalPronunciation;
+      const globalChoices = (globalDict[w.word] || []).map((item: any) => ({
+        ...(typeof item === 'string' ? { phonetic: item } : item),
+        isInGlobalLibrary: preExistingGlobalWords.has(w.word),
+      }));
 
-    if (wordsMissingOptions.length > 0 && activeProfile?.geminiApiKey) {
+      return {
+        ...w,
+        pronunciations: generateOnlyForNewWords && preExistingGlobalWords.has(w.word)
+          ? globalChoices.slice(0, 1)
+          : globalChoices,
+        userOverride: userPronunciation,
+        libraryPronunciation,
+        pronunciationSource: userPronunciation ? 'personal' : globalPronunciation ? 'global' : geminiRecommendations[w.word] ? 'gemini' : 'none',
+        geminiRecommendedPronunciation: geminiRecommendations[w.word] || null,
+      };
+    });
+
+    const jobId = randomUUID();
+    const jobKey = `foreign_word_scan:${jobId}`;
+    const jobState: Record<string, unknown> = {
+      id: jobId,
+      userId,
+      status: 'queued',
+      words: enrichWords(),
+      total: wordsMissingOptions.length,
+      completed: 0,
+      errors: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const saveJob = async (patch: Record<string, unknown>) => {
+      Object.assign(jobState, patch, { updatedAt: Date.now() });
+      await db.insert(adminSettings).values({
+        key: jobKey,
+        valueJson: JSON.stringify(jobState),
+      }).onConflictDoUpdate({
+        target: adminSettings.key,
+        set: { valueJson: JSON.stringify(jobState) },
+      });
+    };
+    await saveJob({});
+
+    after(async () => {
+      try {
+        await saveJob({ status: 'running' });
+        let updatedGlobal = false;
+
+        if (wordsMissingOptions.length > 0 && activeProfile?.geminiApiKey) {
       const model = activeProfile?.aiModel || 'gemini-3.6-flash';
       const apiKey = activeProfile.geminiApiKey;
       
@@ -137,7 +188,6 @@ Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
                     if (!geminiRecommendations[w]) geminiRecommendations[w] = p;
                     current.push({ phonetic: p, usageCount: 0, isUserCustom: false, timestamp: Date.now() });
                     existingPhonetics.add(p);
-                    newPhoneticsToCache.push({ word: w, phonetic: p });
                     updatedGlobal = true;
                   }
                 }
@@ -147,9 +197,12 @@ Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
           }
         } catch (err) {
           console.error("Gemini API error:", err);
+          const errors = Array.isArray(jobState.errors) ? [...jobState.errors, `Gemini batch ${i / chunkSize + 1} failed`] : [`Gemini batch ${i / chunkSize + 1} failed`];
+          await saveJob({ errors, completed: Math.min(i + chunk.length, wordsMissingOptions.length) });
         }
+        await saveJob({ completed: Math.min(i + chunk.length, wordsMissingOptions.length) });
       }
-    }
+        }
 
     if (updatedGlobal) {
       await db.insert(adminSettings).values({
@@ -161,16 +214,11 @@ Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
       });
     }
 
-    // Collect ALL pronunciations for top 80% words (both newly generated and existing) to guarantee instant playback
-    const allPhoneticsToCache: { word: string; phonetic: string }[] = [];
-    for (const w of words) {
-      const prons = globalDict[w.word] || [];
-      for (const item of prons) {
-        if (item?.phonetic) {
-          allPhoneticsToCache.push({ word: w.word, phonetic: item.phonetic });
-        }
-      }
-    }
+    // Warm only Gemini's newly selected defaults up front. Existing library
+    // alternatives are prepared lazily after the user first listens.
+    const allPhoneticsToCache: { word: string; phonetic: string }[] = Object.entries(geminiRecommendations)
+      .filter(([, phonetic]) => Boolean(phonetic))
+      .map(([word, phonetic]) => ({ word, phonetic }));
 
     if (allPhoneticsToCache.length > 0) {
       try {
@@ -210,30 +258,14 @@ Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
       }
     }
 
-    const enriched = words.map((w: any) => {
-      const userPronunciation = overrides[w.word] || null;
-      const globalPronunciation = preExistingGlobalWords.has(w.word)
-        ? globalDict[w.word]?.[0]?.phonetic || null
-        : null;
-      const libraryPronunciation = userPronunciation || globalPronunciation;
-      const globalChoices = (globalDict[w.word] || []).map((item: any) => ({
-        ...(typeof item === 'string' ? { phonetic: item } : item),
-        isInGlobalLibrary: preExistingGlobalWords.has(w.word),
-      }));
-
-      return {
-        ...w,
-        pronunciations: generateOnlyForNewWords && preExistingGlobalWords.has(w.word)
-          ? globalChoices.slice(0, 1)
-          : globalChoices,
-        userOverride: userPronunciation,
-        libraryPronunciation,
-        pronunciationSource: userPronunciation ? 'personal' : globalPronunciation ? 'global' : geminiRecommendations[w.word] ? 'gemini' : 'none',
-        geminiRecommendedPronunciation: geminiRecommendations[w.word] || null,
-      };
+        await saveJob({ status: 'completed', completed: wordsMissingOptions.length, words: enrichWords() });
+      } catch (error) {
+        serverLogger.error({ event: 'pdf.scan.pronunciations.failed', error, jobId }, 'Background foreign-word pronunciation generation failed');
+        await saveJob({ status: 'failed', error: error instanceof Error ? error.message : 'Background pronunciation generation failed' }).catch(() => {});
+      }
     });
 
-    return NextResponse.json({ words: enriched });
+    return NextResponse.json({ words: enrichWords(), scanJobId: jobId, scanStatus: 'queued', scanTotal: wordsMissingOptions.length });
   } catch (error: any) {
     serverLogger.error({ event: 'pdf.scan.failed', error }, 'Scan foreign words error');
     console.error('Scan foreign words error:', error);

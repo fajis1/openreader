@@ -82,6 +82,9 @@ describe('Kokoro pronunciation policy', () => {
     expect(source).toContain('Put the single best pronunciation first');
     expect(source).toContain('generateOnlyForNewWords');
     expect(source).toContain('globalChoices.slice(0, 1)');
+    expect(source).toContain('after(async () =>');
+    expect(source).toContain('Object.entries(geminiRecommendations)');
+    expect(source).toContain('Warm only Gemini');
   });
 
   test('refinement exposes the configured paid backup key and explicit retry choice', () => {

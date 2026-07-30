@@ -30,6 +30,11 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('[overflow-wrap:anywhere]');
     expect(source).toContain('generateOnlyForNewWords');
     expect(source).toContain('Generate 5 only for new words');
+    expect(source).toContain('/api/documents/scan-foreign-words/status?jobId=');
+    expect(source).toContain('setInterval(() => void pollScanJob');
+    expect(source).toContain('warmGeminiDefaults');
+    expect(source).toContain('warmRemainingAudio');
+    expect(source).toContain('Preparing additional pronunciation audio in the background');
   });
 
   test('labels library pronunciations and new Gemini recommendations distinctly', () => {
