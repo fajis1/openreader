@@ -19,4 +19,22 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('scanInFlight.current = true;');
     expect(source).toContain('scanInFlight.current = false;');
   });
+
+  test('opens wider, supports desktop resizing, and constrains long word cells', () => {
+    expect(source).toContain('size="xl"');
+    expect(source).toContain('sm:resize-x');
+    expect(source).toContain('Drag the lower-right corner to resize this window.');
+    expect(source).toContain('table-fixed');
+    expect(source).toContain('<col className="w-[20%]" />');
+    expect(source).toContain('[overflow-wrap:anywhere]');
+  });
+
+  test('labels library pronunciations and new Gemini recommendations distinctly', () => {
+    expect(source).toContain('isLibraryPronunciation');
+    expect(source).toContain('isGeminiRecommendation');
+    expect(source).toContain('Library</span>');
+    expect(source).toContain('Gemini pick</span>');
+    expect(source).toContain('text-green-700');
+    expect(source).toContain('text-red-700');
+  });
 });

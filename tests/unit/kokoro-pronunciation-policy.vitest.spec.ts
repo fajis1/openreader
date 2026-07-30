@@ -66,6 +66,15 @@ describe('Kokoro pronunciation policy', () => {
     }
   });
 
+  test('foreign-word scans distinguish pre-existing library entries from Gemini picks', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/app/api/documents/scan-foreign-words/route.ts'), 'utf8');
+    expect(source).toContain('preExistingGlobalWords');
+    expect(source).toContain('geminiRecommendations');
+    expect(source).toContain('libraryPronunciation');
+    expect(source).toContain('pronunciationSource');
+    expect(source).toContain('Put the single best pronunciation first');
+  });
+
   test('does not modify the established document-cleaning preset prompts', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/constants.ts'), 'utf8');
     expect(source).not.toContain('KOKORO PRONUNCIATION COMPATIBILITY POLICY');

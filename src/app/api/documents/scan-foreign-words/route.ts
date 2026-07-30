@@ -89,8 +89,12 @@ export async function POST(req: NextRequest) {
     const activeProfile = findSmartAudioProfileById(profilesDoc, profilesDoc.selectedProfileId);
     
     const overrides = activeProfile?.pronunciations || {};
+    const preExistingGlobalWords = new Set(Object.keys(globalDict));
+    const geminiRecommendations: Record<string, string> = {};
 
-    const wordsMissingOptions = words.filter((w: any) => !globalDict[w.word] || globalDict[w.word].length < 5).map((w: any) => w.word);
+    const wordsMissingOptions = words
+      .filter((w: any) => !overrides[w.word] && (!globalDict[w.word] || globalDict[w.word].length < 5))
+      .map((w: any) => w.word);
 
     let updatedGlobal = false;
     let newPhoneticsToCache: { word: string; phonetic: string }[] = [];
@@ -106,6 +110,7 @@ export async function POST(req: NextRequest) {
 
 Generate 5 distinct, plausible Kokoro IPA pronunciation variations for each of the following words: ${chunk.join(', ')}.
 Provide slight variations that remain consistent with the pronunciation guidance above.
+Put the single best pronunciation first for each word; that first result is the recommended choice.
 Return a JSON object mapping each word to an array of 5 string pronunciations.
 Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
         
@@ -128,6 +133,7 @@ Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
                 
                 for (const p of prons) {
                   if (isKokoroCompatiblePronunciation(p) && !existingPhonetics.has(p) && current.length < 5) {
+                    if (!geminiRecommendations[w]) geminiRecommendations[w] = p;
                     current.push({ phonetic: p, usageCount: 0, isUserCustom: false, timestamp: Date.now() });
                     existingPhonetics.add(p);
                     newPhoneticsToCache.push({ word: w, phonetic: p });
@@ -203,11 +209,22 @@ Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
       }
     }
 
-    const enriched = words.map((w: any) => ({
-      ...w,
-      pronunciations: globalDict[w.word] || [],
-      userOverride: overrides[w.word] || null
-    }));
+    const enriched = words.map((w: any) => {
+      const userPronunciation = overrides[w.word] || null;
+      const globalPronunciation = preExistingGlobalWords.has(w.word)
+        ? globalDict[w.word]?.[0]?.phonetic || null
+        : null;
+      const libraryPronunciation = userPronunciation || globalPronunciation;
+
+      return {
+        ...w,
+        pronunciations: globalDict[w.word] || [],
+        userOverride: userPronunciation,
+        libraryPronunciation,
+        pronunciationSource: userPronunciation ? 'personal' : globalPronunciation ? 'global' : geminiRecommendations[w.word] ? 'gemini' : 'none',
+        geminiRecommendedPronunciation: geminiRecommendations[w.word] || null,
+      };
+    });
 
     return NextResponse.json({ words: enriched });
   } catch (error: any) {

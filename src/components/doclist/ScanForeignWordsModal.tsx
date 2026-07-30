@@ -235,7 +235,12 @@ export function ScanForeignWordsModal({
 
 
   return (
-    <ModalFrame open={isOpen} onClose={onClose} size="lg">
+    <ModalFrame
+      open={isOpen}
+      onClose={onClose}
+      size="xl"
+      panelClassName="!w-[56rem] !max-w-[calc(100vw-2rem)] sm:min-w-[32rem] sm:resize-x"
+    >
       <div className="flex flex-col max-h-[80vh]">
         <div className="p-4 border-b dark:border-gray-800 flex flex-col gap-3">
           <div className="flex justify-between items-center">
@@ -247,6 +252,9 @@ export function ScanForeignWordsModal({
                     ? `Scanning ${activeDocName}`
                     : `Selected ${activeDocName}`
                   : "Select a PDF to scan"}
+              </p>
+              <p className="hidden text-[11px] text-muted sm:block">
+                Drag the lower-right corner to resize this window.
               </p>
             </div>
             <button onClick={onClose} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 text-lg font-bold">✕</button>
@@ -359,7 +367,13 @@ export function ScanForeignWordsModal({
           ) : words.length === 0 ? (
             <div className="p-4 text-gray-500">No foreign words found.</div>
           ) : (
-            <table className="w-full text-sm text-left">
+            <table className="w-full table-fixed text-sm text-left">
+              <colgroup>
+                <col className="w-[20%]" />
+                <col className="w-[10%]" />
+                <col className="w-[45%]" />
+                <col className="w-[25%]" />
+              </colgroup>
               <thead className="bg-gray-100 dark:bg-gray-800 sticky top-0">
                 <tr>
                   <th className="px-4 py-2">Word</th>
@@ -371,18 +385,22 @@ export function ScanForeignWordsModal({
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                 {words.map((w, i) => (
                   <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-lg text-gray-900 dark:text-gray-100 align-top">{w.word}</td>
+                    <td className="px-4 py-3 font-medium text-lg text-gray-900 dark:text-gray-100 align-top [overflow-wrap:anywhere]">{w.word}</td>
                     <td className="px-4 py-3 text-right text-gray-500 align-top">{w.count}</td>
                     <td className="px-4 py-3 align-top">
                       <div className="flex flex-col gap-2">
                         {(Array.isArray(w.pronunciations) ? w.pronunciations : []).map((p: any, idx: number) => {
                           const phoneticStr = p.phonetic || p;
                           const isMatch = w.userOverride === phoneticStr;
+                          const isLibraryPronunciation = w.libraryPronunciation === phoneticStr;
+                          const isGeminiRecommendation = w.pronunciationSource === 'gemini' && w.geminiRecommendedPronunciation === phoneticStr;
                           return (
-                            <div key={idx} className={`flex items-center gap-2 p-1.5 rounded border ${isMatch ? 'bg-blue-100 border-blue-300 dark:bg-blue-900/30 dark:border-blue-800' : 'border-transparent hover:border-gray-200 dark:hover:border-gray-700'}`}>
-                              <span className="font-mono text-purple-600 dark:text-purple-400 text-xs flex-1">
+                            <div key={idx} className={`flex items-center gap-2 p-1.5 rounded border ${isLibraryPronunciation ? 'bg-green-50 border-green-300 dark:bg-green-900/30 dark:border-green-800' : isGeminiRecommendation ? 'bg-red-50 border-red-300 dark:bg-red-900/30 dark:border-red-800' : isMatch ? 'bg-blue-100 border-blue-300 dark:bg-blue-900/30 dark:border-blue-800' : 'border-transparent hover:border-gray-200 dark:hover:border-gray-700'}`}>
+                              <span className={`font-mono text-xs flex-1 ${isLibraryPronunciation ? 'text-green-700 dark:text-green-300' : isGeminiRecommendation ? 'text-red-700 dark:text-red-300' : 'text-purple-600 dark:text-purple-400'}`}>
                                 {phoneticStr}
                               </span>
+                              {isLibraryPronunciation && <span className="text-[10px] font-semibold text-green-700 dark:text-green-300">Library</span>}
+                              {isGeminiRecommendation && <span className="text-[10px] font-semibold text-red-700 dark:text-red-300">Gemini pick</span>}
                               <button
                                 type="button"
                                 className="px-2 py-0.5 text-[10px] font-semibold bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded hover:bg-gray-300"
@@ -504,7 +522,7 @@ export function ScanForeignWordsModal({
                         </div>
                       ) : (
                         <div className="flex flex-col gap-2">
-                          <span className="font-medium text-blue-600 dark:text-blue-400 font-mono text-xs">{w.userOverride || '-'}</span>
+                          <span className={`font-medium font-mono text-xs ${w.userOverride ? 'text-green-700 dark:text-green-300' : 'text-blue-600 dark:text-blue-400'}`}>{w.userOverride || '-'}</span>
                           {w.userOverride && (
                             <button
                                 type="button"
