@@ -59,6 +59,7 @@ async def process_message(msg):
     api_key = data.get("api_key")
     backup_api_key = data.get("backup_api_key")
     prompt = data.get("prompt")
+    pronunciation_prompt = data.get("pronunciation_prompt", "")
     raw_text = data.get("raw_text")
     
     # --- ADD THESE 3 LINES RIGHT HERE ---
@@ -92,7 +93,7 @@ async def process_message(msg):
         dict_string = json.dumps(pronunciations, indent=2, ensure_ascii=False)
         dynamic_constraints = f"CRITICAL CONTINUITY RULE: Use these exact phonetic spellings:\n{dict_string}\n\n"
         
-        full_prompt = f"{prompt}\n\n{dynamic_constraints}Text to clean:\n{pre_cleaned_text}"
+        full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\nText to clean:\n{pre_cleaned_text}"
         final_text = ""
         
         api_state = API_STATES.setdefault(api_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})

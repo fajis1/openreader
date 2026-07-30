@@ -50,6 +50,10 @@ import {
   readSmartAudioProfilesDocument,
   writeSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
+import {
+  buildKokoroPronunciationInstructions,
+  filterKokoroCompatiblePronunciationRecord,
+} from '@/lib/shared/kokoro-pronunciation-policy';
 
 export const dynamic = 'force-dynamic';
 
@@ -658,6 +662,7 @@ export async function POST(request: NextRequest) {
             api_key: geminiApiKey,
             ai_model: selectedProfile?.aiModel || 'gemini-3.5-flash',
             prompt: selectedProfile?.customTtsPrompt || "You are an expert audiobook preparation assistant...",
+            pronunciation_prompt: buildKokoroPronunciationInstructions(selectedProfile),
             raw_text: data.text,
             pronunciations: finalPronunciations,
             abbreviations: selectedProfile?.abbreviations || {},
@@ -698,12 +703,8 @@ export async function POST(request: NextRequest) {
             }
 
             // Sync new learned pronunciations back to the profile
-            if (
-              workerResult.new_pronunciations &&
-              Object.keys(workerResult.new_pronunciations as Record<string, string>).length > 0 &&
-              selectedProfile
-            ) {
-              const newPronuns = workerResult.new_pronunciations as Record<string, string>;
+            const newPronuns = filterKokoroCompatiblePronunciationRecord(workerResult.new_pronunciations);
+            if (Object.keys(newPronuns).length > 0 && selectedProfile) {
               const updatedProfiles = profilesDocument.profiles.map((p) => {
                 if (p.id === selectedProfile.id) {
                   return {

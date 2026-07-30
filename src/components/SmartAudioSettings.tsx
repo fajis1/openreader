@@ -8,6 +8,8 @@ import { toast } from 'react-hot-toast';
 import { ScanForeignWordsModal } from './doclist/ScanForeignWordsModal';
 import { BookPronunciationInspectorModal } from './doclist/BookPronunciationInspectorModal';
 import { SmartAudioWizardModal } from './SmartAudioWizardModal';
+import { PronunciationGuideManager } from './PronunciationGuideManager';
+import { DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE } from '@/lib/shared/kokoro-pronunciation-policy';
 
 const EMPTY_PROFILE = (): SmartAudioProfile => ({
   id: `profile-${Date.now()}`,
@@ -17,6 +19,8 @@ const EMPTY_PROFILE = (): SmartAudioProfile => ({
   abbreviations: {},
   pronunciations: {},
   books: {},
+  pronunciationPromptMode: 'default',
+  customPronunciationPrompt: '',
   workerMode: 'standard',
 });
 
@@ -63,6 +67,8 @@ export function SmartAudioSettings() {
   const [profiles, setProfiles] = useState<SmartAudioProfile[]>([]);
   const [workerMode, setWorkerMode] = useState<'standard' | 'scholar'>('scholar');
   const [useGlobalPronunciations, setUseGlobalPronunciations] = useState<boolean>(true);
+  const [pronunciationPromptMode, setPronunciationPromptMode] = useState<'default' | 'custom'>('default');
+  const [customPronunciationPrompt, setCustomPronunciationPrompt] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [profileName, setProfileName] = useState('');
   const [aiModel, setAiModel] = useState(PRESET_MODELS[0]?.id || 'gemini-3.6-flash');
@@ -74,10 +80,8 @@ export function SmartAudioSettings() {
   const [pronunciations, setPronunciations] = useState<Array<{ key: string; value: string }>>([]);
   const [books, setBooks] = useState(BASE_BOOKS.map(({ key, value }) => ({ key, value })));
   const [selectedAbbrevs, setSelectedAbbrevs] = useState<number[]>([]);
-  const [selectedPronuns, setSelectedPronuns] = useState<number[]>([]);
   const [selectedBooks, setSelectedBooks] = useState<number[]>([]);
   const [newAbbrev, setNewAbbrev] = useState({ key: '', value: '' });
-  const [newPronun, setNewPronun] = useState({ key: '', value: '' });
   const [newBook, setNewBook] = useState({ key: '', value: '' });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -201,7 +205,11 @@ export function SmartAudioSettings() {
       const data = await res.json();
       setGlobalPronunciations(Object.entries(data).map(([key, value]) => {
         const rawArr = Array.isArray(value) ? value : [value];
-        const stringValues = rawArr.map((v: any) => typeof v === 'object' && v !== null ? (v.phonetic || JSON.stringify(v)) : String(v));
+        const stringValues = rawArr.map((item: unknown) => {
+          if (typeof item !== 'object' || item === null) return String(item);
+          if ('phonetic' in item && typeof item.phonetic === 'string') return item.phonetic;
+          return JSON.stringify(item);
+        });
         return { key, values: stringValues };
       }));
     } catch (err) {
@@ -261,6 +269,8 @@ export function SmartAudioSettings() {
     setProfileName(activeProfile.name);
     setWorkerMode(activeProfile.workerMode ?? 'scholar');
     setUseGlobalPronunciations(activeProfile.useGlobalPronunciations ?? true);
+    setPronunciationPromptMode(activeProfile.pronunciationPromptMode === 'custom' ? 'custom' : 'default');
+    setCustomPronunciationPrompt(activeProfile.customPronunciationPrompt || '');
     setAiModel(activeProfile.aiModel || PRESET_MODELS[0]?.id || 'gemini-2.5-flash');
     setCustomModelId(activeProfile.aiModel && PRESET_MODELS.some((model) => model.id === activeProfile.aiModel) ? '' : activeProfile.aiModel);
 
@@ -314,12 +324,14 @@ export function SmartAudioSettings() {
       pronunciations: entriesToObject(pronunciations),
       books: entriesToObject(books),
       useGlobalPronunciations,
+      pronunciationPromptMode,
+      customPronunciationPrompt: pronunciationPromptMode === 'custom' ? customPronunciationPrompt.trim() : '',
       workerMode,
       // Preserve stored key; overwrite only if user typed a new one
       geminiApiKey: apiKey.trim() || activeProfile?.geminiApiKey || undefined,
       backupGeminiApiKey: backupApiKey.trim() || activeProfile?.backupGeminiApiKey || undefined,
     };
-  }, [apiKey, backupApiKey, aiModel, customModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, useGlobalPronunciations, workerMode, activeProfile]);
+  }, [apiKey, backupApiKey, aiModel, customModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, useGlobalPronunciations, pronunciationPromptMode, customPronunciationPrompt, workerMode, activeProfile]);
 
   // When the user clicks a worker mode card, always switch to the matching
   // preset for that engine. This ensures clicking a card is always a clean
@@ -345,6 +357,8 @@ export function SmartAudioSettings() {
     setPrompt(profile.customTtsPrompt);
     setAbbreviations([]);
     setPronunciations([]);
+    setPronunciationPromptMode('default');
+    setCustomPronunciationPrompt('');
     setBooks([]);
   }, []);
 
@@ -411,7 +425,7 @@ export function SmartAudioSettings() {
       console.error('Error saving smart audio settings:', error);
       alert('Failed to save smart audio settings. Check the server logs.');
     }
-  }, [apiKey, buildCurrentProfile, profiles]);
+  }, [apiKey, backupApiKey, buildCurrentProfile, profiles]);
 
   const handleProfileChange = useCallback((nextProfileId: string) => {
     setSelectedProfileId(nextProfileId);
@@ -463,12 +477,6 @@ export function SmartAudioSettings() {
     if (!newAbbrev.key || !newAbbrev.value) return;
     setAbbreviations([...abbreviations, newAbbrev]);
     setNewAbbrev({ key: '', value: '' });
-  };
-
-  const handleAddPronun = () => {
-    if (!newPronun.key || !newPronun.value) return;
-    setPronunciations([...pronunciations, newPronun]);
-    setNewPronun({ key: '', value: '' });
   };
 
   const handleAddBook = () => {
@@ -842,50 +850,64 @@ export function SmartAudioSettings() {
           <button onClick={() => { setAbbreviations(abbreviations.filter((_, i) => !selectedAbbrevs.includes(i))); setSelectedAbbrevs([]); }} className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold">Delete Selected</button>
         </div>
 
-        <div className="space-y-4 p-4 border rounded dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-          <div className="flex flex-col gap-3 mb-2">
+        <div className="space-y-3">
+          <div className="space-y-2 rounded border border-line bg-surface p-3">
             <div>
-              <h3 className="font-semibold text-lg">Pronunciations</h3>
-              <p className="text-xs text-gray-500">Force specific phonetics.</p>
+              <h3 className="text-sm font-semibold">Gemini pronunciation guidance</h3>
+              <p className="text-xs text-soft">
+                The required Kokoro compatibility rules always apply. Customize only this profile&apos;s pronunciation style.
+              </p>
             </div>
-            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 font-medium cursor-pointer">
-              <input
-                type="checkbox"
-                checked={useGlobalPronunciations}
-                onChange={(e) => setUseGlobalPronunciations(e.target.checked)}
-                className="rounded border-gray-300 dark:border-gray-700 text-purple-600 focus:ring-purple-500"
-              />
-              Include Global Learned Pronunciations
-            </label>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => downloadCSV(pronunciations, 'pronunciations.csv')} className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded cursor-pointer hover:bg-blue-200">Export</button>
-              <button onClick={() => { if (confirm('Are you sure you want to clear all learned pronunciations?')) setPronunciations([]); }} className="text-xs bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 px-2 py-1 rounded cursor-pointer hover:bg-red-200">Clear All</button>
-              <label className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-2 py-1 rounded cursor-pointer hover:bg-gray-300 dark:hover:bg-gray-600">
-                Import CSV
-                <input type="file" accept=".csv" className="hidden" onChange={(e) => handleCSVUpload(e, pronunciations, setPronunciations)} />
-              </label>
-              <button onClick={loadGlobalPronunciations} className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-2 py-1 rounded cursor-pointer hover:bg-purple-200">
-                View Global
+              <button
+                type="button"
+                onClick={() => setPronunciationPromptMode('default')}
+                className={`px-3 py-1.5 rounded border text-xs font-medium ${pronunciationPromptMode === 'default' ? 'bg-accent text-background border-accent' : 'bg-surface text-foreground border-line hover:bg-accent-wash'}`}
+              >
+                Use universal default
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPronunciationPromptMode('custom');
+                  setCustomPronunciationPrompt((current) => current || DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE);
+                }}
+                className={`px-3 py-1.5 rounded border text-xs font-medium ${pronunciationPromptMode === 'custom' ? 'bg-accent text-background border-accent' : 'bg-surface text-foreground border-line hover:bg-accent-wash'}`}
+              >
+                Customize this profile
               </button>
             </div>
+            <textarea
+              value={pronunciationPromptMode === 'custom' ? customPronunciationPrompt : DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE}
+              onChange={(event) => setCustomPronunciationPrompt(event.target.value)}
+              readOnly={pronunciationPromptMode === 'default'}
+              className="w-full h-40 p-3 border rounded bg-surface-sunken border-line text-foreground font-mono text-xs leading-relaxed"
+              aria-label="Profile pronunciation guidance"
+            />
+            <p className="text-xs text-soft">
+              {pronunciationPromptMode === 'default'
+                ? 'This profile automatically receives future universal-default improvements.'
+                : 'This custom guidance applies only to the selected profile. Compatibility exclusions remain enforced separately.'}
+            </p>
           </div>
-          <div className="flex gap-2">
-            <input type="text" placeholder="Word" className="w-1/2 p-2 text-sm border rounded bg-white dark:bg-gray-900 dark:border-gray-700 text-gray-900 dark:text-gray-100" value={newPronun.key} onChange={(e) => setNewPronun({ ...newPronun, key: e.target.value })} />
-            <input type="text" placeholder="Phonetic" className="w-1/2 p-2 text-sm border rounded bg-white dark:bg-gray-900 dark:border-gray-700 text-gray-900 dark:text-gray-100" value={newPronun.value} onChange={(e) => setNewPronun({ ...newPronun, value: e.target.value })} />
-            <button onClick={handleAddPronun} className="px-3 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold shadow-sm">+</button>
-          </div>
-          <ul className="space-y-2 mt-4 max-h-96 overflow-y-auto pr-2">
-            {pronunciations.map((item, idx) => (
-              <li key={`${item.key}-${idx}`} className="flex items-center gap-3 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 p-2 rounded shadow-sm">
-                <input type="checkbox" checked={selectedPronuns.includes(idx)} onChange={(e) => {
-                  if (e.target.checked) setSelectedPronuns([...selectedPronuns, idx]);
-                  else setSelectedPronuns(selectedPronuns.filter((i) => i !== idx));
-                }} />
-                <span className="flex-1"><strong>{item.key}</strong> &rarr; {item.value}</span>
-              </li>
-            ))}
-          </ul>
-          <button onClick={() => { setPronunciations(pronunciations.filter((_, i) => !selectedPronuns.includes(i))); setSelectedPronuns([]); }} className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold">Delete Selected</button>
+          <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 font-medium cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useGlobalPronunciations}
+              onChange={(e) => setUseGlobalPronunciations(e.target.checked)}
+              className="rounded border-gray-300 dark:border-gray-700 text-purple-600 focus:ring-purple-500"
+            />
+            Include Global Learned Pronunciations
+          </label>
+          <button onClick={loadGlobalPronunciations} className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-2 py-1 rounded cursor-pointer hover:bg-purple-200 self-start">
+            View Global Pronunciations
+          </button>
+          <PronunciationGuideManager
+            key={selectedProfileId}
+            guideName={`${profileName || 'OpenReader'} Pronunciation Guide`}
+            items={pronunciations}
+            onChange={setPronunciations}
+          />
         </div>
 
         <div className="space-y-4 p-4 border rounded dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">

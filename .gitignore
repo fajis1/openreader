@@ -68,3 +68,6 @@ __pycache__/
 *.js
 !scripts/
 !next.config.js
+AGENTS.md
+AI-HANDOFF.md
+GEMINI.md

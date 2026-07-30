@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { generateTTSBuffer } from '@/lib/server/tts/generate';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
+import { buildKokoroPronunciationInstructions, isKokoroCompatiblePronunciation } from '@/lib/shared/kokoro-pronunciation-policy';
 
 const SEED_EXAMPLES = [
   "Make the ending sound more like -een instead of -ayn",
@@ -95,12 +96,13 @@ export async function POST(req: NextRequest) {
     const keysToTry = [primaryKey, backupKey].filter((k, idx, arr) => k && arr.indexOf(k) === idx);
 
     // 3. Call Gemini with automatic key failover
-    const prompt = `The user wants to adjust the Kokoro IPA pronunciation for the word '${word}'.
+    const prompt = `${buildKokoroPronunciationInstructions(activeProfile)}
+
+The user wants to adjust the Kokoro IPA pronunciation for the word '${word}'.
 User Feedback: '${feedback}'.
 DO NOT generate any of the following previous choices: ${JSON.stringify(currentChoices || [])}.
 Generate 5 NEW distinct, plausible Kokoro IPA pronunciation variations that address the user's feedback.
-Strictly follow Kokoro IPA constraints: no stress markers '\\u02c8', no standalone '/o/', no syllable boundary periods between vowels.
-Return a JSON object: { "newChoices": ["pron1", "pron2", "pron3", "pron4", "pron5"] }`;
+Return a JSON object: { "newChoices": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
 
     let res: Response | null = null;
     let errText = '';
@@ -178,7 +180,9 @@ Return a JSON object: { "newChoices": ["pron1", "pron2", "pron3", "pron4", "pron
     if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
       try {
         const generated = JSON.parse(data.candidates[0].content.parts[0].text);
-        newChoices = generated.newChoices || [];
+        newChoices = Array.isArray(generated.newChoices)
+          ? generated.newChoices.filter(isKokoroCompatiblePronunciation).slice(0, 5)
+          : [];
       } catch (e) {
         console.error('Failed to parse Gemini response:', e);
       }

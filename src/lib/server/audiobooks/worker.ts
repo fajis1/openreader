@@ -18,6 +18,10 @@ import type { ParsedPdfDocument } from '@/types/parsed-pdf';
 import { normalizeTextForTts } from '@/lib/shared/nlp';
 import { serverLogger } from '@/lib/server/logger';
 import { INTERNAL_WORKER_SECRET } from '@/lib/server/internal-secret';
+import {
+  buildKokoroPronunciationInstructions,
+  filterKokoroCompatiblePronunciationRecord,
+} from '@/lib/shared/kokoro-pronunciation-policy';
 
 function stripHtmlTags(html: string): string {
   return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -350,6 +354,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             api_key: geminiApiKey,
             ai_model: selectedProfile?.aiModel || 'gemini-2.5-flash',
             prompt: selectedProfile?.customTtsPrompt || "You are an expert audiobook preparation assistant...",
+            pronunciation_prompt: buildKokoroPronunciationInstructions(selectedProfile),
             raw_text: chapter.text,
             pronunciations: selectedProfile?.pronunciations || {}, 
             abbreviations: selectedProfile?.abbreviations || {},
@@ -372,15 +377,16 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             processedTextForTts = workerResult.cleaned_text;
             
             // Save newly discovered pronunciations back to the profile AND the global registry!
-            if (workerResult.new_pronunciations && Object.keys(workerResult.new_pronunciations).length > 0 && selectedProfile) {
+            const compatibleNewPronunciations = filterKokoroCompatiblePronunciationRecord(workerResult.new_pronunciations);
+            if (Object.keys(compatibleNewPronunciations).length > 0 && selectedProfile) {
               try {
                 // Must read fresh just in case it was updated during generation
                 const updatedDoc = await readSmartAudioProfilesDocument(userId);
                 const profileToUpdate = updatedDoc.profiles.find(p => p.id === selectedProfile.id);
                 if (profileToUpdate) {
-                  profileToUpdate.pronunciations = { ...profileToUpdate.pronunciations, ...workerResult.new_pronunciations };
+                  profileToUpdate.pronunciations = { ...profileToUpdate.pronunciations, ...compatibleNewPronunciations };
                   await writeSmartAudioProfilesDocument(userId, updatedDoc);
-                  serverLogger.info({ event: 'audiobook.queue.smart_audio.learned_pronunciations', count: Object.keys(workerResult.new_pronunciations).length }, 'Saved new learned pronunciations to smart audio profile');
+                  serverLogger.info({ event: 'audiobook.queue.smart_audio.learned_pronunciations', count: Object.keys(compatibleNewPronunciations).length }, 'Saved new learned pronunciations to smart audio profile');
                 }
                 
                 // Save to Global Pronunciations
@@ -398,7 +404,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
                   }
                   
                   const updatedGlobal = { ...currentGlobal };
-                  for (const [key, val] of Object.entries(workerResult.new_pronunciations as Record<string, string>)) {
+                  for (const [key, val] of Object.entries(compatibleNewPronunciations)) {
                     const existing = updatedGlobal[key] || [];
                     const filtered = existing.filter(p => p !== val);
                     updatedGlobal[key] = [val, ...filtered].slice(0, 5);
@@ -411,7 +417,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
                     target: adminSettings.key,
                     set: { valueJson: JSON.stringify(updatedGlobal) }
                   });
-                  serverLogger.info({ event: 'audiobook.queue.smart_audio.global_learned', count: Object.keys(workerResult.new_pronunciations).length }, 'Appended learned pronunciations to global registry');
+                  serverLogger.info({ event: 'audiobook.queue.smart_audio.global_learned', count: Object.keys(compatibleNewPronunciations).length }, 'Appended learned pronunciations to global registry');
                 } catch (globalErr) {
                   serverLogger.warn({ event: 'audiobook.queue.smart_audio.global_learned_failed', error: globalErr }, 'Failed to save to global pronunciations registry');
                 }

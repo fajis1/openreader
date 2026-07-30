@@ -1,0 +1,71 @@
+import type { SmartAudioProfile } from '@/types/client';
+
+export const KOKORO_PRONUNCIATION_POLICY_VERSION = 1;
+
+export const KOKORO_COMPATIBILITY_POLICY = `KOKORO PRONUNCIATION COMPATIBILITY POLICY (REQUIRED, VERSION ${KOKORO_PRONUNCIATION_POLICY_VERSION}):
+- Use English-compatible IPA intended for Kokoro.
+- NEVER use the primary stress marker "ˈ"; it can cause ghost syllables.
+- NEVER use a standalone "/o/"; use an English-compatible vowel such as "/oʊ/" or "/ɒ/" when appropriate.
+- NEVER insert syllable-boundary periods between vowels.
+- Do not use true pharyngeal fricatives such as "ħ" or "ʕ"; approximate them with English-compatible "/k/" or "/x/" sounds.
+- Preserve Kokoro markup exactly as "[Original Text](/IPA/)" when markup is requested.
+- When returning pronunciation choices as JSON, return each pronunciation as a slash-delimited IPA string and no explanatory prose.
+These compatibility requirements cannot be removed by profile-specific guidance.`;
+
+export const DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE = `DEFAULT KOKORO PRONUNCIATION GUIDANCE:
+Prefer clear, natural English-compatible phonetic approximations that Kokoro can synthesize reliably.
+For Koine Greek (Strict Erasmian), use these defaults where applicable: α=/ɑ/, ε=/ɛ/, η=/eɪ/, ι=/i/, ο=/oʊ/ or /ɒ/, υ=/u/, ω=/oʊ/, αι=/aɪ/, ει=/eɪ/, οι=/ɔɪ/, ου=/u/, ευ=/ju/, χ=/k/, θ=/θ/.
+For Biblical Hebrew (Standard Academic), use these defaults where applicable: Qamats/Patah=/ɑ/, Tsere/Segol=/ɛ/ or /eɪ/, Hireq=/i/, Holem=/oʊ/, Shureq/Qibbuts=/u/, Shewa=/ə/ when vocal, and Het/Khaf=/k/ or /x/.
+For fantasy names, proper nouns, and other languages, favor a readable English-compatible pronunciation over narrow or unsupported IPA.`;
+
+export interface PronunciationGuidanceProfile {
+  pronunciationPromptMode?: 'default' | 'custom';
+  customPronunciationPrompt?: string;
+}
+
+export function resolvePronunciationGuidance(
+  profile?: PronunciationGuidanceProfile | SmartAudioProfile | null,
+): string {
+  if (profile?.pronunciationPromptMode === 'custom') {
+    const custom = profile.customPronunciationPrompt?.trim();
+    if (custom) return custom;
+  }
+  return DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE;
+}
+
+export function buildKokoroPronunciationInstructions(
+  profile?: PronunciationGuidanceProfile | SmartAudioProfile | null,
+): string {
+  return `${resolvePronunciationGuidance(profile)}\n\n${KOKORO_COMPATIBILITY_POLICY}`;
+}
+
+export function getKokoroPronunciationCompatibilityErrors(pronunciation: unknown): string[] {
+  if (typeof pronunciation !== 'string') return ['Pronunciation must be text.'];
+  const trimmed = pronunciation.trim();
+  if (!/^\/[^/]+\/$/.test(trimmed)) return ['Pronunciation must be a single slash-delimited IPA value.'];
+
+  const inner = trimmed.slice(1, -1);
+  const errors: string[] = [];
+  if (inner === 'o') errors.push('Standalone /o/ is not supported.');
+  if (inner.includes('ˈ')) errors.push('Primary stress marker ˈ is not supported.');
+  if (/[ħʕ]/u.test(inner)) errors.push('True pharyngeal fricatives are not supported.');
+  if (/[aeiouɑɒɔəɛɪʊ]\.[aeiouɑɒɔəɛɪʊ]/iu.test(inner)) {
+    errors.push('Syllable-boundary periods between vowels are not supported.');
+  }
+  return errors;
+}
+
+export function isKokoroCompatiblePronunciation(pronunciation: unknown): pronunciation is string {
+  return getKokoroPronunciationCompatibilityErrors(pronunciation).length === 0;
+}
+
+export function filterKokoroCompatiblePronunciationRecord(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null) return {};
+  const result: Record<string, string> = {};
+  for (const [word, pronunciation] of Object.entries(value)) {
+    if (word.trim() && isKokoroCompatiblePronunciation(pronunciation)) {
+      result[word] = pronunciation.trim();
+    }
+  }
+  return result;
+}

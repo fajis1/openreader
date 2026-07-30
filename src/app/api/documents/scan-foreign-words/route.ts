@@ -4,6 +4,7 @@ import { serverLogger } from '@/lib/server/logger';
 import { getDocumentBlob } from '@/lib/server/documents/blobstore';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { readSmartAudioProfilesDocument, findSmartAudioProfileById } from '@/lib/server/smart-audio-profiles';
+import { buildKokoroPronunciationInstructions, isKokoroCompatiblePronunciation } from '@/lib/shared/kokoro-pronunciation-policy';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -101,7 +102,12 @@ export async function POST(req: NextRequest) {
       const chunkSize = 20;
       for (let i = 0; i < wordsMissingOptions.length; i += chunkSize) {
         const chunk = wordsMissingOptions.slice(i, i + chunkSize);
-        const prompt = `Generate 5 distinct, plausible Kokoro IPA pronunciation variations for each of the following words: ${chunk.join(', ')}. Provide slight variations in stress, vowel length, Erasmian vs historical nuances, or slight phonetic glides, all adhering strictly to Kokoro allowed symbols and rules: no stress markers '\\u02c8', no standalone '/o/', no syllable boundary periods between vowels. Return a JSON object mapping each word to an array of 5 string pronunciations. Example: { "word1": ["pron1", "pron2", "pron3", "pron4", "pron5"] }`;
+        const prompt = `${buildKokoroPronunciationInstructions(activeProfile)}
+
+Generate 5 distinct, plausible Kokoro IPA pronunciation variations for each of the following words: ${chunk.join(', ')}.
+Provide slight variations that remain consistent with the pronunciation guidance above.
+Return a JSON object mapping each word to an array of 5 string pronunciations.
+Example: { "word1": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
         
         try {
           const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
@@ -121,10 +127,10 @@ export async function POST(req: NextRequest) {
                 const existingPhonetics = new Set(current.map(c => c.phonetic));
                 
                 for (const p of prons) {
-                  if (!existingPhonetics.has(p as string) && current.length < 5) {
+                  if (isKokoroCompatiblePronunciation(p) && !existingPhonetics.has(p) && current.length < 5) {
                     current.push({ phonetic: p, usageCount: 0, isUserCustom: false, timestamp: Date.now() });
-                    existingPhonetics.add(p as string);
-                    newPhoneticsToCache.push({ word: w, phonetic: p as string });
+                    existingPhonetics.add(p);
+                    newPhoneticsToCache.push({ word: w, phonetic: p });
                     updatedGlobal = true;
                   }
                 }

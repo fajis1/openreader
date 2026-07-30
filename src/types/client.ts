@@ -70,6 +70,10 @@ export interface SmartAudioProfile {
   books: Record<string, string>;
   /** Whether to merge in the globally defined pronunciations. */
   useGlobalPronunciations?: boolean;
+  /** Whether this profile inherits the universal pronunciation guidance or supplies its own style guidance. */
+  pronunciationPromptMode?: 'default' | 'custom';
+  /** Profile-specific pronunciation style guidance. The required Kokoro compatibility policy is always appended separately. */
+  customPronunciationPrompt?: string;
   /** Per-profile Gemini API key. Never exposed to other users. */
   geminiApiKey?: string;
   backupGeminiApiKey?: string;

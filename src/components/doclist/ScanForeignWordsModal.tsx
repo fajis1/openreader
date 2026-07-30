@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ModalFrame } from '@/components/ui';
 import toast from 'react-hot-toast';
 
@@ -19,6 +19,8 @@ export function ScanForeignWordsModal({
   const [loading, setLoading] = useState(false);
   const [words, setWords] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [hasScanned, setHasScanned] = useState(false);
+  const scanInFlight = useRef(false);
 
   // Map to store temporary inline edits before saving
   const [editingWord, setEditingWord] = useState<string | null>(null);
@@ -32,16 +34,19 @@ export function ScanForeignWordsModal({
   useEffect(() => {
     if (isOpen) {
       loadFeedbackExamples();
+      setWords([]);
+      setError(null);
+      setHasScanned(false);
       if (documentId) {
         setActiveDocId(documentId);
         setActiveDocName(documentName || null);
-        loadWords(documentId);
       } else {
         loadDocuments();
       }
     } else {
       setWords([]);
       setError(null);
+      setHasScanned(false);
       setActiveDocId(null);
       setActiveDocName(null);
     }
@@ -74,6 +79,9 @@ export function ScanForeignWordsModal({
   const [customQuery, setCustomQuery] = useState<string>('');
 
   const loadWords = async (targetId: string, overrideMode?: string, overrideCoverage?: number, overrideQuery?: string) => {
+    if (scanInFlight.current) return;
+
+    scanInFlight.current = true;
     setLoading(true);
     setError(null);
     try {
@@ -94,9 +102,11 @@ export function ScanForeignWordsModal({
       if (!res.ok) throw new Error('Failed to scan document');
       const data = await res.json();
       setWords(data.words || []);
+      setHasScanned(true);
     } catch (err: any) {
       setError(err.message);
     } finally {
+      scanInFlight.current = false;
       setLoading(false);
     }
   };
@@ -232,7 +242,11 @@ export function ScanForeignWordsModal({
             <div>
               <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Foreign & Custom Word Pronunciation Pre-Scan 🔍</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {activeDocName ? `Scanning ${activeDocName}` : "Select a PDF to scan"}
+                {activeDocName
+                  ? loading
+                    ? `Scanning ${activeDocName}`
+                    : `Selected ${activeDocName}`
+                  : "Select a PDF to scan"}
               </p>
             </div>
             <button onClick={onClose} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 text-lg font-bold">✕</button>
@@ -244,11 +258,8 @@ export function ScanForeignWordsModal({
                 <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Target Type:</span>
                 <select
                   value={scanMode}
-                  onChange={(e: any) => {
-                    const newMode = e.target.value;
-                    setScanMode(newMode);
-                    if (activeDocId) loadWords(activeDocId, newMode);
-                  }}
+                  onChange={(e: any) => setScanMode(e.target.value)}
+                  disabled={loading}
                   className="px-2.5 py-1 text-xs border rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-700 font-medium"
                 >
                   <option value="all_foreign">🌐 All Foreign Languages (Greek, Hebrew, Cyrillic, CJK, etc.)</option>
@@ -262,9 +273,7 @@ export function ScanForeignWordsModal({
                     type="text"
                     value={customQuery}
                     onChange={(e) => setCustomQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && activeDocId) loadWords(activeDocId);
-                    }}
+                    disabled={loading}
                     placeholder="Enter word to search (e.g. Xylar)"
                     className="px-2.5 py-1 text-xs border rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-700"
                   />
@@ -276,10 +285,8 @@ export function ScanForeignWordsModal({
                 <div className="inline-flex rounded-md shadow-sm">
                   <button
                     type="button"
-                    onClick={() => {
-                      setScanCoverage(80);
-                      if (activeDocId) loadWords(activeDocId, undefined, 80);
-                    }}
+                    onClick={() => setScanCoverage(80)}
+                    disabled={loading}
                     className={`px-3 py-1 text-xs font-bold rounded-l-md border ${
                       scanCoverage === 80
                         ? 'bg-blue-600 text-white border-blue-600'
@@ -290,10 +297,8 @@ export function ScanForeignWordsModal({
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setScanCoverage(100);
-                      if (activeDocId) loadWords(activeDocId, undefined, 100);
-                    }}
+                    onClick={() => setScanCoverage(100)}
+                    disabled={loading}
                     className={`px-3 py-1 text-xs font-bold rounded-r-md border-t border-b border-r ${
                       scanCoverage === 100
                         ? 'bg-blue-600 text-white border-blue-600'
@@ -307,9 +312,10 @@ export function ScanForeignWordsModal({
                 <button
                   type="button"
                   onClick={() => activeDocId && loadWords(activeDocId)}
-                  className="px-3 py-1 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-bold text-xs rounded transition-colors"
+                  disabled={loading}
+                  className="px-3 py-1 bg-accent hover:bg-secondary-accent text-background font-bold text-xs rounded transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  🔄 Rescan
+                  {loading ? 'Scanning…' : hasScanned ? 'Scan Again' : 'Start Scan'}
                 </button>
               </div>
             </div>
@@ -328,7 +334,9 @@ export function ScanForeignWordsModal({
                     onClick={() => {
                       setActiveDocId(doc.id);
                       setActiveDocName(doc.name);
-                      loadWords(doc.id);
+                      setWords([]);
+                      setError(null);
+                      setHasScanned(false);
                     }}
                   >
                     📄 {doc.name}
@@ -346,6 +354,8 @@ export function ScanForeignWordsModal({
             </div>
           ) : error ? (
             <div className="p-4 text-red-600 bg-red-50 dark:bg-red-950/40 rounded">{error}</div>
+          ) : !hasScanned ? (
+            <div className="p-4 text-gray-500">Choose the scan settings, then click Start Scan.</div>
           ) : words.length === 0 ? (
             <div className="p-4 text-gray-500">No foreign words found.</div>
           ) : (
