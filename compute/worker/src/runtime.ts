@@ -85,7 +85,8 @@ import {
   shouldAcquireGpuLease,
   withGpuLease,
 } from './gpu-lease';
-import { startIsolatedInference } from './isolated-inference';
+import { isCudaOutOfMemoryError, startIsolatedInference } from './isolated-inference';
+import { runWithCudaOomCpuFallback } from './cuda-oom-fallback';
 
 type OnnxProviderSelection = {
   workload: 'pdf-layout' | 'whisper';
@@ -95,6 +96,7 @@ type OnnxProviderSelection = {
 type ComputeRunHooks = {
   isolateNative?: boolean;
   reuseIsolatedProcess?: boolean;
+  providerOverride?: 'cpu';
   onProgress?: (progress: PdfLayoutProgress) => Promise<void>;
   onProviderSelection?: (selection: OnnxProviderSelection) => void | Promise<void>;
 };
@@ -1258,6 +1260,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
         },
         onProviderSelection: hooks.onProviderSelection,
         reuseProcess: hooks.reuseIsolatedProcess,
+        providerOverride: hooks.providerOverride,
       })
       : null;
     const nativeWork = isolated?.promise ?? runWhisperAlignmentFromAudioBuffer({
@@ -1274,7 +1277,18 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
         'whisper alignment job',
       );
     } catch (error) {
-      if (isolated && getTimedOutOperationSettlement(error)) isolated.terminate();
+      if (isolated) {
+        if (getTimedOutOperationSettlement(error)) {
+          // Propagate the timeout immediately so withGpuLease can retain the
+          // lease during its bounded settlement grace and restart the worker
+          // if the native child does not die.
+          void isolated.terminate();
+        } else if (isCudaOutOfMemoryError(error)) {
+          // OOM is retried in-process on CPU, so the CUDA context must be gone
+          // before the cooperative lease can be released.
+          await isolated.terminate();
+        }
+      }
       throw error;
     }
 
@@ -1351,6 +1365,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
             onPageParsed,
             onProviderSelection: hooks.onProviderSelection,
             reuseProcess: hooks.reuseIsolatedProcess,
+            providerOverride: hooks.providerOverride,
           });
           return isolated.promise;
         }
@@ -1361,8 +1376,14 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
           onPageParsed,
         });
       },
-    }).catch((error) => {
-      if (isolated && getTimedOutOperationSettlement(error)) isolated.terminate();
+    }).catch(async (error) => {
+      if (isolated) {
+        if (getTimedOutOperationSettlement(error)) {
+          void isolated.terminate();
+        } else if (isCudaOutOfMemoryError(error)) {
+          await isolated.terminate();
+        }
+      }
       throw error;
     });
 
@@ -1592,7 +1613,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
       const runJob = async (
         nativeHooks?: Pick<
           ComputeRunHooks,
-          'isolateNative' | 'reuseIsolatedProcess' | 'onProviderSelection'
+          'isolateNative' | 'reuseIsolatedProcess' | 'providerOverride' | 'onProviderSelection'
         >,
       ) => input.run(decoded.payload, context!.queueWaitTiming?.queueWaitMs ?? 0, {
           ...nativeHooks,
@@ -1683,15 +1704,35 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
                 release: lease.release,
               });
               const reuseIsolatedProcess = !providerConfig.releaseAfterJob && jobConcurrency === 1;
-              return await runJob({
-                isolateNative: true,
-                reuseIsolatedProcess,
-                onProviderSelection: async (selection) => {
-                  if (reuseIsolatedProcess) {
-                    rememberSelectedOnnxProvider(selection.workload, selection.provider);
-                  }
-                  await observeProvider(selection);
+              const onProviderSelection = async (selection: OnnxProviderSelection) => {
+                if (reuseIsolatedProcess) {
+                  rememberSelectedOnnxProvider(selection.workload, selection.provider);
+                }
+                await observeProvider(selection);
+              };
+              return await runWithCudaOomCpuFallback({
+                enabled: providerConfig.mode === 'auto' && providerConfig.allowCpuFallback,
+                isCudaOutOfMemory: isCudaOutOfMemoryError,
+                runCuda: () => runJob({
+                  isolateNative: true,
+                  reuseIsolatedProcess,
+                  onProviderSelection,
+                }),
+                releaseGpuLease: lease.release,
+                beforeCpuRetry: (error) => {
+                  app.log.warn({
+                    worker: input.workerLabel,
+                    kind: decoded.kind,
+                    opId: decoded.opId,
+                    jobId: decoded.jobId,
+                    error: toErrorMessage(error),
+                  }, 'CUDA inference exhausted GPU memory; retrying the complete job on CPU');
                 },
+                runCpu: () => runJob({
+                  isolateNative: true,
+                  reuseIsolatedProcess: false,
+                  providerOverride: 'cpu',
+                }),
               });
             },
           })

@@ -1,3 +1,8 @@
+# The ordinary image installs the CPU ONNX Runtime. The CUDA target overrides
+# this with v11 so its embedded worker receives the P100-compatible native
+# provider while the default build remains portable.
+ARG ONNXRUNTIME_NODE_INSTALL_CUDA=skip
+
 # Stage 1: extract seaweedfs weed binary (for optional embedded weed mini)
 # Pin to 4.18 because CI observed upload regressions on 4.19.
 FROM chrislusf/seaweedfs:4.18 AS seaweedfs-builder
@@ -14,7 +19,8 @@ FROM node:lts-slim AS app-builder
 
 # Install pnpm globally
 RUN npm install -g pnpm@10.33.4
-ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
+ARG ONNXRUNTIME_NODE_INSTALL_CUDA
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=${ONNXRUNTIME_NODE_INSTALL_CUDA}
 
 # Create app directory
 WORKDIR /app
@@ -126,3 +132,25 @@ EXPOSE 3003
 # Start the application
 ENTRYPOINT ["node", "scripts/openreader-entrypoint.mjs", "--"]
 CMD ["node", "server.js"]
+
+# Optional all-in-one CUDA runtime. It retains the same private embedded NATS,
+# SeaweedFS, and compute-worker topology as the ordinary image; only the native
+# CUDA/cuDNN runtime and provider defaults differ. CUDA 11.8 + cuDNN 8.9.6
+# matches onnxruntime-node 1.18.0 and supports the Pascal Tesla P100 (sm_60).
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04@sha256:85fb7ac694079fff1061a0140fd5b5a641997880e12112d92589c3bbb1e8b7ca AS cuda-runtime
+
+FROM runner AS runner-cuda
+
+COPY --from=cuda-runtime /usr/local/cuda-11.8 /usr/local/cuda-11.8
+COPY --from=cuda-runtime /usr/lib/x86_64-linux-gnu/libcudnn* /usr/lib/x86_64-linux-gnu/
+
+ENV LD_LIBRARY_PATH=/usr/local/cuda-11.8/targets/x86_64-linux/lib:/usr/lib/x86_64-linux-gnu
+ENV COMPUTE_JOB_CONCURRENCY=1
+ENV PDF_LAYOUT_ONNX_EXECUTION_PROVIDER=auto
+ENV WHISPER_ONNX_EXECUTION_PROVIDER=cpu
+ENV COMPUTE_CUDA_DEVICE_ID=0
+ENV COMPUTE_CUDA_ALLOW_CPU_FALLBACK=true
+ENV COMPUTE_RELEASE_ONNX_SESSIONS_AFTER_JOB=true
+
+# Keep the final/default target CPU-only for ordinary `docker build .`.
+FROM runner AS final

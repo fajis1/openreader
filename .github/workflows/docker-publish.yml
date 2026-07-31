@@ -26,6 +26,7 @@ jobs:
     outputs:
       web_image_name: ${{ steps.image-name.outputs.web_image_name }}
       web_legacy_image_name: ${{ steps.image-name.outputs.web_legacy_image_name }}
+      web_cuda_image_name: ${{ steps.image-name.outputs.web_cuda_image_name }}
       compute_worker_image_name: ${{ steps.image-name.outputs.compute_worker_image_name }}
       compute_worker_cuda_image_name: ${{ steps.image-name.outputs.compute_worker_cuda_image_name }}
     steps:
@@ -35,6 +36,7 @@ jobs:
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "web_image_name=${owner}/openreader" >> "$GITHUB_OUTPUT"
           echo "web_legacy_image_name=${owner}/openreader-webui" >> "$GITHUB_OUTPUT"
+          echo "web_cuda_image_name=${owner}/openreader-cuda" >> "$GITHUB_OUTPUT"
           echo "compute_worker_image_name=${owner}/openreader-compute-worker" >> "$GITHUB_OUTPUT"
           echo "compute_worker_cuda_image_name=${owner}/openreader-compute-worker-cuda" >> "$GITHUB_OUTPUT"
 
@@ -55,30 +57,48 @@ jobs:
             runner: ubuntu-24.04
             context: .
             dockerfile: ./Dockerfile
+            target: final
+            onnxruntime_cuda: skip
           - image_target: web
             arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
             context: .
             dockerfile: ./Dockerfile
+            target: final
+            onnxruntime_cuda: skip
+          - image_target: web-cuda
+            arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+            context: .
+            dockerfile: ./Dockerfile
+            target: runner-cuda
+            onnxruntime_cuda: v11
           - image_target: compute-worker
             arch: amd64
             platform: linux/amd64
             runner: ubuntu-24.04
             context: .
             dockerfile: ./compute/worker/Dockerfile
+            target: ""
+            onnxruntime_cuda: skip
           - image_target: compute-worker
             arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
             context: .
             dockerfile: ./compute/worker/Dockerfile
+            target: ""
+            onnxruntime_cuda: skip
           - image_target: compute-worker-cuda
             arch: amd64
             platform: linux/amd64
             runner: ubuntu-24.04
             context: .
             dockerfile: ./compute/worker/Dockerfile.gpu
+            target: ""
+            onnxruntime_cuda: v11
 
     steps:
       - name: Checkout repository
@@ -102,6 +122,7 @@ jobs:
         run: |
           case "${{ matrix.image_target }}" in
             web) echo "image_name=${{ needs.prepare.outputs.web_image_name }}" >> "$GITHUB_OUTPUT" ;;
+            web-cuda) echo "image_name=${{ needs.prepare.outputs.web_cuda_image_name }}" >> "$GITHUB_OUTPUT" ;;
             compute-worker-cuda) echo "image_name=${{ needs.prepare.outputs.compute_worker_cuda_image_name }}" >> "$GITHUB_OUTPUT" ;;
             *) echo "image_name=${{ needs.prepare.outputs.compute_worker_image_name }}" >> "$GITHUB_OUTPUT" ;;
           esac
@@ -112,6 +133,9 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          build-args: |
+            ONNXRUNTIME_NODE_INSTALL_CUDA=${{ matrix.onnxruntime_cuda }}
           platforms: ${{ matrix.platform }}
           cache-from: type=gha,scope=${{ matrix.image_target }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image_target }}-${{ matrix.arch }}
@@ -144,6 +168,8 @@ jobs:
       matrix:
         include:
           - image_target: web
+            runner: ubuntu-24.04
+          - image_target: web-cuda
             runner: ubuntu-24.04
           - image_target: compute-worker
             runner: ubuntu-24.04
@@ -178,6 +204,10 @@ jobs:
               echo "${{ env.REGISTRY }}/${{ needs.prepare.outputs.web_image_name }}" >> "$GITHUB_OUTPUT"
               echo "${{ env.REGISTRY }}/${{ needs.prepare.outputs.web_legacy_image_name }}" >> "$GITHUB_OUTPUT"
               echo "EOF" >> "$GITHUB_OUTPUT"
+              ;;
+            web-cuda)
+              echo "image_name=${{ needs.prepare.outputs.web_cuda_image_name }}" >> "$GITHUB_OUTPUT"
+              echo "metadata_images=${{ env.REGISTRY }}/${{ needs.prepare.outputs.web_cuda_image_name }}" >> "$GITHUB_OUTPUT"
               ;;
             compute-worker-cuda)
               echo "image_name=${{ needs.prepare.outputs.compute_worker_cuda_image_name }}" >> "$GITHUB_OUTPUT"

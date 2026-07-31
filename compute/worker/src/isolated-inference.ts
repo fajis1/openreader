@@ -31,18 +31,32 @@ type ChildMessage =
 
 const persistentChildren = new Map<IsolatedRequest['kind'], ChildProcess>();
 
-function spawnInferenceChild(): ChildProcess {
+function spawnInferenceChild(envOverrides?: NodeJS.ProcessEnv): ChildProcess {
   const childPath = fileURLToPath(new URL('./inference-child.ts', import.meta.url));
   return fork(childPath, [], {
-    env: process.env,
+    env: {
+      ...process.env,
+      ...envOverrides,
+    },
     execArgv: ['--import', 'tsx'],
     serialization: 'advanced',
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
 }
 
-function getInferenceChild(kind: IsolatedRequest['kind'], reuseProcess: boolean): ChildProcess {
-  if (!reuseProcess) return spawnInferenceChild();
+function getInferenceChild(
+  kind: IsolatedRequest['kind'],
+  reuseProcess: boolean,
+  providerOverride?: 'cpu',
+): ChildProcess {
+  const envOverrides = providerOverride
+    ? {
+      COMPUTE_ONNX_EXECUTION_PROVIDER: providerOverride,
+      PDF_LAYOUT_ONNX_EXECUTION_PROVIDER: providerOverride,
+      WHISPER_ONNX_EXECUTION_PROVIDER: providerOverride,
+    }
+    : undefined;
+  if (!reuseProcess) return spawnInferenceChild(envOverrides);
   const existing = persistentChildren.get(kind);
   if (existing?.connected && !existing.killed) return existing;
   const child = spawnInferenceChild();
@@ -55,7 +69,7 @@ function getInferenceChild(kind: IsolatedRequest['kind'], reuseProcess: boolean)
 
 export type IsolatedInference<T> = {
   promise: Promise<T>;
-  terminate: () => void;
+  terminate: () => Promise<void>;
 };
 
 export function startIsolatedInference<T>(input: {
@@ -66,13 +80,15 @@ export function startIsolatedInference<T>(input: {
   ) => void | Promise<void>;
   onProviderSelection?: (selection: ProviderSelection) => void | Promise<void>;
   reuseProcess?: boolean;
+  providerOverride?: 'cpu';
 }): IsolatedInference<T> {
-  const reuseProcess = input.reuseProcess === true;
-  const child = getInferenceChild(input.request.kind, reuseProcess);
+  const reuseProcess = input.reuseProcess === true && !input.providerOverride;
+  const child = getInferenceChild(input.request.kind, reuseProcess, input.providerOverride);
   const requestId = randomUUID();
   let settled = false;
   let terminalReceived = false;
   let terminateRequested = false;
+  let terminationPromise: Promise<void> | null = null;
 
   const promise = new Promise<T>((resolve, reject) => {
     let messageQueue = Promise.resolve();
@@ -144,10 +160,28 @@ export function startIsolatedInference<T>(input: {
 
   return {
     promise,
-    terminate: () => {
-      if (settled || child.killed) return;
-      terminateRequested = true;
-      child.kill('SIGKILL');
+    terminate: async () => {
+      if (child.exitCode != null || child.signalCode != null) return;
+      if (!terminationPromise) {
+        terminationPromise = new Promise<void>((resolve) => {
+          const handleTerminated = () => resolve();
+          child.once('exit', handleTerminated);
+          if (!child.killed) {
+            terminateRequested = true;
+            const signalSent = child.kill('SIGKILL');
+            if (!signalSent) {
+              child.off('exit', handleTerminated);
+              resolve();
+            }
+          }
+        });
+      }
+      await terminationPromise;
     },
   };
+}
+
+export function isCudaOutOfMemoryError(error: unknown): boolean {
+  const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error);
+  return /CUDA(?:_ERROR)?_OUT_OF_MEMORY|CUDA[^.\n]*out of memory|CUDNN_STATUS_ALLOC_FAILED|failed to allocate (?:CUDA|GPU)|(?:CUDA|GPU) allocation failed/i.test(message);
 }

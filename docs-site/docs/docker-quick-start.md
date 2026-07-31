@@ -25,6 +25,7 @@ OpenReader currently pins embedded SeaweedFS to `4.18` in CI and Docker builds.
 ## Published images
 
 - App server: `ghcr.io/richardr1126/openreader:latest`
+- All-in-one NVIDIA CUDA app (Linux amd64): `ghcr.io/richardr1126/openreader-cuda:latest`
 - Compute worker (Optional): `ghcr.io/richardr1126/openreader-compute-worker:latest`
 - Legacy app alias: `ghcr.io/richardr1126/openreader-webui:latest`
 
@@ -143,6 +144,49 @@ Visit [http://localhost:3003](http://localhost:3003) after startup.
 
 Legacy image compatibility: `ghcr.io/richardr1126/openreader-webui:latest` remains available as an alias.
 For external compute mode image details, see [Compute Worker (NATS JetStream)](./deploy/compute-worker).
+
+### NVIDIA GPU image
+
+Linux amd64 hosts with the NVIDIA Container Toolkit can use the all-in-one CUDA
+image without deploying a separate compute worker, NATS server, or object store.
+It keeps OpenReader's queue, storage, and compute worker private inside the same
+container, just like the ordinary CPU image:
+
+```bash
+docker run --name openreader \
+  --restart unless-stopped \
+  --gpus all \
+  -p 3003:3003 \
+  -v openreader_docstore:/app/docstore \
+  -e BASE_URL=http://localhost:3003 \
+  -e AUTH_SECRET='<generate-a-long-random-value>' \
+  ghcr.io/richardr1126/openreader-cuda:latest
+```
+
+For an existing Compose deployment, keep the same ports, environment, and
+volumes; change only the image and add GPU access:
+
+```yaml
+services:
+  openreader:
+    image: ghcr.io/richardr1126/openreader-cuda:latest
+    gpus: all
+```
+
+The CUDA image defaults PP-DocLayoutV3 to `auto`, limits compute concurrency to
+one, releases ONNX sessions after each job, and keeps Whisper on CPU. Set
+`PDF_LAYOUT_ONNX_EXECUTION_PROVIDER=cuda` when CUDA must be required and
+failures must be reported instead of retried on CPU.
+
+Verify GPU access before switching:
+
+```bash
+nvidia-smi
+docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
+```
+
+The CUDA image accelerates document layout analysis. It does not move Gemini,
+Kokoro, or FFmpeg audio work into this container.
 
 ```bash
 docker stop openreader || true && \

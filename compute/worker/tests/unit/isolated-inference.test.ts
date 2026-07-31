@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { fork } from 'node:child_process';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 class FakeChild extends EventEmitter {
@@ -81,5 +82,70 @@ describe('isolated inference', () => {
     child.emit('message', { requestId, type: 'page-started', pageNumber: 1, totalPages: 2 });
     await expect(inference.promise).rejects.toThrow('progress persistence failed');
     expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+  });
+
+  test('forces a fresh CPU-only child for an OOM fallback attempt', async () => {
+    const child = new FakeChild();
+    childState.current = child;
+    const { startIsolatedInference } = await import('../../src/isolated-inference');
+    startIsolatedInference({
+      request: {
+        kind: 'pdf-layout',
+        documentId: 'doc-cpu-retry',
+        pdfBytes: new ArrayBuffer(0),
+      },
+      reuseProcess: true,
+      providerOverride: 'cpu',
+    });
+
+    expect(vi.mocked(fork)).toHaveBeenLastCalledWith(
+      expect.any(String),
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          COMPUTE_ONNX_EXECUTION_PROVIDER: 'cpu',
+          PDF_LAYOUT_ONNX_EXECUTION_PROVIDER: 'cpu',
+          WHISPER_ONNX_EXECUTION_PROVIDER: 'cpu',
+        }),
+      }),
+    );
+  });
+
+  test('recognizes CUDA allocation failures without treating generic OOM as CUDA', async () => {
+    const { isCudaOutOfMemoryError } = await import('../../src/isolated-inference');
+
+    expect(isCudaOutOfMemoryError(new Error('CUDA_ERROR_OUT_OF_MEMORY'))).toBe(true);
+    expect(isCudaOutOfMemoryError(new Error('CUDNN_STATUS_ALLOC_FAILED'))).toBe(true);
+    expect(isCudaOutOfMemoryError(new Error('JavaScript heap out of memory'))).toBe(false);
+  });
+
+  test('does not settle termination until the native child has exited', async () => {
+    const child = new FakeChild();
+    childState.current = child;
+    const { startIsolatedInference } = await import('../../src/isolated-inference');
+    const inference = startIsolatedInference({
+      request: {
+        kind: 'pdf-layout',
+        documentId: 'doc-termination',
+        pdfBytes: new ArrayBuffer(0),
+      },
+      reuseProcess: true,
+    });
+    const inferenceFailure = expect(inference.promise).rejects.toThrow(
+      'Isolated ONNX inference was terminated after timeout.',
+    );
+    let terminated = false;
+    const termination = inference.terminate().then(() => {
+      terminated = true;
+    });
+
+    await Promise.resolve();
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(terminated).toBe(false);
+
+    child.emit('exit', null, 'SIGKILL');
+    await termination;
+    await inferenceFailure;
+    expect(terminated).toBe(true);
   });
 });
