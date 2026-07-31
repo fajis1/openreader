@@ -160,9 +160,18 @@ export default function HTMLPage() {
     bookId: string,
     settings: AudiobookGenerationSettings,
     signal: AbortSignal,
+    confirmScholarAutoScan = false,
   ) => {
-    return regenerateChapter(chapterIndex, bookId, settings.format, signal, settings);
-  }, [regenerateChapter]);
+    return regenerateChapter(
+      chapterIndex,
+      bookId,
+      settings.format,
+      signal,
+      { ...settings, scholarAutoScan: confirmScholarAutoScan },
+      undefined,
+      id as string,
+    );
+  }, [id, regenerateChapter]);
 
   if (error) {
     return (

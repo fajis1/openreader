@@ -129,8 +129,8 @@ Follow these rules STRICTLY:
 
 10. THE GARBAGE & TABLE FILTER: If an entire chunk consists of academic citations, Tables of Contents, disconnected word soup, broken formatting from a PDF table (e.g., "Parity, suzerainty, patron"), academic indexes, bibliographies, or repetitive strings of page numbers, DO NOT attempt to fix or phoneticize it. Audiobooks cannot read tables or disconnected data. You must return an EMPTY STRING (literally nothing).
 
-11. SURGICAL FOREIGN QUOTE PRUNING (ORDER OF OPERATIONS PRIORITY): This rule takes absolute precedence over Rule 2. Delete any full sentence or long quotation (more than 5 words total) that is predominantly in a foreign language (e.g., German, French, Latin, Greek). 
-   - KEEP short foreign terms (1 to 5 words) embedded within English sentences (e.g., Greek/Hebrew concepts).
+11. SURGICAL FOREIGN QUOTE PRUNING (ORDER OF OPERATIONS PRIORITY): This rule takes absolute precedence over Rule 2. Delete any full sentence or long quotation (5 or more words total) that is predominantly in a foreign language (e.g., German, French, Latin, Greek).
+   - KEEP short foreign terms (1 to 4 words) embedded within English sentences (e.g., Greek/Hebrew concepts).
    - This rule still applies even if an English conjunction (like "and", "or") bridges two long foreign phrases. Destroy the whole block.
    - DO NOT rewrite, paraphrase, or add new English words to bridge the gap left by the deletion. 
    - Mechanically close the gap: Simply remove the foreign text and join the remaining punctuation, or insert an ellipsis (...) to indicate the omission, leaving the surrounding English text exactly as the author wrote it.
@@ -252,8 +252,8 @@ Follow these rules STRICTLY:
 
 10. THE GARBAGE & TABLE FILTER: If an entire chunk consists of academic citations, Tables of Contents, disconnected word soup, broken formatting from a PDF table, academic indexes, bibliographies, or repetitive strings of page numbers, DO NOT attempt to fix or phoneticize it. You must return an EMPTY STRING (literally nothing).
 
-11. SURGICAL FOREIGN QUOTE PRUNING (ORDER OF OPERATIONS PRIORITY): This rule takes absolute precedence over Rule 2. Delete any full sentence or long quotation (more than 5 words total) that is predominantly in a foreign language (e.g., German, French, Latin, extended Greek).
-   - KEEP short foreign terms (1 to 5 words) embedded within English sentences.
+11. SURGICAL FOREIGN QUOTE PRUNING (ORDER OF OPERATIONS PRIORITY): This rule takes absolute precedence over Rule 2. Delete any full sentence or long quotation (5 or more words total) that is predominantly in a foreign language (e.g., German, French, Latin, extended Greek).
+   - KEEP short foreign terms (1 to 4 words) embedded within English sentences.
    - This rule still applies even if an English conjunction (like "and", "or") bridges two long foreign phrases. Destroy the whole block.
    - DO NOT rewrite, paraphrase, or add new English words to bridge the gap left by the deletion.
    - Mechanically close the gap: Simply remove the foreign text and join the remaining punctuation, or insert an ellipsis (...) to indicate the omission.
@@ -313,9 +313,11 @@ Read 6:18.
 
 export const PRESET_MODELS = [
   { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash (Recommended & Fastest)" },
+  { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite (Recommended Cleanup)" },
+  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite (Newer Cleanup)" },
+  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash" },
   { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
   { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (Most Accurate)" },
-  { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite (Efficient)" },
-  { id: "gemma-4-31b-it", name: "Gemma 4 31B IT (Local/Open)" },
+  { id: "gemma-4-31b-it", name: "Gemma 4 31B IT (Free Tier / Open Weights)" },
   { id: "custom", name: "Custom Model Identifier..." }
 ];

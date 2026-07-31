@@ -49,12 +49,19 @@ export interface AudiobookGenerationSettings {
   ttsInstructions?: string;
   language?: string;
   smartAudioProfileId?: string;
+  useSmartAudio?: boolean;
+  /** Internal queue acknowledgement that an unresolved Scholar lexicon may be auto-scanned. */
+  scholarAutoScan?: boolean;
+  /** Internal chapter-map version. Missing/1 retains legacy 4K resume boundaries; 2 uses 12K cleanup batches. */
+  cleanupBatchVersion?: number;
 }
 
 export interface CreateChapterPayload {
   chapterTitle: string;
   text: string;
   bookId: string;
+  /** Source document whose pronunciation/definition lexicon should be used. */
+  documentId?: string;
   format: TTSAudiobookFormat;
   chapterIndex: number;
   settings?: AudiobookGenerationSettings;
@@ -63,7 +70,10 @@ export interface CreateChapterPayload {
 export interface SmartAudioProfile {
   id: string;
   name: string;
+  /** Gemini model used for high-volume text cleanup. */
   aiModel: string;
+  /** Gemini model used only for pronunciation scanning and refinement. */
+  pronunciationAiModel?: string;
   customTtsPrompt: string;
   abbreviations: Record<string, string>;
   pronunciations: Record<string, string>;
@@ -87,10 +97,10 @@ export interface SmartAudioProfile {
   geminiApiKeySourceProfileId?: string;
   backupGeminiApiKeySourceProfileId?: string;
   /**
-   * Which Python worker pipeline to use for AI text cleaning.
-   * 'standard' → audiobook_worker.py (fast, general-purpose)
-   * 'scholar'  → biblical_scholar_worker.py (multi-pass: Greek/Hebrew
-   *              definition injection → Kokoro IPA markup → auto-learning)
+   * Whether locally cached book definitions should be spoken during the
+   * single Smart Audio cleanup pass.
+   * 'standard' → pronunciation markup only
+   * 'scholar'  → pronunciation markup plus the cached contextual definition
    * Defaults to 'standard' when absent.
    */
   workerMode?: 'standard' | 'scholar';

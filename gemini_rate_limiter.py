@@ -3,6 +3,26 @@ import time
 from typing import MutableMapping
 
 
+def extract_gemini_usage(response: object) -> dict[str, int]:
+    """Return non-sensitive Gemini usage counters in a stable JSON shape."""
+    metadata = getattr(response, "usage_metadata", None)
+
+    def count(*names: str) -> int:
+        for name in names:
+            value = getattr(metadata, name, None)
+            if isinstance(value, (int, float)):
+                return max(0, int(value))
+        return 0
+
+    return {
+        "inputTokens": count("prompt_token_count"),
+        "outputTokens": count("candidates_token_count"),
+        "thinkingTokens": count("thoughts_token_count"),
+        "cachedInputTokens": count("cached_content_token_count"),
+        "totalTokens": count("total_token_count"),
+    }
+
+
 def refresh_gemini_cooldown(
     api_state: MutableMapping[str, object],
     *,

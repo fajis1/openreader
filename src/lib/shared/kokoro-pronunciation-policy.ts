@@ -60,6 +60,31 @@ export function isKokoroCompatiblePronunciation(pronunciation: unknown): pronunc
   return getKokoroPronunciationCompatibilityErrors(pronunciation).length === 0;
 }
 
+export function getKokoroPronunciationQualityWarnings(
+  word: string,
+  pronunciation: unknown,
+): string[] {
+  const warnings = [...getKokoroPronunciationCompatibilityErrors(pronunciation)];
+  if (typeof pronunciation !== 'string') return warnings;
+  const inner = pronunciation.trim().replace(/^\/|\/$/g, '');
+  if (/[yj]{2,}/iu.test(inner)) {
+    warnings.push('Suspicious adjacent /y/ and /j/ phonemes may be spoken as separate letter names.');
+  }
+  if (/\b(?:open|close|slash)\b/iu.test(inner)) {
+    warnings.push('Contains markup words that may be spoken literally.');
+  }
+  if (/[\[\]()]|\s{2,}/u.test(inner)) {
+    warnings.push('Contains unexpected markup or spacing inside the pronunciation.');
+  }
+  if (
+    /[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]/u.test(word)
+    && /[A-Z]{2,}/u.test(inner)
+  ) {
+    warnings.push('Contains capital letter sequences inside foreign-word IPA.');
+  }
+  return [...new Set(warnings)];
+}
+
 export function filterKokoroCompatiblePronunciationRecord(value: unknown): Record<string, string> {
   if (typeof value !== 'object' || value === null) return {};
   const result: Record<string, string> = {};

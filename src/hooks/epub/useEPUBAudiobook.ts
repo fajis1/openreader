@@ -72,14 +72,15 @@ type UseEpubAudiobookResult = {
     onChapterComplete?: (chapter: TTSAudiobookChapter) => void,
     providedBookId?: string,
     format?: TTSAudiobookFormat,
-    settings?: AudiobookGenerationSettings
+    settings?: AudiobookGenerationSettings,
   ) => Promise<string>;
   regenerateChapter: (
     chapterIndex: number,
     bookId: string,
     format: TTSAudiobookFormat,
     signal: AbortSignal,
-    settings?: AudiobookGenerationSettings
+    settings?: AudiobookGenerationSettings,
+    sourceDocumentId?: string,
   ) => Promise<TTSAudiobookChapter>;
 };
 
@@ -168,6 +169,7 @@ export function useEPUBAudiobook({
         signal,
         onChapterComplete,
         providedBookId,
+        sourceDocumentId: providedBookId,
         format,
         settings,
       });
@@ -182,13 +184,15 @@ export function useEPUBAudiobook({
     bookId: string,
     format: TTSAudiobookFormat,
     signal: AbortSignal,
-    settings?: AudiobookGenerationSettings
+    settings?: AudiobookGenerationSettings,
+    sourceDocumentId?: string,
   ): Promise<TTSAudiobookChapter> => {
     try {
       return await regenerateAudiobookChapter({
         adapter: audiobookAdapter,
         chapterIndex,
         bookId,
+        sourceDocumentId,
         format,
         signal,
         apiKey,

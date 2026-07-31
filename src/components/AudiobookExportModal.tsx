@@ -37,7 +37,8 @@ interface AudiobookExportModalProps {
     chapterIndex: number,
     bookId: string,
     settings: AudiobookGenerationSettings,
-    signal: AbortSignal
+    signal: AbortSignal,
+    confirmScholarAutoScan?: boolean,
   ) => Promise<TTSAudiobookChapter>;
 }
 
@@ -72,11 +73,14 @@ export function AudiobookExportModal({
   const [savedSettings, setSavedSettings] = useState<AudiobookGenerationSettings | null>(null);
   const [regeneratingChapter, setRegeneratingChapter] = useState<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const scholarWarningHandledRef = useRef(false);
   const [pendingDeleteChapter, setPendingDeleteChapter] = useState<TTSAudiobookChapter | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showRegenerateHint, setShowRegenerateHint] = useState(false);
   const [showBackgroundWarning, setShowBackgroundWarning] = useState(false);
+  const [showScholarScanWarning, setShowScholarScanWarning] = useState(false);
+  const [pendingScholarRegeneration, setPendingScholarRegeneration] = useState<TTSAudiobookChapter | null>(null);
   const [pendingCloseAction, setPendingCloseAction] = useState<'close_modal' | 'navigate' | null>(null);
 
   const formatSpeed = useCallback((speed: number) => {
@@ -298,7 +302,7 @@ export function AudiobookExportModal({
     setCurrentChapter(chapter.title);
   }, []);
 
-  const handleStartGeneration = useCallback(async () => {
+  const handleStartGeneration = useCallback(async (confirmScholarAutoScan = false) => {
     if (!effectiveSettings) {
       setErrorMessage('No voice selected; please choose a voice before generating.');
       return;
@@ -320,9 +324,16 @@ export function AudiobookExportModal({
       const res = await fetch('/api/audiobooks/queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId, settings: settingsWithToggle })
+        body: JSON.stringify({ documentId, settings: settingsWithToggle, confirmScholarAutoScan })
       });
-      if (!res.ok) throw new Error('Failed to queue audiobook on server');
+      const responseBody = await res.json().catch(() => null);
+      if (res.status === 409 && responseBody?.code === 'SCHOLAR_SCAN_REQUIRED') {
+        setIsGenerating(false);
+        scholarWarningHandledRef.current = true;
+        setShowScholarScanWarning(true);
+        return;
+      }
+      if (!res.ok) throw new Error(responseBody?.error || 'Failed to queue audiobook on server');
       
       // Start polling
       await fetchExistingChapters();
@@ -366,7 +377,14 @@ export function AudiobookExportModal({
 
   // Effect to auto-start generation if URL has autoGenerate=true
   useEffect(() => {
-    if (autoGenerate && !isGenerating && !isLoadingExisting && effectiveSettings && bookId === null) {
+    if (
+      autoGenerate
+      && !scholarWarningHandledRef.current
+      && !isGenerating
+      && !isLoadingExisting
+      && effectiveSettings
+      && bookId === null
+    ) {
       // Check batch queue to apply settings automatically
       const queueRaw = localStorage.getItem('batchAudiobookQueue');
       if (queueRaw) {
@@ -418,7 +436,10 @@ export function AudiobookExportModal({
     };
   }, []);
 
-  const handleRegenerateChapter = useCallback(async (chapter: TTSAudiobookChapter) => {
+  const handleRegenerateChapter = useCallback(async (
+    chapter: TTSAudiobookChapter,
+    confirmScholarAutoScan = false,
+  ) => {
     if (!onRegenerateChapter || !bookId) return;
     if (!effectiveSettings) {
       setErrorMessage('No voice selected; please choose a voice before generating.');
@@ -452,7 +473,8 @@ export function AudiobookExportModal({
         chapter.index,
         bookId,
         effectiveSettings,
-        abortControllerRef.current.signal
+        abortControllerRef.current.signal,
+        confirmScholarAutoScan,
       );
 
       // Update chapter with new data
@@ -464,7 +486,17 @@ export function AudiobookExportModal({
 
     } catch (error) {
       console.error('Error regenerating chapter:', error);
-      if (error instanceof Error && error.message.includes('cancelled')) {
+      if (
+        error instanceof Error
+        && (error as Error & { code?: string }).code === 'SCHOLAR_SCAN_REQUIRED'
+      ) {
+        setPendingScholarRegeneration(chapter);
+        setChapters(prev => prev.map(c =>
+          c.index === chapter.index
+            ? { ...c, status: chapter.status }
+            : c
+        ));
+      } else if (error instanceof Error && error.message.includes('cancelled')) {
         console.log('Chapter regeneration cancelled');
       } else {
         setErrorMessage(error instanceof Error ? error.message : 'Failed to regenerate chapter. Please try again.');
@@ -869,7 +901,7 @@ export function AudiobookExportModal({
 			                              <div className="mt-4 flex items-center gap-2">
 			                                {chapters.length === 0 && (
 			                                  <Button
-			                                    onClick={handleStartGeneration}
+				                                    onClick={() => void handleStartGeneration()}
 			                                    disabled={!canGenerate}
 			                                    variant="primary"
 			                                    size="md"
@@ -880,7 +912,7 @@ export function AudiobookExportModal({
 			                                )}
 			                                {showResumeButton && (
 			                                  <Button
-			                                    onClick={handleStartGeneration}
+				                                    onClick={() => void handleStartGeneration()}
 			                                    disabled={!canGenerate}
 			                                    variant="primary"
 			                                    size="md"
@@ -1092,6 +1124,33 @@ export function AudiobookExportModal({
                   )}
       </ReaderSidebarShell>
 
+      <ConfirmDialog
+        isOpen={showScholarScanWarning}
+        onClose={() => setShowScholarScanWarning(false)}
+        onConfirm={() => {
+          setShowScholarScanWarning(false);
+          void handleStartGeneration(true);
+        }}
+        title="Pronunciation & Definition Scan Needed"
+        message="This book has not completed a pronunciation and definition scan. We recommend running the Foreign Word Pre-Scan and double-checking its pronunciations first. If you continue, OpenReader will scan unresolved Greek and Hebrew terms, adopt Gemini’s recommended pronunciations, and cache short English definitions before audiobook generation."
+        confirmText="Continue & Auto-Scan"
+        cancelText="Review First"
+        isDangerous={false}
+      />
+      <ConfirmDialog
+        isOpen={pendingScholarRegeneration !== null}
+        onClose={() => setPendingScholarRegeneration(null)}
+        onConfirm={() => {
+          const chapter = pendingScholarRegeneration;
+          setPendingScholarRegeneration(null);
+          if (chapter) void handleRegenerateChapter(chapter, true);
+        }}
+        title="Pronunciation & Definition Scan Needed"
+        message="This chapter belongs to a Scholar audiobook whose pronunciation and definition scan is missing or incomplete. Review the book pronunciations first, or continue to let OpenReader scan this chapter and adopt Gemini’s recommended defaults before regenerating it."
+        confirmText="Continue & Auto-Scan"
+        cancelText="Review First"
+        isDangerous={false}
+      />
       <ConfirmDialog
         isOpen={showBackgroundWarning}
         onClose={() => {

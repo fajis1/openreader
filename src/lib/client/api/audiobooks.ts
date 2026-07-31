@@ -157,8 +157,16 @@ export const createAudiobookChapter = async (
   }
 
   if (response.status === 409) {
-    const data = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(data?.error || 'Audiobook settings mismatch');
+    const data = await response.json().catch(() => null) as {
+      code?: string;
+      error?: string;
+      detail?: string;
+    } | null;
+    const err = new Error(data?.error || 'Audiobook settings mismatch') as TTSRequestError;
+    err.status = response.status;
+    err.code = data?.code;
+    err.detail = data?.detail || data?.error;
+    throw err;
   }
 
   if (!response.ok) {

@@ -6,56 +6,12 @@ import time
 import difflib
 from nats.aio.client import Client as NATS
 from google import genai
-from gemini_rate_limiter import refresh_gemini_cooldown
+from gemini_rate_limiter import extract_gemini_usage, refresh_gemini_cooldown
 
 # --- PER-KEY RATE LIMITER STATE ---
 API_STATES = {}
 MAX_DELAY = 300            
 MIN_DELAY = 5              
-
-LINGUISTIC_PROMPT = """
-Perform only the following task: Search the provided text for isolated Greek or Hebrew words (1 to 3 words long). 
-
-If a word is strictly Koine Greek or Biblical Hebrew script, provide a one-word English definition.
-
-HARD CONSTRAINTS:
-1. IF the text contains English, German, Latin, or proper names, return an empty JSON object {}.
-2. IF the text contains a sequence of 4 or more foreign words, return an empty JSON object {}.
-3. DO NOT define English theological words (Messiah, glory, law, participation, etc).
-4. DO NOT define Greek/Hebrew articles or prepositions (του, της, αυτου, etc).
-
-CRITICAL RESTRAINTS:
-1. IGNORE ENGLISH AND NAMES: Do not extract standard English words, theological terms (e.g., law, Messiah, glory), or proper names (e.g., Enoch, Esdras, Baruch).
-2. IGNORE MODERN LANGUAGES: Do not extract German, French, or Latin words (e.g., Taufe, Die, und, Leiden). ONLY target Koine Greek and Biblical Hebrew.
-3. IGNORE BASIC GRAMMAR: Do not extract basic Greek/Hebrew articles, prepositions, or pronouns (e.g., της, του, αυτου, εν, και).
-4. IGNORE LONG PHRASES (PIPELINE SURVIVAL RULE): If you see a sequence of 4 or more consecutive Greek/Hebrew words, IGNORE all of them. Only define isolated terms (1 to 3 words max).
-
-OUTPUT FORMAT:
-Return a JSON object where the keys are the EXACT foreign words found in the text, and the values are their single-word English definitions. Return ONLY the JSON object.
-
-EXAMPLES OF WHAT TO DO:
-Input: "...when the δόξα of God..."
-Output: 
-{
-  "δόξα": "glory"
-}
-
-EXAMPLES OF WHAT NOT TO DO (RETURN EMPTY JSON):
-Input: "...the law and the Messiah bring glorification..."
-Output: 
-{}
-(Reason: English words. Ignore completely.)
-
-Input: "...In der Taufe haben Christen..."
-Output: 
-{}
-(Reason: German language. Ignore completely.)
-
-Input: "...συμμορφους της εικονος του υιου αυτου..."
-Output: 
-{}
-(Reason: 6 consecutive Greek words. Leave untouched so downstream filters can process it.)
-"""
 
 def academic_pre_clean(text, user_abbreviations, biblical_books):
     """Phase 1: Regex & Structural Expansion"""
@@ -83,48 +39,6 @@ def extract_learned_words(cleaned_text, existing_dict):
         if name not in existing_dict and name not in new_words:
             new_words[name] = ipa
     return new_words
-
-async def enrich_text_with_semantics(chunk, api_key, backup_api_key=None, model_name="gemini-3.5-flash"):
-    """Uses Gemini to inject English definitions next to Greek/Hebrew words."""
-    if not api_key:
-        return chunk, []
-        
-    try:
-        client = genai.Client(api_key=api_key)
-        full_prompt = f"{LINGUISTIC_PROMPT}\n\nText:\n{chunk}"
-        
-        response = await client.aio.models.generate_content(
-            model=model_name,
-            contents=full_prompt,
-            config={"response_mime_type": "application/json", "temperature": 0.0}
-        )
-        
-        definitions = json.loads(response.text.strip())
-        if "defined_words" in definitions:
-            definitions = definitions["defined_words"]
-            
-        words_defined = []
-        modified_text = chunk
-        
-        for foreign_word, english_def in definitions.items():
-            if not isinstance(english_def, str) or not english_def: 
-                continue
-            if foreign_word.lower() in ["the", "and", "or", "in", "of", "to", "a", "is", "that", "it", "law", "messiah", "glory", "baptism", "taufe", "die", "und", "leiden"]:
-                continue
-            
-            if foreign_word in modified_text:
-                replacement = f"{foreign_word}, {english_def},"
-                modified_text = modified_text.replace(foreign_word, replacement)
-                words_defined.append(foreign_word)
-            
-        return modified_text, words_defined
-        
-    except Exception as e:
-        if backup_api_key:
-            print(f"    [🔄] Semantic enrichment hit error with primary key: {e}. Trying backup key...")
-            return await enrich_text_with_semantics(chunk, backup_api_key, None, model_name)
-        print(f"    [GEMINI ERROR] Semantic enrichment failed: {e}")
-        return chunk, []
 
 async def process_message(msg):
     data = json.loads(msg.data.decode())
@@ -156,14 +70,12 @@ async def process_message(msg):
         print("  -> Running fast pre-clean...")
         pre_cleaned_text = academic_pre_clean(raw_text, abbreviations, books)
         
-        # PHASE 2: Semantic Enrichment (Biblical Language Scholar Profile)
-        print("  -> Running Semantic Enrichment via Gemini...")
-        enriched_text, words_defined = await enrich_text_with_semantics(pre_cleaned_text, api_key, backup_api_key, ai_model)
-        
-        if words_defined:
-            print(f"  -> [SEMANTICS] Enriched {len(words_defined)} biblical words with English definitions.")
+        # Definitions and pronunciations are resolved once during the book
+        # pre-scan and are already present in raw_text. Scholar cleanup must
+        # remain a single Gemini request per chunk.
+        enriched_text = pre_cleaned_text
 
-        # PHASE 3: Gemini Processing
+        # PHASE 2: Gemini Processing
         print("  -> Initializing Gemini SDK...")
         client = genai.Client(api_key=api_key)
         
@@ -236,12 +148,12 @@ async def process_message(msg):
                         
                     raise e
 
-        # PHASE 4: Two-Way Sync Extraction
+        # PHASE 3: Two-Way Sync Extraction
         learned_words = extract_learned_words(final_text, pronunciations)
         if learned_words:
             print(f"  -> [LEARNED] Discovered {len(learned_words)} new phonetic overrides!")
 
-        # PHASE 5: Changelog Generation
+        # PHASE 4: Changelog Generation
         diff_lines = list(difflib.unified_diff(
             raw_text.splitlines(),
             final_text.splitlines(),
@@ -255,7 +167,8 @@ async def process_message(msg):
             "status": "success",
             "cleaned_text": final_text,
             "new_pronunciations": learned_words,
-            "changelog": changelog
+            "changelog": changelog,
+            "usage": extract_gemini_usage(response),
         }
         
         await msg.respond(json.dumps(result).encode())

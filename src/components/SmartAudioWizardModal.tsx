@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { ModalFrame } from '@/components/ui';
-import { PRESET_MODELS, PRESET_PROMPTS } from '@/components/constants';
+import { PRESET_MODELS } from '@/components/constants';
+import {
+  DEFAULT_CLEANUP_AI_MODEL,
+  DEFAULT_PRONUNCIATION_AI_MODEL,
+} from '@/lib/shared/smart-audio-models';
 
 interface SmartAudioWizardModalProps {
   isOpen: boolean;
@@ -10,7 +14,8 @@ interface SmartAudioWizardModalProps {
   onSaveUniversalSetup: (config: {
     universalApiKey: string;
     backupApiKey: string;
-    selectedModel: string;
+    cleanupModel: string;
+    pronunciationModel: string;
     chosenWorkerMode: 'standard' | 'scholar';
     useGlobal: boolean;
     importGlobal: boolean;
@@ -27,7 +32,8 @@ export function SmartAudioWizardModal({
   const [step, setStep] = useState<number>(1);
   const [universalApiKey, setUniversalApiKey] = useState<string>(currentApiKey);
   const [backupApiKey, setBackupApiKey] = useState<string>('');
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.6-flash');
+  const [cleanupModel, setCleanupModel] = useState<string>(DEFAULT_CLEANUP_AI_MODEL);
+  const [pronunciationModel, setPronunciationModel] = useState<string>(DEFAULT_PRONUNCIATION_AI_MODEL);
   const [chosenWorkerMode, setChosenWorkerMode] = useState<'standard' | 'scholar'>('scholar');
   const [scholarDefinitionChoice, setScholarDefinitionChoice] = useState<'with_definitions' | 'without_definitions'>('with_definitions');
   const [globalOption, setGlobalOption] = useState<'use_global' | 'import_global' | 'disabled'>('use_global');
@@ -77,7 +83,7 @@ export function SmartAudioWizardModal({
     },
     {
       title: "11. Surgical Foreign Quote Pruning",
-      desc: "Deletes full foreign language sentences (>5 words in German, French, etc.) while preserving short embedded Greek/Hebrew terms within English sentences."
+      desc: "Deletes full foreign language sentences (5 or more words in German, French, etc.) while preserving short embedded Greek/Hebrew terms within English sentences."
     },
     {
       title: "12. Section Heading Pacing",
@@ -92,7 +98,8 @@ export function SmartAudioWizardModal({
       await onSaveUniversalSetup({
         universalApiKey,
         backupApiKey,
-        selectedModel,
+        cleanupModel,
+        pronunciationModel,
         chosenWorkerMode: finalWorkerMode,
         useGlobal: globalOption !== 'disabled',
         importGlobal: globalOption === 'import_global',
@@ -116,7 +123,7 @@ export function SmartAudioWizardModal({
             </h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               Step {step} of 4: {
-                step === 1 ? 'Universal API Key & Default AI Engine' :
+                step === 1 ? 'Universal API Key & AI Models' :
                 step === 2 ? 'Profile & Biblical Scholar Mode Selection' :
                 step === 3 ? 'Global Learned Dictionary Setup' :
                 'Interactive Prompt Rule Walkthrough (12 Points)'
@@ -174,22 +181,42 @@ export function SmartAudioWizardModal({
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-semibold mb-1 text-gray-900 dark:text-gray-100">
-                    Default AI Model Choice
-                  </label>
-                  <select
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    className="w-full p-2.5 border rounded-lg bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 font-medium text-sm shadow-sm"
-                  >
-                    {PRESET_MODELS.map((m) => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    <strong>Gemini 3.6 Flash</strong> is selected by default for maximum speed and superior Kokoro IPA phonetics.
-                  </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold mb-1 text-gray-900 dark:text-gray-100">
+                      PDF & Audiobook Cleanup Model
+                    </label>
+                    <select
+                      value={cleanupModel}
+                      onChange={(e) => setCleanupModel(e.target.value)}
+                      className="w-full p-2.5 border rounded-lg bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 font-medium text-sm shadow-sm"
+                    >
+                      {PRESET_MODELS.filter((model) => model.id !== 'custom').map((model) => (
+                        <option key={model.id} value={model.id}>{model.name}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Used for high-volume OCR and manuscript cleanup. Flash-Lite is the economical default.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold mb-1 text-gray-900 dark:text-gray-100">
+                      Pronunciation Model
+                    </label>
+                    <select
+                      value={pronunciationModel}
+                      onChange={(e) => setPronunciationModel(e.target.value)}
+                      className="w-full p-2.5 border rounded-lg bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 font-medium text-sm shadow-sm"
+                    >
+                      {PRESET_MODELS.filter((model) => model.id !== 'custom').map((model) => (
+                        <option key={model.id} value={model.id}>{model.name}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Used only by pronunciation pre-scan and refinement, where the smarter Flash model is recommended.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

@@ -14,6 +14,14 @@ import type {
   TTSAudiobookFormat,
 } from '@/types/tts';
 import { normalizeTextForTts } from '@/lib/shared/nlp';
+import {
+  batchAudiobookText,
+  batchAudiobookTextLegacy,
+  cleanupBatchTargetForVersion,
+  CURRENT_AUDIOBOOK_BATCH_VERSION,
+  SMART_AUDIO_CLEANUP_TARGET_CHARACTERS,
+} from '@/lib/shared/audiobook-batching';
+import { truncateAudiobookEndMatter } from '@/lib/shared/audiobook-end-matter';
 
 export interface PreparedAudiobookChapter {
   index: number;
@@ -21,70 +29,28 @@ export interface PreparedAudiobookChapter {
   text: string;
 }
 
-export function batchPreparedChapters(rawChapters: PreparedAudiobookChapter[]): PreparedAudiobookChapter[] {
-  const softBatchCharacters = 4000;
-  const chapters: PreparedAudiobookChapter[] = [];
-
+export function batchPreparedChapters(
+  rawChapters: PreparedAudiobookChapter[],
+  targetCharacters = SMART_AUDIO_CLEANUP_TARGET_CHARACTERS,
+): PreparedAudiobookChapter[] {
   const remoteLog = (message: string) => {
     console.log(message);
     fetch('/api/log', { method: 'POST', body: JSON.stringify({ message }) }).catch(() => {});
   };
-
-  let currentBatchText = '';
-  let currentBatchTitle = rawChapters[0]?.title || '';
-  let batchIndex = 0;
-
-  for (const item of rawChapters) {
-    // We only break the item text into its natural paragraphs
-    const paragraphs = item.text.split('\n\n').map(p => p.trim()).filter(Boolean);
-    
-    remoteLog(`[batchPreparedChapters] Analyzing chapter "${item.title}". Found ${paragraphs.length} paragraphs separated by \\n\\n.`);
-
-    for (let i = 0; i < paragraphs.length; i++) {
-      const paragraph = paragraphs[i];
-      if (paragraph.length > 6000) {
-        remoteLog(`[batchPreparedChapters] ⚠️ Found unusually large paragraph (${paragraph.length} chars) at paragraph index ${i}. This will be passed intact as its own batch.`);
-      }
-
-      const addedLength = currentBatchText.length > 0 ? paragraph.length + 2 : paragraph.length;
-      
-      // If adding this paragraph exceeds the soft limit, and we already have some text in the batch,
-      // we finish the current batch and start a new one.
-      // This means a single huge paragraph will simply form its own batch.
-      if (currentBatchText.length + addedLength > softBatchCharacters && currentBatchText.length > 0) {
-        remoteLog(`[batchPreparedChapters] Creating batch ${batchIndex}. Text length: ${currentBatchText.length}`);
-        chapters.push({
-          title: currentBatchTitle,
-          text: currentBatchText,
-          index: batchIndex++,
-        });
-        currentBatchText = paragraph;
-        currentBatchTitle = item.title;
-      } else {
-        currentBatchText += (currentBatchText ? '\n\n' : '') + paragraph;
-        // Set title if this is the start of a new batch
-        if (currentBatchText === paragraph) {
-          currentBatchTitle = item.title;
-        }
-      }
-    }
-  }
-
-  // Push whatever is left in the cart at the very end
-  if (currentBatchText.length > 0) {
-    remoteLog(`[batchPreparedChapters] Creating final batch ${batchIndex}. Text length: ${currentBatchText.length}`);
-    chapters.push({
-      title: currentBatchTitle,
-      text: currentBatchText,
-      index: batchIndex++,
-    });
-  }
-
+  const chapters = targetCharacters === cleanupBatchTargetForVersion(1)
+    ? batchAudiobookTextLegacy(rawChapters)
+    : batchAudiobookText(rawChapters, targetCharacters);
+  chapters.forEach((chapter) => {
+    remoteLog(
+      `[batchPreparedChapters] Creating batch ${chapter.index}. Text length: ${chapter.text.length}; target: ${targetCharacters}`,
+    );
+  });
   return chapters;
 }
 
 export interface AudiobookSourceAdapter {
   prepareChapters: () => Promise<PreparedAudiobookChapter[]>;
+  prepareChaptersForBatchVersion?: (cleanupBatchVersion: number) => Promise<PreparedAudiobookChapter[]>;
   prepareChapter: (chapterIndex: number) => Promise<PreparedAudiobookChapter>;
   noContentMessage: string;
   noAudioGeneratedMessage: string;
@@ -99,6 +65,7 @@ interface RunAudiobookGenerationOptions {
   signal?: AbortSignal;
   onChapterComplete?: (chapter: TTSAudiobookChapter) => void;
   providedBookId?: string;
+  sourceDocumentId?: string;
   format?: TTSAudiobookFormat;
   settings?: AudiobookGenerationSettings;
   retryOptions?: TTSRetryOptions;
@@ -108,6 +75,7 @@ interface RegenerateAudiobookChapterOptions {
   adapter: AudiobookSourceAdapter;
   chapterIndex: number;
   bookId: string;
+  sourceDocumentId?: string;
   format: TTSAudiobookFormat;
   signal: AbortSignal;
   apiKey: string;
@@ -198,6 +166,7 @@ async function _runAudiobookGeneration({
   signal,
   onChapterComplete,
   providedBookId = '',
+  sourceDocumentId,
   format = 'mp3',
   settings,
   retryOptions = {
@@ -218,25 +187,20 @@ async function _runAudiobookGeneration({
     }
   },
 }: RunAudiobookGenerationOptions): Promise<string> {
-  const rawChapters = (await adapter.prepareChapters()).map((chapter) => ({
-    ...chapter,
-    text: normalizeTextForTts(chapter.text, { language: settings?.language }),
-  }));
-  const chapters = batchPreparedChapters(rawChapters);
-  const totalLength = chapters.reduce((sum, chapter) => sum + chapter.text.length, 0);
-  if (totalLength === 0) {
-    throw new Error(adapter.noContentMessage);
-  }
-
   const { effectiveProviderRef, effectiveFormat } = resolveAudiobookRequestSettings(settings, defaultProvider, format);
   const reqHeaders = buildAudiobookRequestHeaders(apiKey, baseUrl, effectiveProviderRef);
   let processedLength = 0;
   let bookId = providedBookId;
+  // A caller-supplied document ID is also used for brand-new foreground
+  // audiobooks. Start current and downgrade only when status confirms a
+  // pre-versioned existing audiobook.
+  let cleanupBatchVersion = CURRENT_AUDIOBOOK_BATCH_VERSION;
 
   const existingIndices = new Set<number>();
   if (bookId) {
     try {
       const existingData = await getAudiobookStatus(bookId);
+      cleanupBatchVersion = existingData.settings?.cleanupBatchVersion ?? 1;
       if (existingData.chapters && existingData.chapters.length > 0) {
         for (const chapter of existingData.chapters) {
           if (chapter.status === 'completed') {
@@ -248,6 +212,27 @@ async function _runAudiobookGeneration({
       console.error('Error checking existing chapters:', error);
     }
   }
+  const preparedChapters = adapter.prepareChaptersForBatchVersion
+    ? await adapter.prepareChaptersForBatchVersion(cleanupBatchVersion)
+    : await adapter.prepareChapters();
+  const normalizedChapters = preparedChapters.map((chapter) => ({
+    ...chapter,
+    text: normalizeTextForTts(chapter.text, { language: settings?.language }),
+  }));
+  const rawChapters = cleanupBatchVersion === CURRENT_AUDIOBOOK_BATCH_VERSION
+    ? truncateAudiobookEndMatter(normalizedChapters)
+    : normalizedChapters;
+  const chapters = batchPreparedChapters(
+    rawChapters,
+    cleanupBatchTargetForVersion(cleanupBatchVersion),
+  );
+  const totalLength = chapters.reduce((sum, chapter) => sum + chapter.text.length, 0);
+  if (totalLength === 0) {
+    throw new Error(adapter.noContentMessage);
+  }
+  const settingsWithBatchVersion = settings
+    ? { ...settings, cleanupBatchVersion }
+    : settings;
 
   for (const chapter of chapters) {
     if (signal?.aborted) {
@@ -276,9 +261,10 @@ async function _runAudiobookGeneration({
             chapterTitle: chapter.title,
             text: trimmedText,
             bookId,
+            documentId: sourceDocumentId,
             format: effectiveFormat,
             chapterIndex: chapter.index,
-            settings,
+            settings: settingsWithBatchVersion,
           }, reqHeaders, signal);
         },
         retryOptions,
@@ -342,6 +328,7 @@ async function _regenerateAudiobookChapter({
   adapter,
   chapterIndex,
   bookId,
+  sourceDocumentId,
   format,
   signal,
   apiKey,
@@ -366,11 +353,22 @@ async function _regenerateAudiobookChapter({
     }
   },
 }: RegenerateAudiobookChapterOptions): Promise<TTSAudiobookChapter> {
-  const rawChapters = (await adapter.prepareChapters()).map((chapter) => ({
+  const existingData = await getAudiobookStatus(bookId);
+  const cleanupBatchVersion = existingData.settings?.cleanupBatchVersion ?? 1;
+  const preparedChapters = adapter.prepareChaptersForBatchVersion
+    ? await adapter.prepareChaptersForBatchVersion(cleanupBatchVersion)
+    : await adapter.prepareChapters();
+  const normalizedChapters = preparedChapters.map((chapter) => ({
     ...chapter,
     text: normalizeTextForTts(chapter.text, { language: settings?.language }),
   }));
-  const chapters = batchPreparedChapters(rawChapters);
+  const rawChapters = cleanupBatchVersion === CURRENT_AUDIOBOOK_BATCH_VERSION
+    ? truncateAudiobookEndMatter(normalizedChapters)
+    : normalizedChapters;
+  const chapters = batchPreparedChapters(
+    rawChapters,
+    cleanupBatchTargetForVersion(cleanupBatchVersion),
+  );
   const chapter = chapters.find((c) => c.index === chapterIndex);
   
   if (!chapter) {
@@ -395,9 +393,12 @@ async function _regenerateAudiobookChapter({
         chapterTitle: chapter.title,
         text: trimmedText,
         bookId,
+        documentId: sourceDocumentId,
         format: effectiveFormat,
         chapterIndex,
-        settings,
+        settings: settings
+          ? { ...settings, cleanupBatchVersion }
+          : settings,
       }, reqHeaders, signal);
     },
     retryOptions,

@@ -695,6 +695,7 @@ export function usePdfDocument(): PdfDocumentState {
         signal,
         onChapterComplete,
         providedBookId,
+        sourceDocumentId: currDocId,
         format,
         settings,
       });
@@ -717,7 +718,7 @@ export function usePdfDocument(): PdfDocumentState {
     } finally {
       setIsAudioGenerating(false);
     }
-  }, [audiobookAdapter, apiKey, baseUrl, providerRef]);
+  }, [audiobookAdapter, apiKey, baseUrl, currDocId, providerRef]);
 
   /**
    * Regenerates a specific chapter (page) of the PDF audiobook
@@ -734,6 +735,7 @@ export function usePdfDocument(): PdfDocumentState {
         adapter: audiobookAdapter,
         chapterIndex,
         bookId,
+        sourceDocumentId: currDocId,
         format,
         signal,
         apiKey,
@@ -748,7 +750,7 @@ export function usePdfDocument(): PdfDocumentState {
       console.error('Error regenerating page:', error);
       throw error;
     }
-  }, [audiobookAdapter, apiKey, baseUrl, providerRef]);
+  }, [audiobookAdapter, apiKey, baseUrl, currDocId, providerRef]);
 
   /**
    * Effect hook to initialize TTS as non-EPUB mode

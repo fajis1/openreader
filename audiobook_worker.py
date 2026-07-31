@@ -4,7 +4,7 @@ import re
 import os
 from nats.aio.client import Client as NATS
 from google import genai
-from gemini_rate_limiter import refresh_gemini_cooldown
+from gemini_rate_limiter import extract_gemini_usage, refresh_gemini_cooldown
 
 # --- PER-KEY RATE LIMITER STATE ---
 # Maps api_key -> {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0}
@@ -188,7 +188,8 @@ async def process_message(msg):
             "status": "success",
             "cleaned_text": final_text,
             "new_pronunciations": learned_words,
-            "changelog": changelog
+            "changelog": changelog,
+            "usage": extract_gemini_usage(response),
         }
         
         await msg.respond(json.dumps(result).encode())

@@ -26,7 +26,7 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('setPanelWidth(nextWidth)');
     expect(source).toContain('Drag the lower-right corner to resize this window.');
     expect(source).toContain('table-fixed');
-    expect(source).toContain('<col className="w-[20%]" />');
+    expect(source).toContain('<col className="w-[16%]" />');
     expect(source).toContain('[overflow-wrap:anywhere]');
     expect(source).toContain('generateOnlyForNewWords');
     expect(source).toContain('Generate 5 only for new words');
@@ -37,6 +37,8 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('Preparing additional pronunciation audio in the background');
     expect(source).toContain('Gemini generated {scanJobGeneratedChoices} choices for');
     expect(source).toContain('No Gemini pronunciation was generated for this word');
+    expect(source).toContain('English Definition');
+    expect(source).toContain('definitionNeedsReview');
   });
 
   test('labels library pronunciations and new Gemini recommendations distinctly', () => {

@@ -16,6 +16,8 @@ ALL_FOREIGN_REGEX = re.compile(r'[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF\u0400-
 GREEK_HEBREW_REGEX = re.compile(r'[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF]+')
 # Fantasy / LitRPG capitalized terms / uncommon non-dictionary words (e.g. Xylar, Eldoria, Statblock terms, Khar'Thok)
 FANTASY_LITRPG_REGEX = re.compile(r"\b[A-Z][a-z]+(?:'[A-Z][a-z]+)?\b|\b[a-zA-Z]*[0-9]+[a-zA-Z]*\b")
+ALL_FOREIGN_TERM_CHARS = r"\u0300-\u036F\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF\u0400-\u04FF\u4E00-\u9FFF\u0600-\u06FF\u00C0-\u024F\u1E00-\u1EFF"
+GREEK_HEBREW_TERM_CHARS = r"\u0300-\u036F\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF"
 
 # Common English stop words for LitRPG / Fantasy filtering
 ENGLISH_STOP_WORDS = {
@@ -134,11 +136,46 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
     for word, freq in top_words:
         pct = (freq / total_occurrences) * 100
         pronunciations = global_dict.get(word, ["No global pronunciation recorded yet"])
+        contexts = []
+        if mode == "fantasy_litrpg":
+            term_chars = r"A-Za-z0-9'"
+        elif mode == "greek_hebrew":
+            term_chars = GREEK_HEBREW_TERM_CHARS
+        elif mode == "all_foreign":
+            term_chars = ALL_FOREIGN_TERM_CHARS
+        else:
+            term_chars = r"\w"
+        complete_term_pattern = re.compile(
+            rf"(?<![{term_chars}]){re.escape(word)}(?![{term_chars}])",
+            re.IGNORECASE,
+        )
+        for match in complete_term_pattern.finditer(full_text):
+            start = max(
+                full_text.rfind(".", 0, match.start()),
+                full_text.rfind("!", 0, match.start()),
+                full_text.rfind("?", 0, match.start()),
+                full_text.rfind("\n", 0, match.start()),
+            )
+            endings = [
+                pos for pos in (
+                    full_text.find(".", match.end()),
+                    full_text.find("!", match.end()),
+                    full_text.find("?", match.end()),
+                    full_text.find("\n", match.end()),
+                ) if pos >= 0
+            ]
+            end = min(endings) + 1 if endings else min(len(full_text), match.end() + 180)
+            context = full_text[start + 1:end].strip()
+            if context and context not in contexts:
+                contexts.append(context[:320])
+            if len(contexts) >= 2:
+                break
         results.append({
             "word": word,
             "count": freq,
             "percentage": round(pct, 2),
-            "pronunciations": pronunciations
+            "pronunciations": pronunciations,
+            "contexts": contexts,
         })
 
     return results

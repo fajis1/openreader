@@ -2,8 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import { db } from '@/db';
 import { userPreferences } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { SmartAudioProfile } from '@/types/client';
+import {
+  DEFAULT_CLEANUP_AI_MODEL,
+  resolvePronunciationAiModel,
+} from '@/lib/shared/smart-audio-models';
 import defaultProfilesData from './default_smart_audio_profiles.json';
 
 const configDir = path.join(process.cwd(), 'config');
@@ -14,11 +18,39 @@ export interface SmartAudioProfilesDocument {
   profiles: SmartAudioProfile[];
 }
 
+export function mergeGeneratedPronunciations(
+  profile: SmartAudioProfile,
+  generatedPronunciations: Record<string, string>,
+  pronunciationsAtScanStart: Record<string, string>,
+): {
+  profile: SmartAudioProfile;
+  appliedWords: string[];
+  preservedUserEdits: string[];
+} {
+  const pronunciations = { ...(profile.pronunciations || {}) };
+  const appliedWords: string[] = [];
+  const preservedUserEdits: string[] = [];
+  for (const [word, pronunciation] of Object.entries(generatedPronunciations)) {
+    if (pronunciations[word] !== pronunciationsAtScanStart[word]) {
+      preservedUserEdits.push(word);
+      continue;
+    }
+    pronunciations[word] = pronunciation;
+    appliedWords.push(word);
+  }
+  return {
+    profile: { ...profile, pronunciations },
+    appliedWords,
+    preservedUserEdits,
+  };
+}
+
 export function redactSmartAudioProfileSecrets(profile: SmartAudioProfile): SmartAudioProfile {
   return {
     id: profile.id,
     name: profile.name,
     aiModel: profile.aiModel,
+    pronunciationAiModel: profile.pronunciationAiModel,
     customTtsPrompt: profile.customTtsPrompt,
     abbreviations: profile.abbreviations,
     pronunciations: profile.pronunciations,
@@ -85,7 +117,8 @@ function sanitizeProfile(profile: Partial<SmartAudioProfile> & { id?: string; na
   return {
     id,
     name,
-    aiModel: (profile.aiModel || 'gemini-3.6-flash').trim(),
+    aiModel: (profile.aiModel || DEFAULT_CLEANUP_AI_MODEL).trim(),
+    pronunciationAiModel: resolvePronunciationAiModel(profile),
     customTtsPrompt: profile.customTtsPrompt || '',
     abbreviations: profile.abbreviations || {},
     pronunciations: profile.pronunciations || {},
@@ -93,7 +126,7 @@ function sanitizeProfile(profile: Partial<SmartAudioProfile> & { id?: string; na
     useGlobalPronunciations: profile.useGlobalPronunciations ?? false,
     pronunciationPromptMode: profile.pronunciationPromptMode === 'custom' ? 'custom' : 'default',
     customPronunciationPrompt: profile.customPronunciationPrompt || '',
-    workerMode: profile.workerMode || 'scholar',
+    workerMode: profile.workerMode || 'standard',
     // Keep the key if already stored; never default to a non-empty string
     geminiApiKey: (profile.geminiApiKey || '').trim() || undefined,
     backupGeminiApiKey: (profile.backupGeminiApiKey || '').trim() || undefined,
@@ -144,6 +177,15 @@ function serializeDataJson(val: Record<string, unknown>): string | Record<string
   return process.env.POSTGRES_URL ? val : JSON.stringify(val);
 }
 
+async function lockSmartAudioProfilesRow(tx: typeof db, userId: string): Promise<void> {
+  if (!process.env.POSTGRES_URL) return;
+  // The row may not exist yet, so SELECT FOR UPDATE cannot cover first-write
+  // races. Every Smart Audio profile writer takes this transaction-scoped lock.
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`openreader-smart-audio:${userId}`}, 0))`,
+  );
+}
+
 export async function readSmartAudioProfilesDocument(userId?: string | null): Promise<SmartAudioProfilesDocument> {
   if (!userId) return fallbackProfilesDocument;
   
@@ -186,12 +228,74 @@ export async function writeSmartAudioProfilesDocument(userId: string | null | un
   };
 
   try {
-    const rows = await db.select({ dataJson: userPreferences.dataJson }).from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
-    const currentDataJson = rows && rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
-    
-    currentDataJson.smartAudioProfiles = sanitizedDocument;
-    
-    await db.insert(userPreferences)
+    await db.transaction(async (tx: typeof db) => {
+      await lockSmartAudioProfilesRow(tx, userId);
+      const rows = await tx.select({ dataJson: userPreferences.dataJson }).from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
+      const currentDataJson = rows && rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
+
+      currentDataJson.smartAudioProfiles = sanitizedDocument;
+
+      await tx.insert(userPreferences)
+        .values({
+          userId,
+          dataJson: serializeDataJson(currentDataJson),
+        })
+        .onConflictDoUpdate({
+          target: [userPreferences.userId],
+          set: {
+            dataJson: serializeDataJson(currentDataJson),
+          }
+        });
+    });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to write smart audio profiles', error);
+  }
+  return sanitizedDocument;
+}
+
+export async function mergeGeneratedPronunciationsIntoLatestProfile(
+  userId: string,
+  profileId: string,
+  generatedPronunciations: Record<string, string>,
+  pronunciationsAtScanStart: Record<string, string>,
+): Promise<{
+  document: SmartAudioProfilesDocument;
+  profile: SmartAudioProfile;
+  appliedWords: string[];
+  preservedUserEdits: string[];
+} | null> {
+  return db.transaction(async (tx: typeof db) => {
+    await lockSmartAudioProfilesRow(tx, userId);
+    const rows = await tx
+      .select({ dataJson: userPreferences.dataJson })
+      .from(userPreferences)
+      .where(eq(userPreferences.userId, userId))
+      .limit(1);
+    const currentDataJson = rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
+    const raw = currentDataJson.smartAudioProfiles as Partial<SmartAudioProfilesDocument> | undefined;
+    const currentProfiles = Array.isArray(raw?.profiles)
+      ? raw.profiles.map((profile) => sanitizeProfile(profile as SmartAudioProfile))
+      : fallbackProfilesDocument.profiles.map((profile) => ({ ...profile }));
+    const profileIndex = currentProfiles.findIndex((profile) => profile.id === profileId);
+    if (profileIndex < 0) return null;
+
+    const merged = mergeGeneratedPronunciations(
+      currentProfiles[profileIndex],
+      generatedPronunciations,
+      pronunciationsAtScanStart,
+    );
+    currentProfiles[profileIndex] = merged.profile;
+    const selectedProfileId = typeof raw?.selectedProfileId === 'string'
+      && currentProfiles.some((profile) => profile.id === raw.selectedProfileId)
+      ? raw.selectedProfileId
+      : currentProfiles[0].id;
+    const document: SmartAudioProfilesDocument = {
+      selectedProfileId,
+      profiles: currentProfiles,
+    };
+    currentDataJson.smartAudioProfiles = document;
+    await tx.insert(userPreferences)
       .values({
         userId,
         dataJson: serializeDataJson(currentDataJson),
@@ -200,13 +304,16 @@ export async function writeSmartAudioProfilesDocument(userId: string | null | un
         target: [userPreferences.userId],
         set: {
           dataJson: serializeDataJson(currentDataJson),
-        }
+        },
       });
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to write smart audio profiles', error);
-  }
-  return sanitizedDocument;
+
+    return {
+      document,
+      profile: merged.profile,
+      appliedWords: merged.appliedWords,
+      preservedUserEdits: merged.preservedUserEdits,
+    };
+  });
 }
 
 export function findSmartAudioProfileById(

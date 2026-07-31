@@ -80,7 +80,8 @@ export interface EpubDocumentState {
     bookId: string,
     format: TTSAudiobookFormat,
     signal: AbortSignal,
-    settings?: AudiobookGenerationSettings
+    settings?: AudiobookGenerationSettings,
+    sourceDocumentId?: string,
   ) => Promise<TTSAudiobookChapter>;
   bookRef: RefObject<Book | null>;
   renditionRef: RefObject<Rendition | undefined>;

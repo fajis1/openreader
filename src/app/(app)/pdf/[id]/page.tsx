@@ -251,12 +251,19 @@ export default function PDFViewerPage() {
     chapterIndex: number,
     bookId: string,
     settings: AudiobookGenerationSettings,
-    signal: AbortSignal
+    signal: AbortSignal,
+    confirmScholarAutoScan = false,
   ) => {
     if (!isParseReady) {
       throw new Error('PDF parsing is not ready yet.');
     }
-    return regeneratePDFChapter(chapterIndex, bookId, settings.format, signal, settings);
+    return regeneratePDFChapter(
+      chapterIndex,
+      bookId,
+      settings.format,
+      signal,
+      { ...settings, scholarAutoScan: confirmScholarAutoScan },
+    );
   }, [regeneratePDFChapter, isParseReady]);
 
   if (error) {

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useConfig } from '@/contexts/ConfigContext';
 import { VoicesControlBase } from '@/components/player/VoicesControlBase';
 import { Button, Select, Card } from '@/components/ui';
@@ -131,8 +132,9 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
   const [isQueueing, setIsQueueing] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
   const [queuedCount, setQueuedCount] = useState(0);
+  const [showScholarScanWarning, setShowScholarScanWarning] = useState(false);
 
-  const handleStartBatch = async () => {
+  const handleStartBatch = async (confirmScholarAutoScan = false) => {
     if (selectedDocs.length === 0) return;
     setIsQueueing(true);
     setQueueError(null);
@@ -150,14 +152,45 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
         smartAudioProfileId: useSmartAudio ? selectedSmartAudioProfileId : undefined,
       };
 
+      if (!confirmScholarAutoScan) {
+        for (const doc of selectedDocs) {
+          const preflight = await fetch('/api/audiobooks/queue', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              documentId: doc.id,
+              settings,
+              preflightOnly: true,
+            }),
+          });
+          const preflightBody = await preflight.json().catch(() => null);
+          if (preflight.status === 409 && preflightBody?.code === 'SCHOLAR_SCAN_REQUIRED') {
+            setShowScholarScanWarning(true);
+            return;
+          }
+          if (!preflight.ok) {
+            throw new Error(preflightBody?.error || `Failed to check ${doc.name}`);
+          }
+        }
+      }
+
       let count = 0;
       for (const doc of selectedDocs) {
         const res = await fetch('/api/audiobooks/queue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ documentId: doc.id, settings }),
+          body: JSON.stringify({ documentId: doc.id, settings, confirmScholarAutoScan }),
         });
-        if (res.ok) count++;
+        const responseBody = await res.json().catch(() => null);
+        if (res.status === 409 && responseBody?.code === 'SCHOLAR_SCAN_REQUIRED') {
+          setQueuedCount(count);
+          setShowScholarScanWarning(true);
+          return;
+        }
+        if (!res.ok) {
+          throw new Error(responseBody?.error || `Failed to queue ${doc.name}`);
+        }
+        count++;
       }
       setQueuedCount(count);
       setIsOpen(false);
@@ -333,7 +366,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
           <Button
             className="w-full"
             variant="primary"
-            onClick={handleStartBatch}
+            onClick={() => void handleStartBatch()}
             disabled={isQueueing || selectedDocs.length === 0 || availableVoices.length === 0}
           >
             {isQueueing
@@ -351,6 +384,19 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
           </p>
         )}
       </div>
+      <ConfirmDialog
+        isOpen={showScholarScanWarning}
+        onClose={() => setShowScholarScanWarning(false)}
+        onConfirm={() => {
+          setShowScholarScanWarning(false);
+          void handleStartBatch(true);
+        }}
+        title="Pronunciation & Definition Scan Needed"
+        message="At least one selected book has not completed a pronunciation and definition scan. We recommend reviewing pronunciations first. If you continue, OpenReader will auto-scan each unresolved book, adopt Gemini’s recommended pronunciations, and cache short English definitions."
+        confirmText="Continue & Auto-Scan"
+        cancelText="Review First"
+        isDangerous={false}
+      />
     </ReaderSidebarShell>
   );
 }

@@ -43,6 +43,7 @@ export interface HtmlDocumentState {
     signal: AbortSignal,
     settings?: AudiobookGenerationSettings,
     retryOptions?: TTSRetryOptions,
+    sourceDocumentId?: string,
   ) => Promise<TTSAudiobookChapter>;
 }
 
@@ -180,6 +181,7 @@ export function useHtmlDocument(): HtmlDocumentState {
           signal,
           onChapterComplete,
           providedBookId,
+          sourceDocumentId: providedBookId,
           format,
           settings,
           retryOptions,
@@ -200,12 +202,14 @@ export function useHtmlDocument(): HtmlDocumentState {
       signal: AbortSignal,
       settings?: AudiobookGenerationSettings,
       retryOptions?: TTSRetryOptions,
+      sourceDocumentId?: string,
     ): Promise<TTSAudiobookChapter> => {
       try {
         return await regenerateAudiobookChapter({
           adapter: audiobookAdapter,
           chapterIndex,
           bookId,
+          sourceDocumentId,
           format,
           signal,
           apiKey,

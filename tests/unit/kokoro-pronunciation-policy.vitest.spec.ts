@@ -6,6 +6,7 @@ import {
   DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE,
   filterKokoroCompatiblePronunciationRecord,
   getKokoroPronunciationCompatibilityErrors,
+  getKokoroPronunciationQualityWarnings,
   KOKORO_COMPATIBILITY_POLICY,
   resolvePronunciationGuidance,
 } from '../../src/lib/shared/kokoro-pronunciation-policy';
@@ -56,6 +57,12 @@ describe('Kokoro pronunciation policy', () => {
     })).toEqual({ logos: '/loʊɡɒs/' });
   });
 
+  test('flags legacy IPA patterns that Kokoro may spell aloud', () => {
+    expect(getKokoroPronunciationQualityWarnings('huiothesia', '/hyjɔθesiːa/'))
+      .toContain('Suspicious adjacent /y/ and /j/ phonemes may be spoken as separate letter names.');
+    expect(getKokoroPronunciationQualityWarnings('λόγος', '/loʊɡɒs/')).toEqual([]);
+  });
+
   test('all Gemini pronunciation paths consume the centralized instructions', () => {
     for (const relativePath of [
       'src/app/api/documents/scan-foreign-words/route.ts',
@@ -79,7 +86,7 @@ describe('Kokoro pronunciation policy', () => {
     expect(source).toContain('geminiRecommendations');
     expect(source).toContain('libraryPronunciation');
     expect(source).toContain('pronunciationSource');
-    expect(source).toContain('Put the single best pronunciation first');
+    expect(source).toContain('put the best first');
     expect(source).toContain('generateOnlyForNewWords');
     expect(source).toContain('globalChoices.slice(0, 1)');
     expect(source).toContain('after(async () =>');

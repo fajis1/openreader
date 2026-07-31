@@ -1,1 +1,3 @@
 *.tsx linguist-language=TypeScript
+config/global_api_key.json -diff
+config/tts_settings.json -diff

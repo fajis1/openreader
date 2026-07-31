@@ -1,10 +1,29 @@
 import unittest
 from pathlib import Path
 
-from gemini_rate_limiter import refresh_gemini_cooldown
+from gemini_rate_limiter import extract_gemini_usage, refresh_gemini_cooldown
 
 
 class GeminiRateLimiterTests(unittest.TestCase):
+    def test_usage_metadata_is_normalized_without_prompt_content(self):
+        class Usage:
+            prompt_token_count = 120
+            candidates_token_count = 80
+            thoughts_token_count = 10
+            cached_content_token_count = 70
+            total_token_count = 210
+
+        class Response:
+            usage_metadata = Usage()
+
+        self.assertEqual(extract_gemini_usage(Response()), {
+            "inputTokens": 120,
+            "outputTokens": 80,
+            "thinkingTokens": 10,
+            "cachedInputTokens": 70,
+            "totalTokens": 210,
+        })
+
     def test_active_cooldown_is_preserved_and_reported(self):
         state = {"current_delay": 40, "resume_at": 140}
 

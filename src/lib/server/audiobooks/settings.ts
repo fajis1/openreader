@@ -70,6 +70,9 @@ export function coerceAudiobookGenerationSettings(
     format,
     ...(typeof record.ttsInstructions === 'string' ? { ttsInstructions: record.ttsInstructions } : {}),
     ...(typeof record.language === 'string' ? { language: normalizeLanguageTag(record.language) } : {}),
+    ...(Number.isInteger(record.cleanupBatchVersion)
+      ? { cleanupBatchVersion: Number(record.cleanupBatchVersion) }
+      : {}),
   };
 
   const migrated =

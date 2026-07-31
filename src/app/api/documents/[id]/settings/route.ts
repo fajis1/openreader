@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { documentSettings, documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
-import { mergeDocumentSettings } from '@/lib/shared/document-settings';
+import {
+  mergeDocumentSettings,
+} from '@/lib/shared/document-settings';
 import { DEFAULT_DOCUMENT_SETTINGS, type DocumentSettings } from '@/types/document-settings';
 import { coerceTimestampMs, nowTimestampMs } from '@/lib/shared/timestamps';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
@@ -138,10 +140,27 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       });
     }
 
+    // smartAudioLexicon is server-managed scan state. Do not accept it from the
+    // client, and preserve the database's current value inside the upsert so a
+    // scan completing between the SELECT and UPDATE cannot be overwritten.
+    const clientManagedIncoming = { ...incoming };
+    delete clientManagedIncoming.smartAudioLexicon;
     const updatedAt = nowTimestampMs();
-    const payload = serializeForDb(incoming as unknown as Record<string, unknown>);
+    const incomingJson = JSON.stringify(clientManagedIncoming);
+    const payload = serializeForDb(clientManagedIncoming as unknown as Record<string, unknown>);
+    const mergedDataJson = process.env.POSTGRES_URL
+      ? sql`case
+          when ${documentSettings.dataJson} ? 'smartAudioLexicon'
+          then jsonb_set(${incomingJson}::jsonb, '{smartAudioLexicon}', ${documentSettings.dataJson}->'smartAudioLexicon', true)
+          else ${incomingJson}::jsonb
+        end`
+      : sql`case
+          when json_type(${documentSettings.dataJson}, '$.smartAudioLexicon') is not null
+          then json_set(json(${incomingJson}), '$.smartAudioLexicon', json_extract(${documentSettings.dataJson}, '$.smartAudioLexicon'))
+          else json(${incomingJson})
+        end`;
 
-    await db
+    const savedRows = await db
       .insert(documentSettings)
       .values({
         documentId,
@@ -153,14 +172,16 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       .onConflictDoUpdate({
         target: [documentSettings.documentId, documentSettings.userId],
         set: {
-          dataJson: payload as never,
+          dataJson: mergedDataJson as never,
           clientUpdatedAtMs,
           updatedAt,
         },
-      });
+      })
+      .returning({ dataJson: documentSettings.dataJson });
+    const savedSettings = parseStored(savedRows[0]?.dataJson);
 
     return NextResponse.json({
-      settings: incoming,
+      settings: savedSettings,
       clientUpdatedAtMs,
       applied: true,
     });

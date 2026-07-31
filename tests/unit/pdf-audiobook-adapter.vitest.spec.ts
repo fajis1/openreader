@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { createPdfAudiobookSourceAdapter } from '../../src/lib/client/audiobooks/adapters/pdf';
 import type { ParsedPdfDocument } from '../../src/types/parsed-pdf';
 import type { DocumentSettings } from '../../src/types/document-settings';
+import { CURRENT_AUDIOBOOK_BATCH_VERSION } from '../../src/lib/shared/audiobook-batching';
 
 describe('pdf audiobook adapter', () => {
   test('builds chapters from paragraph titles and filters skipped kinds', async () => {
@@ -131,5 +132,57 @@ describe('pdf audiobook adapter', () => {
     expect(chapters[0].title).toBe('Sample PDF');
     expect(chapters[0].text).toContain('First page body.');
     expect(chapters[0].text).toContain('Second page body.');
+  });
+
+  test('uses the same TOC-filtered map for current-version regeneration', async () => {
+    const block = (
+      id: string,
+      kind: 'paragraph_title' | 'text',
+      text: string,
+      page: number,
+    ) => ({
+      id,
+      kind,
+      text,
+      fragments: [{ page, bbox: [0, 0, 100, 20] as [number, number, number, number], text, readingOrder: 0 }],
+    });
+    const parsed: ParsedPdfDocument = {
+      schemaVersion: 1,
+      documentId: 'doc-toc',
+      parserVersion: 'test',
+      parsedAt: 1,
+      pages: [
+        {
+          pageNumber: 1,
+          width: 100,
+          height: 100,
+          blocks: [
+            block('toc', 'paragraph_title', 'Contents', 1),
+            block('toc-entry', 'text', 'Chapter One ........ 3', 1),
+          ],
+        },
+        {
+          pageNumber: 3,
+          width: 100,
+          height: 100,
+          blocks: [
+            block('chapter', 'paragraph_title', 'Chapter One', 3),
+            block('body', 'text', 'A short real chapter begins.', 3),
+          ],
+        },
+      ],
+    };
+    const adapter = createPdfAudiobookSourceAdapter({
+      parsed,
+      settings: { schemaVersion: 1, pdf: { skipBlockKinds: [] } },
+    });
+
+    const legacy = await adapter.prepareChapters();
+    const current = await adapter.prepareChaptersForBatchVersion?.(
+      CURRENT_AUDIOBOOK_BATCH_VERSION,
+    );
+    expect(legacy[0]?.title).toBe('Contents');
+    expect(current?.[0]?.title).toBe('Chapter One');
+    expect(current?.[0]?.text).toContain('A short real chapter begins.');
   });
 });

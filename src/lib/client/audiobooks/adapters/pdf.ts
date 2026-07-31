@@ -3,11 +3,16 @@ import { normalizeTextForTts } from '@/lib/shared/nlp';
 import type { ParsedPdfDocument, ParsedPdfBlock } from '@/types/parsed-pdf';
 import type { DocumentSettings } from '@/types/document-settings';
 import { DEFAULT_DOCUMENT_SETTINGS } from '@/types/document-settings';
+import {
+  CURRENT_AUDIOBOOK_BATCH_VERSION,
+} from '@/lib/shared/audiobook-batching';
+import { removePdfTableOfContents } from '@/lib/shared/audiobook-end-matter';
 
 interface PdfAudiobookAdapterOptions {
   parsed?: ParsedPdfDocument;
   settings?: DocumentSettings;
   maxBlockLength?: number;
+  cleanupBatchVersion?: number;
 }
 
 function chapterTextFromBlocks(
@@ -26,15 +31,23 @@ function prepareParsedChapters({
   parsed,
   settings,
   maxBlockLength,
+  cleanupBatchVersion,
 }: {
   parsed: ParsedPdfDocument;
   settings: DocumentSettings;
   maxBlockLength?: number;
+  cleanupBatchVersion?: number;
 }): PreparedAudiobookChapter[] {
   const skip = new Set(settings.pdf?.skipBlockKinds ?? DEFAULT_DOCUMENT_SETTINGS.pdf?.skipBlockKinds ?? []);
-  const allBlocks = parsed.pages
-    .flatMap((page) => page.blocks)
+  const pageBlocks = parsed.pages
+    .flatMap((page) => page.blocks.map((block) => ({
+      ...block,
+      pageNumber: page.pageNumber,
+    })))
     .filter((block) => !skip.has(block.kind));
+  const allBlocks = cleanupBatchVersion === CURRENT_AUDIOBOOK_BATCH_VERSION
+    ? removePdfTableOfContents(pageBlocks, parsed.pages.length).blocks
+    : pageBlocks;
   if (!allBlocks.length) return [];
 
   const chapters: PreparedAudiobookChapter[] = [];
@@ -74,6 +87,7 @@ async function extractPreparedPdfChapters({
   parsed,
   settings = DEFAULT_DOCUMENT_SETTINGS,
   maxBlockLength,
+  cleanupBatchVersion,
 }: PdfAudiobookAdapterOptions): Promise<PreparedAudiobookChapter[]> {
   if (!parsed) {
     throw new Error('PDF parsing is not ready yet.');
@@ -83,6 +97,7 @@ async function extractPreparedPdfChapters({
     parsed,
     settings,
     maxBlockLength,
+    cleanupBatchVersion,
   });
 }
 
@@ -91,6 +106,9 @@ export function createPdfAudiobookSourceAdapter(options: PdfAudiobookAdapterOpti
     noContentMessage: 'No text content found in PDF',
     noAudioGeneratedMessage: 'No audio was generated from the PDF content',
     prepareChapters: async () => extractPreparedPdfChapters(options),
+    prepareChaptersForBatchVersion: async (cleanupBatchVersion) => (
+      extractPreparedPdfChapters({ ...options, cleanupBatchVersion })
+    ),
     prepareChapter: async (chapterIndex: number) => {
       const chapters = await extractPreparedPdfChapters(options);
       const chapter = chapters[chapterIndex];

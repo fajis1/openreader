@@ -8,6 +8,7 @@ import { generateTTSBuffer } from '@/lib/server/tts/generate';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { buildKokoroPronunciationInstructions, isKokoroCompatiblePronunciation } from '@/lib/shared/kokoro-pronunciation-policy';
+import { resolvePronunciationAiModel } from '@/lib/shared/smart-audio-models';
 
 const SEED_EXAMPLES = [
   "Make the ending sound more like -een instead of -ayn",
@@ -40,8 +41,13 @@ export async function GET(req: NextRequest) {
   try {
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
+    const profilesDoc = await readSmartAudioProfilesDocument(ctxOrRes.userId);
+    const activeProfile = findSmartAudioProfileById(profilesDoc, profilesDoc.selectedProfileId);
     const examples = await getFeedbackExamples();
-    return NextResponse.json({ feedbackExamples: examples });
+    return NextResponse.json({
+      feedbackExamples: examples,
+      pronunciationModel: resolvePronunciationAiModel(activeProfile),
+    });
   } catch (error: any) {
     console.error('Refine pronunciations GET error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
@@ -93,7 +99,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Gemini API key not configured. Please enter your API key in Smart Audio Settings.', canUseBackupKey: Boolean(backupKey) }, { status: 400 });
     }
 
-    const model = activeProfile?.aiModel || 'gemini-3.6-flash';
+    const model = resolvePronunciationAiModel(activeProfile);
     const keysToTry = (useBackupKey ? [backupKey, primaryKey] : [primaryKey, backupKey])
       .filter((k, idx, arr) => k && arr.indexOf(k) === idx);
 

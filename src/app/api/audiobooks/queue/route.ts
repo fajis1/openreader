@@ -2,13 +2,35 @@ import { NextResponse, NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { eq, and, asc, lt } from 'drizzle-orm';
 import { db } from '@/db';
-import { audiobookJobs, documents } from '@/db/schema';
+import { audiobookChapters, audiobookJobs, documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { serverLogger, errorToLog } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { runTaskNow } from '@/lib/server/tasks/engine';
+import {
+  findSmartAudioProfileById,
+  readSmartAudioProfilesDocument,
+} from '@/lib/server/smart-audio-profiles';
+import { readBookLexicon } from '@/lib/server/smart-audio/book-lexicon';
+import { queuedAudiobookBatchVersion } from '@/lib/shared/audiobook-batching';
 
 export const dynamic = 'force-dynamic';
+
+function parseJobSettings(value: unknown): Record<string, unknown> {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object'
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : {};
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,31 +42,96 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const { documentId, settings } = body;
+    const confirmScholarAutoScan = body.confirmScholarAutoScan === true;
+    const preflightOnly = body.preflightOnly === true;
 
     if (!documentId) {
       return NextResponse.json({ error: 'Missing documentId' }, { status: 400 });
     }
 
-    const now = Date.now();
+    const settingsRecord = settings && typeof settings === 'object'
+      ? settings as Record<string, unknown>
+      : {};
     const existingJobs = await db.select().from(audiobookJobs)
       .where(and(eq(audiobookJobs.userId, userId), eq(audiobookJobs.documentId, documentId)));
     
-    // Check if an active job already exists or one was just created within 5 seconds
-    const activeOrRecent = existingJobs.find((j: typeof audiobookJobs.$inferSelect) => 
+    // Only genuinely active jobs deduplicate. A fast completed job must not
+    // block an immediate Resume request after a chapter is removed.
+    const activeJob = existingJobs.find((j: typeof audiobookJobs.$inferSelect) =>
       j.status === 'queued' || 
       j.status === 'running' || 
       j.status === 'waiting_for_pdf' || 
-      j.status === 'paused' ||
-      (now - (j.createdAt || 0) < 5000)
+      j.status === 'paused'
     );
 
-    if (activeOrRecent) {
-      return NextResponse.json({ jobId: activeOrRecent.id });
+    if (activeJob) {
+      // The worker may already be performing an acknowledged Scholar auto-scan.
+      // Deduplicate before the lexicon gate so retries do not ask for the same
+      // confirmation again or mutate the settings captured by the worker.
+      return NextResponse.json({ jobId: activeJob.id });
     }
+
+    let resolvedSmartAudioProfileId: string | null = null;
+    if (settingsRecord.useSmartAudio === true) {
+      const profiles = await readSmartAudioProfilesDocument(userId);
+      const profile = findSmartAudioProfileById(
+        profiles,
+        typeof settingsRecord.smartAudioProfileId === 'string'
+          ? settingsRecord.smartAudioProfileId
+          : profiles.selectedProfileId,
+      );
+      resolvedSmartAudioProfileId = profile?.id || null;
+      if (profile?.workerMode === 'scholar') {
+        const lexicon = await readBookLexicon(userId, documentId);
+        const hasCompletedDefinitionScan = lexicon?.status === 'complete'
+          && lexicon.definitionScanComplete === true
+          && lexicon.profileId === profile.id
+          && Object.values(lexicon.entries).every((entry) => entry.definition || entry.language === 'other');
+        if (!hasCompletedDefinitionScan && !confirmScholarAutoScan) {
+          return NextResponse.json({
+            code: 'SCHOLAR_SCAN_REQUIRED',
+            error: 'This book has not completed a pronunciation and definition scan.',
+            message: 'Review the book pronunciations before generating. If you continue, OpenReader will scan unresolved foreign terms with the pronunciation model and adopt Gemini’s recommended defaults.',
+          }, { status: 409 });
+        }
+      }
+    }
+    if (preflightOnly) {
+      return NextResponse.json({
+        ready: true,
+        smartAudioProfileId: resolvedSmartAudioProfileId,
+      });
+    }
+    const resolvedSettingsRecord: Record<string, unknown> = {
+      ...settingsRecord,
+      ...(resolvedSmartAudioProfileId
+        ? { smartAudioProfileId: resolvedSmartAudioProfileId }
+        : {}),
+    };
 
     const jobId = randomUUID();
     const testNamespace = req.headers.get('x-openreader-test-namespace');
-    const settingsJson = { ...(settings || {}) };
+    const existingChapter = await db.select({ id: audiobookChapters.id })
+      .from(audiobookChapters)
+      .where(and(
+        eq(audiobookChapters.userId, userId),
+        eq(audiobookChapters.bookId, documentId),
+      ))
+      .limit(1);
+    const previousJob = [...existingJobs]
+      .sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0))[0];
+    const previousSettings = parseJobSettings(previousJob?.settingsJson);
+    // Existing chapter indexes must keep the batching map that created them.
+    // Jobs from before explicit versioning are therefore conservatively legacy.
+    const cleanupBatchVersion = queuedAudiobookBatchVersion(
+      existingChapter.length > 0,
+      previousSettings.cleanupBatchVersion,
+    );
+    const settingsJson: Record<string, unknown> = {
+      ...resolvedSettingsRecord,
+      cleanupBatchVersion,
+      ...(confirmScholarAutoScan ? { scholarAutoScan: true } : {}),
+    };
     if (testNamespace) {
       settingsJson.testNamespace = testNamespace;
     }

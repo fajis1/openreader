@@ -27,6 +27,7 @@ export function ScanForeignWordsModal({
   const [editValue, setEditValue] = useState<string>('');
 
   const [feedbackExamples, setFeedbackExamples] = useState<string[]>([]);
+  const [pronunciationModel, setPronunciationModel] = useState<string | null>(null);
   const [refineInput, setRefineInput] = useState<{ [word: string]: string }>({});
   const [refineStatus, setRefineStatus] = useState<{ [word: string]: string }>({});
   const [refineExpanded, setRefineExpanded] = useState<{ [word: string]: boolean }>({});
@@ -104,6 +105,9 @@ export function ScanForeignWordsModal({
       if (res.ok) {
         const data = await res.json();
         if (data.feedbackExamples) setFeedbackExamples(data.feedbackExamples);
+        setPronunciationModel(
+          typeof data.pronunciationModel === 'string' ? data.pronunciationModel : null,
+        );
       }
     } catch (err) {
       console.error(err);
@@ -329,7 +333,10 @@ export function ScanForeignWordsModal({
     });
     const feedback = customPrompt || refineInput[word] || "Generate 5 clean, standard Kokoro IPA pronunciations for this word";
 
-    setRefineStatus(prev => ({ ...prev, [word]: 'Step 1/2: Asking Gemini 3.6 Flash for 5 new variations based on your feedback...' }));
+    setRefineStatus(prev => ({
+      ...prev,
+      [word]: `Step 1/2: Asking ${pronunciationModel || 'the pronunciation model'} for 5 new variations based on your feedback...`,
+    }));
     
     try {
       const wObj = words.find(w => w.word === word);
@@ -430,7 +437,7 @@ export function ScanForeignWordsModal({
         <div className="p-4 border-b dark:border-gray-800 flex flex-col gap-3">
           <div className="flex justify-between items-center">
             <div>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Foreign & Custom Word Pronunciation Pre-Scan 🔍</h3>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Foreign Word Pronunciation & Definition Pre-Scan 🔍</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 {activeDocName
                   ? loading
@@ -441,6 +448,11 @@ export function ScanForeignWordsModal({
               <p className="hidden text-[11px] text-muted sm:block">
                 Drag the lower-right corner to resize this window.
               </p>
+              {pronunciationModel && (
+                <p className="text-[11px] text-purple-700 dark:text-purple-300">
+                  Pronunciation model: <span className="font-mono">{pronunciationModel}</span>
+                </p>
+              )}
               {scanJobStatus === 'queued' || scanJobStatus === 'running' ? (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400">
                   Gemini pronunciation generation: {scanJobProgress.total > 0 ? `${scanJobProgress.completed}/${scanJobProgress.total} words processed` : 'queued'}…
@@ -593,16 +605,18 @@ export function ScanForeignWordsModal({
           ) : (
             <table className="w-full table-fixed text-sm text-left">
               <colgroup>
+                <col className="w-[16%]" />
+                <col className="w-[8%]" />
+                <col className="w-[36%]" />
                 <col className="w-[20%]" />
-                <col className="w-[10%]" />
-                <col className="w-[45%]" />
-                <col className="w-[25%]" />
+                <col className="w-[20%]" />
               </colgroup>
               <thead className="bg-gray-100 dark:bg-gray-800 sticky top-0">
                 <tr>
                   <th className="px-4 py-2">Word</th>
                   <th className="px-4 py-2 text-right">Count</th>
                   <th className="px-4 py-2">AI Pronunciation Options</th>
+                  <th className="px-4 py-2">English Definition</th>
                   <th className="px-4 py-2">Your Override</th>
                 </tr>
               </thead>
@@ -753,6 +767,29 @@ export function ScanForeignWordsModal({
                           </div>
                         )}
                       </div>
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      {w.definition ? (
+                        <div>
+                          <span className={w.definitionNeedsReview
+                            ? 'text-amber-700 dark:text-amber-300'
+                            : 'text-gray-800 dark:text-gray-200'}
+                          >
+                            {w.definition}
+                          </span>
+                          {w.definitionNeedsReview && (
+                            <p className="mt-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                              Double-check this definition
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs italic text-gray-500">
+                          {scanJobStatus === 'queued' || scanJobStatus === 'running'
+                            ? 'Waiting for scan…'
+                            : 'No contextual definition'}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 align-top">
                       {editingWord === w.word ? (

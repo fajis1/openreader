@@ -9,12 +9,20 @@ import { ScanForeignWordsModal } from './doclist/ScanForeignWordsModal';
 import { BookPronunciationInspectorModal } from './doclist/BookPronunciationInspectorModal';
 import { SmartAudioWizardModal } from './SmartAudioWizardModal';
 import { PronunciationGuideManager } from './PronunciationGuideManager';
-import { DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE } from '@/lib/shared/kokoro-pronunciation-policy';
+import {
+  DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE,
+  getKokoroPronunciationQualityWarnings,
+} from '@/lib/shared/kokoro-pronunciation-policy';
+import {
+  DEFAULT_CLEANUP_AI_MODEL,
+  DEFAULT_PRONUNCIATION_AI_MODEL,
+} from '@/lib/shared/smart-audio-models';
 
 const EMPTY_PROFILE = (): SmartAudioProfile => ({
   id: `profile-${Date.now()}`,
   name: 'New Profile',
-  aiModel: PRESET_MODELS[0]?.id || 'gemini-3.6-flash',
+  aiModel: DEFAULT_CLEANUP_AI_MODEL,
+  pronunciationAiModel: DEFAULT_PRONUNCIATION_AI_MODEL,
   customTtsPrompt: '',
   abbreviations: {},
   pronunciations: {},
@@ -39,8 +47,8 @@ const WORKER_MODES = [
     icon: '📖',
     label: 'Biblical Scholar & Theology',
     badge: 'Academic & ancient languages',
-    description: 'Uses a specialized multi-pass pipeline. First, a dedicated AI pass identifies isolated Koine Greek and Biblical Hebrew words and inserts inline English definitions/glosses for listening clarity. Then the main cleaning pass applies strict Erasmian Greek and Academic Hebrew Kokoro IPA phonetic markup, prunes long foreign-language quotations, strips dense footnotes, and generates a full line-by-line changelog. Best for commentaries, study Bibles, and academic papers.',
-    features: ['Everything in Standard', 'Greek & Hebrew lexical definition injection', 'Strict Erasmian + Academic Hebrew IPA markup', 'Inline English gloss preservation', 'Full changelog / diff generation', 'Phonetic auto-learning (saves new IPA to your profile)'],
+    description: 'Uses the book’s pronunciation pre-scan to insert saved contextual English definitions next to isolated Koine Greek and Biblical Hebrew words, then performs the same single cleanup pass. If the book has not been scanned, OpenReader warns before generation and can build the lexicon automatically.',
+    features: ['Everything in Standard', 'Cached Greek & Hebrew contextual definitions', 'Strict Erasmian + Academic Hebrew IPA markup', 'One Gemini cleanup call per chunk', 'Full changelog / diff generation', 'Book-specific definition review'],
     presetName: 'Biblical Scholar & Theology',
   },
 ];
@@ -70,14 +78,16 @@ export function SmartAudioSettings() {
   const [backupApiKey, setBackupApiKey] = useState('');
   const [maskedBackupKey, setMaskedBackupKey] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<SmartAudioProfile[]>([]);
-  const [workerMode, setWorkerMode] = useState<'standard' | 'scholar'>('scholar');
+  const [workerMode, setWorkerMode] = useState<'standard' | 'scholar'>('standard');
   const [useGlobalPronunciations, setUseGlobalPronunciations] = useState<boolean>(true);
   const [pronunciationPromptMode, setPronunciationPromptMode] = useState<'default' | 'custom'>('default');
   const [customPronunciationPrompt, setCustomPronunciationPrompt] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [profileName, setProfileName] = useState('');
-  const [aiModel, setAiModel] = useState(PRESET_MODELS[0]?.id || 'gemini-3.6-flash');
+  const [aiModel, setAiModel] = useState(DEFAULT_CLEANUP_AI_MODEL);
   const [customModelId, setCustomModelId] = useState('');
+  const [pronunciationAiModel, setPronunciationAiModel] = useState(DEFAULT_PRONUNCIATION_AI_MODEL);
+  const [customPronunciationModelId, setCustomPronunciationModelId] = useState('');
   const [promptMode, setPromptMode] = useState<'preset' | 'custom'>('preset');
   const [selectedPromptName, setSelectedPromptName] = useState<string>(PRESET_PROMPTS[0]?.name || '');
   const [prompt, setPrompt] = useState('');
@@ -94,6 +104,8 @@ export function SmartAudioSettings() {
   const [globalPronunciations, setGlobalPronunciations] = useState<{key: string; values: string[]}[]>([]);
   const [isLoadingGlobal, setIsLoadingGlobal] = useState(false);
   const [playingKey, setPlayingKey] = useState<string | null>(null);
+  const [showSuspectPronunciationsOnly, setShowSuspectPronunciationsOnly] = useState(false);
+  const [isRescanningSuspects, setIsRescanningSuspects] = useState(false);
 
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
@@ -102,7 +114,8 @@ export function SmartAudioSettings() {
   const handleSaveUniversalSetup = async (config: {
     universalApiKey: string;
     backupApiKey: string;
-    selectedModel: string;
+    cleanupModel: string;
+    pronunciationModel: string;
     chosenWorkerMode: 'standard' | 'scholar';
     useGlobal: boolean;
     importGlobal: boolean;
@@ -144,7 +157,8 @@ export function SmartAudioSettings() {
           : (backupKeySourceProfileId && activeProfile?.backupGeminiApiKeyConfigured
             ? { backupGeminiApiKeySourceProfileId: backupKeySourceProfileId }
             : {})),
-        aiModel: config.selectedModel,
+        aiModel: config.cleanupModel,
+        pronunciationAiModel: config.pronunciationModel,
         workerMode: config.chosenWorkerMode
       }));
 
@@ -291,15 +305,71 @@ export function SmartAudioSettings() {
     }
   };
 
+  const suspectGlobalWords = useMemo(
+    () => globalPronunciations
+      .filter((item) => item.values.some(
+        (phonetic) => getKokoroPronunciationQualityWarnings(item.key, phonetic).length > 0,
+      ))
+      .map((item) => item.key),
+    [globalPronunciations],
+  );
+  const suspectPersonalPronunciations = useMemo(
+    () => pronunciations.filter(
+      (item) => getKokoroPronunciationQualityWarnings(item.key, item.value).length > 0,
+    ),
+    [pronunciations],
+  );
+  const suspectPersonalWords = useMemo(
+    () => suspectPersonalPronunciations.map((item) => item.key),
+    [suspectPersonalPronunciations],
+  );
+  const suspectWordCount = useMemo(
+    () => new Set([...suspectGlobalWords, ...suspectPersonalWords]).size,
+    [suspectGlobalWords, suspectPersonalWords],
+  );
+
+  const handleRescanSuspectPronunciations = async () => {
+    if (suspectWordCount === 0) return;
+    setIsRescanningSuspects(true);
+    try {
+      const response = await fetch('/api/tts/global-pronunciations/rescan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          globalWords: suspectGlobalWords,
+          personalWords: suspectPersonalWords,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Pronunciation rescan failed');
+      toast.success(
+        `Replaced ${data.replacedGlobal.length} global and ${data.replacedPersonal.length} personal suspect pronunciation${data.replaced.length === 1 ? '' : 's'}.`,
+      );
+      await Promise.all([loadGlobalPronunciations(), loadProfiles()]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Pronunciation rescan failed');
+    } finally {
+      setIsRescanningSuspects(false);
+    }
+  };
+
   useEffect(() => {
     if (!activeProfile) return;
     setProfileName(activeProfile.name);
-    setWorkerMode(activeProfile.workerMode ?? 'scholar');
+    setWorkerMode(activeProfile.workerMode ?? 'standard');
     setUseGlobalPronunciations(activeProfile.useGlobalPronunciations ?? true);
     setPronunciationPromptMode(activeProfile.pronunciationPromptMode === 'custom' ? 'custom' : 'default');
     setCustomPronunciationPrompt(activeProfile.customPronunciationPrompt || '');
-    setAiModel(activeProfile.aiModel || PRESET_MODELS[0]?.id || 'gemini-2.5-flash');
-    setCustomModelId(activeProfile.aiModel && PRESET_MODELS.some((model) => model.id === activeProfile.aiModel) ? '' : activeProfile.aiModel);
+    const cleanupModel = activeProfile.aiModel || DEFAULT_CLEANUP_AI_MODEL;
+    const pronunciationModel = activeProfile.pronunciationAiModel || cleanupModel;
+    setAiModel(PRESET_MODELS.some((model) => model.id === cleanupModel) ? cleanupModel : 'custom');
+    setCustomModelId(PRESET_MODELS.some((model) => model.id === cleanupModel) ? '' : cleanupModel);
+    setPronunciationAiModel(
+      PRESET_MODELS.some((model) => model.id === pronunciationModel) ? pronunciationModel : 'custom',
+    );
+    setCustomPronunciationModelId(
+      PRESET_MODELS.some((model) => model.id === pronunciationModel) ? '' : pronunciationModel,
+    );
 
     const savedPrompt = activeProfile.customTtsPrompt || '';
 
@@ -347,12 +417,17 @@ export function SmartAudioSettings() {
 
   const buildCurrentProfile = useCallback((): SmartAudioProfile | null => {
     const finalModel = aiModel === 'custom' ? customModelId.trim() : aiModel;
+    const finalPronunciationModel = pronunciationAiModel === 'custom'
+      ? customPronunciationModelId.trim()
+      : pronunciationAiModel;
     if (!profileName.trim()) return null;
     if (aiModel === 'custom' && !finalModel) return null;
+    if (pronunciationAiModel === 'custom' && !finalPronunciationModel) return null;
     return {
       id: selectedProfileId || EMPTY_PROFILE().id,
       name: profileName.trim(),
-      aiModel: finalModel || PRESET_MODELS[0]?.id || 'gemini-2.5-flash',
+      aiModel: finalModel || DEFAULT_CLEANUP_AI_MODEL,
+      pronunciationAiModel: finalPronunciationModel || DEFAULT_PRONUNCIATION_AI_MODEL,
       customTtsPrompt: prompt,
       abbreviations: entriesToObject(abbreviations),
       pronunciations: entriesToObject(pronunciations),
@@ -371,7 +446,7 @@ export function SmartAudioSettings() {
       ...(apiKey.trim() ? { geminiApiKey: apiKey.trim() } : {}),
       ...(backupApiKey.trim() ? { backupGeminiApiKey: backupApiKey.trim() } : {}),
     };
-  }, [apiKey, backupApiKey, aiModel, customModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, useGlobalPronunciations, pronunciationPromptMode, customPronunciationPrompt, workerMode, activeProfile]);
+  }, [apiKey, backupApiKey, aiModel, customModelId, pronunciationAiModel, customPronunciationModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, useGlobalPronunciations, pronunciationPromptMode, customPronunciationPrompt, workerMode, activeProfile]);
 
   // When the user clicks a worker mode card, always switch to the matching
   // preset for that engine. This ensures clicking a card is always a clean
@@ -394,6 +469,8 @@ export function SmartAudioSettings() {
     setProfileName(profile.name);
     setAiModel(profile.aiModel);
     setCustomModelId('');
+    setPronunciationAiModel(profile.pronunciationAiModel || DEFAULT_PRONUNCIATION_AI_MODEL);
+    setCustomPronunciationModelId('');
     setPrompt(profile.customTtsPrompt);
     setAbbreviations([]);
     setPronunciations([]);
@@ -562,6 +639,9 @@ export function SmartAudioSettings() {
   }, []);
 
   const finalModel = aiModel === 'custom' ? customModelId.trim() : aiModel;
+  const finalPronunciationModel = pronunciationAiModel === 'custom'
+    ? customPronunciationModelId.trim()
+    : pronunciationAiModel;
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-8 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800">
@@ -776,7 +856,7 @@ export function SmartAudioSettings() {
         <div className="space-y-4 p-4 border rounded dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 lg:col-span-2">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-3">
-              <label className="block text-sm font-semibold">AI Processing Model</label>
+              <label className="block text-sm font-semibold">PDF & Audiobook Cleanup Model</label>
               <select
                 className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-800 dark:border-gray-700 text-gray-900 dark:text-gray-100 cursor-pointer"
                 value={aiModel}
@@ -785,7 +865,6 @@ export function SmartAudioSettings() {
                 {PRESET_MODELS.map((model) => (
                   <option key={model.id} value={model.id}>{model.name}</option>
                 ))}
-                <option value="custom">Custom...</option>
               </select>
               {aiModel === 'custom' && (
                 <input
@@ -796,14 +875,42 @@ export function SmartAudioSettings() {
                   onChange={(e) => setCustomModelId(e.target.value)}
                 />
               )}
-              <p className="text-xs text-gray-400">Select or enter the Gemini model used by the worker.</p>
+              <p className="text-xs text-gray-400">
+                Used for high-volume OCR and manuscript cleanup. Flash-Lite is recommended to reduce cost.
+              </p>
             </div>
 
             <div className="space-y-3">
+              <label className="block text-sm font-semibold">Pronunciation Model</label>
+              <select
+                className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-800 dark:border-gray-700 text-gray-900 dark:text-gray-100 cursor-pointer"
+                value={pronunciationAiModel}
+                onChange={(e) => setPronunciationAiModel(e.target.value)}
+              >
+                {PRESET_MODELS.map((model) => (
+                  <option key={model.id} value={model.id}>{model.name}</option>
+                ))}
+              </select>
+              {pronunciationAiModel === 'custom' && (
+                <input
+                  type="text"
+                  className="w-full p-2 border rounded bg-white dark:bg-gray-900 border-blue-400 dark:border-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 text-sm font-mono shadow-inner"
+                  placeholder="e.g., gemini-3.6-flash"
+                  value={customPronunciationModelId}
+                  onChange={(e) => setCustomPronunciationModelId(e.target.value)}
+                />
+              )}
+              <p className="text-xs text-gray-400">
+                Used only for pronunciation pre-scan and refinement. The smarter Flash model is recommended.
+              </p>
+            </div>
+
+            <div className="space-y-3 md:col-span-2">
               <label className="block text-sm font-semibold">Profile Summary</label>
               <div className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 text-sm text-gray-600 dark:text-gray-300 space-y-1">
                 <div><span className="font-medium text-gray-900 dark:text-gray-100">Profile id:</span> {selectedProfileId || 'unset'}</div>
-                <div><span className="font-medium text-gray-900 dark:text-gray-100">Model:</span> {finalModel || 'unset'}</div>
+                <div><span className="font-medium text-gray-900 dark:text-gray-100">Cleanup model:</span> {finalModel || 'unset'}</div>
+                <div><span className="font-medium text-gray-900 dark:text-gray-100">Pronunciation model:</span> {finalPronunciationModel || 'unset'}</div>
                 <div><span className="font-medium text-gray-900 dark:text-gray-100">Abbreviations:</span> {abbreviations.length}</div>
                 <div><span className="font-medium text-gray-900 dark:text-gray-100">Pronunciations:</span> {pronunciations.length}</div>
                 <div><span className="font-medium text-gray-900 dark:text-gray-100">Books:</span> {books.length}</div>
@@ -1016,19 +1123,69 @@ export function SmartAudioSettings() {
               <button onClick={() => setIsGlobalModalOpen(false)} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">✕</button>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
+              {!isLoadingGlobal && globalPronunciations.length > 0 && (
+                <div className="mb-4 rounded border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-200 dark:bg-amber-900 dark:text-amber-100"
+                      onClick={() => setShowSuspectPronunciationsOnly((current) => !current)}
+                    >
+                      {showSuspectPronunciationsOnly ? 'Show All' : `Show ${suspectWordCount} Suspect`}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50"
+                      disabled={suspectWordCount === 0 || isRescanningSuspects}
+                      onClick={() => void handleRescanSuspectPronunciations()}
+                    >
+                      {isRescanningSuspects ? 'Rescanning…' : 'Force Rescan Suspects'}
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+                    Found {suspectGlobalWords.length} global and {suspectPersonalWords.length} personal/profile suspect entries. Detection includes LitRPG names and flags malformed IPA or patterns such as adjacent /y/ and /j/ that Kokoro may spell aloud.
+                  </p>
+                </div>
+              )}
+              {!isLoadingGlobal && suspectPersonalPronunciations.length > 0 && (
+                <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                  <p className="mb-2 text-xs font-semibold text-amber-900 dark:text-amber-100">
+                    Personal pronunciations in {profileName || 'the selected profile'}
+                  </p>
+                  <ul className="space-y-2">
+                    {suspectPersonalPronunciations.map((item) => (
+                      <li key={item.key} className="text-xs text-amber-800 dark:text-amber-200">
+                        <strong>{item.key}</strong>: <code>{item.value}</code>
+                        {getKokoroPronunciationQualityWarnings(item.key, item.value).map((warning) => (
+                          <span key={warning} className="ml-2">— {warning}</span>
+                        ))}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {isLoadingGlobal ? (
                 <div className="flex justify-center p-8"><span className="text-gray-500">Loading...</span></div>
               ) : globalPronunciations.length === 0 ? (
                 <div className="text-center p-8 text-gray-500">No global pronunciations found.</div>
               ) : (
                 <ul className="space-y-3">
-                  {globalPronunciations.map((item) => (
+                  {globalPronunciations
+                    .filter((item) => !showSuspectPronunciationsOnly || suspectGlobalWords.includes(item.key))
+                    .map((item) => (
                     <li key={item.key} className="flex flex-col gap-2 bg-gray-50 dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-700">
                       <strong className="block text-sm">{item.key}</strong>
                       <div className="flex flex-col gap-2">
-                        {item.values.map((phonetic, idx) => (
-                          <div key={idx} className="flex items-center gap-3 bg-white dark:bg-gray-900 p-2 rounded border border-gray-200 dark:border-gray-700">
-                            <code className="flex-1 text-xs text-purple-600 dark:text-purple-400">{phonetic}</code>
+                        {item.values.map((phonetic, idx) => {
+                          const warnings = getKokoroPronunciationQualityWarnings(item.key, phonetic);
+                          return (
+                          <div key={idx} className={`flex items-center gap-3 p-2 rounded border ${warnings.length > 0 ? 'border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'}`}>
+                            <div className="min-w-0 flex-1">
+                              <code className="text-xs text-purple-600 dark:text-purple-400">{phonetic}</code>
+                              {warnings.map((warning) => (
+                                <p key={warning} className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">{warning}</p>
+                              ))}
+                            </div>
                             <button
                               onClick={() => playPreview(item.key, phonetic)}
                               disabled={playingKey === item.key}
@@ -1043,7 +1200,8 @@ export function SmartAudioSettings() {
                               Adopt to My Profile
                             </button>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </li>
                   ))}

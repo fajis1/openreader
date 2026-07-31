@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  mergeGeneratedPronunciations,
   mergeStoredSmartAudioProfileSecrets,
   redactSmartAudioProfileSecrets,
 } from '../../src/lib/server/smart-audio-profiles';
@@ -18,6 +19,37 @@ const makeProfile = (overrides: Partial<SmartAudioProfile> = {}): SmartAudioProf
 });
 
 describe('Smart Audio profile secret boundary', () => {
+  it('merges scan results without overwriting pronunciations edited during the scan', () => {
+    const profile = makeProfile({
+      customTtsPrompt: 'new prompt saved while scanning',
+      pronunciations: {
+        λόγος: '/user-edited/',
+        θεός: '/unchanged-at-start/',
+      },
+    });
+    const merged = mergeGeneratedPronunciations(
+      profile,
+      {
+        λόγος: '/generated-logos/',
+        θεός: '/generated-theos/',
+        πνεῦμα: '/generated-pneuma/',
+      },
+      {
+        λόγος: '/old-logos/',
+        θεός: '/unchanged-at-start/',
+      },
+    );
+
+    expect(merged.profile.customTtsPrompt).toBe('new prompt saved while scanning');
+    expect(merged.profile.pronunciations).toEqual({
+      λόγος: '/user-edited/',
+      θεός: '/generated-theos/',
+      πνεῦμα: '/generated-pneuma/',
+    });
+    expect(merged.appliedWords).toEqual(['θεός', 'πνεῦμα']);
+    expect(merged.preservedUserEdits).toEqual(['λόγος']);
+  });
+
   it('redacts both stored keys and returns only configured/suffix metadata', () => {
     const safeProfile = redactSmartAudioProfileSecrets(makeProfile({
       geminiApiKey: 'test-primary-1234',

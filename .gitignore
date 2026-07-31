@@ -35,6 +35,8 @@ yarn-error.log*
 .env*
 !.env.example
 *.creds
+/config/global_api_key.json
+/config/tts_settings.json
 
 # vercel
 .vercel

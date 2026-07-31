@@ -172,10 +172,18 @@ export default function EPUBPage() {
     chapterIndex: number,
     bookId: string,
     settings: AudiobookGenerationSettings,
-    signal: AbortSignal
+    signal: AbortSignal,
+    confirmScholarAutoScan = false,
   ) => {
-    return regenerateEPUBChapter(chapterIndex, bookId, settings.format, signal, settings);
-  }, [regenerateEPUBChapter]);
+    return regenerateEPUBChapter(
+      chapterIndex,
+      bookId,
+      settings.format,
+      signal,
+      { ...settings, scholarAutoScan: confirmScholarAutoScan },
+      routeDocumentId,
+    );
+  }, [regenerateEPUBChapter, routeDocumentId]);
 
   if (error) {
     return (

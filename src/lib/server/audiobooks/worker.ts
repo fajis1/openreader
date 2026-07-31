@@ -1,5 +1,10 @@
 
-import { readSmartAudioProfilesDocument, findSmartAudioProfileById, writeSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
+import {
+  findSmartAudioProfileById,
+  mergeGeneratedPronunciationsIntoLatestProfile,
+  readSmartAudioProfilesDocument,
+  writeSmartAudioProfilesDocument,
+} from '@/lib/server/smart-audio-profiles';
 import { eq, and, asc, lt, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { audiobookJobs, documents, audiobooks, audiobookChapters, adminSettings } from '@/db/schema';
@@ -7,7 +12,6 @@ import { readCurrentParsedPdfArtifact } from '@/lib/server/pdf-parse/artifact';
 import { getDocumentBlob } from '@/lib/server/documents/blobstore';
 import { checkSystemResources } from '@/lib/server/audiobooks/system-monitor';
 import { randomUUID } from 'node:crypto';
-import { generateTTSBuffer } from '@/lib/server/tts/generate';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
@@ -15,7 +19,6 @@ import { encodeChapterFileName } from '@/lib/server/audiobooks/chapters';
 import { createOrReuseCurrentPdfParseOperation } from '@/lib/server/pdf-parse/operation';
 import JSZip from 'jszip';
 import type { ParsedPdfDocument } from '@/types/parsed-pdf';
-import { normalizeTextForTts } from '@/lib/shared/nlp';
 import { serverLogger } from '@/lib/server/logger';
 import { INTERNAL_WORKER_SECRET } from '@/lib/server/internal-secret';
 import {
@@ -23,6 +26,57 @@ import {
   filterKokoroCompatiblePronunciationRecord,
 } from '@/lib/shared/kokoro-pronunciation-policy';
 import { GEMINI_RATE_LIMIT_PAUSE_MESSAGE } from '@/lib/shared/audiobook-job-status';
+import { resolveCleanupAiModel } from '@/lib/shared/smart-audio-models';
+import {
+  extractEpubChapterHeading,
+  isAudiobookEndMatterHeading,
+  removePdfTableOfContents,
+  truncateAudiobookEndMatter,
+} from '@/lib/shared/audiobook-end-matter';
+import {
+  batchAudiobookText,
+  cleanupBatchTargetForVersion,
+  CURRENT_AUDIOBOOK_BATCH_VERSION,
+} from '@/lib/shared/audiobook-batching';
+import {
+  collectSmartAudioTermCandidates,
+  enrichTextFromBookLexicon,
+  readBookLexicon,
+  resolveSmartAudioBookLexicon,
+  selectPronunciationsForText,
+  writeBookLexicon,
+} from '@/lib/server/smart-audio/book-lexicon';
+import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
+import { generateSegmentedAudiobookTtsBuffer } from '@/lib/server/audiobooks/segmented-tts';
+
+const SMART_AUDIO_NATS_SUBJECT = 'audiobooks.gemini.clean';
+
+async function readGlobalPronunciationDefaults(): Promise<Record<string, string>> {
+  const rows = await db
+    .select({ valueJson: adminSettings.valueJson })
+    .from(adminSettings)
+    .where(eq(adminSettings.key, 'global_pronunciations'))
+    .limit(1);
+  if (!rows[0]?.valueJson) return {};
+  try {
+    const parsed = typeof rows[0].valueJson === 'string'
+      ? JSON.parse(rows[0].valueJson)
+      : rows[0].valueJson;
+    const defaults: Record<string, string> = {};
+    for (const [term, raw] of Object.entries(parsed as Record<string, unknown>)) {
+      const first = Array.isArray(raw) ? raw[0] : raw;
+      const pronunciation = typeof first === 'string'
+        ? first
+        : first && typeof first === 'object' && typeof (first as Record<string, unknown>).phonetic === 'string'
+          ? String((first as Record<string, unknown>).phonetic)
+          : '';
+      if (pronunciation) defaults[term] = pronunciation;
+    }
+    return defaults;
+  } catch {
+    return {};
+  }
+}
 
 function stripHtmlTags(html: string): string {
   return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -74,9 +128,10 @@ async function extractTextFromEpub(buffer: Buffer): Promise<{ title: string; tex
     
     const htmlContent = await file.async('string');
     const text = stripHtmlTags(htmlContent);
+    const extractedTitle = extractEpubChapterHeading(htmlContent);
     if (text.trim().length > 0) {
       chapters.push({
-        title: `Chapter ${chapters.length + 1}`,
+        title: extractedTitle || `Chapter ${chapters.length + 1}`,
         text: text,
       });
     }
@@ -148,6 +203,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
     const existingBook = await db.select().from(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, userId)));
     const jobSettings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
+    // Missing/legacy versions must retain the exact pre-12K chapter map so a
+    // resumed job never reuses an existing numeric index for different text.
+    const usesCurrentBatching = jobSettings.cleanupBatchVersion === CURRENT_AUDIOBOOK_BATCH_VERSION;
+    const cleanupTargetCharacters = cleanupBatchTargetForVersion(jobSettings.cleanupBatchVersion);
     const hasSmartAudio = !!jobSettings?.useSmartAudio;
     const testNamespace = jobSettings?.testNamespace || null;
 
@@ -163,7 +222,19 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       await db.update(audiobooks).set({ hasSmartAudio: true }).where(eq(audiobooks.id, bookId));
     }
 
+    // Foreground regeneration reads this metadata to reproduce the exact
+    // chapter boundaries used by background queue generation.
+    await putAudiobookObject(
+      bookId,
+      userId,
+      'audiobook.meta.json',
+      Buffer.from(JSON.stringify(jobSettings, null, 2), 'utf8'),
+      'application/json; charset=utf-8',
+      testNamespace,
+    );
+
     let chapters: { index: number; title: string; text: string }[] = [];
+    let tocSectionsSkipped = 0;
 
     if (doc.type === 'pdf') {
       let artifact = await readCurrentParsedPdfArtifact({ documentId: doc.id, namespace: testNamespace });
@@ -195,7 +266,22 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       }
       const parsedPdf = JSON.parse(artifact.bytes.toString('utf-8')) as ParsedPdfDocument;
       
-      const allBlocks = parsedPdf.pages.flatMap(p => p.blocks);
+      const pdfBlocks = parsedPdf.pages.flatMap((page) => page.blocks.map((block) => ({
+        ...block,
+        pageNumber: page.pageNumber,
+      })));
+      const tocFiltered = usesCurrentBatching
+        ? removePdfTableOfContents(pdfBlocks, parsedPdf.pages.length)
+        : { blocks: pdfBlocks, skipped: false };
+      const allBlocks = tocFiltered.blocks;
+      if (tocFiltered.skipped) {
+        tocSectionsSkipped += 1;
+        serverLogger.info({
+          event: 'audiobook.queue.front_matter.skipped',
+          bookId,
+          section: 'table_of_contents',
+        }, 'Removed the PDF table of contents before Smart Audio and TTS processing.');
+      }
       const chapterBoundaryKinds = new Set(['paragraph_title', 'doc_title']);
       
       let currentTitle = 'Introduction';
@@ -213,12 +299,22 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         lastBlockWasTitle = false;
       };
 
-      for (const block of allBlocks) {
+      for (let blockIndex = 0; blockIndex < allBlocks.length; blockIndex += 1) {
+        const block = allBlocks[blockIndex];
         const blockText = block.text.trim();
         if (!blockText) continue;
 
         if (chapterBoundaryKinds.has(block.kind)) {
-          if (currentLength >= 4000) {
+          if (
+            usesCurrentBatching
+            &&
+            blockIndex / Math.max(allBlocks.length, 1) >= 0.7
+            && isAudiobookEndMatterHeading(blockText)
+          ) {
+            flush();
+            break;
+          }
+          if (currentLength >= cleanupTargetCharacters) {
             flush();
             currentTitle = blockText || `Chapter ${chapters.length + 1}`;
           } else if (currentText.length === 0) {
@@ -232,7 +328,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           const isContinuation = !lastBlockWasTitle && lastIndex >= 0 && !/[.!?…'"”’\]}):;]\s*$/.test(currentText[lastIndex]);
 
           // Only flush if we are safely AT a paragraph boundary!
-          if (!isContinuation && currentLength >= 4000) {
+          if (!isContinuation && currentLength >= cleanupTargetCharacters) {
             flush();
             currentTitle = currentTitle.endsWith('(Continued)') ? currentTitle : `${currentTitle} (Continued)`;
           }
@@ -262,11 +358,16 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       throw new Error(`Unsupported document type: ${doc.type}`);
     }
 
-    if (chapters.length === 0) throw new Error('No content found');
-
     const runtimeConfig = await getResolvedRuntimeConfig();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const settings = (job.settingsJson as Record<string, any>) || {};
+    const settings = jobSettings as Record<string, any>;
+    if (usesCurrentBatching) {
+      chapters = batchAudiobookText(
+        truncateAudiobookEndMatter(chapters),
+        cleanupTargetCharacters,
+      );
+    }
+    if (chapters.length === 0) throw new Error('No audiobook content found before end matter');
     const format = (settings.format as 'mp3' | 'm4b') || 'm4b';
 
     const creds = await resolveTtsCredentials({
@@ -286,6 +387,125 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     const totalLength = chapters.reduce((sum, c) => sum + c.text.length, 0);
 
     const useSmartAudio = Boolean(settings.useSmartAudio);
+    const profilesDocument = useSmartAudio
+      ? await readSmartAudioProfilesDocument(userId)
+      : null;
+    let selectedProfile = profilesDocument
+      ? findSmartAudioProfileById(profilesDocument, String(settings.smartAudioProfileId || ''))
+      : null;
+    const pronunciationsAtAutoScanStart = {
+      ...(selectedProfile?.pronunciations || {}),
+    };
+    const globalPronunciations = selectedProfile?.useGlobalPronunciations
+      ? await readGlobalPronunciationDefaults()
+      : {};
+    let resolvedPronunciations = filterKokoroCompatiblePronunciationRecord({
+      ...globalPronunciations,
+      ...(selectedProfile?.pronunciations || {}),
+    });
+    let bookLexicon = selectedProfile?.workerMode === 'scholar'
+      ? await readBookLexicon(userId, doc.id)
+      : null;
+    let definitionPassRan = false;
+
+    if (
+      selectedProfile?.workerMode === 'scholar'
+      && (
+        bookLexicon?.status !== 'complete'
+        || bookLexicon.definitionScanComplete !== true
+        || bookLexicon.profileId !== selectedProfile.id
+      )
+    ) {
+      if (settings.scholarAutoScan !== true) {
+        throw new Error('Scholar pronunciation and definition scan is required before audiobook generation.');
+      }
+      const candidates = collectSmartAudioTermCandidates(
+        chapters.map((chapter) => chapter.text),
+        resolvedPronunciations,
+      );
+      definitionPassRan = true;
+      try {
+        bookLexicon = await resolveSmartAudioBookLexicon({
+          profile: selectedProfile,
+          candidates,
+          existing: bookLexicon?.profileId === selectedProfile.id ? bookLexicon : null,
+          onProgress: (partial) => writeBookLexicon(userId, doc.id, partial),
+          onUsage: ({ model, batch, tokens }) => {
+            serverLogger.info({
+              event: 'audiobook.queue.gemini.usage',
+              jobId: job.id,
+              bookId,
+              chapter: null,
+              model,
+              pass: 'pronunciation_definition_scan',
+              batch,
+              tokens,
+            }, 'Recorded Gemini pronunciation and definition token usage.');
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/\bHTTP (429|503)\b/.test(message)) {
+          await db.update(audiobookJobs)
+            .set({
+              status: 'queued',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              error: GEMINI_RATE_LIMIT_PAUSE_MESSAGE,
+            })
+            .where(eq(audiobookJobs.id, job.id));
+          serverLogger.warn({
+            event: 'audiobook.queue.scholar_lexicon.rate_limit',
+            bookId,
+          }, 'Pronunciation and definition auto-scan paused by Gemini API limits.');
+          return;
+        }
+        throw error;
+      }
+      await writeBookLexicon(userId, doc.id, bookLexicon);
+
+      const termsNeedingGeneratedPronunciations = new Set(
+        candidates
+          .filter((candidate) => !candidate.pronunciation)
+          .map((candidate) => candidate.term),
+      );
+      const selectedDefaults = Object.fromEntries(
+        Object.values(bookLexicon.entries)
+          .filter((entry) => termsNeedingGeneratedPronunciations.has(entry.term))
+          .map((entry) => [entry.term, entry.pronunciation]),
+      );
+      const mergedProfile = await mergeGeneratedPronunciationsIntoLatestProfile(
+        userId,
+        selectedProfile.id,
+        selectedDefaults,
+        pronunciationsAtAutoScanStart,
+      );
+      selectedProfile = mergedProfile?.profile || selectedProfile;
+      resolvedPronunciations = filterKokoroCompatiblePronunciationRecord({
+        ...globalPronunciations,
+        ...(selectedProfile.pronunciations || {}),
+      });
+      serverLogger.info({
+        event: 'audiobook.queue.scholar_lexicon.completed',
+        bookId,
+        terms: Object.keys(bookLexicon.entries).length,
+        pronunciationsApplied: mergedProfile?.appliedWords.length || 0,
+        userEditsPreserved: mergedProfile?.preservedUserEdits.length || 0,
+      }, 'Built the Scholar pronunciation and definition lexicon before cleanup.');
+    }
+
+    serverLogger.info({
+      event: 'audiobook.queue.smart_audio.plan',
+      jobId: job.id,
+      bookId,
+      worker_mode: selectedProfile?.workerMode || 'standard',
+      nats_subject: useSmartAudio ? SMART_AUDIO_NATS_SUBJECT : null,
+      definition_pass_ran: definitionPassRan,
+      definitions_found: Object.values(bookLexicon?.entries || {})
+        .filter((entry) => Boolean(entry.definition)).length,
+      toc_sections_skipped: tocSectionsSkipped,
+      cleanup_target_characters: cleanupTargetCharacters,
+    }, 'Prepared audiobook cleanup plan.');
 
     let nc: import("nats").NatsConnection | null = null;
     let sc: import("nats").Codec<string> | null = null;
@@ -312,16 +532,6 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
       if (!chapter.text.trim()) continue;
 
-      // END OF BOOK TRIPWIRE: Save API tokens by aborting when we hit a bibliography
-      const progressRatio = processedLength / totalLength;
-      if (progressRatio > 0.85) {
-        const titleLower = chapter.title.toLowerCase();
-        if (titleLower.includes('bibliography') || titleLower.includes('works cited') || titleLower.includes('references') || titleLower === 'index') {
-          serverLogger.info({ event: 'audiobook.queue.tripwire', title: chapter.title }, 'Bibliography tripwire triggered. Skipping the rest of the book to save API tokens.');
-          break; // Break the loop, which triggers the 'completed' database update at the bottom!
-        }
-      }
-
       const chapterFileName = encodeChapterFileName(chapter.index, chapter.title, format);
       
       // CRASH RECOVERY: Check if chapter already exists in DB
@@ -337,32 +547,50 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
       if (useSmartAudio && nc && sc) {
         const smartAudioProfileId = String(settings.smartAudioProfileId || '');
-        const profilesDocument = await readSmartAudioProfilesDocument(userId);
-        const selectedProfile = findSmartAudioProfileById(profilesDocument, smartAudioProfileId);
+        const currentProfilesDocument = await readSmartAudioProfilesDocument(userId);
+        const currentSelectedProfile = findSmartAudioProfileById(currentProfilesDocument, smartAudioProfileId);
         
         try {
           serverLogger.info({ event: 'audiobook.queue.smart_audio.enabled', bookId, chapter: chapter.index }, 'Triggering Python Gemini worker...');
           
           // Key is stored per-profile; fall back to empty string which causes
           // the Python worker to return {status:"error"} and skip smart audio.
-          const geminiApiKey = (selectedProfile?.geminiApiKey || '').trim();
+          const geminiApiKey = (currentSelectedProfile?.geminiApiKey || '').trim();
 
-          const backupGeminiApiKey = (selectedProfile?.backupGeminiApiKey || '').trim();
+          const backupGeminiApiKey = (currentSelectedProfile?.backupGeminiApiKey || '').trim();
+          const currentPronunciations = currentSelectedProfile?.useGlobalPronunciations
+            ? {
+              ...globalPronunciations,
+              ...(currentSelectedProfile.pronunciations || {}),
+            }
+            : currentSelectedProfile?.pronunciations || resolvedPronunciations;
+          const enrichedChapterText = enrichTextFromBookLexicon(
+            chapter.text,
+            bookLexicon,
+            {
+              includeDefinitions: currentSelectedProfile?.workerMode === 'scholar',
+              pronunciationOverrides: currentPronunciations,
+            },
+          );
+          const applicablePronunciations = selectPronunciationsForText(
+            enrichedChapterText,
+            currentPronunciations,
+          );
 
           const payload = JSON.stringify({
             backup_api_key: backupGeminiApiKey,
             user_id: userId,
             api_key: geminiApiKey,
-            ai_model: selectedProfile?.aiModel || 'gemini-2.5-flash',
-            prompt: selectedProfile?.customTtsPrompt || "You are an expert audiobook preparation assistant...",
-            pronunciation_prompt: buildKokoroPronunciationInstructions(selectedProfile),
-            raw_text: chapter.text,
-            pronunciations: selectedProfile?.pronunciations || {}, 
-            abbreviations: selectedProfile?.abbreviations || {},
-            books: selectedProfile?.books || {}
+            ai_model: resolveCleanupAiModel(currentSelectedProfile),
+            prompt: currentSelectedProfile?.customTtsPrompt || "You are an expert audiobook preparation assistant...",
+            pronunciation_prompt: buildKokoroPronunciationInstructions(currentSelectedProfile),
+            raw_text: enrichedChapterText,
+            pronunciations: applicablePronunciations,
+            abbreviations: currentSelectedProfile?.abbreviations || {},
+            books: currentSelectedProfile?.books || {}
           });
 
-          const msg = await nc.request("audiobooks.gemini.clean", sc.encode(payload), { timeout: 120000 });
+          const msg = await nc.request(SMART_AUDIO_NATS_SUBJECT, sc.encode(payload), { timeout: 120000 });
           const workerResult = JSON.parse(sc.decode(msg.data));
 
           if (workerResult.status === "rate_limit") {
@@ -381,14 +609,29 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
           if (workerResult.status === "success" && workerResult.cleaned_text) {
             processedTextForTts = workerResult.cleaned_text;
+            serverLogger.info({
+              event: 'audiobook.queue.gemini.usage',
+              jobId: job.id,
+              bookId,
+              chapter: chapter.index,
+              model: resolveCleanupAiModel(currentSelectedProfile),
+              pass: 'cleanup',
+              worker_mode: currentSelectedProfile?.workerMode || 'standard',
+              nats_subject: SMART_AUDIO_NATS_SUBJECT,
+              definition_pass_ran: false,
+              definitions_found: Object.values(bookLexicon?.entries || {})
+                .filter((entry) => Boolean(entry.definition)).length,
+              toc_sections_skipped: tocSectionsSkipped,
+              tokens: normalizeGeminiTokenUsage(workerResult.usage),
+            }, 'Recorded Gemini cleanup token usage.');
             
             // Save newly discovered pronunciations back to the profile AND the global registry!
             const compatibleNewPronunciations = filterKokoroCompatiblePronunciationRecord(workerResult.new_pronunciations);
-            if (Object.keys(compatibleNewPronunciations).length > 0 && selectedProfile) {
+            if (Object.keys(compatibleNewPronunciations).length > 0 && currentSelectedProfile) {
               try {
                 // Must read fresh just in case it was updated during generation
                 const updatedDoc = await readSmartAudioProfilesDocument(userId);
-                const profileToUpdate = updatedDoc.profiles.find(p => p.id === selectedProfile.id);
+                const profileToUpdate = updatedDoc.profiles.find(p => p.id === currentSelectedProfile.id);
                 if (profileToUpdate) {
                   profileToUpdate.pronunciations = { ...profileToUpdate.pronunciations, ...compatibleNewPronunciations };
                   await writeSmartAudioProfilesDocument(userId, updatedDoc);
@@ -398,7 +641,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
                 // Save to Global Pronunciations
                 try {
                   const globalRow = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_pronunciations')).limit(1);
-                  let currentGlobal: Record<string, string[]> = {};
+                  const currentGlobal: Record<string, string[]> = {};
                   if (globalRow && globalRow.length > 0) {
                     try {
                       const parsed = JSON.parse(globalRow[0].valueJson);
@@ -406,7 +649,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
                         if (Array.isArray(val)) currentGlobal[key] = val;
                         else if (typeof val === 'string') currentGlobal[key] = [val];
                       }
-                    } catch(e) {}
+                    } catch {}
                   }
                   
                   const updatedGlobal = { ...currentGlobal };
@@ -477,10 +720,8 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         }
       }
 
-      const normalized = normalizeTextForTts(processedTextForTts, { maxBlockLength: 4000 });
-      
-      const ttsBuffer = await generateTTSBuffer({
-        text: normalized,
+      const ttsBuffer = await generateSegmentedAudiobookTtsBuffer({
+        text: processedTextForTts,
         voice: settings.voice || 'alloy',
         speed: settings.speed || 1,
         format: 'mp3',
