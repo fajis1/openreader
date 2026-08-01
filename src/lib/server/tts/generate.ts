@@ -25,6 +25,7 @@ import {
   REPLICATE_KOKORO_82M_VERSIONED_MODEL,
   speechSdkProviderPrefix,
 } from '@/lib/shared/tts-provider-catalog';
+import { isKokoroModel } from '@/lib/shared/kokoro';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import {
   resolveReplicateLanguageInput,
@@ -61,6 +62,9 @@ type ExtendedSpeechParams = Omit<SpeechCreateParams, 'voice'> & {
   voice: SpeechCreateParams['voice'] | CustomVoice;
   instructions?: string;
   language?: string;
+  normalization_options?: {
+    normalize: false;
+  };
 };
 
 type ResolvedServerTTSRequest = {
@@ -94,6 +98,7 @@ const openAiCompatibleLanguageUnsupported = new LRUCache<string, true>({ max: 25
 // then converts. In-memory + per-process: on serverless this may re-probe once per
 // cold instance, which is harmless; on long-running self-hosted it persists.
 const openAiCompatibleResponseFormatUnsupported = new LRUCache<string, true>({ max: 256 });
+const openAiCompatibleNormalizationOptionsUnsupported = new LRUCache<string, true>({ max: 256 });
 
 const DEFAULT_TTS_CACHE_MAX_SIZE_BYTES = 256 * 1024 * 1024;
 const DEFAULT_TTS_CACHE_TTL_MS = 1000 * 60 * 30;
@@ -777,13 +782,12 @@ async function runOpenAiCompatibleRequest(
 
   const formatKey = `${request.provider}|${request.baseUrl || ''}|${request.model as string}`;
   const skipResponseFormat = openAiCompatibleResponseFormatUnsupported.has(formatKey);
+  const skipNormalizationOptions = openAiCompatibleNormalizationOptionsUnsupported.has(formatKey);
 
-  const createParams: ExtendedSpeechParams = {
-    model: request.model,
-    voice: request.voice as SpeechCreateParams['voice'],
-    input: request.text,
-    speed: request.speed,
-  };
+  const createParams = buildOpenAiCompatibleSpeechParams(request);
+  if (skipNormalizationOptions) {
+    delete createParams.normalization_options;
+  }
   if (!skipResponseFormat) {
     createParams.response_format = request.format as SpeechCreateParams['response_format'];
   }
@@ -822,21 +826,80 @@ async function runOpenAiCompatibleRequest(
 
   try {
     return await fetchWithLanguageFallback(createParams);
-  } catch (error) {
-    const status = getUpstreamStatus(error);
-    // A wav-only server rejects the explicit mp3 `response_format`. Retry once
-    // without it, cache the decision, and let `normalizeToMp3` convert the result.
+  } catch (originalError) {
+    const originalStatus = getUpstreamStatus(originalError);
     const canRetryWithoutFormat = request.provider !== 'openai'
-      && (status === 400 || status === 422)
+      && (originalStatus === 400 || originalStatus === 422)
       && !skipResponseFormat
       && createParams.response_format !== undefined;
-    if (!canRetryWithoutFormat) throw error;
+    const canRetryWithoutNormalization = (originalStatus === 400 || originalStatus === 422)
+      && !skipNormalizationOptions
+      && createParams.normalization_options !== undefined;
 
-    openAiCompatibleResponseFormatUnsupported.set(formatKey, true);
-    const { response_format: _omitted, ...withoutFormat } = createParams;
-    void _omitted;
-    return fetchWithLanguageFallback(withoutFormat as ExtendedSpeechParams);
+    if (canRetryWithoutFormat) {
+      const { response_format: _omitted, ...withoutFormat } = createParams;
+      void _omitted;
+      try {
+        const result = await fetchWithLanguageFallback(withoutFormat as ExtendedSpeechParams);
+        openAiCompatibleResponseFormatUnsupported.set(formatKey, true);
+        return result;
+      } catch (withoutFormatError) {
+        const fallbackStatus = getUpstreamStatus(withoutFormatError);
+        if (!canRetryWithoutNormalization || (fallbackStatus !== 400 && fallbackStatus !== 422)) {
+          throw withoutFormatError;
+        }
+      }
+    }
+
+    if (canRetryWithoutNormalization) {
+      const { normalization_options: _omitted, ...withoutNormalization } = createParams;
+      void _omitted;
+      try {
+        const result = await fetchWithLanguageFallback(withoutNormalization as ExtendedSpeechParams);
+        openAiCompatibleNormalizationOptionsUnsupported.set(formatKey, true);
+        return result;
+      } catch (withoutNormalizationError) {
+        const fallbackStatus = getUpstreamStatus(withoutNormalizationError);
+        if (
+          !canRetryWithoutFormat
+          || (fallbackStatus !== 400 && fallbackStatus !== 422)
+        ) {
+          throw withoutNormalizationError;
+        }
+
+        const {
+          normalization_options: _normalizationOmitted,
+          response_format: _formatOmitted,
+          ...withoutExtensions
+        } = createParams;
+        void _normalizationOmitted;
+        void _formatOmitted;
+        const result = await fetchWithLanguageFallback(withoutExtensions as ExtendedSpeechParams);
+        openAiCompatibleNormalizationOptionsUnsupported.set(formatKey, true);
+        openAiCompatibleResponseFormatUnsupported.set(formatKey, true);
+        return result;
+      }
+    }
+
+    throw originalError;
   }
+}
+
+export function buildOpenAiCompatibleSpeechParams(
+  request: Pick<ResolvedServerTTSRequest, 'model' | 'provider' | 'voice' | 'text' | 'speed'>,
+): ExtendedSpeechParams {
+  const createParams: ExtendedSpeechParams = {
+    model: request.model,
+    voice: request.voice as SpeechCreateParams['voice'],
+    input: request.text,
+    speed: request.speed,
+  };
+
+  if (request.provider === 'custom-openai' && isKokoroModel(request.model as string)) {
+    createParams.normalization_options = { normalize: false };
+  }
+
+  return createParams;
 }
 
 export async function generateTTSBuffer(

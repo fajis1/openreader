@@ -611,7 +611,7 @@ export function ScanForeignWordsModal({
                     onChange={(event) => setGenerateOnlyForNewWords(event.target.checked)}
                     disabled={loading}
                   />
-                  Generate 5 only for new words
+                  Generate 5 only for new words (skip existing global/profile pronunciations)
                 </label>
                 {hasScanned && (
                   <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">

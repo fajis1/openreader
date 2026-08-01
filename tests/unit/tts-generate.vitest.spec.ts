@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  buildOpenAiCompatibleSpeechParams,
   buildReplicateInput,
   buildTTSCacheKey,
   extractReplicateAudioUrl,
@@ -77,6 +78,44 @@ describe('TTS upstream cache identity', () => {
 
     expect(buildTTSCacheKey({ ...request, language: 'ja' }))
       .not.toBe(buildTTSCacheKey({ ...request, language: 'en' }));
+  });
+});
+
+describe('OpenAI-compatible Kokoro request options', () => {
+  const request = {
+    text: '[λόγος](/loʊɡɒs/)',
+    voice: 'af_heart',
+    speed: 1,
+  };
+
+  test('disables API normalization for self-hosted Kokoro', () => {
+    expect(buildOpenAiCompatibleSpeechParams({
+      ...request,
+      model: 'kokoro',
+      provider: 'custom-openai',
+    })).toMatchObject({
+      normalization_options: { normalize: false },
+    });
+  });
+
+  test.each([
+    ['hosted OpenAI', 'openai', 'kokoro'],
+    ['DeepInfra Kokoro', 'deepinfra', 'hexgrad/Kokoro-82M'],
+    ['non-Kokoro custom endpoint', 'custom-openai', 'kitten-tts'],
+  ])('does not send the vendor option to %s', (_label, provider, model) => {
+    expect(buildOpenAiCompatibleSpeechParams({
+      ...request,
+      model,
+      provider,
+    })).not.toHaveProperty('normalization_options');
+  });
+
+  test('keeps an unsupported-field fallback for custom Kokoro servers', async () => {
+    const source = await import('node:fs/promises').then(({ readFile }) => (
+      readFile('src/lib/server/tts/generate.ts', 'utf8')
+    ));
+    expect(source).toContain('openAiCompatibleNormalizationOptionsUnsupported');
+    expect(source).toContain('withoutNormalization');
   });
 });
 

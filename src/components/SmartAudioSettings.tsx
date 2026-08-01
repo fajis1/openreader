@@ -17,6 +17,7 @@ import {
   DEFAULT_CLEANUP_AI_MODEL,
   DEFAULT_PRONUNCIATION_AI_MODEL,
 } from '@/lib/shared/smart-audio-models';
+import { useAuthSession } from '@/hooks/useAuthSession';
 
 const EMPTY_PROFILE = (): SmartAudioProfile => ({
   id: `profile-${Date.now()}`,
@@ -73,6 +74,10 @@ function formatMaskedKey(configured?: boolean, last4?: string): string | null {
 }
 
 export function SmartAudioSettings() {
+  const { data: session } = useAuthSession();
+  const isAdmin = Boolean(
+    (session?.user as unknown as { isAdmin?: boolean } | undefined)?.isAdmin,
+  );
   const [apiKey, setApiKey] = useState('');
   const [maskedKey, setMaskedKey] = useState<string | null>(null);
   const [backupApiKey, setBackupApiKey] = useState('');
@@ -106,6 +111,10 @@ export function SmartAudioSettings() {
   const [playingKey, setPlayingKey] = useState<string | null>(null);
   const [showSuspectPronunciationsOnly, setShowSuspectPronunciationsOnly] = useState(false);
   const [isRescanningSuspects, setIsRescanningSuspects] = useState(false);
+  const [globalRefineInput, setGlobalRefineInput] = useState<Record<string, string>>({});
+  const [globalRefineStatus, setGlobalRefineStatus] = useState<Record<string, string>>({});
+  const [globalRefineChoices, setGlobalRefineChoices] = useState<Record<string, string[]>>({});
+  const [globalRefineDefault, setGlobalRefineDefault] = useState<Record<string, number>>({});
 
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
@@ -261,20 +270,97 @@ export function SmartAudioSettings() {
   };
 
   const handleAdoptGlobal = async (word: string, phonetic: string) => {
+    const trimmed = phonetic.trim();
+    const normalizedPhonetic = trimmed.startsWith('/') && trimmed.endsWith('/')
+      ? trimmed
+      : `/${trimmed.replace(/^\/+|\/+$/g, '')}/`;
     setPronunciations((prev) => {
       const filtered = prev.filter(p => p.key !== word);
-      return [{ key: word, value: phonetic }, ...filtered];
+      return [{ key: word, value: normalizedPhonetic }, ...filtered];
     });
 
     try {
       await fetch('/api/tts/global-pronunciations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word, phonetic })
+        body: JSON.stringify({ word, phonetic: normalizedPhonetic })
       });
       loadGlobalPronunciations();
     } catch(e) {
       console.error(e);
+    }
+  };
+
+  const handleRefineGlobal = async (word: string, currentChoices: string[]) => {
+    const feedback = (globalRefineInput[word] || '').trim();
+    if (!feedback) {
+      toast.error('Tell the pronunciation AI how this word should sound.');
+      return;
+    }
+    setGlobalRefineStatus((current) => ({ ...current, [word]: 'Asking Gemini for five replacements…' }));
+    try {
+      const response = await fetch('/api/tts/refine-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word, feedback, currentChoices }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to generate pronunciation choices');
+      const choices = Array.isArray(data.newChoices)
+        ? data.newChoices.filter((choice: unknown): choice is string => typeof choice === 'string')
+        : [];
+      if (choices.length === 0) throw new Error('Gemini returned no usable pronunciation choices.');
+      setGlobalRefineChoices((current) => ({ ...current, [word]: choices }));
+      setGlobalRefineDefault((current) => ({ ...current, [word]: 0 }));
+      setGlobalRefineStatus((current) => ({ ...current, [word]: '' }));
+    } catch (error) {
+      setGlobalRefineStatus((current) => ({ ...current, [word]: '' }));
+      toast.error(error instanceof Error ? error.message : 'Failed to refine global pronunciation');
+    }
+  };
+
+  const handleSetGlobalDefault = async (word: string, phonetic: string) => {
+    try {
+      const response = await fetch('/api/tts/global-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set-default', word, phonetic }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to set global default');
+      toast.success(`Updated the global default for ${word}.`);
+      await loadGlobalPronunciations();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to set global default');
+    }
+  };
+
+  const handleApplyGlobalChoices = async (word: string) => {
+    const choices = globalRefineChoices[word] || [];
+    if (choices.length === 0) return;
+    try {
+      const response = await fetch('/api/tts/global-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'replace-choices',
+          word,
+          choices,
+          defaultIndex: globalRefineDefault[word] || 0,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to replace global pronunciation choices');
+      toast.success(`Replaced the global choices for ${word}.`);
+      setGlobalRefineChoices((current) => {
+        const next = { ...current };
+        delete next[word];
+        return next;
+      });
+      setGlobalRefineInput((current) => ({ ...current, [word]: '' }));
+      await loadGlobalPronunciations();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to replace global pronunciation choices');
     }
   };
 
@@ -1117,9 +1203,14 @@ export function SmartAudioSettings() {
 
       {isGlobalModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
-            <div className="p-4 border-b dark:border-gray-800 flex justify-between items-center">
-              <h3 className="text-lg font-bold">Global Pronunciations</h3>
+          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-4xl flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b dark:border-gray-800 flex justify-between items-center gap-4">
+              <div>
+                <h3 className="text-lg font-bold">Global Pronunciations</h3>
+                <p className="mt-1 text-xs text-soft">
+                  The first choice is the global default used automatically. A pronunciation saved in a user profile overrides it.
+                </p>
+              </div>
               <button onClick={() => setIsGlobalModalOpen(false)} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">✕</button>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
@@ -1179,9 +1270,16 @@ export function SmartAudioSettings() {
                         {item.values.map((phonetic, idx) => {
                           const warnings = getKokoroPronunciationQualityWarnings(item.key, phonetic);
                           return (
-                          <div key={idx} className={`flex items-center gap-3 p-2 rounded border ${warnings.length > 0 ? 'border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'}`}>
+                          <div key={idx} className={`flex flex-wrap items-center gap-3 p-2 rounded border ${warnings.length > 0 ? 'border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30' : idx === 0 ? 'border-green-500 bg-green-50 dark:border-green-800 dark:bg-green-950/30' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'}`}>
                             <div className="min-w-0 flex-1">
-                              <code className="text-xs text-purple-600 dark:text-purple-400">{phonetic}</code>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <code className="text-xs text-purple-600 dark:text-purple-400">{phonetic}</code>
+                                {idx === 0 && (
+                                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-green-800 dark:bg-green-900 dark:text-green-100">
+                                    Global default
+                                  </span>
+                                )}
+                              </div>
                               {warnings.map((warning) => (
                                 <p key={warning} className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">{warning}</p>
                               ))}
@@ -1199,10 +1297,94 @@ export function SmartAudioSettings() {
                             >
                               Adopt to My Profile
                             </button>
+                            {isAdmin && idx !== 0 && (
+                              <button
+                                type="button"
+                                onClick={() => void handleSetGlobalDefault(item.key, phonetic)}
+                                className="rounded bg-green-600 px-2 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                              >
+                                Make Global Default
+                              </button>
+                            )}
                           </div>
                           );
                         })}
                       </div>
+                      {isAdmin && (
+                        <div className="rounded border border-purple-300 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-950/30">
+                          <label className="block text-xs font-semibold text-purple-900 dark:text-purple-100" htmlFor={`global-ai-guidance-${item.key}`}>
+                            Administrator AI pronunciation guidance
+                          </label>
+                          <textarea
+                            id={`global-ai-guidance-${item.key}`}
+                            value={globalRefineInput[item.key] || ''}
+                            onChange={(event) => setGlobalRefineInput((current) => ({
+                              ...current,
+                              [item.key]: event.target.value,
+                            }))}
+                            placeholder="Describe how it should sound, the pronunciation tradition, or an English approximation."
+                            className="mt-2 min-h-20 w-full rounded border border-purple-200 bg-white p-2 text-xs text-gray-900 dark:border-purple-800 dark:bg-gray-900 dark:text-gray-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void handleRefineGlobal(item.key, item.values)}
+                            disabled={Boolean(globalRefineStatus[item.key])}
+                            className="mt-2 rounded bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50"
+                          >
+                            {globalRefineStatus[item.key] || 'Ask AI for 5 Replacement Choices'}
+                          </button>
+                          {(globalRefineChoices[item.key] || []).length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              <p className="text-xs text-purple-900 dark:text-purple-100">
+                                Review the generated choices and select which one should become the global default.
+                              </p>
+                              {(globalRefineChoices[item.key] || []).map((choice, choiceIndex) => {
+                                const warnings = getKokoroPronunciationQualityWarnings(item.key, choice);
+                                return (
+                                  <label
+                                    key={choice}
+                                    className={`flex flex-wrap items-center gap-2 rounded border p-2 text-xs ${warnings.length > 0 ? 'border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30' : 'border-purple-200 bg-white dark:border-purple-800 dark:bg-gray-900'}`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name={`global-default-${item.key}`}
+                                      checked={(globalRefineDefault[item.key] || 0) === choiceIndex}
+                                      onChange={() => setGlobalRefineDefault((current) => ({
+                                        ...current,
+                                        [item.key]: choiceIndex,
+                                      }))}
+                                    />
+                                    <code className="min-w-0 flex-1 [overflow-wrap:anywhere]">{choice}</code>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        void playPreview(item.key, choice);
+                                      }}
+                                      className="rounded bg-blue-100 px-2 py-1 font-semibold text-blue-700 hover:bg-blue-200 dark:bg-blue-900/50 dark:text-blue-300"
+                                    >
+                                      Listen
+                                    </button>
+                                    {warnings.map((warning) => (
+                                      <span key={warning} className="w-full text-[10px] text-amber-700 dark:text-amber-300">{warning}</span>
+                                    ))}
+                                  </label>
+                                );
+                              })}
+                              <button
+                                type="button"
+                                onClick={() => void handleApplyGlobalChoices(item.key)}
+                                disabled={(globalRefineChoices[item.key] || []).some(
+                                  (choice) => getKokoroPronunciationQualityWarnings(item.key, choice).length > 0,
+                                )}
+                                className="rounded bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Apply Reviewed Choices Globally
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>

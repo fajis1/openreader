@@ -5,7 +5,7 @@ import {
   readSmartAudioProfilesDocument,
   writeSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
-import { eq, and, asc, lt, inArray } from 'drizzle-orm';
+import { eq, and, asc, lt, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { audiobookJobs, documents, audiobooks, audiobookChapters, adminSettings } from '@/db/schema';
 import { readCurrentParsedPdfArtifact } from '@/lib/server/pdf-parse/artifact';
@@ -48,8 +48,66 @@ import {
 } from '@/lib/server/smart-audio/book-lexicon';
 import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
 import { generateSegmentedAudiobookTtsBuffer } from '@/lib/server/audiobooks/segmented-tts';
+import {
+  normalizeGlobalPronunciationLibrary,
+  recordLearnedGlobalPronunciation,
+} from '@/lib/server/tts/global-pronunciation-library';
 
 const SMART_AUDIO_NATS_SUBJECT = 'audiobooks.gemini.clean';
+
+async function recordLearnedGlobalPronunciations(
+  learned: Record<string, string>,
+): Promise<void> {
+  const applyLearned = (value: unknown) => {
+    const updatedGlobal = normalizeGlobalPronunciationLibrary(value || {});
+    for (const [word, pronunciation] of Object.entries(learned)) {
+      updatedGlobal[word] = recordLearnedGlobalPronunciation(
+        updatedGlobal[word] || [],
+        pronunciation,
+      );
+    }
+    return updatedGlobal;
+  };
+
+  if (process.env.POSTGRES_URL) {
+    await db.transaction(async (tx: typeof db) => {
+      await tx.execute(sql`
+        select pg_advisory_xact_lock(
+          hashtextextended('openreader:global_pronunciations', 0)
+        )
+      `);
+      const rows = await tx
+        .select({ valueJson: adminSettings.valueJson })
+        .from(adminSettings)
+        .where(eq(adminSettings.key, 'global_pronunciations'))
+        .limit(1);
+      const updatedGlobal = applyLearned(rows[0]?.valueJson);
+      await tx.insert(adminSettings).values({
+        key: 'global_pronunciations',
+        valueJson: JSON.stringify(updatedGlobal),
+      }).onConflictDoUpdate({
+        target: adminSettings.key,
+        set: { valueJson: JSON.stringify(updatedGlobal) },
+      });
+    });
+    return;
+  }
+  db.transaction((tx: typeof db) => {
+    const rows = tx
+      .select({ valueJson: adminSettings.valueJson })
+      .from(adminSettings)
+      .where(eq(adminSettings.key, 'global_pronunciations'))
+      .limit(1);
+    const updatedGlobal = applyLearned(rows[0]?.valueJson);
+    tx.insert(adminSettings).values({
+      key: 'global_pronunciations',
+      valueJson: JSON.stringify(updatedGlobal),
+    }).onConflictDoUpdate({
+      target: adminSettings.key,
+      set: { valueJson: JSON.stringify(updatedGlobal) },
+    });
+  });
+}
 
 async function readGlobalPronunciationDefaults(): Promise<Record<string, string>> {
   const rows = await db
@@ -640,32 +698,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
                 
                 // Save to Global Pronunciations
                 try {
-                  const globalRow = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_pronunciations')).limit(1);
-                  const currentGlobal: Record<string, string[]> = {};
-                  if (globalRow && globalRow.length > 0) {
-                    try {
-                      const parsed = JSON.parse(globalRow[0].valueJson);
-                      for (const [key, val] of Object.entries(parsed)) {
-                        if (Array.isArray(val)) currentGlobal[key] = val;
-                        else if (typeof val === 'string') currentGlobal[key] = [val];
-                      }
-                    } catch {}
-                  }
-                  
-                  const updatedGlobal = { ...currentGlobal };
-                  for (const [key, val] of Object.entries(compatibleNewPronunciations)) {
-                    const existing = updatedGlobal[key] || [];
-                    const filtered = existing.filter(p => p !== val);
-                    updatedGlobal[key] = [val, ...filtered].slice(0, 5);
-                  }
-                  
-                  await db.insert(adminSettings).values({
-                    key: 'global_pronunciations',
-                    valueJson: JSON.stringify(updatedGlobal)
-                  }).onConflictDoUpdate({
-                    target: adminSettings.key,
-                    set: { valueJson: JSON.stringify(updatedGlobal) }
-                  });
+                  await recordLearnedGlobalPronunciations(compatibleNewPronunciations);
                   serverLogger.info({ event: 'audiobook.queue.smart_audio.global_learned', count: Object.keys(compatibleNewPronunciations).length }, 'Appended learned pronunciations to global registry');
                 } catch (globalErr) {
                   serverLogger.warn({ event: 'audiobook.queue.smart_audio.global_learned_failed', error: globalErr }, 'Failed to save to global pronunciations registry');
