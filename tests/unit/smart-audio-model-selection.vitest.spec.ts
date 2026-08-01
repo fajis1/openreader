@@ -56,4 +56,13 @@ describe('Smart Audio model selection', () => {
     expect(settings).toContain('Pronunciation Model');
     expect(scanner).toContain('Pronunciation model:');
   });
+
+  it('renders the document scanner and pronunciation inspector opened by settings buttons', () => {
+    const settings = readSource('src/components/SmartAudioSettings.tsx');
+
+    expect(settings).toContain('<ScanForeignWordsModal');
+    expect(settings).toContain('isOpen={isScannerOpen}');
+    expect(settings).toContain('<BookPronunciationInspectorModal');
+    expect(settings).toContain('isOpen={isInspectorOpen}');
+  });
 });

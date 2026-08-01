@@ -1223,6 +1223,14 @@ export function SmartAudioSettings() {
           onSaveUniversalSetup={handleSaveUniversalSetup}
         />
       )}
+      <ScanForeignWordsModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+      />
+      <BookPronunciationInspectorModal
+        isOpen={isInspectorOpen}
+        onClose={() => setIsInspectorOpen(false)}
+      />
     </div>
   );
 }

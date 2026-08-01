@@ -43,6 +43,57 @@ function normalizeGlobalLibrary(value: unknown): Record<string, StoredChoice[]> 
   return normalized;
 }
 
+type SuspectPronunciation = {
+  word: string;
+  pronunciation: string;
+  warnings: string[];
+};
+
+export async function GET(req: NextRequest) {
+  try {
+    const ctxOrRes = await requireAuthContext(req);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+    if (!ctxOrRes.userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const rows = await db
+      .select({ valueJson: adminSettings.valueJson })
+      .from(adminSettings)
+      .where(eq(adminSettings.key, 'global_pronunciations'))
+      .limit(1);
+    const library = normalizeGlobalLibrary(rows[0]?.valueJson || {});
+    const profiles = await readSmartAudioProfilesDocument(ctxOrRes.userId);
+    const profile = findSmartAudioProfileById(profiles, profiles.selectedProfileId);
+
+    const globalSuspects: SuspectPronunciation[] = Object.entries(library).flatMap(
+      ([word, choices]) => choices.flatMap(({ phonetic }) => {
+        const warnings = getKokoroPronunciationQualityWarnings(word, phonetic);
+        return warnings.length > 0 ? [{ word, pronunciation: phonetic, warnings }] : [];
+      }),
+    );
+    const personalSuspects: SuspectPronunciation[] = Object.entries(profile?.pronunciations || {}).flatMap(
+      ([word, pronunciation]) => {
+        const warnings = getKokoroPronunciationQualityWarnings(word, pronunciation);
+        return warnings.length > 0 ? [{ word, pronunciation, warnings }] : [];
+      },
+    );
+
+    return NextResponse.json({
+      globalSuspects,
+      personalSuspects,
+      globalWords: [...new Set(globalSuspects.map(({ word }) => word))],
+      personalWords: [...new Set(personalSuspects.map(({ word }) => word))],
+      profileName: profile?.name || 'Selected profile',
+    });
+  } catch (error) {
+    return errorResponse(error, {
+      logger: serverLogger,
+      event: 'tts.global_pronunciations.audit.failed',
+      msg: 'Failed to scan saved pronunciation libraries',
+      apiErrorMessage: 'Failed to scan saved pronunciation libraries.',
+    });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const ctxOrRes = await requireAuthContext(req);
@@ -110,6 +161,7 @@ export async function POST(req: NextRequest) {
 
 Replace the suspect Kokoro pronunciations below.
 Generate five new choices per exact word, best choice first.
+Keep every choice within the profile's selected pronunciation tradition. Do not mix Erasmian, historical, modern, or reconstructed systems merely to make the choices different.
 Do not repeat any rejected choice. Avoid adjacent /y/ and /j/ sequences that Kokoro may spell aloud.
 Return JSON only as {"word":["/best/","/choice2/","/choice3/","/choice4/","/choice5/"]}.
 

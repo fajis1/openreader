@@ -53,4 +53,16 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('Try paid API key');
     expect(source).toContain('[30, 60, 120, 240]');
   });
+
+  test('offers a saved-pronunciation health scan across global and personal libraries', () => {
+    expect(source).toContain('Saved pronunciation health check');
+    expect(source).toContain('Scan Saved Pronunciations');
+    expect(source).toContain("fetch('/api/tts/global-pronunciations/rescan')");
+    expect(source).toContain('globalWords: libraryScan.globalWords');
+    expect(source).toContain('personalWords: libraryScan.personalWords');
+    expect(source).toContain('Repair All Suspects with Gemini');
+    expect(source).toContain('first safe replacement is automatically selected as the default');
+    expect(source).toContain('Global library');
+    expect(source).toContain('Personal library —');
+  });
 });

@@ -120,6 +120,18 @@ describe('Smart Audio data-integrity guards', () => {
     expect(route).not.toMatch(/const (?:global|personal)Words = .*\.slice\(0, 50\)/);
     expect(route).toContain('const batchSize = 20;');
     expect(route).toContain('candidates.slice(offset, offset + batchSize)');
+    expect(route).toContain('replacements[word][0].phonetic');
+  });
+
+  test('audits both global and selected-profile pronunciation libraries before repair', () => {
+    const route = source('src/app/api/tts/global-pronunciations/rescan/route.ts');
+    expect(route).toContain('export async function GET');
+    expect(route).toContain('const globalSuspects');
+    expect(route).toContain('const personalSuspects');
+    expect(route).toContain("profile?.pronunciations || {}");
+    expect(route).toContain('globalWords: [...new Set(globalSuspects.map');
+    expect(route).toContain('personalWords: [...new Set(personalSuspects.map');
+    expect(route).toContain('Do not mix Erasmian, historical, modern, or reconstructed systems');
   });
 
   test('gives direct 12K cleanup requests the full worker timeout', () => {

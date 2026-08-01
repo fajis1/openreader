@@ -2,6 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ModalFrame } from '@/components/ui';
 import toast from 'react-hot-toast';
 
+type SuspectPronunciation = {
+  word: string;
+  pronunciation: string;
+  warnings: string[];
+};
+
+type PronunciationLibraryScan = {
+  globalSuspects: SuspectPronunciation[];
+  personalSuspects: SuspectPronunciation[];
+  globalWords: string[];
+  personalWords: string[];
+  profileName: string;
+};
+
 export function ScanForeignWordsModal({
   isOpen,
   onClose,
@@ -41,6 +55,9 @@ export function ScanForeignWordsModal({
   const [scanJobGeneratedChoices, setScanJobGeneratedChoices] = useState(0);
   const [scanJobError, setScanJobError] = useState<string | null>(null);
   const [audioWarmStatus, setAudioWarmStatus] = useState<'idle' | 'warming' | 'ready'>('idle');
+  const [libraryScanStatus, setLibraryScanStatus] = useState<'idle' | 'scanning' | 'complete' | 'repairing'>('idle');
+  const [libraryScan, setLibraryScan] = useState<PronunciationLibraryScan | null>(null);
+  const [libraryScanError, setLibraryScanError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const resizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
   const retryTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
@@ -64,6 +81,9 @@ export function ScanForeignWordsModal({
       setScanJobGeneratedChoices(0);
       setScanJobError(null);
       setAudioWarmStatus('idle');
+      setLibraryScanStatus('idle');
+      setLibraryScan(null);
+      setLibraryScanError(null);
       warmedAudio.current.clear();
       warmingAudio.current.clear();
       audioWarmStarted.current = false;
@@ -86,6 +106,9 @@ export function ScanForeignWordsModal({
       setScanJobGeneratedChoices(0);
       setScanJobError(null);
       setAudioWarmStatus('idle');
+      setLibraryScanStatus('idle');
+      setLibraryScan(null);
+      setLibraryScanError(null);
       warmedAudio.current.clear();
       warmingAudio.current.clear();
       audioWarmStarted.current = false;
@@ -121,6 +144,46 @@ export function ScanForeignWordsModal({
       setDocuments((data.documents || []).filter((d: any) => d.type === 'pdf'));
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const scanSavedPronunciations = async () => {
+    setLibraryScanStatus('scanning');
+    setLibraryScanError(null);
+    try {
+      const response = await fetch('/api/tts/global-pronunciations/rescan');
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Saved pronunciation scan failed');
+      setLibraryScan(data as PronunciationLibraryScan);
+      setLibraryScanStatus('complete');
+    } catch (scanError) {
+      setLibraryScanError(scanError instanceof Error ? scanError.message : 'Saved pronunciation scan failed');
+      setLibraryScanStatus('idle');
+    }
+  };
+
+  const repairSuspectPronunciations = async () => {
+    if (!libraryScan || (libraryScan.globalWords.length === 0 && libraryScan.personalWords.length === 0)) return;
+    setLibraryScanStatus('repairing');
+    setLibraryScanError(null);
+    try {
+      const response = await fetch('/api/tts/global-pronunciations/rescan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          globalWords: libraryScan.globalWords,
+          personalWords: libraryScan.personalWords,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Pronunciation repair failed');
+      toast.success(`Repaired ${data.replacedGlobal.length} global and ${data.replacedPersonal.length} personal pronunciation entries.`);
+      await scanSavedPronunciations();
+    } catch (repairError) {
+      const message = repairError instanceof Error ? repairError.message : 'Pronunciation repair failed';
+      setLibraryScanError(message);
+      setLibraryScanStatus('complete');
+      toast.error(message);
     }
   };
 
@@ -564,6 +627,67 @@ export function ScanForeignWordsModal({
               </div>
             </div>
           )}
+
+          <div className="rounded-lg border border-accent-line bg-accent-wash p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-semibold text-foreground">Saved pronunciation health check</h4>
+                <p className="mt-0.5 text-xs text-soft">
+                  Scan both the global pronunciation library and the selected profile&apos;s personal library for malformed or Kokoro-incompatible entries.
+                  Gemini&apos;s first safe replacement is automatically selected as the default, so no manual adoption is required.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void scanSavedPronunciations()}
+                  disabled={libraryScanStatus === 'scanning' || libraryScanStatus === 'repairing'}
+                  className="rounded border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent-wash disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {libraryScanStatus === 'scanning' ? 'Scanning both libraries…' : libraryScan ? 'Scan Again' : 'Scan Saved Pronunciations'}
+                </button>
+                {libraryScan && (libraryScan.globalWords.length > 0 || libraryScan.personalWords.length > 0) && (
+                  <button
+                    type="button"
+                    onClick={() => void repairSuspectPronunciations()}
+                    disabled={libraryScanStatus === 'scanning' || libraryScanStatus === 'repairing'}
+                    className="rounded bg-accent px-3 py-1.5 text-xs font-semibold text-background hover:bg-secondary-accent disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {libraryScanStatus === 'repairing' ? 'Repairing suspects…' : 'Repair All Suspects with Gemini'}
+                  </button>
+                )}
+              </div>
+            </div>
+            {libraryScanError && (
+              <p className="mt-2 text-xs font-medium text-danger">{libraryScanError}</p>
+            )}
+            {libraryScan && (
+              <div className="mt-3 text-xs text-foreground">
+                <p className="font-semibold">
+                  Found {libraryScan.globalWords.length} global and {libraryScan.personalWords.length} personal suspect word{libraryScan.globalWords.length + libraryScan.personalWords.length === 1 ? '' : 's'} in {libraryScan.profileName}.
+                </p>
+                {libraryScan.globalSuspects.length === 0 && libraryScan.personalSuspects.length === 0 ? (
+                  <p className="mt-1 text-accent">No improperly formed saved pronunciations were found.</p>
+                ) : (
+                  <div className="mt-2 max-h-36 space-y-2 overflow-y-auto rounded border border-line bg-surface p-2">
+                    {([
+                      ['Global library', libraryScan.globalSuspects],
+                      [`Personal library — ${libraryScan.profileName}`, libraryScan.personalSuspects],
+                    ] as const).map(([label, suspects]) => suspects.length > 0 && (
+                      <div key={label}>
+                        <p className="font-semibold">{label}</p>
+                        {suspects.map((suspect, index) => (
+                          <p key={`${label}-${suspect.word}-${suspect.pronunciation}-${index}`} className="mt-1 [overflow-wrap:anywhere]">
+                            <strong>{suspect.word}</strong>: <code>{suspect.pronunciation}</code> — {suspect.warnings.join(' ')}
+                          </p>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div className="p-4 overflow-y-auto flex-1">
           {!activeDocId ? (
