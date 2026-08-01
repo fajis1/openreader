@@ -123,6 +123,10 @@ describe('Smart Audio data-integrity guards', () => {
     expect(route).toContain('replacements[word][0].phonetic');
     expect(route).toContain('normalizeGeneratedPronunciation');
     expect(route).toContain('trimmed.replace(/^\\/|\\/$/g, \'\')');
+    expect(route).toContain('Legacy global entries were often stored without slash wrappers');
+    expect(route).toContain('const fallbackChoices');
+    expect(route).toContain('const rejectedChoices = new Set');
+    expect(route).toContain('!rejectedChoices.has(choice)');
   });
 
   test('audits both global and selected-profile pronunciation libraries before repair', () => {

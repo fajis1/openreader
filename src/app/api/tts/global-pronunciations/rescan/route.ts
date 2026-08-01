@@ -216,10 +216,15 @@ ${JSON.stringify(candidateBatch)}`;
     for (const word of words) {
       const rawChoices = generated[word];
       if (!Array.isArray(rawChoices)) continue;
+      const rejectedChoices = new Set([
+        ...(library[word] || []).map((choice) => choice.phonetic),
+        ...(personalLibrary[word] ? [personalLibrary[word]] : []),
+      ].flatMap((choice) => [choice, normalizeGeneratedPronunciation(choice)]));
       const choices = rawChoices
         .map(normalizeGeneratedPronunciation)
         .filter((choice): choice is string => (
           choice !== null
+          && !rejectedChoices.has(choice)
           && getKokoroPronunciationQualityWarnings(word, choice).length === 0
         ))
         .filter((choice, index, all) => all.indexOf(choice) === index)
@@ -232,6 +237,33 @@ ${JSON.stringify(candidateBatch)}`;
         timestamp: now,
       }));
     }
+
+    // Legacy global entries were often stored without slash wrappers. If Gemini
+    // does not return a usable replacement for one of those entries, still make
+    // the safe, deterministic format repair instead of leaving it unchanged.
+    for (const word of words) {
+      if (replacements[word]) continue;
+      const fallbackChoices = [
+        ...(library[word] || []).map((choice) => choice.phonetic),
+        ...(personalLibrary[word] ? [personalLibrary[word]] : []),
+      ]
+        .map(normalizeGeneratedPronunciation)
+        .filter((choice): choice is string => (
+          choice !== null
+          && getKokoroPronunciationQualityWarnings(word, choice).length === 0
+        ))
+        .filter((choice, index, all) => all.indexOf(choice) === index)
+        .slice(0, 5);
+      if (fallbackChoices.length > 0) {
+        replacements[word] = fallbackChoices.map((phonetic) => ({
+          phonetic,
+          usageCount: 0,
+          isUserCustom: false,
+          timestamp: Date.now(),
+        }));
+      }
+    }
+
     if (Object.keys(replacements).length === 0) {
       return NextResponse.json({
         error: 'Gemini did not return any replacement choices that passed the Kokoro safety checks.',
