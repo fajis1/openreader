@@ -121,6 +121,8 @@ describe('Smart Audio data-integrity guards', () => {
     expect(route).toContain('const batchSize = 20;');
     expect(route).toContain('candidates.slice(offset, offset + batchSize)');
     expect(route).toContain('replacements[word][0].phonetic');
+    expect(route).toContain('normalizeGeneratedPronunciation');
+    expect(route).toContain('trimmed.replace(/^\\/|\\/$/g, \'\')');
   });
 
   test('audits both global and selected-profile pronunciation libraries before repair', () => {

@@ -43,6 +43,16 @@ function normalizeGlobalLibrary(value: unknown): Record<string, StoredChoice[]> 
   return normalized;
 }
 
+function normalizeGeneratedPronunciation(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const wrapped = trimmed.startsWith('/') && trimmed.endsWith('/')
+    ? trimmed
+    : `/${trimmed.replace(/^\/|\/$/g, '')}/`;
+  return isKokoroCompatiblePronunciation(wrapped) ? wrapped : null;
+}
+
 type SuspectPronunciation = {
   word: string;
   pronunciation: string;
@@ -207,8 +217,9 @@ ${JSON.stringify(candidateBatch)}`;
       const rawChoices = generated[word];
       if (!Array.isArray(rawChoices)) continue;
       const choices = rawChoices
+        .map(normalizeGeneratedPronunciation)
         .filter((choice): choice is string => (
-          isKokoroCompatiblePronunciation(choice)
+          choice !== null
           && getKokoroPronunciationQualityWarnings(word, choice).length === 0
         ))
         .filter((choice, index, all) => all.indexOf(choice) === index)
