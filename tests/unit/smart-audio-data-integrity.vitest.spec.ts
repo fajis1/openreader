@@ -127,6 +127,8 @@ describe('Smart Audio data-integrity guards', () => {
     expect(route).toContain('const fallbackChoices');
     expect(route).toContain('const rejectedChoices = new Set');
     expect(route).toContain('!rejectedChoices.has(choice)');
+    expect(route).toContain('better-sqlite3 transactions require a synchronous callback');
+    expect(route).toContain('db.transaction((tx: typeof db) => {');
   });
 
   test('audits both global and selected-profile pronunciation libraries before repair', () => {

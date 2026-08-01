@@ -273,32 +273,53 @@ ${JSON.stringify(candidateBatch)}`;
     const globalReplacementCandidates = globalWords.filter((word) => replacements[word]);
     let replacedGlobal: string[] = [];
     if (globalReplacementCandidates.length > 0) {
-      await db.transaction(async (tx: typeof db) => {
-        if (process.env.POSTGRES_URL) {
+      if (process.env.POSTGRES_URL) {
+        await db.transaction(async (tx: typeof db) => {
           await tx.execute(sql`
             select pg_advisory_xact_lock(
               hashtextextended('openreader:global_pronunciations', 0)
             )
           `);
-        }
-        const latestRows = await tx
-          .select({ valueJson: adminSettings.valueJson })
-          .from(adminSettings)
-          .where(eq(adminSettings.key, 'global_pronunciations'))
-          .limit(1);
-        const latestLibrary = normalizeGlobalLibrary(latestRows[0]?.valueJson || {});
-        replacedGlobal = globalReplacementCandidates.filter((word) => (
-          JSON.stringify(latestLibrary[word] || []) === JSON.stringify(library[word] || [])
-        ));
-        for (const word of replacedGlobal) latestLibrary[word] = replacements[word];
-        await tx.insert(adminSettings).values({
-          key: 'global_pronunciations',
-          valueJson: JSON.stringify(latestLibrary),
-        }).onConflictDoUpdate({
-          target: adminSettings.key,
-          set: { valueJson: JSON.stringify(latestLibrary) },
+          const latestRows = await tx
+            .select({ valueJson: adminSettings.valueJson })
+            .from(adminSettings)
+            .where(eq(adminSettings.key, 'global_pronunciations'))
+            .limit(1);
+          const latestLibrary = normalizeGlobalLibrary(latestRows[0]?.valueJson || {});
+          replacedGlobal = globalReplacementCandidates.filter((word) => (
+            JSON.stringify(latestLibrary[word] || []) === JSON.stringify(library[word] || [])
+          ));
+          for (const word of replacedGlobal) latestLibrary[word] = replacements[word];
+          await tx.insert(adminSettings).values({
+            key: 'global_pronunciations',
+            valueJson: JSON.stringify(latestLibrary),
+          }).onConflictDoUpdate({
+            target: adminSettings.key,
+            set: { valueJson: JSON.stringify(latestLibrary) },
+          });
         });
-      });
+      } else {
+        // better-sqlite3 transactions require a synchronous callback.
+        db.transaction((tx: typeof db) => {
+          const latestRows = tx
+            .select({ valueJson: adminSettings.valueJson })
+            .from(adminSettings)
+            .where(eq(adminSettings.key, 'global_pronunciations'))
+            .limit(1);
+          const latestLibrary = normalizeGlobalLibrary(latestRows[0]?.valueJson || {});
+          replacedGlobal = globalReplacementCandidates.filter((word) => (
+            JSON.stringify(latestLibrary[word] || []) === JSON.stringify(library[word] || [])
+          ));
+          for (const word of replacedGlobal) latestLibrary[word] = replacements[word];
+          tx.insert(adminSettings).values({
+            key: 'global_pronunciations',
+            valueJson: JSON.stringify(latestLibrary),
+          }).onConflictDoUpdate({
+            target: adminSettings.key,
+            set: { valueJson: JSON.stringify(latestLibrary) },
+          });
+        });
+      }
     }
 
     const personalReplacementCandidates = personalWords.filter((word) => replacements[word]);
