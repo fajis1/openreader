@@ -344,8 +344,11 @@ ${JSON.stringify(terms)}`;
               },
             ),
           });
-          await saveJob({ statusMessage: null });
           const data = await res.json().catch(() => null);
+          if (!res.ok) {
+            const errorMsg = data?.error?.message || `Gemini request failed (HTTP ${res.status}).`;
+            throw new Error(errorMsg);
+          }
           serverLogger.info({
             event: 'pdf.scan.gemini.usage',
             jobId,
@@ -356,9 +359,6 @@ ${JSON.stringify(terms)}`;
             batch: i / chunkSize + 1,
             tokens: normalizeGeminiTokenUsage(data?.usageMetadata),
           }, 'Recorded Gemini pronunciation and definition scan token usage.');
-          if (!res.ok) {
-            throw new Error(`Gemini request failed (HTTP ${res.status}).`);
-          }
           const generatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
           if (!generatedText) {
             throw new Error('Gemini returned no pronunciation choices.');
