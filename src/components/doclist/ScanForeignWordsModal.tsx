@@ -518,13 +518,28 @@ export function ScanForeignWordsModal({
                 Drag the lower-right corner to resize this window.
               </p>
               {pronunciationModel && (
-                <div className="flex items-center gap-3 text-[11px] text-purple-700 dark:text-purple-300">
+                <div className="flex flex-wrap items-center gap-3 text-[11px] text-purple-700 dark:text-purple-300">
                   <span>Pronunciation model: <span className="font-mono font-semibold">{pronunciationModel}</span></span>
-                  {apiKeyLast4 && (
+                  {apiKeyLast4 ? (
                     <span>Primary API Key: <span className="font-mono font-semibold">{apiKeyLast4}</span></span>
-                  )}
-                  {backupApiKeyLast4 && (
+                  ) : null}
+                  {backupApiKeyLast4 ? (
                     <span>Backup API Key: <span className="font-mono font-semibold">{backupApiKeyLast4}</span></span>
+                  ) : null}
+                  {!apiKeyLast4 && !backupApiKeyLast4 && (
+                    <div className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-700 dark:text-amber-300 font-semibold border border-amber-500/30">
+                      <span>⚠️ No Gemini API Key configured!</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          window.dispatchEvent(new CustomEvent('open-smart-audio-settings'));
+                        }}
+                        className="underline hover:text-amber-900 dark:hover:text-amber-100 font-bold ml-1"
+                      >
+                        Configure Key in Smart Audio Settings →
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
