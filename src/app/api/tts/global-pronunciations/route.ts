@@ -6,6 +6,7 @@ import { requireAdminContext } from '@/lib/server/auth/admin';
 import {
   normalizeGlobalPronunciationLibrary,
   recordLearnedGlobalPronunciation,
+  removeGlobalPronunciationChoice,
   replaceGlobalPronunciationChoices,
   setGlobalPronunciationDefault,
   type GlobalPronunciationLibrary,
@@ -111,9 +112,6 @@ export async function GET() {
     } else {
       const value = rows[0].valueJson;
       parsed = typeof value === 'string' ? JSON.parse(value) : value;
-      if (!parsed || Object.keys(parsed).length === 0) {
-        parsed = DEFAULT_SEED_PRONUNCIATIONS;
-      }
     }
 
     return NextResponse.json(normalizeGlobalPronunciationLibrary(parsed));
@@ -128,15 +126,32 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as Record<string, unknown>;
     const word = typeof body.word === 'string' ? body.word.trim() : '';
     const phonetic = typeof body.phonetic === 'string' ? body.phonetic : '';
-    if (!word || !phonetic) {
-      if (body.action !== 'replace-choices' || !word || !Array.isArray(body.choices)) {
+    const isReplaceAction = body.action === 'replace-choices';
+    const isPhoneticAction = body.action === 'set-default' || body.action === 'delete-choice';
+    if (!word || (!phonetic && !isReplaceAction)) {
+      if (!isReplaceAction || !word || !Array.isArray(body.choices)) {
         return NextResponse.json({ error: 'Missing word or phonetic' }, { status: 400 });
       }
     }
 
-    if (body.action === 'set-default' || body.action === 'replace-choices') {
+    if (isPhoneticAction || isReplaceAction) {
       const admin = await requireAdminContext(req);
       if (admin instanceof Response) return admin;
+
+      if (body.action === 'delete-choice') {
+        const removal = await mutateGlobalPronunciationLibrary((latestLibrary) => {
+          const next = removeGlobalPronunciationChoice(latestLibrary, word, phonetic);
+          if (next.removed) {
+            if (next.choices.length > 0) latestLibrary[word] = next.choices;
+            else delete latestLibrary[word];
+          }
+          return { result: next, changed: next.removed };
+        });
+        if (!removal.removed) {
+          return NextResponse.json({ error: 'Global pronunciation choice not found.' }, { status: 404 });
+        }
+        return NextResponse.json({ success: true, updatedList: removal.choices });
+      }
 
       const buildUpdatedList = (latestLibrary: GlobalPronunciationLibrary) => (
         body.action === 'set-default'

@@ -12,6 +12,23 @@ export type GlobalPronunciationChoice = {
 
 export type GlobalPronunciationLibrary = Record<string, GlobalPronunciationChoice[]>;
 
+export function removeGlobalPronunciationChoice(
+  library: GlobalPronunciationLibrary,
+  word: string,
+  pronunciation: unknown,
+): { removed: boolean; choices: GlobalPronunciationChoice[] } {
+  const normalized = normalizeGlobalPronunciation(pronunciation);
+  const raw = typeof pronunciation === 'string' ? pronunciation.trim() : '';
+  if (!raw) return { removed: false, choices: library[word] || [] };
+  const current = library[word] || [];
+  const choices = current.filter(
+    (choice) => normalized
+      ? normalizeGlobalPronunciation(choice.phonetic) !== normalized
+      : choice.phonetic.trim() !== raw,
+  );
+  return { removed: choices.length !== current.length, choices };
+}
+
 export function recordLearnedGlobalPronunciation(
   current: GlobalPronunciationChoice[],
   pronunciation: unknown,

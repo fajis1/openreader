@@ -18,6 +18,7 @@ import {
   DEFAULT_PRONUNCIATION_AI_MODEL,
 } from '@/lib/shared/smart-audio-models';
 import { useAuthSession } from '@/hooks/useAuthSession';
+import { useTtsPreviewSettings } from '@/hooks/audio/useTtsPreviewSettings';
 
 const EMPTY_PROFILE = (): SmartAudioProfile => ({
   id: `profile-${Date.now()}`,
@@ -75,6 +76,7 @@ function formatMaskedKey(configured?: boolean, last4?: string): string | null {
 
 export function SmartAudioSettings() {
   const { data: session } = useAuthSession();
+  const previewSettings = useTtsPreviewSettings();
   const isAdmin = Boolean(
     (session?.user as unknown as { isAdmin?: boolean } | undefined)?.isAdmin,
   );
@@ -307,7 +309,17 @@ export function SmartAudioSettings() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Failed to generate pronunciation choices');
       const choices = Array.isArray(data.newChoices)
-        ? data.newChoices.filter((choice: unknown): choice is string => typeof choice === 'string')
+        ? data.newChoices
+          .filter((choice: unknown): choice is string => typeof choice === 'string')
+          .map((choice: string) => {
+            const trimmed = choice.trim();
+            return trimmed.startsWith('/') && trimmed.endsWith('/')
+              ? trimmed
+              : `/${trimmed.replace(/^\/+|\/+$/g, '')}/`;
+          })
+          .filter((choice: string, index: number, all: string[]) => (
+            choice.length > 2 && all.indexOf(choice) === index
+          ))
         : [];
       if (choices.length === 0) throw new Error('Gemini returned no usable pronunciation choices.');
       setGlobalRefineChoices((current) => ({ ...current, [word]: choices }));
@@ -364,14 +376,31 @@ export function SmartAudioSettings() {
     }
   };
 
+  const handleDeleteGlobalChoice = async (word: string, phonetic: string) => {
+    if (!window.confirm(`Remove ${phonetic} from the global choices for ${word}?`)) return;
+    try {
+      const response = await fetch('/api/tts/global-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete-choice', word, phonetic }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to remove global pronunciation');
+      toast.success(`Removed a global pronunciation for ${word}.`);
+      await loadGlobalPronunciations();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to remove global pronunciation');
+    }
+  };
+
   const playPreview = async (word: string, phonetic: string) => {
     try {
       setPlayingKey(word);
       const textToSynthesize = phonetic.startsWith('/') ? `[${word}](${phonetic})` : phonetic;
       const res = await fetch('/api/tts/preview', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: textToSynthesize })
+        headers: previewSettings.headers,
+        body: JSON.stringify({ text: textToSynthesize, voice: previewSettings.voice })
       });
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
@@ -1304,6 +1333,15 @@ export function SmartAudioSettings() {
                                 className="rounded bg-green-600 px-2 py-1 text-xs font-semibold text-white hover:bg-green-700"
                               >
                                 Make Global Default
+                              </button>
+                            )}
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteGlobalChoice(item.key, phonetic)}
+                                className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300"
+                              >
+                                Remove from Global Library
                               </button>
                             )}
                           </div>

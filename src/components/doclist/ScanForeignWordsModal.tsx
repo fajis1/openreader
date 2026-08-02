@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ModalFrame } from '@/components/ui';
 import toast from 'react-hot-toast';
+import { useTtsPreviewSettings } from '@/hooks/audio/useTtsPreviewSettings';
 
 type SuspectPronunciation = {
   word: string;
@@ -27,6 +28,7 @@ export function ScanForeignWordsModal({
   documentId?: string | null;
   documentName?: string | null;
 }) {
+  const previewSettings = useTtsPreviewSettings();
   const [activeDocId, setActiveDocId] = useState<string | null>(documentId || null);
   const [activeDocName, setActiveDocName] = useState<string | null>(documentName || null);
   const [documents, setDocuments] = useState<any[]>([]);
@@ -222,8 +224,8 @@ export function ScanForeignWordsModal({
       const textToSynthesize = phonetic.startsWith('/') ? `[${word}](${phonetic})` : `[${word}](/${phonetic}/)`;
       const res = await fetch('/api/tts/preview', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: textToSynthesize, voice: 'af_heart' }),
+        headers: previewSettings.headers,
+        body: JSON.stringify({ text: textToSynthesize, voice: previewSettings.voice }),
       });
       if (res.ok) {
         await res.arrayBuffer();
@@ -320,8 +322,8 @@ export function ScanForeignWordsModal({
       const textToSynthesize = phonetic ? (phonetic.startsWith('/') ? `[${word}](${phonetic})` : `[${word}](/${phonetic}/)`) : word;
       const res = await fetch(`/api/tts/preview`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: textToSynthesize, voice: 'af_heart' })
+        headers: previewSettings.headers,
+        body: JSON.stringify({ text: textToSynthesize, voice: previewSettings.voice })
       });
       if (!res.ok) throw new Error('TTS Preview failed');
       const blob = await res.blob();

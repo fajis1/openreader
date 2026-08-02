@@ -4,7 +4,7 @@ import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useConfig } from '@/contexts/ConfigContext';
-import { CheckIcon, SettingsIcon, KeyIcon, PaletteIcon, DocumentIcon, UserIcon, DownloadIcon, ChevronRightIcon } from '@/components/icons/Icons';
+import { CheckIcon, SettingsIcon, KeyIcon, PaletteIcon, DocumentIcon, UserIcon, DownloadIcon, ChevronRightIcon, AudioWaveIcon } from '@/components/icons/Icons';
 import { useDocuments } from '@/contexts/DocumentContext';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ProgressPopup } from '@/components/ProgressPopup';
@@ -65,6 +65,8 @@ import {
   type ChangelogReleaseBody,
 } from '@/lib/shared/changelog';
 import { useOnboardingFlow } from '@/contexts/OnboardingFlowContext';
+import { useVoiceManagement } from '@/hooks/audio/useVoiceManagement';
+import { VoicesControlBase } from '@/components/player/VoicesControlBase';
 
 // Hard-coded theme color palettes for the visual theme selector
 type ThemeColorSet = { background: string; base: string; offbase: string; accent: string; secondaryAccent: string; foreground: string; muted: string };
@@ -153,7 +155,7 @@ function ThemeChoice({
   );
 }
 
-type SectionId = 'api' | 'api-keys' | 'theme' | 'docs' | 'account' | 'logs' | 'admin';
+type SectionId = 'audio' | 'api' | 'api-keys' | 'theme' | 'docs' | 'account' | 'logs' | 'admin';
 
 type SidebarSection = {
   id: SectionId;
@@ -164,6 +166,7 @@ type SidebarSection = {
 };
 
 const SIDEBAR_SECTIONS: SidebarSection[] = [
+  { id: 'audio', label: 'Audio', icon: AudioWaveIcon },
   { id: 'api', label: 'TTS Provider', icon: KeyIcon },
   { id: 'api-keys', label: 'API Keys', icon: KeyIcon },
   { id: 'theme', label: 'Appearance', icon: PaletteIcon },
@@ -228,12 +231,12 @@ export function SettingsModal({
   const isOpen = open;
   const setIsOpen = onOpenChange;
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<SectionId>(enableTTSProvidersTab ? 'api' : 'theme');
+  const [activeSection, setActiveSection] = useState<SectionId>('audio');
 
   const { theme, setTheme, applyCustomColors } = useTheme();
   const [customColors, setCustomColors] = useState<CustomThemeColors>(getCustomThemeColors);
   const [isCustomExpanded, setIsCustomExpanded] = useState(false);
-  const { apiKey, baseUrl, providerRef, providerType, ttsModel, ttsInstructions, updateConfig, updateConfigKey } = useConfig();
+  const { apiKey, baseUrl, providerRef, providerType, ttsModel, ttsInstructions, voice, updateConfig, updateConfigKey } = useConfig();
   const { refreshDocuments } = useDocuments();
   const [localApiKey, setLocalApiKey] = useState(apiKey);
   const [localBaseUrl, setLocalBaseUrl] = useState(baseUrl);
@@ -242,6 +245,14 @@ export function SettingsModal({
   const [modelValue, setModelValue] = useState(ttsModel);
   const [customModelInput, setCustomModelInput] = useState('');
   const [localTTSInstructions, setLocalTTSInstructions] = useState(ttsInstructions);
+  const [localDefaultVoice, setLocalDefaultVoice] = useState(voice);
+  const { availableVoices, fetchVoices } = useVoiceManagement(
+    apiKey,
+    baseUrl,
+    providerRef,
+    providerType,
+    ttsModel,
+  );
   const [isImportingLibrary, setIsImportingLibrary] = useState(false);
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [selectionModalProps, setSelectionModalProps] = useState<{
@@ -312,7 +323,13 @@ export function SettingsModal({
     setLocalProviderType(providerType);
     setModelValue(ttsModel);
     setLocalTTSInstructions(ttsInstructions);
-  }, [isOpen, apiKey, baseUrl, providerRef, providerType, ttsModel, ttsInstructions]);
+    setLocalDefaultVoice(voice);
+  }, [isOpen, apiKey, baseUrl, providerRef, providerType, ttsModel, ttsInstructions, voice]);
+
+  useEffect(() => {
+    if (!isOpen || activeSection !== 'audio') return;
+    void fetchVoices();
+  }, [isOpen, activeSection, fetchVoices]);
 
   useEffect(() => {
     if (!ttsModels.some(m => m.id === modelValue) && modelValue !== '') {
@@ -562,6 +579,10 @@ export function SettingsModal({
   const selectedModelVersion = selectedModel?.id?.includes(':')
     ? selectedModel.id.slice(selectedModel.id.indexOf(':'))
     : '';
+  const displayedDefaultVoice = localDefaultVoice
+    && (availableVoices.includes(localDefaultVoice) || localDefaultVoice.includes('+'))
+    ? localDefaultVoice
+    : availableVoices[0] || '';
   const displayVersion = normalizeVersion(runtimeConfig.appVersion || '');
 
   return (
@@ -615,6 +636,55 @@ export function SettingsModal({
           ) : undefined
         }
       >
+                      {/* Audio defaults are always available, even when provider editing is disabled. */}
+                      {activeSection === 'audio' && (
+                        <div className="space-y-4">
+                          <div className="space-y-1.5">
+                            <label className={fieldLabelClass}>Default Voice</label>
+                            <p className="text-xs text-soft">
+                              Used for Reader playback, new audiobooks, and pronunciation previews. The choice is saved to your account for this provider and model.
+                            </p>
+                            {availableVoices.length > 0 ? (
+                              <VoicesControlBase
+                                availableVoices={availableVoices}
+                                voice={displayedDefaultVoice}
+                                onChangeVoice={setLocalDefaultVoice}
+                                providerType={providerType}
+                                ttsModel={ttsModel}
+                                dropdownDirection="down"
+                                variant="field"
+                              />
+                            ) : (
+                              <p className="rounded border border-line bg-surface p-3 text-xs text-soft">
+                                Loading voices for the selected TTS provider…
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              variant="primary"
+                              size="md"
+                              disabled={availableVoices.length === 0}
+                              onClick={async () => {
+                                const nextVoice = displayedDefaultVoice;
+                                if (!nextVoice) return;
+                                await updateConfigKey('voice', nextVoice);
+                                try {
+                                  await flushUserPreferencesSync();
+                                  toast.success(`Default voice set to ${nextVoice}.`);
+                                } catch (error) {
+                                  console.error('Failed to save default voice:', error);
+                                  toast.error('Failed to save the default voice. Please try again.');
+                                }
+                              }}
+                            >
+                              Save Default Voice
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
                       {/* API Section */}
                       {activeSection === 'api' && (
                         <div className="space-y-4">

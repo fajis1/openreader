@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 import {
   replaceGlobalPronunciationChoices,
   recordLearnedGlobalPronunciation,
+  removeGlobalPronunciationChoice,
   setGlobalPronunciationDefault,
   type GlobalPronunciationLibrary,
 } from '../../src/lib/server/tts/global-pronunciation-library';
@@ -60,6 +61,19 @@ describe('global pronunciation administration', () => {
     expect(recordLearnedGlobalPronunciation(full, '/one/')[1].usageCount).toBe(6);
   });
 
+  test('removes one global choice and promotes the next choice when needed', () => {
+    expect(removeGlobalPronunciationChoice(library, 'στοιχεῖα', 'stɔɪxɛːa')).toEqual({
+      removed: true,
+      choices: [{ phonetic: '/stixia/', usageCount: 1 }],
+    });
+    expect(removeGlobalPronunciationChoice(library, 'στοιχεῖα', '/missing/').removed).toBe(false);
+    expect(removeGlobalPronunciationChoice(
+      { λόγος: [{ phonetic: '/loˈgos/' }] },
+      'λόγος',
+      '/loˈgos/',
+    ).removed).toBe(true);
+  });
+
   test('exposes admin-only default and guided AI replacement controls', () => {
     const component = fs.readFileSync(
       path.join(process.cwd(), 'src/components/SmartAudioSettings.tsx'),
@@ -73,13 +87,18 @@ describe('global pronunciation administration', () => {
     expect(component).toContain('Make Global Default');
     expect(component).toContain('Ask AI for 5 Replacement Choices');
     expect(component).toContain('Apply Reviewed Choices Globally');
+    expect(component).toContain('Remove from Global Library');
+    expect(component).toContain("action: 'delete-choice'");
+    expect(component).toContain("trimmed.startsWith('/') && trimmed.endsWith('/')");
     expect(component).toContain('{isAdmin &&');
     expect(route).toContain("body.action === 'set-default'");
     expect(route).toContain("body.action === 'replace-choices'");
+    expect(route).toContain("body.action === 'delete-choice'");
     expect(route).toContain('requireAdminContext(req)');
     expect(route).toContain('pg_advisory_xact_lock');
     expect(route).toContain('const latestLibrary = normalizeGlobalPronunciationLibrary');
     expect(route).toContain('mutateGlobalPronunciationLibrary');
+    expect(route).not.toContain('Object.keys(parsed).length === 0');
   });
 
   test('keeps new-word-only generation as the scan default', () => {

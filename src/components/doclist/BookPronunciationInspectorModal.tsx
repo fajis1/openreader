@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ModalFrame } from '@/components/ui';
 import toast from 'react-hot-toast';
+import { useTtsPreviewSettings } from '@/hooks/audio/useTtsPreviewSettings';
 
 export function BookPronunciationInspectorModal({
   isOpen,
@@ -11,6 +12,7 @@ export function BookPronunciationInspectorModal({
   onClose: () => void;
   initialBookId?: string | null;
 }) {
+  const previewSettings = useTtsPreviewSettings();
   const [selectedBookId, setSelectedBookId] = useState<string>(initialBookId || '');
   const [letterFilter, setLetterFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -60,8 +62,8 @@ export function BookPronunciationInspectorModal({
     try {
       const res = await fetch('/api/tts/preview', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: `[${word}](/${phonetic}/)` })
+        headers: previewSettings.headers,
+        body: JSON.stringify({ text: `[${word}](/${phonetic}/)`, voice: previewSettings.voice })
       });
       if (!res.ok) return;
       const audioBlob = await res.blob();

@@ -11,6 +11,7 @@ import {
   type PronunciationGuideEntry,
   type PronunciationImportStrategy,
 } from '@/lib/shared/pronunciation-guide';
+import { useTtsPreviewSettings } from '@/hooks/audio/useTtsPreviewSettings';
 
 interface PronunciationItem {
   key: string;
@@ -36,6 +37,7 @@ function previewKey(item: PronunciationItem): string {
 }
 
 export function PronunciationGuideManager({ guideName, items, onChange }: PronunciationGuideManagerProps) {
+  const previewSettings = useTtsPreviewSettings();
   const [selectedWords, setSelectedWords] = useState<string[]>([]);
   const [newEntry, setNewEntry] = useState({ key: '', value: '' });
   const [importGuide, setImportGuide] = useState<PronunciationGuide | null>(null);
@@ -120,11 +122,8 @@ export function PronunciationGuideManager({ guideName, items, onChange }: Pronun
       const text = item.value.startsWith('/') ? `[${item.key}](${item.value})` : `[${item.key}](/${item.value}/)`;
       const response = await fetch('/api/tts/preview', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tts-provider': 'kokoro',
-        },
-        body: JSON.stringify({ text, voice: 'af_heart' }),
+        headers: previewSettings.headers,
+        body: JSON.stringify({ text, voice: previewSettings.voice }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
