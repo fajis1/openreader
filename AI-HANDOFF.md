@@ -11,6 +11,12 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-02 — Validated Gemini HTTP response status before logging token usage
+
+- Updated [`src/app/api/documents/scan-foreign-words/route.ts`](file:///home/cisco/openreader/src/app/api/documents/scan-foreign-words/route.ts#L345-L360) to check `if (!res.ok)` **before** logging token usage.
+- If Gemini returns an HTTP error response, OpenReader now extracts Gemini's exact API error message (e.g. `API key not valid` or `Quota exceeded`) and throws immediately rather than logging false `0 inputTokens / 0 outputTokens` events.
+- Verified `pnpm exec tsc --noEmit` (0 errors) and Vitest unit tests (104/104 files passed).
+
 ### 2026-08-02 — Comprehensive Architecture & Handoff Update
 
 - **Gemini Failover & Exponential Backoff:** Updated [`src/lib/server/smart-audio/gemini-failover.ts`](file:///home/cisco/openreader/src/lib/server/smart-audio/gemini-failover.ts) to execute up to 8 attempts per key on HTTP 429/503 with doubling backoff ($4\text{s} \to 8\text{s} \to 16\text{s} \to 32\text{s} \to 64\text{s} \to 128\text{s} \to 256\text{s} \to 300\text{s}$). Automatically fails over to `backupGeminiApiKey` when primary is exhausted. Made sleep non-blocking during unit tests (`process.env.NODE_ENV === 'test'`).
