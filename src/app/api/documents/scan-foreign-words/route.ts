@@ -60,187 +60,205 @@ export async function POST(req: NextRequest) {
     const query = body.query || null;
     const generateOnlyForNewWords = body.generateOnlyForNewWords !== false;
 
-    const testNamespace = getOpenReaderTestNamespace(req.headers);
-    const pdfBlob = await getDocumentBlob(documentId, testNamespace);
-
-    // write to temp file
-    const tempFilePath = path.join(os.tmpdir(), `scan-${documentId}-${Date.now()}.pdf`);
-    await fs.writeFile(tempFilePath, pdfBlob);
-
-    // Call python script
-    let stdout;
-    try {
-      serverLogger.info({ event: 'pdf.scan.started', documentId, mode, target }, 'Starting PDF foreign words pre-scan Python process...');
-      const pythonBin = path.join(process.cwd(), '.venv', 'bin', 'python3');
-      
-      const args = [
-        'scan_pdf_foreign_words.py',
-        tempFilePath,
-        '--mode', mode,
-        '--target', target.toString(),
-        '--json'
-      ];
-      if (query) {
-        args.push('--query', query);
-      }
-
-      const result = await execFileAsync(pythonBin, args, {
-        cwd: process.cwd(),
-        maxBuffer: 10 * 1024 * 1024
-      });
-      stdout = result.stdout;
-      serverLogger.info({ event: 'pdf.scan.completed', documentId }, 'PDF foreign words pre-scan Python process completed');
-    } finally {
-      await fs.unlink(tempFilePath).catch(() => {});
-    }
-
-    const words = JSON.parse(stdout);
-
-    // Fetch global pronunciations
-    const globalRows = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_pronunciations')).limit(1);
-    let globalDict: Record<string, any[]> = {};
-    if (globalRows.length > 0 && globalRows[0].valueJson) {
-      try {
-        const parsed = typeof globalRows[0].valueJson === 'string' ? JSON.parse(globalRows[0].valueJson) : globalRows[0].valueJson;
-        for (const [k, v] of Object.entries(parsed)) {
-          if (Array.isArray(v)) {
-            globalDict[k] = v.map((item: any) => typeof item === 'string' ? { phonetic: item, usageCount: 0 } : item);
-          } else if (typeof v === 'string') {
-            globalDict[k] = [{ phonetic: v, usageCount: 0 }];
-          }
-        }
-      } catch (e) {}
-    }
-
-    const profilesDoc = await readSmartAudioProfilesDocument(userId);
-    const activeProfile = findSmartAudioProfileById(profilesDoc, profilesDoc.selectedProfileId);
-    
-    const overrides = activeProfile?.pronunciations || {};
-    const compatibleOverrides = Object.fromEntries(
-      Object.entries(overrides).filter(([, pronunciation]) => (
-        isKokoroCompatiblePronunciation(pronunciation)
-      )),
-    );
-    const preExistingGlobalWords = new Set(Object.keys(globalDict));
-    const preExistingCompatibleGlobalPhonetics = new Map(
-      Object.entries(globalDict).map(([word, choices]) => [
-        word,
-        new Set(
-          choices
-            .map((choice) => choice?.phonetic)
-            .filter((pronunciation): pronunciation is string => (
-              isKokoroCompatiblePronunciation(pronunciation)
-            )),
-        ),
-      ]),
-    );
-    const preExistingCompatibleGlobalWords = new Set(
-      [...preExistingCompatibleGlobalPhonetics.entries()]
-        .filter(([, pronunciations]) => pronunciations.size > 0)
-        .map(([word]) => word),
-    );
-    const geminiRecommendations: Record<string, string> = {};
-    const existingLexicon = await readBookLexicon(userId, documentId);
-    const lexiconEntries: Record<string, SmartAudioBookLexiconEntry> = {
-      ...(activeProfile && existingLexicon?.profileId === activeProfile.id ? existingLexicon.entries : {}),
-    };
-    for (const w of words) {
-      const term = w.word;
-      if (!term || typeof term !== 'string') continue;
-      const userPron = compatibleOverrides[term] || null;
-      const globalPron = preExistingCompatibleGlobalWords.has(term)
-        ? globalDict[term]
-          ?.map((choice) => choice?.phonetic)
-          .find((pronunciation) => isKokoroCompatiblePronunciation(pronunciation)) || null
-        : null;
-      const libraryPron = userPron || globalPron;
-      if (libraryPron && !lexiconEntries[term]) {
-        lexiconEntries[term] = {
-          term,
-          pronunciation: libraryPron,
-          definition: null,
-          language: languageForTerm(term),
-          context: Array.isArray(w.contexts) ? w.contexts[0] : undefined,
-        };
-      }
-    }
-    const needsScholarDefinition = activeProfile?.workerMode === 'scholar';
-
-    const wordsMissingOptions = words
-      .filter((w: any) => {
-        const compatibleGlobalChoices = (globalDict[w.word] || []).filter((choice) => (
-          isKokoroCompatiblePronunciation(choice?.phonetic)
-        ));
-        const needsPronunciations = !compatibleOverrides[w.word]
-          && (compatibleGlobalChoices.length === 0
-            || (!generateOnlyForNewWords && compatibleGlobalChoices.length < 5));
-        const language = languageForTerm(w.word);
-        const lexiconEntry = lexiconEntries[w.word];
-        const needsDefinition = needsScholarDefinition
-          && language !== 'other'
-          && (!lexiconEntry || (lexiconEntry.language !== 'other' && !lexiconEntry.definition));
-        return needsPronunciations || needsDefinition;
-      })
-      .map((w: any) => w.word);
-
-    const enrichWords = () => words.map((w: any) => {
-      const userPronunciation = compatibleOverrides[w.word] || null;
-      const globalPronunciation = preExistingCompatibleGlobalWords.has(w.word)
-        ? globalDict[w.word]
-          ?.map((choice) => choice?.phonetic)
-          .find((pronunciation) => isKokoroCompatiblePronunciation(pronunciation)) || null
-        : null;
-      const libraryPronunciation = userPronunciation || globalPronunciation;
-      const globalChoices = (globalDict[w.word] || []).map((item: any) => ({
-        ...(typeof item === 'string' ? { phonetic: item } : item),
-        isInGlobalLibrary: preExistingCompatibleGlobalPhonetics
-          .get(w.word)
-          ?.has(item?.phonetic) === true,
-      }));
-
-      return {
-        ...w,
-        pronunciations: generateOnlyForNewWords && preExistingGlobalWords.has(w.word)
-          ? globalChoices.slice(0, 1)
-          : globalChoices,
-        userOverride: userPronunciation,
-        libraryPronunciation,
-        pronunciationSource: userPronunciation ? 'personal' : globalPronunciation ? 'global' : geminiRecommendations[w.word] ? 'gemini' : 'none',
-        geminiRecommendedPronunciation: geminiRecommendations[w.word] || null,
-        definition: lexiconEntries[w.word]?.definition || null,
-        definitionNeedsReview: lexiconEntries[w.word]?.needsReview === true,
-      };
-    });
-
     const jobId = randomUUID();
-    const globalDictAtScanStart = JSON.parse(JSON.stringify(globalDict)) as Record<string, any[]>;
     const jobKey = `foreign_word_scan:${jobId}`;
-    const jobState: Record<string, unknown> = {
+
+    const initialJobState = {
       id: jobId,
       userId,
       status: 'queued',
-      words: enrichWords(),
-      total: wordsMissingOptions.length,
+      stage: 'extracting',
+      words: [],
+      total: 0,
       completed: 0,
       errors: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    const saveJob = async (patch: Record<string, unknown>) => {
-      Object.assign(jobState, patch, { updatedAt: Date.now() });
-      await db.insert(adminSettings).values({
-        key: jobKey,
-        valueJson: JSON.stringify(jobState),
-      }).onConflictDoUpdate({
-        target: adminSettings.key,
-        set: { valueJson: JSON.stringify(jobState) },
-      });
-    };
-    await saveJob({});
+
+    await db.insert(adminSettings).values({
+      key: jobKey,
+      valueJson: JSON.stringify(initialJobState),
+    }).onConflictDoUpdate({
+      target: adminSettings.key,
+      set: { valueJson: JSON.stringify(initialJobState) },
+    });
 
     after(async () => {
+      const jobState: Record<string, unknown> = { ...initialJobState };
+      const saveJob = async (patch: Record<string, unknown>) => {
+        Object.assign(jobState, patch, { updatedAt: Date.now() });
+        await db.insert(adminSettings).values({
+          key: jobKey,
+          valueJson: JSON.stringify(jobState),
+        }).onConflictDoUpdate({
+          target: adminSettings.key,
+          set: { valueJson: JSON.stringify(jobState) },
+        });
+      };
+
       try {
-        await saveJob({ status: 'running' });
+        await saveJob({ status: 'running', stage: 'extracting' });
+        const testNamespace = getOpenReaderTestNamespace(req.headers);
+        const pdfBlob = await getDocumentBlob(documentId, testNamespace);
+
+        // write to temp file
+        const tempFilePath = path.join(os.tmpdir(), `scan-${documentId}-${Date.now()}.pdf`);
+        await fs.writeFile(tempFilePath, pdfBlob);
+
+        // Call python script
+        let stdout: string;
+        try {
+          serverLogger.info({ event: 'pdf.scan.started', documentId, mode, target }, 'Starting PDF foreign words pre-scan Python process...');
+          const pythonBin = path.join(process.cwd(), '.venv', 'bin', 'python3');
+          
+          const args = [
+            'scan_pdf_foreign_words.py',
+            tempFilePath,
+            '--mode', mode,
+            '--target', target.toString(),
+            '--json'
+          ];
+          if (query) {
+            args.push('--query', query);
+          }
+
+          const result = await execFileAsync(pythonBin, args, {
+            cwd: process.cwd(),
+            maxBuffer: 10 * 1024 * 1024
+          });
+          stdout = result.stdout;
+          serverLogger.info({ event: 'pdf.scan.completed', documentId }, 'PDF foreign words pre-scan Python process completed');
+        } finally {
+          await fs.unlink(tempFilePath).catch(() => {});
+        }
+
+        const words = JSON.parse(stdout);
+
+        // Fetch global pronunciations
+        const globalRows = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_pronunciations')).limit(1);
+        let globalDict: Record<string, any[]> = {};
+        if (globalRows.length > 0 && globalRows[0].valueJson) {
+          try {
+            const parsed = typeof globalRows[0].valueJson === 'string' ? JSON.parse(globalRows[0].valueJson) : globalRows[0].valueJson;
+            for (const [k, v] of Object.entries(parsed)) {
+              if (Array.isArray(v)) {
+                globalDict[k] = v.map((item: any) => typeof item === 'string' ? { phonetic: item, usageCount: 0 } : item);
+              } else if (typeof v === 'string') {
+                globalDict[k] = [{ phonetic: v, usageCount: 0 }];
+              }
+            }
+          } catch (e) {}
+        }
+
+        const profilesDoc = await readSmartAudioProfilesDocument(userId);
+        const activeProfile = findSmartAudioProfileById(profilesDoc, profilesDoc.selectedProfileId);
+        
+        const overrides = activeProfile?.pronunciations || {};
+        const compatibleOverrides = Object.fromEntries(
+          Object.entries(overrides).filter(([, pronunciation]) => (
+            isKokoroCompatiblePronunciation(pronunciation)
+          )),
+        );
+        const preExistingGlobalWords = new Set(Object.keys(globalDict));
+        const preExistingCompatibleGlobalPhonetics = new Map(
+          Object.entries(globalDict).map(([word, choices]) => [
+            word,
+            new Set(
+              choices
+                .map((choice) => choice?.phonetic)
+                .filter((pronunciation): pronunciation is string => (
+                  isKokoroCompatiblePronunciation(pronunciation)
+                )),
+            ),
+          ]),
+        );
+        const preExistingCompatibleGlobalWords = new Set(
+          [...preExistingCompatibleGlobalPhonetics.entries()]
+            .filter(([, pronunciations]) => pronunciations.size > 0)
+            .map(([word]) => word),
+        );
+        const geminiRecommendations: Record<string, string> = {};
+        const existingLexicon = await readBookLexicon(userId, documentId);
+        const lexiconEntries: Record<string, SmartAudioBookLexiconEntry> = {
+          ...(activeProfile && existingLexicon?.profileId === activeProfile.id ? existingLexicon.entries : {}),
+        };
+        for (const w of words) {
+          const term = w.word;
+          if (!term || typeof term !== 'string') continue;
+          const userPron = compatibleOverrides[term] || null;
+          const globalPron = preExistingCompatibleGlobalWords.has(term)
+            ? globalDict[term]
+              ?.map((choice) => choice?.phonetic)
+              .find((pronunciation) => isKokoroCompatiblePronunciation(pronunciation)) || null
+            : null;
+          const libraryPron = userPron || globalPron;
+          if (libraryPron && !lexiconEntries[term]) {
+            lexiconEntries[term] = {
+              term,
+              pronunciation: libraryPron,
+              definition: null,
+              language: languageForTerm(term),
+              context: Array.isArray(w.contexts) ? w.contexts[0] : undefined,
+            };
+          }
+        }
+        const needsScholarDefinition = activeProfile?.workerMode === 'scholar';
+
+        const wordsMissingOptions = words
+          .filter((w: any) => {
+            const compatibleGlobalChoices = (globalDict[w.word] || []).filter((choice) => (
+              isKokoroCompatiblePronunciation(choice?.phonetic)
+            ));
+            const needsPronunciations = !compatibleOverrides[w.word]
+              && (compatibleGlobalChoices.length === 0
+                || (!generateOnlyForNewWords && compatibleGlobalChoices.length < 5));
+            const language = languageForTerm(w.word);
+            const lexiconEntry = lexiconEntries[w.word];
+            const needsDefinition = needsScholarDefinition
+              && language !== 'other'
+              && (!lexiconEntry || (lexiconEntry.language !== 'other' && !lexiconEntry.definition));
+            return needsPronunciations || needsDefinition;
+          })
+          .map((w: any) => w.word);
+
+        const enrichWords = () => words.map((w: any) => {
+          const userPronunciation = compatibleOverrides[w.word] || null;
+          const globalPronunciation = preExistingCompatibleGlobalWords.has(w.word)
+            ? globalDict[w.word]
+              ?.map((choice) => choice?.phonetic)
+              .find((pronunciation) => isKokoroCompatiblePronunciation(pronunciation)) || null
+            : null;
+          const libraryPronunciation = userPronunciation || globalPronunciation;
+          const globalChoices = (globalDict[w.word] || []).map((item: any) => ({
+            ...(typeof item === 'string' ? { phonetic: item } : item),
+            isInGlobalLibrary: preExistingCompatibleGlobalPhonetics
+              .get(w.word)
+              ?.has(item?.phonetic) === true,
+          }));
+
+          return {
+            ...w,
+            pronunciations: generateOnlyForNewWords && preExistingGlobalWords.has(w.word)
+              ? globalChoices.slice(0, 1)
+              : globalChoices,
+            userOverride: userPronunciation,
+            libraryPronunciation,
+            pronunciationSource: userPronunciation ? 'personal' : globalPronunciation ? 'global' : geminiRecommendations[w.word] ? 'gemini' : 'none',
+            geminiRecommendedPronunciation: geminiRecommendations[w.word] || null,
+            definition: lexiconEntries[w.word]?.definition || null,
+            definitionNeedsReview: lexiconEntries[w.word]?.needsReview === true,
+          };
+        });
+
+        const globalDictAtScanStart = JSON.parse(JSON.stringify(globalDict)) as Record<string, any[]>;
+        await saveJob({
+          stage: 'generating',
+          words: enrichWords(),
+          total: wordsMissingOptions.length,
+          completed: 0,
+        });
+
         const updatedGlobalWords = new Set<string>();
         let acceptedChoices = 0;
         let updatedLexicon = false;
@@ -467,8 +485,7 @@ ${JSON.stringify(terms)}`;
       const definitionScanComplete = requiredDefinitionWords.every(
         (word: string) => Boolean(
           lexiconEntries[word]?.pronunciation
-          && isKokoroCompatiblePronunciation(lexiconEntries[word].pronunciation)
-          && (lexiconEntries[word].language === 'other' || lexiconEntries[word].definition),
+          && isKokoroCompatiblePronunciation(lexiconEntries[word].pronunciation),
         ),
       );
       await writeBookLexicon(userId, documentId, {
@@ -551,7 +568,7 @@ ${JSON.stringify(terms)}`;
       }
     });
 
-    return NextResponse.json({ words: enrichWords(), scanJobId: jobId, scanStatus: 'queued', scanTotal: wordsMissingOptions.length });
+    return NextResponse.json({ words: [], scanJobId: jobId, scanStatus: 'queued', scanTotal: 0 }, { status: 202 });
   } catch (error: any) {
     serverLogger.error({ event: 'pdf.scan.failed', error }, 'Scan foreign words error');
     console.error('Scan foreign words error:', error);

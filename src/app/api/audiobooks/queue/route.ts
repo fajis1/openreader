@@ -12,6 +12,7 @@ import {
   readSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
 import { readBookLexicon } from '@/lib/server/smart-audio/book-lexicon';
+import { isKokoroCompatiblePronunciation } from '@/lib/shared/kokoro-pronunciation-policy';
 import { queuedAudiobookBatchVersion } from '@/lib/shared/audiobook-batching';
 
 export const dynamic = 'force-dynamic';
@@ -86,7 +87,9 @@ export async function POST(req: NextRequest) {
         const hasCompletedDefinitionScan = lexicon?.status === 'complete'
           && lexicon.definitionScanComplete === true
           && lexicon.profileId === profile.id
-          && Object.values(lexicon.entries).every((entry) => entry.definition || entry.language === 'other');
+          && Object.values(lexicon.entries).every((entry) => (
+            entry.pronunciation && isKokoroCompatiblePronunciation(entry.pronunciation)
+          ));
         if (!hasCompletedDefinitionScan && !confirmScholarAutoScan) {
           return NextResponse.json({
             code: 'SCHOLAR_SCAN_REQUIRED',
