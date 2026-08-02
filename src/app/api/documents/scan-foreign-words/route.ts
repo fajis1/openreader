@@ -274,7 +274,7 @@ export async function POST(req: NextRequest) {
             ? activeProfile.backupGeminiApiKey
             : (activeProfile?.geminiApiKey || activeProfile?.backupGeminiApiKey || '');
       
-      const chunkSize = 75;
+      const chunkSize = 35;
       for (let i = 0; i < wordsMissingOptions.length; i += chunkSize) {
         if (i > 0) {
           await new Promise((resolve) => setTimeout(resolve, 500));
@@ -301,7 +301,6 @@ For Koine Greek or Biblical Hebrew, use the supplied contexts to return a contex
 If the surrounding book context already states the definition, return that same concise gloss; OpenReader will recognize the author-supplied definition and will not speak it twice.
 Set language to "koine_greek", "biblical_hebrew", or "other". For other languages, abbreviations, or invented names, set language to "other" and definition to null.
 Return a JSON object keyed by the exact term.
-Example: { "λόγος": { "language": "koine_greek", "pronunciations": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"], "definition": "word", "confidence": 0.95, "needsReview": false } }
 
 Terms:
 ${JSON.stringify(terms)}`;
@@ -323,6 +322,23 @@ ${JSON.stringify(terms)}`;
                   generationConfig: {
                     responseMimeType: 'application/json',
                     maxOutputTokens: 8192,
+                    responseSchema: {
+                      type: 'OBJECT',
+                      additionalProperties: {
+                        type: 'OBJECT',
+                        properties: {
+                          language: { type: 'STRING' },
+                          pronunciations: {
+                            type: 'ARRAY',
+                            items: { type: 'STRING' },
+                          },
+                          definition: { type: 'STRING' },
+                          confidence: { type: 'NUMBER' },
+                          needsReview: { type: 'BOOLEAN' },
+                        },
+                        required: ['language', 'pronunciations'],
+                      },
+                    },
                   },
                 }),
               },
@@ -347,7 +363,27 @@ ${JSON.stringify(terms)}`;
           if (!generatedText) {
             throw new Error('Gemini returned no pronunciation choices.');
           }
-          const generated = JSON.parse(generatedText);
+          let generated: Record<string, unknown> = {};
+          try {
+            generated = JSON.parse(generatedText);
+          } catch (jsonErr) {
+            // Partial JSON recovery: find last valid key/value entry in truncated JSON
+            const lastValidIndex = Math.max(generatedText.lastIndexOf('},'), generatedText.lastIndexOf('}'));
+            if (lastValidIndex > 10) {
+              const sanitizedText = generatedText.slice(0, lastValidIndex + 1) + '}';
+              try {
+                generated = JSON.parse(sanitizedText);
+                serverLogger.warn(
+                  { event: 'pdf.scan.gemini.json_repaired', jobId, batch: i / chunkSize + 1 },
+                  'Recovered partial JSON response from truncated Gemini output',
+                );
+              } catch {
+                throw jsonErr;
+              }
+            } else {
+              throw jsonErr;
+            }
+          }
           const acceptedWords = new Set<string>();
           for (const [w, rawResult] of Object.entries(generated)) {
             if (chunk.includes(w)) {
