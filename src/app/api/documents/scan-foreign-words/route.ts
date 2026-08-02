@@ -29,6 +29,14 @@ import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
 import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemini-failover';
+import {
+  createGeminiHttpError,
+  foreignWordCandidateCacheKey,
+  GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA,
+  GeminiHttpError,
+  parseForeignWordCandidateCache,
+  parseGeminiForeignWordResults,
+} from '@/lib/server/smart-audio/gemini-foreign-word-scan';
 
 const execFileAsync = util.promisify(execFile);
 const GREEK = /[\u0370-\u03ff\u1f00-\u1fff]/u;
@@ -102,40 +110,75 @@ export async function POST(req: NextRequest) {
       try {
         await saveJob({ status: 'running', stage: 'extracting' });
         const testNamespace = getOpenReaderTestNamespace(req.headers);
-        const pdfBlob = await getDocumentBlob(documentId, testNamespace);
+        const candidateCacheKey = foreignWordCandidateCacheKey({
+          userId,
+          documentId,
+          mode,
+          target,
+          query,
+        });
+        const cachedRows = await db.select({ valueJson: adminSettings.valueJson })
+          .from(adminSettings)
+          .where(eq(adminSettings.key, candidateCacheKey))
+          .limit(1);
+        let words = parseForeignWordCandidateCache(cachedRows[0]?.valueJson) as any[] | null;
+        if (words) {
+          serverLogger.info(
+            { event: 'pdf.scan.candidates.cache_hit', documentId, mode, target },
+            'Reusing cached PDF foreign-word candidates',
+          );
+        } else {
+          const pdfBlob = await getDocumentBlob(documentId, testNamespace);
 
-        // write to temp file
-        const tempFilePath = path.join(os.tmpdir(), `scan-${documentId}-${Date.now()}.pdf`);
-        await fs.writeFile(tempFilePath, pdfBlob);
+          // write to temp file
+          const tempFilePath = path.join(os.tmpdir(), `scan-${documentId}-${Date.now()}.pdf`);
+          await fs.writeFile(tempFilePath, pdfBlob);
 
-        // Call python script
-        let stdout: string;
-        try {
-          serverLogger.info({ event: 'pdf.scan.started', documentId, mode, target }, 'Starting PDF foreign words pre-scan Python process...');
-          const pythonBin = path.join(process.cwd(), '.venv', 'bin', 'python3');
-          
-          const args = [
-            'scan_pdf_foreign_words.py',
-            tempFilePath,
-            '--mode', mode,
-            '--target', target.toString(),
-            '--json'
-          ];
-          if (query) {
-            args.push('--query', query);
+          // Call python script
+          let stdout: string;
+          try {
+            serverLogger.info({ event: 'pdf.scan.started', documentId, mode, target }, 'Starting PDF foreign words pre-scan Python process...');
+            const pythonBin = path.join(process.cwd(), '.venv', 'bin', 'python3');
+
+            const args = [
+              'scan_pdf_foreign_words.py',
+              tempFilePath,
+              '--mode', mode,
+              '--target', target.toString(),
+              '--json'
+            ];
+            if (query) {
+              args.push('--query', query);
+            }
+
+            const result = await execFileAsync(pythonBin, args, {
+              cwd: process.cwd(),
+              maxBuffer: 10 * 1024 * 1024
+            });
+            stdout = result.stdout;
+            serverLogger.info({ event: 'pdf.scan.completed', documentId }, 'PDF foreign words pre-scan Python process completed');
+          } finally {
+            await fs.unlink(tempFilePath).catch(() => {});
           }
 
-          const result = await execFileAsync(pythonBin, args, {
-            cwd: process.cwd(),
-            maxBuffer: 10 * 1024 * 1024
+          words = JSON.parse(stdout);
+          if (!Array.isArray(words)) {
+            throw new Error('PDF foreign-word scanner returned an invalid candidate list.');
+          }
+          const cachedCandidates = JSON.stringify({ version: 1, words });
+          await db.insert(adminSettings).values({
+            key: candidateCacheKey,
+            valueJson: cachedCandidates,
+            source: 'runtime',
+          }).onConflictDoUpdate({
+            target: adminSettings.key,
+            set: {
+              valueJson: cachedCandidates,
+              source: 'runtime',
+              updatedAt: Date.now(),
+            },
           });
-          stdout = result.stdout;
-          serverLogger.info({ event: 'pdf.scan.completed', documentId }, 'PDF foreign words pre-scan Python process completed');
-        } finally {
-          await fs.unlink(tempFilePath).catch(() => {});
         }
-
-        const words = JSON.parse(stdout);
 
         // Fetch global pronunciations
         const globalRows = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_pronunciations')).limit(1);
@@ -264,6 +307,7 @@ export async function POST(req: NextRequest) {
         const updatedGlobalWords = new Set<string>();
         let acceptedChoices = 0;
         let updatedLexicon = false;
+        let terminalGeminiError: string | null = null;
 
         if (wordsMissingOptions.length > 0) {
           if (!activeProfile?.geminiApiKey && !activeProfile?.backupGeminiApiKey) {
@@ -300,7 +344,7 @@ If currentPronunciation is supplied, preserve it exactly and return it as the on
 For Koine Greek or Biblical Hebrew, use the supplied contexts to return a contextual English definition of one to four words.
 If the surrounding book context already states the definition, return that same concise gloss; OpenReader will recognize the author-supplied definition and will not speak it twice.
 Set language to "koine_greek", "biblical_hebrew", or "other". For other languages, abbreviations, or invented names, set language to "other" and definition to null.
-Return a JSON object keyed by the exact term.
+Return a JSON array with exactly one result object per requested term. Copy each requested term exactly into that result object's "term" field.
 
 Terms:
 ${JSON.stringify(terms)}`;
@@ -322,23 +366,7 @@ ${JSON.stringify(terms)}`;
                   generationConfig: {
                     responseMimeType: 'application/json',
                     maxOutputTokens: 8192,
-                    responseSchema: {
-                      type: 'OBJECT',
-                      additionalProperties: {
-                        type: 'OBJECT',
-                        properties: {
-                          language: { type: 'STRING' },
-                          pronunciations: {
-                            type: 'ARRAY',
-                            items: { type: 'STRING' },
-                          },
-                          definition: { type: 'STRING' },
-                          confidence: { type: 'NUMBER' },
-                          needsReview: { type: 'BOOLEAN' },
-                        },
-                        required: ['language', 'pronunciations'],
-                      },
-                    },
+                    responseJsonSchema: GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA,
                   },
                 }),
               },
@@ -346,8 +374,10 @@ ${JSON.stringify(terms)}`;
           });
           const data = await res.json().catch(() => null);
           if (!res.ok) {
-            const errorMsg = data?.error?.message || `Gemini request failed (HTTP ${res.status}).`;
-            throw new Error(errorMsg);
+            throw createGeminiHttpError(res.status, data, [
+              apiKey,
+              activeProfile?.backupGeminiApiKey || '',
+            ]);
           }
           serverLogger.info({
             event: 'pdf.scan.gemini.usage',
@@ -363,33 +393,18 @@ ${JSON.stringify(terms)}`;
           if (!generatedText) {
             throw new Error('Gemini returned no pronunciation choices.');
           }
-          let generated: Record<string, unknown> = {};
-          try {
-            generated = JSON.parse(generatedText);
-          } catch (jsonErr) {
-            // Partial JSON recovery: find last valid key/value entry in truncated JSON
-            const lastValidIndex = Math.max(generatedText.lastIndexOf('},'), generatedText.lastIndexOf('}'));
-            if (lastValidIndex > 10) {
-              const sanitizedText = generatedText.slice(0, lastValidIndex + 1) + '}';
-              try {
-                generated = JSON.parse(sanitizedText);
-                serverLogger.warn(
-                  { event: 'pdf.scan.gemini.json_repaired', jobId, batch: i / chunkSize + 1 },
-                  'Recovered partial JSON response from truncated Gemini output',
-                );
-              } catch {
-                throw jsonErr;
-              }
-            } else {
-              throw jsonErr;
-            }
+          const { results: generated, repaired } = parseGeminiForeignWordResults(generatedText);
+          if (repaired) {
+            serverLogger.warn(
+              { event: 'pdf.scan.gemini.json_repaired', jobId, batch: i / chunkSize + 1 },
+              'Recovered complete results from a truncated Gemini JSON array',
+            );
           }
           const acceptedWords = new Set<string>();
-          for (const [w, rawResult] of Object.entries(generated)) {
-            if (chunk.includes(w)) {
-              const result = rawResult && typeof rawResult === 'object' && !Array.isArray(rawResult)
-                ? rawResult as Record<string, unknown>
-                : { pronunciations: rawResult };
+          const requestedTerms = new Map(chunk.map((term: string) => [term, term]));
+          for (const result of generated) {
+            const w = requestedTerms.get(result.term);
+            if (w) {
               const prons = Array.isArray(result.pronunciations) ? result.pronunciations : [];
               const current = (globalDict[w] || []).filter((choice) => (
                 isKokoroCompatiblePronunciation(choice?.phonetic)
@@ -470,9 +485,19 @@ ${JSON.stringify(terms)}`;
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Unknown Gemini error';
-          serverLogger.error({ event: 'pdf.scan.gemini.batch.failed', error: err, jobId, batch: i / chunkSize + 1 }, 'Gemini pronunciation batch failed');
+          serverLogger.error({
+            event: 'pdf.scan.gemini.batch.failed',
+            error: message,
+            httpStatus: err instanceof GeminiHttpError ? err.status : undefined,
+            jobId,
+            batch: i / chunkSize + 1,
+          }, 'Gemini pronunciation batch failed');
           const errors = Array.isArray(jobState.errors) ? [...jobState.errors, `Gemini batch ${i / chunkSize + 1}: ${message}`] : [`Gemini batch ${i / chunkSize + 1}: ${message}`];
           await saveJob({ errors, completed: Math.min(i + chunk.length, wordsMissingOptions.length) });
+          if (err instanceof GeminiHttpError && err.status === 400) {
+            terminalGeminiError = message;
+            break;
+          }
         }
         await saveJob({ completed: Math.min(i + chunk.length, wordsMissingOptions.length) });
       }
@@ -614,22 +639,32 @@ ${JSON.stringify(terms)}`;
         const generated = Object.keys(geminiRecommendations).length;
         const errors = Array.isArray(jobState.errors) ? jobState.errors : [];
         await saveJob({
-          status: 'completed',
-          completed: wordsMissingOptions.length,
+          status: terminalGeminiError ? 'failed' : 'completed',
+          completed: terminalGeminiError
+            ? jobState.completed
+            : wordsMissingOptions.length,
           generated,
           generatedChoices: acceptedChoices,
-          error: errors.length > 0 ? `${errors.length} Gemini batch${errors.length === 1 ? '' : 'es'} failed. ${errors[0]}` : null,
+          error: terminalGeminiError
+            || (errors.length > 0 ? `${errors.length} Gemini batch${errors.length === 1 ? '' : 'es'} failed. ${errors[0]}` : null),
           words: enrichWords(),
         });
       } catch (error) {
-        serverLogger.error({ event: 'pdf.scan.pronunciations.failed', error, jobId }, 'Background foreign-word pronunciation generation failed');
+        serverLogger.error({
+          event: 'pdf.scan.pronunciations.failed',
+          error: error instanceof Error ? error.message : String(error),
+          jobId,
+        }, 'Background foreign-word pronunciation generation failed');
         await saveJob({ status: 'failed', error: error instanceof Error ? error.message : 'Background pronunciation generation failed' }).catch(() => {});
       }
     });
 
     return NextResponse.json({ words: [], scanJobId: jobId, scanStatus: 'queued', scanTotal: 0 }, { status: 202 });
   } catch (error: any) {
-    serverLogger.error({ event: 'pdf.scan.failed', error }, 'Scan foreign words error');
+    serverLogger.error({
+      event: 'pdf.scan.failed',
+      error: error instanceof Error ? error.message : String(error),
+    }, 'Scan foreign words error');
     console.error('Scan foreign words error:', error);
     return NextResponse.json({ error: error?.message || 'Failed to scan document' }, { status: 500 });
   }

@@ -11,6 +11,15 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-02 — Repaired Gemini foreign-word structured output requests
+
+- Replaced the foreign-word scan's deprecated dynamic `responseSchema` object with a lowercase `responseJsonSchema` array of explicit result objects, including exact `term` fields that are mapped back only to terms in the requested batch.
+- Added array-aware truncated-output recovery, sanitized Gemini HTTP error details, string-valued error logging, and terminal HTTP 400 handling that stops remaining batches and marks the scan job failed; existing backup-key failover remains limited to HTTP 429/503.
+- Cached completed Python PDF candidate lists by user, document, and scan options so Gemini retries skip redundant PDF extraction.
+- Added focused structured-output, error-redaction, terminal-400, parsing, and candidate-cache regression tests.
+- Verified `pnpm exec tsc --noEmit`, all OpenReader unit tests (105/105 files, 616 tests), focused ESLint, and `git diff --check`.
+- Follow-up: rebuild/redeploy OpenReader and run one live foreign-word scan to confirm Gemini accepts the request and the second scan logs `pdf.scan.candidates.cache_hit`.
+
 ### 2026-08-02 — Validated Gemini HTTP response status before logging token usage
 
 - Updated [`src/app/api/documents/scan-foreign-words/route.ts`](file:///home/cisco/openreader/src/app/api/documents/scan-foreign-words/route.ts#L345-L360) to check `if (!res.ok)` **before** logging token usage.
