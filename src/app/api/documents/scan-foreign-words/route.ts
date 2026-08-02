@@ -28,6 +28,7 @@ import { generateTTSBuffer } from '@/lib/server/tts/generate';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
+import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemini-failover';
 
 const execFileAsync = util.promisify(execFile);
 const GREEK = /[\u0370-\u03ff\u1f00-\u1fff]/u;
@@ -300,13 +301,20 @@ Terms:
 ${JSON.stringify(terms)}`;
         
         try {
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: "user", parts: [{ text: prompt }] }],
-              generationConfig: { responseMimeType: "application/json" }
-            })
+          const { response: res, usedBackup } = await fetchGeminiWithRateLimitFallback({
+            primaryApiKey: apiKey,
+            backupApiKey: activeProfile?.backupGeminiApiKey,
+            request: (requestApiKey) => fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(requestApiKey)}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                  generationConfig: { responseMimeType: 'application/json' },
+                }),
+              },
+            ),
           });
           const data = await res.json().catch(() => null);
           serverLogger.info({
@@ -314,6 +322,7 @@ ${JSON.stringify(terms)}`;
             jobId,
             documentId,
             model,
+            usedBackup,
             pass: 'pronunciation_definition_scan',
             batch: i / chunkSize + 1,
             tokens: normalizeGeminiTokenUsage(data?.usageMetadata),
