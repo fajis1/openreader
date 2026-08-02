@@ -127,16 +127,32 @@ export async function POST(req: NextRequest) {
     const word = typeof body.word === 'string' ? body.word.trim() : '';
     const phonetic = typeof body.phonetic === 'string' ? body.phonetic : '';
     const isReplaceAction = body.action === 'replace-choices';
+    const isDeleteWordAction = body.action === 'delete-word';
     const isPhoneticAction = body.action === 'set-default' || body.action === 'delete-choice';
-    if (!word || (!phonetic && !isReplaceAction)) {
-      if (!isReplaceAction || !word || !Array.isArray(body.choices)) {
-        return NextResponse.json({ error: 'Missing word or phonetic' }, { status: 400 });
-      }
+    if (!word || (isReplaceAction && !Array.isArray(body.choices))) {
+      return NextResponse.json({ error: 'Missing word or replacement choices' }, { status: 400 });
+    }
+    if (!phonetic && !isReplaceAction && !isDeleteWordAction) {
+      return NextResponse.json({ error: 'Missing phonetic' }, { status: 400 });
     }
 
-    if (isPhoneticAction || isReplaceAction) {
+    if (isPhoneticAction || isReplaceAction || isDeleteWordAction) {
       const admin = await requireAdminContext(req);
       if (admin instanceof Response) return admin;
+
+      if (isDeleteWordAction) {
+        const deleted = await mutateGlobalPronunciationLibrary((latestLibrary) => {
+          if (!Object.prototype.hasOwnProperty.call(latestLibrary, word)) {
+            return { result: false, changed: false };
+          }
+          delete latestLibrary[word];
+          return { result: true, changed: true };
+        });
+        if (!deleted) {
+          return NextResponse.json({ error: 'Global pronunciation word not found.' }, { status: 404 });
+        }
+        return NextResponse.json({ success: true });
+      }
 
       if (body.action === 'delete-choice') {
         const removal = await mutateGlobalPronunciationLibrary((latestLibrary) => {

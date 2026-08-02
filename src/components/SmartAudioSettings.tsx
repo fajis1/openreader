@@ -393,6 +393,33 @@ export function SmartAudioSettings() {
     }
   };
 
+  const handleDeleteGlobalWord = async (word: string) => {
+    if (!window.confirm(`Delete ${word} and every pronunciation choice for it from the global library?`)) return;
+    try {
+      const response = await fetch('/api/tts/global-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete-word', word }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to delete global pronunciation word');
+      setGlobalRefineInput((current) => {
+        const next = { ...current };
+        delete next[word];
+        return next;
+      });
+      setGlobalRefineChoices((current) => {
+        const next = { ...current };
+        delete next[word];
+        return next;
+      });
+      toast.success(`Deleted ${word} from the global pronunciation library.`);
+      await loadGlobalPronunciations();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete global pronunciation word');
+    }
+  };
+
   const playPreview = async (word: string, phonetic: string) => {
     try {
       setPlayingKey(word);
@@ -1294,7 +1321,18 @@ export function SmartAudioSettings() {
                     .filter((item) => !showSuspectPronunciationsOnly || suspectGlobalWords.includes(item.key))
                     .map((item) => (
                     <li key={item.key} className="flex flex-col gap-2 bg-gray-50 dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-700">
-                      <strong className="block text-sm">{item.key}</strong>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <strong className="block text-sm">{item.key}</strong>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteGlobalWord(item.key)}
+                            className="rounded bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700"
+                          >
+                            Delete Word from Global Library
+                          </button>
+                        )}
+                      </div>
                       <div className="flex flex-col gap-2">
                         {item.values.map((phonetic, idx) => {
                           const warnings = getKokoroPronunciationQualityWarnings(item.key, phonetic);
@@ -1341,7 +1379,7 @@ export function SmartAudioSettings() {
                                 onClick={() => void handleDeleteGlobalChoice(item.key, phonetic)}
                                 className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300"
                               >
-                                Remove from Global Library
+                                Remove Choice
                               </button>
                             )}
                           </div>

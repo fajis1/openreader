@@ -87,13 +87,17 @@ describe('global pronunciation administration', () => {
     expect(component).toContain('Make Global Default');
     expect(component).toContain('Ask AI for 5 Replacement Choices');
     expect(component).toContain('Apply Reviewed Choices Globally');
-    expect(component).toContain('Remove from Global Library');
+    expect(component).toContain('Delete Word from Global Library');
+    expect(component).toContain('Remove Choice');
+    expect(component).toContain("action: 'delete-word'");
     expect(component).toContain("action: 'delete-choice'");
     expect(component).toContain("trimmed.startsWith('/') && trimmed.endsWith('/')");
     expect(component).toContain('{isAdmin &&');
     expect(route).toContain("body.action === 'set-default'");
     expect(route).toContain("body.action === 'replace-choices'");
     expect(route).toContain("body.action === 'delete-choice'");
+    expect(route).toContain("body.action === 'delete-word'");
+    expect(route).toContain('delete latestLibrary[word]');
     expect(route).toContain('requireAdminContext(req)');
     expect(route).toContain('pg_advisory_xact_lock');
     expect(route).toContain('const latestLibrary = normalizeGlobalPronunciationLibrary');
