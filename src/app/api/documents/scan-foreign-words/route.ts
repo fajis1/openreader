@@ -271,8 +271,11 @@ export async function POST(req: NextRequest) {
           const model = resolvePronunciationAiModel(activeProfile);
       const apiKey = activeProfile.geminiApiKey;
       
-      const chunkSize = 20;
+      const chunkSize = 75;
       for (let i = 0; i < wordsMissingOptions.length; i += chunkSize) {
+        if (i > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
         const chunk = wordsMissingOptions.slice(i, i + chunkSize);
         const terms = chunk.map((word: string) => {
           const scanned = words.find((item: any) => item.word === word);
@@ -311,7 +314,10 @@ ${JSON.stringify(terms)}`;
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                  generationConfig: { responseMimeType: 'application/json' },
+                  generationConfig: {
+                    responseMimeType: 'application/json',
+                    maxOutputTokens: 8192,
+                  },
                 }),
               },
             ),
