@@ -113,14 +113,16 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const requestedGlobalWords: string[] = Array.isArray(body.globalWords)
       ? body.globalWords.filter((word: unknown): word is string => typeof word === 'string' && Boolean(word.trim()))
-      : Array.isArray(body.words)
+      : Array.isArray(body.words) && !Array.isArray(body.personalWords)
         ? body.words.filter((word: unknown): word is string => typeof word === 'string' && Boolean(word.trim()))
         : [];
-    const requestedPersonalWords: string[] = Array.isArray(body.personalWords)
+    const rawRequestedPersonalWords: string[] = Array.isArray(body.personalWords)
       ? body.personalWords.filter((word: unknown): word is string => typeof word === 'string' && Boolean(word.trim()))
-      : [];
+      : Array.isArray(body.words) && !Array.isArray(body.globalWords)
+        ? body.words.filter((word: unknown): word is string => typeof word === 'string' && Boolean(word.trim()))
+        : [];
     const globalWords = [...new Set(requestedGlobalWords.map((word) => word.trim()))];
-    const personalWords = [...new Set(requestedPersonalWords.map((word) => word.trim()))];
+    let personalWords = [...new Set(rawRequestedPersonalWords.map((word) => word.trim()))];
     const words = [...new Set([...globalWords, ...personalWords])];
     if (words.length === 0) {
       return NextResponse.json({ error: 'Select at least one suspect pronunciation.' }, { status: 400 });
@@ -219,7 +221,9 @@ ${JSON.stringify(candidateBatch)}`;
       const rejectedChoices = new Set([
         ...(library[word] || []).map((choice) => choice.phonetic),
         ...(personalLibrary[word] ? [personalLibrary[word]] : []),
-      ].flatMap((choice) => [choice, normalizeGeneratedPronunciation(choice)]));
+      ].filter((choice) => (
+        typeof choice === 'string' && getKokoroPronunciationQualityWarnings(word, choice).length === 0
+      )));
       const choices = rawChoices
         .map(normalizeGeneratedPronunciation)
         .filter((choice): choice is string => (
