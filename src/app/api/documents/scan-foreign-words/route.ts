@@ -307,6 +307,9 @@ ${JSON.stringify(terms)}`;
           const { response: res, usedBackup } = await fetchGeminiWithRateLimitFallback({
             primaryApiKey: apiKey,
             backupApiKey: activeProfile?.backupGeminiApiKey,
+            onStatusUpdate: async (statusMessage) => {
+              await saveJob({ statusMessage });
+            },
             request: (requestApiKey) => fetch(
               `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(requestApiKey)}`,
               {
@@ -322,6 +325,7 @@ ${JSON.stringify(terms)}`;
               },
             ),
           });
+          await saveJob({ statusMessage: null });
           const data = await res.json().catch(() => null);
           serverLogger.info({
             event: 'pdf.scan.gemini.usage',

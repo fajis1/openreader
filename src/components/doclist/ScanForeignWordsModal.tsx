@@ -58,6 +58,7 @@ export function ScanForeignWordsModal({
   const [scanJobGenerated, setScanJobGenerated] = useState(0);
   const [scanJobGeneratedChoices, setScanJobGeneratedChoices] = useState(0);
   const [scanJobError, setScanJobError] = useState<string | null>(null);
+  const [scanJobStatusMessage, setScanJobStatusMessage] = useState<string | null>(null);
   const [audioWarmStatus, setAudioWarmStatus] = useState<'idle' | 'warming' | 'ready'>('idle');
   const [libraryScanStatus, setLibraryScanStatus] = useState<'idle' | 'scanning' | 'complete' | 'repairing'>('idle');
   const [libraryScan, setLibraryScan] = useState<PronunciationLibraryScan | null>(null);
@@ -214,6 +215,7 @@ export function ScanForeignWordsModal({
       setScanJobGenerated(Number(job.generated) || 0);
       setScanJobGeneratedChoices(Number(job.generatedChoices) || 0);
       setScanJobError(job.error || (Array.isArray(job.errors) && job.errors.length > 0 ? job.errors.join(' ') : null));
+      setScanJobStatusMessage(typeof job.statusMessage === 'string' ? job.statusMessage : null);
       if (job.status === 'completed' || job.status === 'failed') stopScanPolling();
     } catch (pollError) {
       console.error('Failed to poll foreign-word scan job:', pollError);
@@ -544,9 +546,16 @@ export function ScanForeignWordsModal({
                 </div>
               )}
               {scanJobStatus === 'queued' || scanJobStatus === 'running' ? (
-                <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                  Gemini pronunciation generation: {scanJobProgress.total > 0 ? `${scanJobProgress.completed}/${scanJobProgress.total} words processed` : 'queued'}…
-                </p>
+                <div className="space-y-0.5">
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    Gemini pronunciation generation: {scanJobProgress.total > 0 ? `${scanJobProgress.completed}/${scanJobProgress.total} words processed` : 'queued'}…
+                  </p>
+                  {scanJobStatusMessage && (
+                    <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300 animate-pulse">
+                      {scanJobStatusMessage}
+                    </p>
+                  )}
+                </div>
               ) : scanJobStatus === 'completed' && scanJobProgress.total > 0 ? (
                 scanJobError ? (
                   <p className="text-[11px] text-amber-700 dark:text-amber-300">Gemini generated {scanJobGeneratedChoices} choices for {scanJobGenerated}/{scanJobProgress.total} new words. {scanJobError}</p>
