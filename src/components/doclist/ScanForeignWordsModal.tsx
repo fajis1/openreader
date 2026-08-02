@@ -53,6 +53,7 @@ export function ScanForeignWordsModal({
   const [onlyNewPronunciations, setOnlyNewPronunciations] = useState(false);
   const [generateOnlyForNewWords, setGenerateOnlyForNewWords] = useState(true);
   const [forceUseBackupKey, setForceUseBackupKey] = useState(false);
+  const [sortMissingFirst, setSortMissingFirst] = useState(true);
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const [scanJobStatus, setScanJobStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed'>('idle');
   const [scanJobProgress, setScanJobProgress] = useState({ completed: 0, total: 0 });
@@ -663,15 +664,26 @@ export function ScanForeignWordsModal({
                   </label>
                 )}
                 {hasScanned && (
-                  <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                    <input
-                      type="checkbox"
-                      checked={onlyNewPronunciations}
-                      onChange={(event) => setOnlyNewPronunciations(event.target.checked)}
-                      disabled={loading}
-                    />
-                    New global choices only
-                  </label>
+                  <>
+                    <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={onlyNewPronunciations}
+                        onChange={(event) => setOnlyNewPronunciations(event.target.checked)}
+                        disabled={loading}
+                      />
+                      New global choices only
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 font-semibold whitespace-nowrap" title="Pin words missing Gemini pronunciations or needing review to the top of the table.">
+                      <input
+                        type="checkbox"
+                        checked={sortMissingFirst}
+                        onChange={(event) => setSortMissingFirst(event.target.checked)}
+                        disabled={loading}
+                      />
+                      📌 Pin missing/failed words to top
+                    </label>
+                  </>
                 )}
               </div>
             </div>
@@ -794,9 +806,28 @@ export function ScanForeignWordsModal({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                {words.map((w, i) => (
-                  <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-lg text-gray-900 dark:text-gray-100 align-top [overflow-wrap:anywhere]">{w.word}</td>
+                {(sortMissingFirst
+                  ? [...words].sort((a, b) => {
+                      const aMissing = (!a.pronunciations || a.pronunciations.length === 0) && !a.userOverride ? 0 : 1;
+                      const bMissing = (!b.pronunciations || b.pronunciations.length === 0) && !b.userOverride ? 0 : 1;
+                      if (aMissing !== bMissing) return aMissing - bMissing;
+                      return b.count - a.count;
+                    })
+                  : words
+                ).map((w, i) => {
+                  const isMissing = (!w.pronunciations || w.pronunciations.length === 0) && !w.userOverride;
+                  return (
+                  <tr key={i} className={`transition-colors ${isMissing ? 'bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-100/60 dark:hover:bg-amber-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}>
+                    <td className="px-4 py-3 font-medium text-lg text-gray-900 dark:text-gray-100 align-top [overflow-wrap:anywhere]">
+                      <div className="flex flex-col gap-1">
+                        <span>{w.word}</span>
+                        {isMissing && (
+                          <span className="inline-block w-fit rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            ⚠️ Missing / Needs Fix
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-right text-gray-500 align-top">{w.count}</td>
                     <td className="px-4 py-3 align-top">
                       <div className="flex flex-col gap-2">
@@ -997,31 +1028,44 @@ export function ScanForeignWordsModal({
                         </div>
                       ) : (
                         <div className="flex flex-col gap-2">
-                          <span className={`font-medium font-mono text-xs ${w.userOverride ? 'text-green-700 dark:text-green-300' : 'text-blue-600 dark:text-blue-400'}`}>{w.userOverride || '-'}</span>
-                          {w.userOverride && (
+                          <span className={`font-medium font-mono text-xs ${w.userOverride === '[OMIT]' ? 'text-amber-700 dark:text-amber-300 font-bold' : w.userOverride ? 'text-green-700 dark:text-green-300' : 'text-gray-500'}`}>
+                            {w.userOverride === '[OMIT]' ? '🚫 Omitted' : w.userOverride || '-'}
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
                             <button
+                              type="button"
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded hover:bg-gray-300"
+                              onClick={() => {
+                                setEditingWord(w.word);
+                                setEditValue(w.userOverride && w.userOverride !== '[OMIT]' ? w.userOverride : w.geminiRecommendedPronunciation || '');
+                              }}
+                            >
+                              Edit IPA
+                            </button>
+                            <button
+                              type="button"
+                              className="px-2 py-0.5 text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded hover:bg-amber-200"
+                              onClick={() => handleSaveOverride(w.word, '[OMIT]')}
+                              title="Marks this word to be skipped/omitted during pronunciation."
+                            >
+                              🚫 Omit
+                            </button>
+                            {w.userOverride && w.userOverride !== '[OMIT]' && (
+                              <button
                                 type="button"
                                 className="px-2 py-0.5 text-[10px] font-semibold bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded hover:bg-gray-300 self-start"
                                 onClick={() => handleListen(w.word, w.userOverride)}
                               >
-                                Listen Override
+                                Listen
                               </button>
-                          )}
-                          <button
-                            type="button"
-                            className="px-2.5 py-1 text-[10px] font-semibold bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-600 self-start"
-                            onClick={() => {
-                              setEditingWord(w.word);
-                              setEditValue(w.userOverride || '');
-                            }}
-                          >
-                            Custom Edit
-                          </button>
+                            )}
+                          </div>
                         </div>
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
