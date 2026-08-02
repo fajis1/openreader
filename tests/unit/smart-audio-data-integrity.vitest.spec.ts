@@ -129,6 +129,12 @@ describe('Smart Audio data-integrity guards', () => {
     expect(route).toContain('!rejectedChoices.has(choice)');
     expect(route).toContain('better-sqlite3 transactions require a synchronous callback');
     expect(route).toContain('db.transaction((tx: typeof db) => {');
+    expect(route).toContain('.limit(1)\n            .all();');
+    expect(route).toContain('}).run();');
+
+    const worker = source('src/lib/server/audiobooks/worker.ts');
+    expect(worker).toContain('.limit(1)\n      .all();');
+    expect(worker).toContain('}).run();');
   });
 
   test('audits both global and selected-profile pronunciation libraries before repair', () => {

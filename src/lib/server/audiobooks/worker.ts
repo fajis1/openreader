@@ -97,7 +97,8 @@ async function recordLearnedGlobalPronunciations(
       .select({ valueJson: adminSettings.valueJson })
       .from(adminSettings)
       .where(eq(adminSettings.key, 'global_pronunciations'))
-      .limit(1);
+      .limit(1)
+      .all();
     const updatedGlobal = applyLearned(rows[0]?.valueJson);
     tx.insert(adminSettings).values({
       key: 'global_pronunciations',
@@ -105,7 +106,7 @@ async function recordLearnedGlobalPronunciations(
     }).onConflictDoUpdate({
       target: adminSettings.key,
       set: { valueJson: JSON.stringify(updatedGlobal) },
-    });
+    }).run();
   });
 }
 

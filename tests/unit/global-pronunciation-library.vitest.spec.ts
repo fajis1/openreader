@@ -102,6 +102,8 @@ describe('global pronunciation administration', () => {
     expect(route).toContain('pg_advisory_xact_lock');
     expect(route).toContain('const latestLibrary = normalizeGlobalPronunciationLibrary');
     expect(route).toContain('mutateGlobalPronunciationLibrary');
+    expect(route).toContain('.limit(1)\n        .all();');
+    expect(route).toContain('}).run();');
     expect(route).not.toContain('Object.keys(parsed).length === 0');
   });
 

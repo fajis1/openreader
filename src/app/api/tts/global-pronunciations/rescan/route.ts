@@ -305,7 +305,8 @@ ${JSON.stringify(candidateBatch)}`;
             .select({ valueJson: adminSettings.valueJson })
             .from(adminSettings)
             .where(eq(adminSettings.key, 'global_pronunciations'))
-            .limit(1);
+            .limit(1)
+            .all();
           const latestLibrary = normalizeGlobalLibrary(latestRows[0]?.valueJson || {});
           replacedGlobal = globalReplacementCandidates.filter((word) => (
             JSON.stringify(latestLibrary[word] || []) === JSON.stringify(library[word] || [])
@@ -317,7 +318,7 @@ ${JSON.stringify(candidateBatch)}`;
           }).onConflictDoUpdate({
             target: adminSettings.key,
             set: { valueJson: JSON.stringify(latestLibrary) },
-          });
+          }).run();
         });
       }
     }

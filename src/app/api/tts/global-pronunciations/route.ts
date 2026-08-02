@@ -72,7 +72,8 @@ async function mutateGlobalPronunciationLibrary<T>(
         .select({ valueJson: adminSettings.valueJson })
         .from(adminSettings)
         .where(eq(adminSettings.key, 'global_pronunciations'))
-        .limit(1);
+        .limit(1)
+        .all();
       const latestLibrary = normalizeGlobalPronunciationLibrary(latestRows[0]?.valueJson || {});
       mutationResult = mutation(latestLibrary);
       completed = true;
@@ -83,7 +84,7 @@ async function mutateGlobalPronunciationLibrary<T>(
       }).onConflictDoUpdate({
         target: adminSettings.key,
         set: { valueJson: JSON.stringify(latestLibrary) },
-      });
+      }).run();
     });
   }
   if (!completed) throw new Error('Global pronunciation transaction did not complete.');
