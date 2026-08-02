@@ -5,13 +5,20 @@ const MAX_ATTEMPTS = 8;
 const INITIAL_DELAY_MS = 4000;
 const MAX_DELAY_MS = 300000; // 5 minutes
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => {
+  if (process.env.NODE_ENV === 'test') {
+    resolve(undefined);
+  } else {
+    setTimeout(resolve, ms);
+  }
+});
 
 export interface GeminiFallbackOptions {
   primaryApiKey: string;
   backupApiKey?: string | null;
   request: (apiKey: string) => Promise<Response>;
   onStatusUpdate?: (statusMessage: string) => Promise<void> | void;
+  initialDelayMs?: number;
 }
 
 async function fetchWithExponentialBackoff(
@@ -19,8 +26,9 @@ async function fetchWithExponentialBackoff(
   keyType: 'primary' | 'backup',
   request: (apiKey: string) => Promise<Response>,
   onStatusUpdate?: (statusMessage: string) => Promise<void> | void,
+  customInitialDelayMs?: number,
 ): Promise<Response> {
-  let delayMs = INITIAL_DELAY_MS;
+  let delayMs = customInitialDelayMs ?? INITIAL_DELAY_MS;
   const maskedKey = apiKey.length >= 4 ? `...${apiKey.slice(-4)}` : 'Key';
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -83,6 +91,7 @@ export async function fetchGeminiWithRateLimitFallback(
     'primary',
     input.request,
     input.onStatusUpdate,
+    input.initialDelayMs,
   );
 
   if (
@@ -111,6 +120,7 @@ export async function fetchGeminiWithRateLimitFallback(
     'backup',
     input.request,
     input.onStatusUpdate,
+    input.initialDelayMs,
   );
 
   return {
