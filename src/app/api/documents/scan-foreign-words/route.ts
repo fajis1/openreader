@@ -410,15 +410,6 @@ ${JSON.stringify(terms)}`;
               }
             }
           }
-          if (acceptedWords.size === 0) {
-            throw new Error('Gemini returned no Kokoro-compatible pronunciation choices for this batch.');
-          }
-          const omittedWords = chunk.filter((word: string) => !acceptedWords.has(word));
-          if (omittedWords.length > 0) {
-            throw new Error(
-              `Gemini returned no accepted pronunciation choices for: ${omittedWords.join(', ')}.`,
-            );
-          }
           if (updatedLexicon && activeProfile) {
             const partialLexicon: SmartAudioBookLexicon = {
               schemaVersion: 1,
@@ -430,6 +421,16 @@ ${JSON.stringify(terms)}`;
               entries: lexiconEntries,
             };
             await writeBookLexicon(userId, documentId, partialLexicon);
+          }
+          if (acceptedWords.size === 0) {
+            throw new Error('Gemini returned no Kokoro-compatible pronunciation choices for this batch.');
+          }
+          const omittedWords = chunk.filter((word: string) => !acceptedWords.has(word));
+          if (omittedWords.length > 0) {
+            serverLogger.warn(
+              { event: 'pdf.scan.gemini.omitted_words', omittedWords, jobId, batch: i / chunkSize + 1 },
+              `Gemini omitted ${omittedWords.length} terms from batch ${i / chunkSize + 1}`,
+            );
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Unknown Gemini error';
