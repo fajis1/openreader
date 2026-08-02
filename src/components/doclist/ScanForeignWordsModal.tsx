@@ -52,6 +52,7 @@ export function ScanForeignWordsModal({
   const [refineRecovery, setRefineRecovery] = useState<Record<string, { message: string; feedback: string; canUseBackupKey: boolean; countdown?: number }>>({});
   const [onlyNewPronunciations, setOnlyNewPronunciations] = useState(false);
   const [generateOnlyForNewWords, setGenerateOnlyForNewWords] = useState(true);
+  const [forceUseBackupKey, setForceUseBackupKey] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const [scanJobStatus, setScanJobStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed'>('idle');
   const [scanJobProgress, setScanJobProgress] = useState({ completed: 0, total: 0 });
@@ -297,8 +298,9 @@ export function ScanForeignWordsModal({
           documentId: targetId,
           mode: modeToUse,
           target: coverageToUse,
-          query: queryToUse,
+          query: queryToUse || undefined,
           generateOnlyForNewWords,
+          forceUseBackupKey,
         }),
       });
       if (!res.ok) throw new Error('Failed to scan document');
@@ -649,6 +651,17 @@ export function ScanForeignWordsModal({
                   />
                   Generate 5 only for new words (skip existing global/profile pronunciations)
                 </label>
+                {backupApiKeyLast4 && (
+                  <label className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 font-semibold whitespace-nowrap" title="Bypasses the primary API key and uses the backup Gemini key immediately for this scan.">
+                    <input
+                      type="checkbox"
+                      checked={forceUseBackupKey}
+                      onChange={(event) => setForceUseBackupKey(event.target.checked)}
+                      disabled={loading}
+                    />
+                    ⚡ Force backup API key immediately ({backupApiKeyLast4})
+                  </label>
+                )}
                 {hasScanned && (
                   <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
                     <input

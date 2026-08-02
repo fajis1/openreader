@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
     const target = typeof body.target === 'number' ? body.target : 80.0;
     const query = body.query || null;
     const generateOnlyForNewWords = body.generateOnlyForNewWords !== false;
+    const forceUseBackupKey = body.forceUseBackupKey === true;
 
     const jobId = randomUUID();
     const jobKey = `foreign_word_scan:${jobId}`;
@@ -265,11 +266,13 @@ export async function POST(req: NextRequest) {
         let updatedLexicon = false;
 
         if (wordsMissingOptions.length > 0) {
-          if (!activeProfile?.geminiApiKey) {
+          if (!activeProfile?.geminiApiKey && !activeProfile?.backupGeminiApiKey) {
             throw new Error('Gemini API key is not configured for the selected Smart Audio profile.');
           }
           const model = resolvePronunciationAiModel(activeProfile);
-      const apiKey = activeProfile.geminiApiKey;
+          const apiKey = (forceUseBackupKey && activeProfile?.backupGeminiApiKey)
+            ? activeProfile.backupGeminiApiKey
+            : (activeProfile?.geminiApiKey || activeProfile?.backupGeminiApiKey || '');
       
       const chunkSize = 75;
       for (let i = 0; i < wordsMissingOptions.length; i += chunkSize) {
