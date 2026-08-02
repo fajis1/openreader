@@ -144,6 +144,26 @@ export async function POST(req: NextRequest) {
     const lexiconEntries: Record<string, SmartAudioBookLexiconEntry> = {
       ...(activeProfile && existingLexicon?.profileId === activeProfile.id ? existingLexicon.entries : {}),
     };
+    for (const w of words) {
+      const term = w.word;
+      if (!term || typeof term !== 'string') continue;
+      const userPron = compatibleOverrides[term] || null;
+      const globalPron = preExistingCompatibleGlobalWords.has(term)
+        ? globalDict[term]
+          ?.map((choice) => choice?.phonetic)
+          .find((pronunciation) => isKokoroCompatiblePronunciation(pronunciation)) || null
+        : null;
+      const libraryPron = userPron || globalPron;
+      if (libraryPron && !lexiconEntries[term]) {
+        lexiconEntries[term] = {
+          term,
+          pronunciation: libraryPron,
+          definition: null,
+          language: languageForTerm(term),
+          context: Array.isArray(w.contexts) ? w.contexts[0] : undefined,
+        };
+      }
+    }
     const needsScholarDefinition = activeProfile?.workerMode === 'scholar';
 
     const wordsMissingOptions = words

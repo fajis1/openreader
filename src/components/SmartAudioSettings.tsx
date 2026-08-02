@@ -1150,7 +1150,21 @@ export function SmartAudioSettings() {
               </li>
             ))}
           </ul>
-          <button onClick={() => { setAbbreviations(abbreviations.filter((_, i) => !selectedAbbrevs.includes(i))); setSelectedAbbrevs([]); }} className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold">Delete Selected</button>
+          <div className="flex items-center gap-4">
+            <button onClick={() => { setAbbreviations(abbreviations.filter((_, i) => !selectedAbbrevs.includes(i))); setSelectedAbbrevs([]); }} className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold">Delete Selected</button>
+            <button
+              onClick={() => {
+                if (window.confirm(`Delete all ${abbreviations.length} abbreviations from this profile?`)) {
+                  setAbbreviations([]);
+                  setSelectedAbbrevs([]);
+                  toast.success('Cleared all abbreviations. Save the profile to keep changes.');
+                }
+              }}
+              className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold"
+            >
+              Delete All
+            </button>
+          </div>
         </div>
 
         <div className="space-y-3">
@@ -1244,7 +1258,21 @@ export function SmartAudioSettings() {
               </li>
             ))}
           </ul>
-          <button onClick={() => { setBooks(books.filter((_, i) => !selectedBooks.includes(i))); setSelectedBooks([]); }} className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold">Delete Selected</button>
+          <div className="flex items-center gap-4">
+            <button onClick={() => { setBooks(books.filter((_, i) => !selectedBooks.includes(i))); setSelectedBooks([]); }} className="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold">Delete Selected</button>
+            <button
+              onClick={() => {
+                if (window.confirm(`Delete all ${books.length} biblical book mappings from this profile?`)) {
+                  setBooks([]);
+                  setSelectedBooks([]);
+                  toast.success('Cleared all biblical book mappings. Save the profile to keep changes.');
+                }
+              }}
+              className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-bold"
+            >
+              Delete All
+            </button>
+          </div>
         </div>
       </div>
 

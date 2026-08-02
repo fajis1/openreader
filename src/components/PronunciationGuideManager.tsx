@@ -243,17 +243,34 @@ export function PronunciationGuideManager({ guideName, items, onChange }: Pronun
           })}
         </ul>
         {items.length === 0 && <p className="text-sm text-soft">No pronunciations in this profile yet.</p>}
-        <button
-          type="button"
-          onClick={() => {
-            onChange(items.filter((item) => !selectedSet.has(item.key)));
-            setSelectedWords([]);
-          }}
-          disabled={selectedWords.length === 0}
-          className="text-xs text-danger font-bold disabled:opacity-50"
-        >
-          Delete checked
-        </button>
+        {items.length > 0 && (
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => {
+                onChange(items.filter((item) => !selectedSet.has(item.key)));
+                setSelectedWords([]);
+              }}
+              disabled={selectedWords.length === 0}
+              className="text-xs text-danger font-bold disabled:opacity-50"
+            >
+              Delete checked
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Delete all ${items.length} pronunciations from this profile?`)) {
+                  onChange([]);
+                  setSelectedWords([]);
+                  toast.success('Cleared all profile pronunciations. Save the profile to keep these changes.');
+                }
+              }}
+              className="text-xs text-red-600 hover:text-red-700 font-bold"
+            >
+              Delete all
+            </button>
+          </div>
+        )}
       </div>
 
       {importGuide && (
