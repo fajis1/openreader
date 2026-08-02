@@ -44,6 +44,8 @@ export function ScanForeignWordsModal({
 
   const [feedbackExamples, setFeedbackExamples] = useState<string[]>([]);
   const [pronunciationModel, setPronunciationModel] = useState<string | null>(null);
+  const [apiKeyLast4, setApiKeyLast4] = useState<string | null>(null);
+  const [backupApiKeyLast4, setBackupApiKeyLast4] = useState<string | null>(null);
   const [refineInput, setRefineInput] = useState<{ [word: string]: string }>({});
   const [refineStatus, setRefineStatus] = useState<{ [word: string]: string }>({});
   const [refineExpanded, setRefineExpanded] = useState<{ [word: string]: boolean }>({});
@@ -133,6 +135,8 @@ export function ScanForeignWordsModal({
         setPronunciationModel(
           typeof data.pronunciationModel === 'string' ? data.pronunciationModel : null,
         );
+        setApiKeyLast4(typeof data.apiKeyLast4 === 'string' ? data.apiKeyLast4 : null);
+        setBackupApiKeyLast4(typeof data.backupApiKeyLast4 === 'string' ? data.backupApiKeyLast4 : null);
       }
     } catch (err) {
       console.error(err);
@@ -514,9 +518,15 @@ export function ScanForeignWordsModal({
                 Drag the lower-right corner to resize this window.
               </p>
               {pronunciationModel && (
-                <p className="text-[11px] text-purple-700 dark:text-purple-300">
-                  Pronunciation model: <span className="font-mono">{pronunciationModel}</span>
-                </p>
+                <div className="flex items-center gap-3 text-[11px] text-purple-700 dark:text-purple-300">
+                  <span>Pronunciation model: <span className="font-mono font-semibold">{pronunciationModel}</span></span>
+                  {apiKeyLast4 && (
+                    <span>Primary API Key: <span className="font-mono font-semibold">{apiKeyLast4}</span></span>
+                  )}
+                  {backupApiKeyLast4 && (
+                    <span>Backup API Key: <span className="font-mono font-semibold">{backupApiKeyLast4}</span></span>
+                  )}
+                </div>
               )}
               {scanJobStatus === 'queued' || scanJobStatus === 'running' ? (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400">

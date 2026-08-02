@@ -43,10 +43,18 @@ export async function GET(req: NextRequest) {
     if (ctxOrRes instanceof Response) return ctxOrRes;
     const profilesDoc = await readSmartAudioProfilesDocument(ctxOrRes.userId);
     const activeProfile = findSmartAudioProfileById(profilesDoc, profilesDoc.selectedProfileId);
+    const primaryKey = (activeProfile?.geminiApiKey || '').trim();
+    const apiKeyLast4 = primaryKey.length >= 4 ? `...${primaryKey.slice(-4)}` : primaryKey ? 'Configured' : null;
+    const backupKey = (activeProfile?.backupGeminiApiKey || '').trim();
+    const backupApiKeyLast4 = backupKey.length >= 4 ? `...${backupKey.slice(-4)}` : backupKey ? 'Configured' : null;
+
     const examples = await getFeedbackExamples();
     return NextResponse.json({
       feedbackExamples: examples,
       pronunciationModel: resolvePronunciationAiModel(activeProfile),
+      apiKeyLast4,
+      backupApiKeyLast4,
+      profileName: activeProfile?.name || null,
     });
   } catch (error: any) {
     console.error('Refine pronunciations GET error:', error);
