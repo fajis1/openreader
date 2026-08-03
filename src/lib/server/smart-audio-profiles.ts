@@ -228,25 +228,46 @@ export async function writeSmartAudioProfilesDocument(userId: string | null | un
   };
 
   try {
-    await db.transaction(async (tx: typeof db) => {
-      await lockSmartAudioProfilesRow(tx, userId);
-      const rows = await tx.select({ dataJson: userPreferences.dataJson }).from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
-      const currentDataJson = rows && rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
+    if (process.env.POSTGRES_URL) {
+      await db.transaction(async (tx: typeof db) => {
+        await lockSmartAudioProfilesRow(tx, userId);
+        const rows = await tx.select({ dataJson: userPreferences.dataJson }).from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
+        const currentDataJson = rows && rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
 
-      currentDataJson.smartAudioProfiles = sanitizedDocument;
+        currentDataJson.smartAudioProfiles = sanitizedDocument;
 
-      await tx.insert(userPreferences)
-        .values({
-          userId,
-          dataJson: serializeDataJson(currentDataJson),
-        })
-        .onConflictDoUpdate({
-          target: [userPreferences.userId],
-          set: {
+        await tx.insert(userPreferences)
+          .values({
+            userId,
             dataJson: serializeDataJson(currentDataJson),
-          }
-        });
-    });
+          })
+          .onConflictDoUpdate({
+            target: [userPreferences.userId],
+            set: {
+              dataJson: serializeDataJson(currentDataJson),
+            }
+          });
+      });
+    } else {
+      db.transaction((tx: typeof db) => {
+        const rows = tx.select({ dataJson: userPreferences.dataJson }).from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1).all();
+        const currentDataJson = rows && rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
+
+        currentDataJson.smartAudioProfiles = sanitizedDocument;
+
+        tx.insert(userPreferences)
+          .values({
+            userId,
+            dataJson: serializeDataJson(currentDataJson),
+          })
+          .onConflictDoUpdate({
+            target: [userPreferences.userId],
+            set: {
+              dataJson: serializeDataJson(currentDataJson),
+            }
+          }).run();
+      });
+    }
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to write smart audio profiles', error);
@@ -265,13 +286,14 @@ export async function mergeGeneratedPronunciationsIntoLatestProfile(
   appliedWords: string[];
   preservedUserEdits: string[];
 } | null> {
-  return db.transaction(async (tx: typeof db) => {
-    await lockSmartAudioProfilesRow(tx, userId);
-    const rows = await tx
-      .select({ dataJson: userPreferences.dataJson })
-      .from(userPreferences)
-      .where(eq(userPreferences.userId, userId))
-      .limit(1);
+  const mergeDocument = (
+    rows: Array<{ dataJson: unknown }>,
+  ): {
+    document: SmartAudioProfilesDocument;
+    profile: SmartAudioProfile;
+    appliedWords: string[];
+    preservedUserEdits: string[];
+  } | null => {
     const currentDataJson = rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
     const raw = currentDataJson.smartAudioProfiles as Partial<SmartAudioProfilesDocument> | undefined;
     const currentProfiles = Array.isArray(raw?.profiles)
@@ -295,17 +317,6 @@ export async function mergeGeneratedPronunciationsIntoLatestProfile(
       profiles: currentProfiles,
     };
     currentDataJson.smartAudioProfiles = document;
-    await tx.insert(userPreferences)
-      .values({
-        userId,
-        dataJson: serializeDataJson(currentDataJson),
-      })
-      .onConflictDoUpdate({
-        target: [userPreferences.userId],
-        set: {
-          dataJson: serializeDataJson(currentDataJson),
-        },
-      });
 
     return {
       document,
@@ -313,6 +324,43 @@ export async function mergeGeneratedPronunciationsIntoLatestProfile(
       appliedWords: merged.appliedWords,
       preservedUserEdits: merged.preservedUserEdits,
     };
+  };
+
+  if (process.env.POSTGRES_URL) {
+    return db.transaction(async (tx: typeof db) => {
+      await lockSmartAudioProfilesRow(tx, userId);
+      const rows = await tx
+        .select({ dataJson: userPreferences.dataJson })
+        .from(userPreferences)
+        .where(eq(userPreferences.userId, userId))
+        .limit(1);
+      const result = mergeDocument(rows);
+      if (!result) return null;
+      const dataJson = rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
+      dataJson.smartAudioProfiles = result.document;
+      await tx.insert(userPreferences)
+        .values({ userId, dataJson: serializeDataJson(dataJson) })
+        .onConflictDoUpdate({ target: [userPreferences.userId], set: { dataJson: serializeDataJson(dataJson) } });
+      return result;
+    });
+  }
+
+  return db.transaction((tx: typeof db) => {
+    const rows = tx
+      .select({ dataJson: userPreferences.dataJson })
+      .from(userPreferences)
+      .where(eq(userPreferences.userId, userId))
+      .limit(1)
+      .all();
+    const result = mergeDocument(rows);
+    if (!result) return null;
+    const dataJson = rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
+    dataJson.smartAudioProfiles = result.document;
+    tx.insert(userPreferences)
+      .values({ userId, dataJson: serializeDataJson(dataJson) })
+      .onConflictDoUpdate({ target: [userPreferences.userId], set: { dataJson: serializeDataJson(dataJson) } })
+      .run();
+    return result;
   });
 }
 

@@ -26,6 +26,9 @@ describe('Smart Audio data-integrity guards', () => {
     const profiles = source('src/lib/server/smart-audio-profiles.ts');
     expect(profiles).toContain('pg_advisory_xact_lock');
     expect(profiles.match(/lockSmartAudioProfilesRow\(tx, userId\)/g)).toHaveLength(2);
+    expect(profiles).toContain('db.transaction((tx: typeof db) => {');
+    expect(profiles).toContain('.limit(1).all();');
+    expect(profiles).toContain('}).run();');
   });
 
   test('preflights every selected batch document before creating queue jobs', () => {

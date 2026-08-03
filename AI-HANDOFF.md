@@ -11,6 +11,14 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-03 — Fixed SQLite Smart Audio profile persistence
+
+- Split `writeSmartAudioProfilesDocument` and `mergeGeneratedPronunciationsIntoLatestProfile` into PostgreSQL async/advisory-lock and SQLite synchronous better-sqlite3 transaction paths.
+- SQLite profile reads now use `.all()` and writes use `.run()`, preventing `Transaction function cannot return a promise` after a scan has already generated and persisted pronunciations.
+- Added data-integrity regression assertions for the synchronous profile transaction path.
+- Verified `pnpm exec tsc --noEmit`, focused profile/lexicon/SQLite tests (36 tests), Python scanner tests, and `git diff --check`. The full OpenReader suite reached 106/107 files and 628/629 tests; its single failure was the unrelated environment-sensitive runtime seed fallback test, which received an auto-generated keyless provider instead of the test's expected env-fallback provider.
+- Follow-up: rebuild/redeploy and rerun the existing cached scan; the book should be marked complete without triggering another Gemini scan.
+
 ### 2026-08-03 — Dictionary placeholder suppression and editing
 
 - Added a shared definition-quality policy that converts meta-glosses such as “Fragment or inflected form,” “OCR fragment,” and “inflected form” to intentional `null` definitions so they are never inserted into audiobook narration.
