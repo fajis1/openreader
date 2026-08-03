@@ -95,8 +95,15 @@ export function filterKokoroCompatiblePronunciationRecord(value: unknown): Recor
   if (typeof value !== 'object' || value === null) return {};
   const result: Record<string, string> = {};
   for (const [word, pronunciation] of Object.entries(value)) {
-    if (word.trim() && isKokoroCompatiblePronunciation(pronunciation)) {
-      result[word] = pronunciation.trim();
+    const trimmedWord = word.trim();
+    if (trimmedWord && isKokoroCompatiblePronunciation(pronunciation)) {
+      if (/[\[\]{}()<>\d]/.test(trimmedWord)) continue;
+      
+      const hasLatin = /[A-Za-z]/.test(trimmedWord);
+      const hasForeign = /[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF]/.test(trimmedWord);
+      if (hasLatin && hasForeign) continue;
+
+      result[trimmedWord] = (pronunciation as string).trim();
     }
   }
   return result;

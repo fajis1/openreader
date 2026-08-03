@@ -520,3 +520,9 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 - Follow-up: deploy the CUDA worker in the GPU LXC, verify `/health/ready`, confirm `nvidia-smi` shows PP-DocLayout inference, and configure the same host-backed lease contract in every GPU service that must be serialized.
 
 <!-- Add newest entries above this line. -->
+
+### 2026-08-03 — Filter malformed mixed-script OCR fragments from global pronunciation dictionary
+
+- Updated `filterKokoroCompatiblePronunciationRecord` in `kokoro-pronunciation-policy.ts` to reject words containing brackets, digits, or mixed Latin/Greek/Hebrew characters.
+- This ensures that if the Gemini audiobook generator attempts to fix or pronounce an OCR corrupted string like `vio[θεσ]iα` without removing the corruption, the malformed string will not be learned and saved into the global pronunciation dictionary.
+- Verified all TypeScript tests pass.
