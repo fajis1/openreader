@@ -8,6 +8,7 @@ import {
   getKokoroPronunciationCompatibilityErrors,
   getKokoroPronunciationQualityWarnings,
   KOKORO_COMPATIBILITY_POLICY,
+  isKokoroSafePronunciation,
   resolvePronunciationGuidance,
 } from '../../src/lib/shared/kokoro-pronunciation-policy';
 
@@ -39,6 +40,8 @@ describe('Kokoro pronunciation policy', () => {
     expect(DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE).toContain('κτλ');
     expect(DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE).toContain('K, T, L');
     expect(DEFAULT_KOKORO_PRONUNCIATION_GUIDANCE).toContain('takes precedence over the normal Greek/Hebrew IPA rule');
+    expect(KOKORO_COMPATIBILITY_POLICY).toContain('NEVER place /y/ directly beside /j/');
+    expect(KOKORO_COMPATIBILITY_POLICY).toContain('NEVER group capitals');
   });
 
   test('rejects the explicitly unsupported Kokoro patterns', () => {
@@ -61,6 +64,11 @@ describe('Kokoro pronunciation policy', () => {
     expect(getKokoroPronunciationQualityWarnings('huiothesia', '/hyjɔθesiːa/'))
       .toContain('Suspicious adjacent /y/ and /j/ phonemes may be spoken as separate letter names.');
     expect(getKokoroPronunciationQualityWarnings('λόγος', '/loʊɡɒs/')).toEqual([]);
+    expect(isKokoroSafePronunciation('υἱοὶ', '/hyjoɪ/')).toBe(false);
+    expect(isKokoroSafePronunciation('θν', '/TH, N/')).toBe(false);
+    expect(isKokoroSafePronunciation('κτλ', '/K, T, L/')).toBe(true);
+    expect(isKokoroSafePronunciation('NASA', '/NA, SA/')).toBe(false);
+    expect(isKokoroSafePronunciation('NASA', '/N, A, S, A/')).toBe(true);
   });
 
   test('all Gemini pronunciation paths consume the centralized instructions', () => {

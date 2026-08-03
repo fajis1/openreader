@@ -5,7 +5,7 @@ import { serverLogger } from '@/lib/server/logger';
 import { getDocumentBlob } from '@/lib/server/documents/blobstore';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { readSmartAudioProfilesDocument, findSmartAudioProfileById } from '@/lib/server/smart-audio-profiles';
-import { buildKokoroPronunciationInstructions, isKokoroCompatiblePronunciation } from '@/lib/shared/kokoro-pronunciation-policy';
+import { buildKokoroPronunciationInstructions, isKokoroSafePronunciation } from '@/lib/shared/kokoro-pronunciation-policy';
 import { resolvePronunciationAiModel } from '@/lib/shared/smart-audio-models';
 import {
   isCompleteScholarScanScope,
@@ -32,9 +32,11 @@ import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemin
 import { mergeGeneratedGlobalPronunciations } from '@/lib/server/smart-audio/global-pronunciation-merge';
 import {
   createGeminiHttpError,
+  collectGeminiPronunciationRepairRequests,
   foreignWordCandidateCacheKey,
   GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA,
   GeminiHttpError,
+  mergeGeminiPronunciationRepairResults,
   parseForeignWordCandidateCache,
   parseGeminiForeignWordResults,
 } from '@/lib/server/smart-audio/gemini-foreign-word-scan';
@@ -203,8 +205,8 @@ export async function POST(req: NextRequest) {
         
         const overrides = activeProfile?.pronunciations || {};
         const compatibleOverrides = Object.fromEntries(
-          Object.entries(overrides).filter(([, pronunciation]) => (
-            isKokoroCompatiblePronunciation(pronunciation)
+          Object.entries(overrides).filter(([word, pronunciation]) => (
+            isKokoroSafePronunciation(word, pronunciation)
           )),
         );
         const preExistingGlobalWords = new Set(Object.keys(globalDict));
@@ -215,7 +217,7 @@ export async function POST(req: NextRequest) {
               choices
                 .map((choice) => choice?.phonetic)
                 .filter((pronunciation): pronunciation is string => (
-                  isKokoroCompatiblePronunciation(pronunciation)
+                  isKokoroSafePronunciation(word, pronunciation)
                 )),
             ),
           ]),
@@ -237,7 +239,7 @@ export async function POST(req: NextRequest) {
           const globalPron = preExistingCompatibleGlobalWords.has(term)
             ? globalDict[term]
               ?.map((choice) => choice?.phonetic)
-              .find((pronunciation) => isKokoroCompatiblePronunciation(pronunciation)) || null
+              .find((pronunciation) => isKokoroSafePronunciation(term, pronunciation)) || null
             : null;
           const libraryPron = userPron || globalPron;
           if (libraryPron && !lexiconEntries[term]) {
@@ -255,7 +257,7 @@ export async function POST(req: NextRequest) {
         const wordsMissingOptions = words
           .filter((w: any) => {
             const compatibleGlobalChoices = (globalDict[w.word] || []).filter((choice) => (
-              isKokoroCompatiblePronunciation(choice?.phonetic)
+              isKokoroSafePronunciation(w.word, choice?.phonetic)
             ));
             const needsPronunciations = !compatibleOverrides[w.word]
               && (compatibleGlobalChoices.length === 0
@@ -274,7 +276,7 @@ export async function POST(req: NextRequest) {
           const globalPronunciation = preExistingCompatibleGlobalWords.has(w.word)
             ? globalDict[w.word]
               ?.map((choice) => choice?.phonetic)
-              .find((pronunciation) => isKokoroCompatiblePronunciation(pronunciation)) || null
+              .find((pronunciation) => isKokoroSafePronunciation(w.word, pronunciation)) || null
             : null;
           const libraryPronunciation = userPronunciation || globalPronunciation;
           const globalChoices = (globalDict[w.word] || []).map((item: any) => ({
@@ -331,7 +333,7 @@ export async function POST(req: NextRequest) {
           const storedPronunciation = compatibleOverrides[word]
             || (globalDict[word] || [])
               .map((choice) => choice?.phonetic)
-              .find((choice) => isKokoroCompatiblePronunciation(choice));
+              .find((choice) => isKokoroSafePronunciation(word, choice));
           return {
             term: word,
             contexts: Array.isArray(scanned?.contexts) ? scanned.contexts.slice(0, 2) : [],
@@ -351,7 +353,10 @@ Return a JSON array with exactly one result object per requested term. Copy each
 Terms:
 ${JSON.stringify(terms)}`;
         
-        try {
+        const requestGeminiResults = async (
+          requestPrompt: string,
+          pass: 'pronunciation_definition_scan' | 'pronunciation_quality_repair',
+        ) => {
           const { response: res, usedBackup } = await fetchGeminiWithRateLimitFallback({
             primaryApiKey: apiKey,
             backupApiKey: activeProfile?.backupGeminiApiKey,
@@ -364,7 +369,7 @@ ${JSON.stringify(terms)}`;
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                  contents: [{ role: 'user', parts: [{ text: requestPrompt }] }],
                   generationConfig: {
                     responseMimeType: 'application/json',
                     maxOutputTokens: 8192,
@@ -387,7 +392,7 @@ ${JSON.stringify(terms)}`;
             documentId,
             model,
             usedBackup,
-            pass: 'pronunciation_definition_scan',
+            pass,
             batch: i / chunkSize + 1,
             tokens: normalizeGeminiTokenUsage(data?.usageMetadata),
           }, 'Recorded Gemini pronunciation and definition scan token usage.');
@@ -395,13 +400,66 @@ ${JSON.stringify(terms)}`;
           if (!generatedText) {
             throw new Error('Gemini returned no pronunciation choices.');
           }
-          const { results: generated, repaired } = parseGeminiForeignWordResults(generatedText);
+          const { results, repaired } = parseGeminiForeignWordResults(generatedText);
           if (repaired) {
             serverLogger.warn(
-              { event: 'pdf.scan.gemini.json_repaired', jobId, batch: i / chunkSize + 1 },
+              { event: 'pdf.scan.gemini.json_repaired', jobId, pass, batch: i / chunkSize + 1 },
               'Recovered complete results from a truncated Gemini JSON array',
             );
           }
+          return results;
+        };
+
+        try {
+          let generated = await requestGeminiResults(prompt, 'pronunciation_definition_scan');
+          const repairRequests = collectGeminiPronunciationRepairRequests(terms, generated);
+          if (repairRequests.length > 0) {
+            const repairPrompt = `${buildKokoroPronunciationInstructions(activeProfile)}
+
+This is the only automatic correction pass for these terms. Your previous response violated OpenReader's Kokoro pronunciation policy or omitted required choices.
+Return only the listed terms, using the same JSON response structure. Correct every listed violation and provide exactly choicesNeeded new, distinct choices for each term.
+Do not return any rejected pronunciation or repeat an accepted pronunciation.
+Never place /y/ directly beside /j/ and never repeat /j/; choose one appropriate glide.
+For an initialism, return separated single English capital letters such as /K, T, L/, never grouped capitals such as /K, TL/ or /TH, N/.
+Copy each term exactly. Preserve its language and contextual meaning. Do not add terms that are not listed.
+
+Corrections:
+${JSON.stringify(repairRequests)}`;
+
+            await saveJob({
+              statusMessage: `Correcting ${repairRequests.length} pronunciation ${repairRequests.length === 1 ? 'result' : 'results'} (one automatic pass)…`,
+            });
+            try {
+              const repairs = await requestGeminiResults(repairPrompt, 'pronunciation_quality_repair');
+              generated = mergeGeminiPronunciationRepairResults(generated, repairs);
+            } catch (repairError) {
+              serverLogger.warn({
+                event: 'pdf.scan.gemini.quality_repair.failed',
+                error: repairError instanceof Error ? repairError.message : 'Unknown Gemini correction error',
+                jobId,
+                batch: i / chunkSize + 1,
+              }, 'The single Gemini pronunciation quality correction pass failed');
+              if (repairError instanceof GeminiHttpError && repairError.status === 400) {
+                throw repairError;
+              }
+            } finally {
+              await saveJob({ statusMessage: null });
+            }
+          }
+
+          const unresolvedQualityTerms = new Set(
+            collectGeminiPronunciationRepairRequests(terms, generated)
+              .map((request) => request.term),
+          );
+          if (unresolvedQualityTerms.size > 0) {
+            serverLogger.warn({
+              event: 'pdf.scan.gemini.quality_unresolved',
+              terms: [...unresolvedQualityTerms],
+              jobId,
+              batch: i / chunkSize + 1,
+            }, 'Pronunciations still require review after the single automatic correction pass');
+          }
+
           const acceptedWords = new Set<string>();
           const requestedTerms = new Map(chunk.map((term: string) => [term, term]));
           for (const result of generated) {
@@ -409,14 +467,14 @@ ${JSON.stringify(terms)}`;
             if (w) {
               const prons = Array.isArray(result.pronunciations) ? result.pronunciations : [];
               const current = (globalDict[w] || []).filter((choice) => (
-                isKokoroCompatiblePronunciation(choice?.phonetic)
+                isKokoroSafePronunciation(w, choice?.phonetic)
               ));
               const existingPhonetics = new Set(current.map(c => c.phonetic));
 
               for (const p of prons) {
                 if (
                   !compatibleOverrides[w]
-                  && isKokoroCompatiblePronunciation(p)
+                  && isKokoroSafePronunciation(w, p)
                   && !existingPhonetics.has(p)
                   && current.length < 5
                 ) {
@@ -432,7 +490,7 @@ ${JSON.stringify(terms)}`;
 
               const pronunciation = compatibleOverrides[w]
                 || current[0]?.phonetic
-                || prons.find((candidate) => isKokoroCompatiblePronunciation(candidate));
+                || prons.find((candidate) => isKokoroSafePronunciation(w, candidate));
               if (pronunciation) {
                 if (!geminiRecommendations[w] && !compatibleOverrides[w] && !preExistingCompatibleGlobalWords.has(w)) {
                   geminiRecommendations[w] = pronunciation;
@@ -456,6 +514,7 @@ ${JSON.stringify(terms)}`;
                     ? Math.max(0, Math.min(1, result.confidence))
                     : undefined,
                   needsReview: result.needsReview === true
+                    || unresolvedQualityTerms.has(w)
                     || (needsScholarDefinition && language !== 'other' && !definition),
                 };
                 updatedLexicon = true;
@@ -538,7 +597,7 @@ ${JSON.stringify(terms)}`;
       const definitionScanComplete = requiredDefinitionWords.every(
         (word: string) => Boolean(
           lexiconEntries[word]?.pronunciation
-          && isKokoroCompatiblePronunciation(lexiconEntries[word].pronunciation),
+          && isKokoroSafePronunciation(word, lexiconEntries[word].pronunciation),
         ),
       );
       await writeBookLexicon(userId, documentId, {

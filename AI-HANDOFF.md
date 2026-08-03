@@ -11,6 +11,14 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-03 — One-pass Gemini pronunciation quality correction
+
+- Bumped the Kokoro pronunciation policy to version 3, explicitly rejecting adjacent `/y/`/`/j` glides and grouped capital sequences while preserving comma-separated initialism letters.
+- Foreign-word scans now strictly validate initial Gemini choices, send only omitted/incomplete/unsafe terms and their exact violations through one automatic correction request, then stop retrying and mark any remaining incomplete terms for review.
+- Filtered unsafe personal/global/generated choices from scan reuse and persistence so malformed results cannot become document or global-library defaults.
+- Verified `pnpm exec tsc --noEmit`, all OpenReader unit tests (106/106 files, 625 tests), 21 focused tests, and `git diff --check`. Targeted route lint remains blocked only by its pre-existing file-wide `any`, console, and response-helper violations.
+- Follow-up: rebuild/redeploy and run a live scan containing adjacent-glide and Greek, Hebrew, and Latin initialism examples; no live Gemini request was made from this workspace.
+
 ### 2026-08-03 — Foreign-word scan modal reconnects after closing
 
 - Persisted `documentId` in new foreign-word scan jobs and extended the authenticated status route to find the latest job for a document, prioritizing active work; a single active legacy job can also be recovered for scans started before this change.

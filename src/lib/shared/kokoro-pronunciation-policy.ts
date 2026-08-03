@@ -1,6 +1,6 @@
 import type { SmartAudioProfile } from '@/types/client';
 
-export const KOKORO_PRONUNCIATION_POLICY_VERSION = 2;
+export const KOKORO_PRONUNCIATION_POLICY_VERSION = 3;
 
 export const KOKORO_COMPATIBILITY_POLICY = `KOKORO PRONUNCIATION COMPATIBILITY POLICY (REQUIRED, VERSION ${KOKORO_PRONUNCIATION_POLICY_VERSION}):
 - Use English-compatible IPA intended for Kokoro.
@@ -8,6 +8,8 @@ export const KOKORO_COMPATIBILITY_POLICY = `KOKORO PRONUNCIATION COMPATIBILITY P
 - NEVER use a standalone "/o/"; use an English-compatible vowel such as "/oʊ/" or "/ɒ/" when appropriate.
 - NEVER insert syllable-boundary periods between vowels.
 - Do not use true pharyngeal fricatives such as "ħ" or "ʕ"; approximate them with English-compatible "/k/" or "/x/" sounds.
+- NEVER place /y/ directly beside /j/ or repeat /j/; choose one appropriate glide so Kokoro does not speak separate letter names.
+- For initialisms, use single capital letters separated by commas and spaces, such as "K, T, L"; NEVER group capitals as "TH, N".
 - Preserve Kokoro markup exactly as "[Original Text](/IPA/)" when markup is requested.
 - When returning pronunciation choices as JSON, return each pronunciation as a slash-delimited IPA string and no explanatory prose.
 These compatibility requirements cannot be removed by profile-specific guidance.`;
@@ -61,7 +63,7 @@ export function isKokoroCompatiblePronunciation(pronunciation: unknown): pronunc
 }
 
 export function getKokoroPronunciationQualityWarnings(
-  word: string,
+  _word: string,
   pronunciation: unknown,
 ): string[] {
   const warnings = [...getKokoroPronunciationCompatibilityErrors(pronunciation)];
@@ -76,13 +78,17 @@ export function getKokoroPronunciationQualityWarnings(
   if (/[\[\]()]|\s{2,}/u.test(inner)) {
     warnings.push('Contains unexpected markup or spacing inside the pronunciation.');
   }
-  if (
-    /[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]/u.test(word)
-    && /[A-Z]{2,}/u.test(inner)
-  ) {
-    warnings.push('Contains capital letter sequences inside foreign-word IPA.');
+  if (/[A-Z]{2,}/u.test(inner)) {
+    warnings.push('Contains grouped capital letters; initialism letters must be separated.');
   }
   return [...new Set(warnings)];
+}
+
+export function isKokoroSafePronunciation(
+  word: string,
+  pronunciation: unknown,
+): pronunciation is string {
+  return getKokoroPronunciationQualityWarnings(word, pronunciation).length === 0;
 }
 
 export function filterKokoroCompatiblePronunciationRecord(value: unknown): Record<string, string> {

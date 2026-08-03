@@ -3,10 +3,12 @@ import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import {
   createGeminiHttpError,
+  collectGeminiPronunciationRepairRequests,
   foreignWordCandidateCacheKey,
   findLatestForeignWordScanJob,
   GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA,
   GeminiHttpError,
+  mergeGeminiPronunciationRepairResults,
   parseForeignWordCandidateCache,
   parseGeminiForeignWordResults,
 } from '@/lib/server/smart-audio/gemini-foreign-word-scan';
@@ -105,5 +107,45 @@ describe('Gemini foreign-word structured output', () => {
       ...oneLegacy,
       { id: 'legacy-2', userId: 'user-a', status: 'queued', updatedAt: 20 },
     ], 'user-a', 'doc-a')).toBeNull();
+  });
+
+  test('requests one correction for omitted, unsafe, or incomplete pronunciation results', () => {
+    const terms = [
+      { term: 'υἱοὶ', contexts: [], currentPronunciation: null },
+      { term: 'κτλ', contexts: [], currentPronunciation: null },
+      { term: 'λόγος', contexts: [], currentPronunciation: null },
+    ];
+    const repairs = collectGeminiPronunciationRepairRequests(terms, [
+      { term: 'υἱοὶ', pronunciations: ['/hyjoɪ/'] },
+      { term: 'κτλ', pronunciations: ['/K, T, L/'] },
+    ]);
+    expect(repairs.map(({ term }) => term)).toEqual(['υἱοὶ', 'κτλ', 'λόγος']);
+    expect(repairs[0].rejectedPronunciations[0].violations[0]).toContain('adjacent /y/ and /j/');
+    expect(repairs[1].acceptedPronunciations).toEqual(['/K, T, L/']);
+    expect(repairs[1].choicesNeeded).toBe(4);
+    expect(repairs[2].rejectedPronunciations[0].violations[0]).toContain('omitted');
+  });
+
+  test('merges only warning-free correction choices', () => {
+    expect(mergeGeminiPronunciationRepairResults(
+      [{ term: 'υἱοὶ', pronunciations: ['/hyjoɪ/'], language: 'koine_greek' }],
+      [{ term: 'υἱοὶ', pronunciations: ['/huːɔɪ/', '/hjjɔɪ/'], needsReview: false }],
+    )).toEqual([{
+      term: 'υἱοὶ',
+      pronunciations: ['/huːɔɪ/'],
+      language: 'koine_greek',
+      needsReview: false,
+    }]);
+  });
+
+  test('limits scan quality correction to one Gemini pass', () => {
+    const route = readFileSync(resolve(
+      process.cwd(),
+      'src/app/api/documents/scan-foreign-words/route.ts',
+    ), 'utf8');
+    expect(route).toContain('This is the only automatic correction pass');
+    expect(route.match(/requestGeminiResults\(repairPrompt, 'pronunciation_quality_repair'\)/g))
+      .toHaveLength(1);
+    expect(route).not.toMatch(/while\s*\([^)]*(?:repair|correction)/i);
   });
 });

@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import {
+  getKokoroPronunciationQualityWarnings,
+  isKokoroSafePronunciation,
+} from '@/lib/shared/kokoro-pronunciation-policy';
 
 export const GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA = {
   type: 'array',
@@ -45,6 +49,83 @@ export const GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA = {
 
 export interface GeminiForeignWordResult extends Record<string, unknown> {
   term: string;
+}
+
+export type GeminiForeignWordTerm = {
+  term: string;
+  contexts: string[];
+  currentPronunciation: string | null;
+};
+
+export type GeminiPronunciationRepairRequest = GeminiForeignWordTerm & {
+  acceptedPronunciations: string[];
+  rejectedPronunciations: Array<{
+    pronunciation: unknown;
+    violations: string[];
+  }>;
+  choicesNeeded: number;
+};
+
+export function collectGeminiPronunciationRepairRequests(
+  terms: readonly GeminiForeignWordTerm[],
+  results: readonly GeminiForeignWordResult[],
+): GeminiPronunciationRepairRequest[] {
+  const resultsByTerm = new Map(results.map((result) => [result.term, result]));
+  return terms.flatMap((term) => {
+    const result = resultsByTerm.get(term.term);
+    const pronunciations = Array.isArray(result?.pronunciations) ? result.pronunciations : [];
+    const acceptedPronunciations = pronunciations
+      .filter((pronunciation): pronunciation is string => (
+        isKokoroSafePronunciation(term.term, pronunciation)
+      ))
+      .filter((pronunciation, index, all) => all.indexOf(pronunciation) === index);
+    const rejectedPronunciations = pronunciations.flatMap((pronunciation) => {
+      const violations = getKokoroPronunciationQualityWarnings(term.term, pronunciation);
+      return violations.length > 0 ? [{ pronunciation, violations }] : [];
+    });
+    if (!result) {
+      rejectedPronunciations.push({
+        pronunciation: null,
+        violations: ['Gemini omitted this requested term.'],
+      });
+    } else if (pronunciations.length === 0) {
+      rejectedPronunciations.push({
+        pronunciation: null,
+        violations: ['Gemini returned no pronunciation choices for this term.'],
+      });
+    }
+    const expectedChoices = term.currentPronunciation ? 1 : 5;
+    const choicesNeeded = Math.max(0, expectedChoices - acceptedPronunciations.length);
+    if (choicesNeeded === 0) return [];
+    return [{
+      ...term,
+      acceptedPronunciations,
+      rejectedPronunciations,
+      choicesNeeded,
+    }];
+  });
+}
+
+export function mergeGeminiPronunciationRepairResults(
+  initialResults: readonly GeminiForeignWordResult[],
+  repairResults: readonly GeminiForeignWordResult[],
+): GeminiForeignWordResult[] {
+  const merged = new Map(initialResults.map((result) => [result.term, { ...result }]));
+  for (const repair of repairResults) {
+    const initial = merged.get(repair.term);
+    const pronunciations = [
+      ...(Array.isArray(initial?.pronunciations) ? initial.pronunciations : []),
+      ...(Array.isArray(repair.pronunciations) ? repair.pronunciations : []),
+    ].filter((pronunciation): pronunciation is string => (
+      isKokoroSafePronunciation(repair.term, pronunciation)
+    )).filter((pronunciation, index, all) => all.indexOf(pronunciation) === index).slice(0, 5);
+    merged.set(repair.term, {
+      ...initial,
+      ...repair,
+      pronunciations,
+    });
+  }
+  return [...merged.values()];
 }
 
 export interface ForeignWordScanJob extends Record<string, unknown> {
