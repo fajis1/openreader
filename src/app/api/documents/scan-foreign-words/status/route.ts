@@ -58,3 +58,52 @@ export async function GET(req: NextRequest) {
     });
   }
 }
+
+export async function POST(req: NextRequest) {
+  try {
+    const ctxOrRes = await requireAuthContext(req);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+    const userId = ctxOrRes.userId;
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const body = await req.json().catch(() => ({}));
+    const jobId = typeof body.jobId === 'string' ? body.jobId : '';
+    if (!jobId) return NextResponse.json({ error: 'Missing jobId' }, { status: 400 });
+
+    const key = `foreign_word_scan:${jobId}`;
+    const rows = await db.select({ valueJson: adminSettings.valueJson })
+      .from(adminSettings)
+      .where(eq(adminSettings.key, key))
+      .limit(1);
+    if (rows.length === 0 || !rows[0].valueJson) {
+      return NextResponse.json({ error: 'Scan job not found' }, { status: 404 });
+    }
+    const job = typeof rows[0].valueJson === 'string' ? JSON.parse(rows[0].valueJson) : rows[0].valueJson;
+    if (!job || job.userId !== userId) return NextResponse.json({ error: 'Scan job not found' }, { status: 404 });
+    if (job.status !== 'queued' && job.status !== 'running') return NextResponse.json(job);
+
+    const cancelled = {
+      ...job,
+      status: 'cancelled',
+      stage: 'cancelled',
+      error: 'Scan cancelled by user.',
+      cancelledAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await db.insert(adminSettings).values({
+      key,
+      valueJson: JSON.stringify(cancelled),
+    }).onConflictDoUpdate({
+      target: adminSettings.key,
+      set: { valueJson: JSON.stringify(cancelled) },
+    });
+    serverLogger.info({ event: 'pdf.scan.cancel.requested', jobId, userId }, 'Foreign-word scan cancellation requested');
+    return NextResponse.json(cancelled);
+  } catch (error) {
+    return errorResponse(error, {
+      logger: serverLogger,
+      event: 'pdf.scan.cancel.failed',
+      msg: 'Failed to cancel foreign-word scan',
+      apiErrorMessage: 'Failed to cancel scan',
+    });
+  }
+}

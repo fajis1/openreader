@@ -50,6 +50,13 @@ const execFileAsync = util.promisify(execFile);
 const GREEK = /[\u0370-\u03ff\u1f00-\u1fff]/u;
 const HEBREW = /[\u0590-\u05ff]/u;
 
+class ScanCancelledError extends Error {
+  constructor() {
+    super('Scan cancelled by user.');
+    this.name = 'ScanCancelledError';
+  }
+}
+
 function languageForTerm(term: string): SmartAudioBookLexiconEntry['language'] {
   if (HEBREW.test(term)) return 'biblical_hebrew';
   if (GREEK.test(term)) return 'koine_greek';
@@ -100,7 +107,19 @@ export async function POST(req: NextRequest) {
 
     after(async () => {
       const jobState: Record<string, unknown> = { ...initialJobState };
+      const ensureScanNotCancelled = async () => {
+        const rows = await db.select({ valueJson: adminSettings.valueJson })
+          .from(adminSettings)
+          .where(eq(adminSettings.key, jobKey))
+          .limit(1);
+        const current = rows[0]?.valueJson;
+        const parsed = typeof current === 'string' ? JSON.parse(current) : current;
+        if (parsed && typeof parsed === 'object' && (parsed as { status?: unknown }).status === 'cancelled') {
+          throw new ScanCancelledError();
+        }
+      };
       const saveJob = async (patch: Record<string, unknown>) => {
+        if (patch.status !== 'cancelled') await ensureScanNotCancelled();
         Object.assign(jobState, patch, { updatedAt: Date.now() });
         await db.insert(adminSettings).values({
           key: jobKey,
@@ -348,7 +367,8 @@ export async function POST(req: NextRequest) {
             : (activeProfile?.geminiApiKey || activeProfile?.backupGeminiApiKey || '');
       
       const chunkSize = 35;
-      for (let i = 0; i < wordsMissingOptions.length; i += chunkSize) {
+          for (let i = 0; i < wordsMissingOptions.length; i += chunkSize) {
+        await ensureScanNotCancelled();
         if (i > 0) {
           await new Promise((resolve) => setTimeout(resolve, 500));
         }
@@ -758,6 +778,10 @@ ${JSON.stringify(repairRequests)}`;
           words: enrichWords(),
         });
       } catch (error) {
+        if (error instanceof ScanCancelledError) {
+          serverLogger.info({ event: 'pdf.scan.cancelled', jobId, documentId }, 'Foreign-word scan cancelled by user');
+          return;
+        }
         serverLogger.error({
           event: 'pdf.scan.pronunciations.failed',
           error: error instanceof Error ? error.message : String(error),

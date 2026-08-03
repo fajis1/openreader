@@ -271,6 +271,27 @@ export function SmartAudioSettings() {
     }
   };
 
+  const exportGlobalPronunciations = async () => {
+    try {
+      const response = await fetch('/api/tts/global-pronunciations/export');
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to export global pronunciations');
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'openreader-global-pronunciations.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to export global pronunciations');
+    }
+  };
+
   const handleAdoptGlobal = async (word: string, phonetic: string) => {
     const trimmed = phonetic.trim();
     const normalizedPhonetic = trimmed.startsWith('/') && trimmed.endsWith('/')
@@ -921,13 +942,22 @@ export function SmartAudioSettings() {
           >
             Inspect Book Pronunciations 📚
           </button>
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={(e) => { e.stopPropagation(); loadGlobalPronunciations(); }} 
             className="text-xs font-semibold px-3 py-1.5 bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200 rounded hover:bg-purple-300 dark:hover:bg-purple-700 transition-colors sm:mr-2"
           >
             View Global List
           </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); void exportGlobalPronunciations(); }}
+              className="text-xs font-semibold px-3 py-1.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800 transition-colors sm:mr-2"
+            >
+              Export Global JSON
+            </button>
+          )}
           <div className="relative inline-flex h-6 w-11 items-center rounded-full bg-purple-600">
             <span className="inline-block h-4 w-4 translate-x-6 transform rounded-full bg-white" />
           </div>

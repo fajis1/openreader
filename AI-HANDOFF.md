@@ -11,6 +11,21 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-03 — Added admin global-pronunciation export
+
+- Added admin-authenticated `GET /api/tts/global-pronunciations/export`, returning the normalized global library as a downloadable JSON file with no credentials or private settings.
+- Added an admin-only Export Global JSON button in Smart Audio Settings.
+- Verified TypeScript, focused modal/data-integrity tests (25 tests), and `git diff --check`.
+- Follow-up: rebuild/redeploy to expose the export endpoint in the running web image.
+
+### 2026-08-03 — Added cancellable foreign-word scans
+
+- Added an authenticated scan-status cancellation endpoint that marks only the owned queued/running job as `cancelled`.
+- The background scanner now checks the durable job flag before continuing or overwriting progress, exits cleanly after cancellation, and preserves results already persisted from completed batches.
+- The scan modal now stores the job ID, shows a Cancel scan button, stops polling after cancellation, and explains that completed results were kept.
+- Verified TypeScript, focused scan-modal/lexicon/data-integrity tests (43 tests), and `git diff --check`.
+- Follow-up: rebuild/redeploy the web image; cancellation takes effect between Gemini requests (an already in-flight request may finish before the worker observes the flag).
+
 ### 2026-08-03 — Global dictionary baseline with local overrides
 
 - Added a provider-safe `global_definitions` admin library alongside the existing global pronunciation library; foreign-word scans and Scholar audiobook preparation now persist usable definitions there.

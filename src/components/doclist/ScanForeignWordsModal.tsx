@@ -63,7 +63,8 @@ export function ScanForeignWordsModal({
   const [forceUseBackupKey, setForceUseBackupKey] = useState(false);
   const [sortMissingFirst, setSortMissingFirst] = useState(true);
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
-  const [scanJobStatus, setScanJobStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed'>('idle');
+  const [scanJobStatus, setScanJobStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>('idle');
+  const [scanJobId, setScanJobId] = useState<string | null>(null);
   const [scanJobProgress, setScanJobProgress] = useState({ completed: 0, total: 0 });
   const [scanJobGenerated, setScanJobGenerated] = useState(0);
   const [scanJobGeneratedChoices, setScanJobGeneratedChoices] = useState(0);
@@ -98,6 +99,7 @@ export function ScanForeignWordsModal({
       setGenerateOnlyForNewWords(true);
       setPanelWidth(null);
       setScanJobStatus('idle');
+      setScanJobId(null);
       setScanJobProgress({ completed: 0, total: 0 });
       setScanJobGenerated(0);
       setScanJobGeneratedChoices(0);
@@ -128,6 +130,7 @@ export function ScanForeignWordsModal({
       setGenerateOnlyForNewWords(true);
       setPanelWidth(null);
       setScanJobStatus('idle');
+      setScanJobId(null);
       setScanJobProgress({ completed: 0, total: 0 });
       setScanJobGenerated(0);
       setScanJobGeneratedChoices(0);
@@ -306,6 +309,7 @@ export function ScanForeignWordsModal({
   };
 
   const applyScanJob = (job: Record<string, any>) => {
+    if (typeof job.id === 'string') setScanJobId(job.id);
     if (Array.isArray(job.words)) {
       setWords(job.words);
       void warmGeminiDefaults(job.words);
@@ -325,7 +329,7 @@ export function ScanForeignWordsModal({
       if (!res.ok) return;
       const job = await res.json();
       applyScanJob(job);
-      if (job.status === 'completed' || job.status === 'failed') stopScanPolling();
+      if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') stopScanPolling();
     } catch (pollError) {
       console.error('Failed to poll foreign-word scan job:', pollError);
     }
@@ -360,6 +364,24 @@ export function ScanForeignWordsModal({
       return;
     }
     onClose();
+  };
+
+  const cancelScan = async () => {
+    if (!scanJobId || !scanActive) return;
+    try {
+      const response = await fetch('/api/documents/scan-foreign-words/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: scanJobId }),
+      });
+      const job = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(job.error || 'Failed to cancel scan');
+      applyScanJob(job);
+      stopScanPolling();
+      toast.success('Scan cancelled. Completed results were kept.');
+    } catch (cancelError) {
+      toast.error(cancelError instanceof Error ? cancelError.message : 'Failed to cancel scan');
+    }
   };
 
   const warmPreview = async (word: string, phonetic: string) => {
@@ -453,6 +475,7 @@ export function ScanForeignWordsModal({
       setScanJobError(null);
       stopScanPolling();
       if (data.scanJobId) {
+        setScanJobId(data.scanJobId);
         watchScanJob(data.scanJobId);
       }
     } catch (err: any) {
@@ -686,7 +709,8 @@ export function ScanForeignWordsModal({
                 </div>
               )}
               {scanJobStatus === 'queued' || scanJobStatus === 'running' ? (
-                <div className="space-y-0.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="space-y-0.5">
                   <p className="text-[11px] text-amber-600 dark:text-amber-400">
                     Gemini pronunciation generation: {scanJobProgress.total > 0 ? `${scanJobProgress.completed}/${scanJobProgress.total} words processed` : 'queued'}…
                   </p>
@@ -695,6 +719,14 @@ export function ScanForeignWordsModal({
                       {scanJobStatusMessage}
                     </p>
                   )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void cancelScan()}
+                    className="rounded border border-red-300 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300"
+                  >
+                    Cancel scan
+                  </button>
                 </div>
               ) : scanJobStatus === 'completed' && scanJobProgress.total > 0 ? (
                 scanJobError ? (
@@ -704,6 +736,8 @@ export function ScanForeignWordsModal({
                 )
               ) : scanJobStatus === 'failed' ? (
                 <p className="text-[11px] text-red-600 dark:text-red-400">Pronunciation generation failed: {scanJobError || 'check server logs'}</p>
+              ) : scanJobStatus === 'cancelled' ? (
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">Scan cancelled. Completed results were kept; you can restart it later.</p>
               ) : null}
               {audioWarmStatus === 'warming' && (
                 <p className="text-[11px] text-blue-600 dark:text-blue-400">Preparing additional pronunciation audio in the background…</p>

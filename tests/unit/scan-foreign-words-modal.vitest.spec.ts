@@ -30,6 +30,14 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('loading || (scanActive && words.length === 0)');
   });
 
+  test('offers cancellation and preserves completed batch results', () => {
+    expect(source).toContain("fetch('/api/documents/scan-foreign-words/status'");
+    expect(source).toContain('method: \'POST\'');
+    expect(source).toContain('Cancel scan');
+    expect(source).toContain('Completed results were kept');
+    expect(source).toContain("'cancelled'");
+  });
+
   test('opens wider, supports desktop resizing, and constrains long word cells', () => {
     expect(source).toContain('size="xl"');
     expect(source).toContain('handleResizePointerDown');
