@@ -76,7 +76,10 @@ export async function POST(req: NextRequest) {
     if (!documentId) return NextResponse.json({ error: 'Missing documentId' }, { status: 400 });
 
     const mode = body.mode || 'all_foreign';
-    const target = typeof body.target === 'number' ? body.target : 80.0;
+    // A partial scan cannot certify a Scholar audiobook as ready. Keep this
+    // server-side as well as in the UI so callers cannot accidentally create
+    // another 80% scan that later fails the audiobook preflight.
+    const target = 100;
     const query = body.query || null;
     const generateOnlyForNewWords = body.generateOnlyForNewWords !== false;
     const forceUseBackupKey = body.forceUseBackupKey === true;
@@ -189,7 +192,7 @@ export async function POST(req: NextRequest) {
           if (!Array.isArray(words)) {
             throw new Error('PDF foreign-word scanner returned an invalid candidate list.');
           }
-          const cachedCandidates = JSON.stringify({ version: 3, words });
+          const cachedCandidates = JSON.stringify({ version: 4, words });
           await db.insert(adminSettings).values({
             key: candidateCacheKey,
             valueJson: cachedCandidates,
@@ -354,6 +357,8 @@ export async function POST(req: NextRequest) {
             definition: lexiconEntries[w.word]?.definition || null,
             definitionOmitted: lexiconEntries[w.word]?.definitionOmitted === true,
             definitionNeedsReview: lexiconEntries[w.word]?.needsReview === true,
+            ocrSuspect: w.ocrSuspect === true,
+            ocrFragment: confirmedOcrFragments.has(w.word),
           };
         });
 
@@ -366,6 +371,7 @@ export async function POST(req: NextRequest) {
         });
 
         const updatedGlobalWords = new Set<string>();
+        const confirmedOcrFragments = new Set<string>();
         let acceptedChoices = 0;
         let updatedLexicon = false;
         let terminalGeminiError: string | null = null;
@@ -398,6 +404,8 @@ export async function POST(req: NextRequest) {
             term: word,
             contexts: Array.isArray(scanned?.contexts) ? scanned.contexts.slice(0, 2) : [],
             currentPronunciation: storedPronunciation || null,
+            ocrSuspect: scanned?.ocrSuspect === true,
+            ocrEvidence: Array.isArray(scanned?.ocrEvidence) ? scanned.ocrEvidence.slice(0, 2) : [],
           };
         });
         const prompt = `${buildKokoroPronunciationInstructions(activeProfile)}
@@ -409,6 +417,8 @@ For Koine Greek or Biblical Hebrew, use the supplied contexts to return a contex
 If the surrounding book context already states the definition, return that same concise gloss; OpenReader will recognize the author-supplied definition and will not speak it twice.
 Set language to "koine_greek", "biblical_hebrew", or "other". For other languages, abbreviations, or invented names, set language to "other" and definition to null.
 If a token is an OCR fragment, an unidentifiable fragment, or an inflected form with no reliable contextual English gloss, return definition as null and definitionOmitted as true. Never use placeholder text such as "Fragment or inflected form" as a definition.
+When ocrSuspect is true, inspect ocrEvidence before deciding. Set ocrFragment to true only if that raw mixed-script/bracketed OCR token proves the requested term is a damaged fragment. For a confirmed OCR fragment return pronunciations as [], language as "other", definition as null, definitionOmitted as true, and needsReview as false. Do not attempt to reconstruct or invent a replacement term.
+For all other terms set ocrFragment to false.
 Otherwise return a useful contextual definition and set definitionOmitted to false.
 Return a JSON array with exactly one result object per requested term. Copy each requested term exactly into that result object's "term" field.
 
@@ -527,6 +537,18 @@ ${JSON.stringify(repairRequests)}`;
           for (const result of generated) {
             const w = requestedTerms.get(result.term);
             if (w) {
+              const scanned = words.find((item: any) => item.word === w);
+              if (scanned?.ocrSuspect === true && result.ocrFragment === true) {
+                // Gemini, not a brittle local heuristic, made the final call.
+                // Do not let a confirmed OCR shard reuse or create a global entry.
+                confirmedOcrFragments.add(w);
+                if (Object.prototype.hasOwnProperty.call(lexiconEntries, w)) {
+                  delete lexiconEntries[w];
+                  updatedLexicon = true;
+                }
+                acceptedWords.add(w);
+                continue;
+              }
               const prons = Array.isArray(result.pronunciations) ? result.pronunciations : [];
               const current = (globalDict[w] || []).filter((choice) => (
                 isKokoroSafePronunciation(w, choice?.phonetic)
@@ -558,7 +580,6 @@ ${JSON.stringify(repairRequests)}`;
                 if (!geminiRecommendations[w] && !compatibleOverrides[w] && !preExistingCompatibleGlobalWords.has(w)) {
                   geminiRecommendations[w] = pronunciation;
                 }
-                const scanned = words.find((item: any) => item.word === w);
                 const definitionOmitted = result.definitionOmitted === true
                   || shouldOmitDictionaryDefinition(result.definition);
                 const definition = definitionOmitted
@@ -706,6 +727,7 @@ ${JSON.stringify(repairRequests)}`;
       const requiredDefinitionWords = needsScholarDefinition
         ? words
           .map((word: any) => word.word as string)
+          .filter((word: string) => !confirmedOcrFragments.has(word))
           .filter((word: string) => languageForTerm(word) !== 'other')
         : [];
       const definitionScanComplete = requiredDefinitionWords.every(

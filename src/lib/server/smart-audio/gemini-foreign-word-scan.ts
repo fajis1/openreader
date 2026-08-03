@@ -21,8 +21,12 @@ export const GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA = {
       pronunciations: {
         type: 'array',
         items: { type: 'string' },
-        minItems: 1,
+        minItems: 0,
         maxItems: 5,
+      },
+      ocrFragment: {
+        type: 'boolean',
+        description: 'True only when supplied OCR evidence proves this is a damaged fragment, not a lexical term.',
       },
       definition: {
         type: ['string', 'null'],
@@ -44,6 +48,7 @@ export const GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA = {
       'term',
       'language',
       'pronunciations',
+      'ocrFragment',
       'definition',
       'definitionOmitted',
       'confidence',
@@ -60,6 +65,8 @@ export type GeminiForeignWordTerm = {
   term: string;
   contexts: string[];
   currentPronunciation: string | null;
+  ocrSuspect?: boolean;
+  ocrEvidence?: string[];
 };
 
 /**
@@ -92,6 +99,7 @@ export function collectGeminiPronunciationRepairRequests(
   const resultsByTerm = new Map(results.map((result) => [result.term, result]));
   return terms.flatMap((term) => {
     const result = resultsByTerm.get(term.term);
+    if (term.ocrSuspect === true && result?.ocrFragment === true) return [];
     const pronunciations = Array.isArray(result?.pronunciations) ? result.pronunciations : [];
     const acceptedPronunciations = pronunciations
       .filter((pronunciation): pronunciation is string => (
@@ -212,7 +220,7 @@ export function foreignWordCandidateCacheKey(input: {
   const scopeHash = createHash('sha256')
     .update(JSON.stringify(input))
     .digest('hex');
-  return `foreign_word_candidates:v3:${scopeHash}`;
+  return `foreign_word_candidates:v4:${scopeHash}`;
 }
 
 export function parseForeignWordCandidateCache(value: unknown): unknown[] | null {
@@ -221,7 +229,7 @@ export function parseForeignWordCandidateCache(value: unknown): unknown[] | null
     if (
       !parsed
       || typeof parsed !== 'object'
-      || (parsed as { version?: unknown }).version !== 3
+      || (parsed as { version?: unknown }).version !== 4
       || !Array.isArray((parsed as { words?: unknown }).words)
     ) {
       return null;

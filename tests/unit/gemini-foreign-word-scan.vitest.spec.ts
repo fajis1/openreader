@@ -20,8 +20,10 @@ describe('Gemini foreign-word structured output', () => {
     expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.type).toBe('object');
     expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.properties.term.type).toBe('string');
     expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.properties.definitionOmitted.type).toBe('boolean');
+    expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.properties.ocrFragment.type).toBe('boolean');
     expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.required).toContain('term');
     expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.required).toContain('definitionOmitted');
+    expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.required).toContain('ocrFragment');
   });
 
   test('parses result arrays and recovers complete entries from truncation', () => {
@@ -74,7 +76,7 @@ describe('Gemini foreign-word structured output', () => {
       mode: 'greek_hebrew',
     }));
     expect(parseForeignWordCandidateCache(JSON.stringify({
-      version: 3,
+      version: 4,
       words: [{ word: 'λόγος' }],
     }))).toEqual([{ word: 'λόγος' }]);
     expect(parseForeignWordCandidateCache('{invalid')).toBeNull();
@@ -136,6 +138,13 @@ describe('Gemini foreign-word structured output', () => {
     expect(repairs[2].rejectedPronunciations[0].violations[0]).toContain('omitted');
   });
 
+  test('does not send a Gemini-confirmed OCR fragment through pronunciation repair', () => {
+    const repairs = collectGeminiPronunciationRepairRequests([
+      { term: 'θεσ', contexts: ['vio[θεσ]iα'], currentPronunciation: null, ocrSuspect: true },
+    ], [{ term: 'θεσ', ocrFragment: true, pronunciations: [] }]);
+    expect(repairs).toEqual([]);
+  });
+
   test('merges only warning-free correction choices', () => {
     expect(mergeGeminiPronunciationRepairResults(
       [{ term: 'υἱοὶ', pronunciations: ['/hyjoɪ/'], language: 'koine_greek' }],
@@ -157,5 +166,16 @@ describe('Gemini foreign-word structured output', () => {
     expect(route.match(/requestGeminiResults\(repairPrompt, 'pronunciation_quality_repair'\)/g))
       .toHaveLength(1);
     expect(route).not.toMatch(/while\s*\([^)]*(?:repair|correction)/i);
+  });
+
+  test('gives Gemini mixed-script OCR evidence and suppresses only confirmed fragments', () => {
+    const route = readFileSync(resolve(
+      process.cwd(),
+      'src/app/api/documents/scan-foreign-words/route.ts',
+    ), 'utf8');
+    expect(route).toContain('ocrSuspect: scanned?.ocrSuspect === true');
+    expect(route).toContain('ocrEvidence: Array.isArray(scanned?.ocrEvidence)');
+    expect(route).toContain('Gemini, not a brittle local heuristic, made the final call.');
+    expect(route).toContain('result.ocrFragment === true');
   });
 });

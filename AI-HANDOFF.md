@@ -11,6 +11,28 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-03 — Routed mixed-script OCR fragments through Gemini review
+
+- Python now retains raw evidence when a Greek/Hebrew regex match is embedded in a mixed Latin/bracketed OCR token (for example, `vio[θεσ]iα`) instead of silently discarding that context.
+- Gemini receives the evidence and makes the final `ocrFragment` classification. Confirmed fragments receive no pronunciation or definition and are excluded from the book lexicon and global-persistence path; intact terms remain eligible for normal processing.
+- Bumped the foreign-word candidate cache to version 4 so scans do not reuse candidate lists created before OCR evidence was retained.
+- Verified Python scanner tests, TypeScript, 40 focused Vitest tests, and `git diff --check`.
+- Follow-up: rebuild/redeploy and rescan a document containing a mixed-script OCR artifact; existing historical global fragment entries are deliberately not auto-deleted and should be reviewed before removal.
+
+### 2026-08-03 — Current pre-scan and audiobook operational state
+
+- Pre-scan coverage is now fixed at 100% in both the modal and server route. This is required for a Scholar book lexicon to be certified as complete for audiobook generation.
+- The mixed-script OCR evidence/classification flow runs in the document pre-scan only. Audiobook chapter cleanup uses its saved book/global lexicon plus a separate per-chapter Gemini cleanup pass; it does not re-run OCR candidate classification.
+- A completed scan of the main Adoption document saved a complete Scholar lexicon with 2,964 entries and no Kokoro-unsafe IPA. Historical OCR-shard entries may still be visible in the global library until manually reviewed and removed.
+- The local audiobook job was running without a recorded error when inspected; its Gemini cleanup batches were far below the Gemini 3.1 Flash-Lite token limits.
+
+### 2026-08-03 — Made document pre-scans full coverage only
+
+- Removed the Top 80% scan option; the pre-scan UI now clearly reports Full 100% coverage.
+- The server now enforces `target = 100` regardless of a stale client request, preventing a partial scan from later failing Scholar audiobook preflight solely because of its scope.
+- Verified TypeScript, focused scan-modal and Scholar-lexicon tests (26 tests), and `git diff --check`.
+- Follow-up: rebuild/redeploy, run one new pre-scan for an existing partial book, and confirm its saved lexicon is marked complete before creating the audiobook.
+
 ### 2026-08-03 — Transfer global definitions with global dictionary JSON
 
 - Global JSON export/import now transfers both validated pronunciation choices and usable global definitions (format version 2), while retaining support for older pronunciation-only exports.

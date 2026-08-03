@@ -6,6 +6,10 @@ const source = readFileSync(
   resolve(process.cwd(), 'src/components/doclist/ScanForeignWordsModal.tsx'),
   'utf8',
 );
+const scanRoute = readFileSync(
+  resolve(process.cwd(), 'src/app/api/documents/scan-foreign-words/route.ts'),
+  'utf8',
+);
 
 describe('foreign-word scan modal', () => {
   test('starts a scan only from the explicit scan button', () => {
@@ -18,6 +22,14 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('if (scanInFlight.current || scanActive) return;');
     expect(source).toContain('scanInFlight.current = true;');
     expect(source).toContain('scanInFlight.current = false;');
+  });
+
+  test('always requests a full scan that can certify a Scholar audiobook', () => {
+    expect(source).toContain('target: 100');
+    expect(source).toContain('Coverage: Full 100%');
+    expect(source).not.toContain('Top 80% (Recommended)');
+    expect(source).not.toContain('setScanCoverage');
+    expect(scanRoute).toContain('const target = 100;');
   });
 
   test('warns before closing an active scan and reconnects when reopened', () => {

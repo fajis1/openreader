@@ -43,6 +43,25 @@ class ForeignWordContextTests(unittest.TestCase):
         logos = next(item for item in results if item["word"] == "λόγος")
         self.assertEqual(logos["contexts"], ["The standalone λόγος means word."])
 
+    def test_preserves_mixed_script_ocr_evidence_for_gemini_review(self):
+        text = "The damaged OCR token vio[θεσ]iα appears beside υἱοθεσία."
+        with (
+            patch.object(scan_pdf_foreign_words, "load_pdf_text", return_value=text),
+            patch.object(scan_pdf_foreign_words, "fetch_global_pronunciations", return_value={}),
+        ):
+            results = scan_pdf_foreign_words.scan_pdf_foreign_words(
+                "unused.pdf",
+                target_percentile=100,
+                mode="greek_hebrew",
+                quiet=True,
+            )
+
+        shard = next(item for item in results if item["word"] == "θεσ")
+        intact = next(item for item in results if item["word"] == "υἱοθεσία")
+        self.assertTrue(shard["ocrSuspect"])
+        self.assertEqual(shard["ocrEvidence"], ["vio[θεσ]iα"])
+        self.assertNotIn("ocrSuspect", intact)
+
 
 if __name__ == "__main__":
     unittest.main()

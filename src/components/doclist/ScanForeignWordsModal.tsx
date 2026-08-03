@@ -438,10 +438,9 @@ export function ScanForeignWordsModal({
   };
 
   const [scanMode, setScanMode] = useState<'all_foreign' | 'fantasy_litrpg' | 'greek_hebrew' | 'custom'>('all_foreign');
-  const [scanCoverage, setScanCoverage] = useState<number>(80);
   const [customQuery, setCustomQuery] = useState<string>('');
 
-  const loadWords = async (targetId: string, overrideMode?: string, overrideCoverage?: number, overrideQuery?: string) => {
+  const loadWords = async (targetId: string, overrideMode?: string, overrideQuery?: string) => {
     if (scanInFlight.current || scanActive) return;
 
     scanInFlight.current = true;
@@ -449,7 +448,6 @@ export function ScanForeignWordsModal({
     setError(null);
     try {
       const modeToUse = overrideMode || scanMode;
-      const coverageToUse = overrideCoverage !== undefined ? overrideCoverage : scanCoverage;
       const queryToUse = overrideQuery !== undefined ? overrideQuery : customQuery;
 
       const res = await fetch('/api/documents/scan-foreign-words', {
@@ -458,7 +456,7 @@ export function ScanForeignWordsModal({
         body: JSON.stringify({
           documentId: targetId,
           mode: modeToUse,
-          target: coverageToUse,
+          target: 100,
           query: queryToUse || undefined,
           generateOnlyForNewWords,
           forceUseBackupKey,
@@ -778,33 +776,8 @@ export function ScanForeignWordsModal({
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Coverage:</span>
-                <div className="inline-flex rounded-md shadow-sm">
-                  <button
-                    type="button"
-                    onClick={() => setScanCoverage(80)}
-                    disabled={loading || scanActive}
-                    className={`px-3 py-1 text-xs font-bold rounded-l-md border ${
-                      scanCoverage === 80
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:bg-gray-100'
-                    }`}
-                  >
-                    Top 80% (Recommended)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setScanCoverage(100)}
-                    disabled={loading || scanActive}
-                    className={`px-3 py-1 text-xs font-bold rounded-r-md border-t border-b border-r ${
-                      scanCoverage === 100
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:bg-gray-100'
-                    }`}
-                  >
-                    Full 100%
-                  </button>
-                </div>
+                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Coverage: Full 100%</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">Required before creating a Scholar audiobook.</span>
 
                 <button
                   type="button"

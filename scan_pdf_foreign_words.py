@@ -40,6 +40,43 @@ STOP_WORDS = {
 # Keep this intentionally narrow; Gemini handles genuine inflected forms using context.
 KNOWN_OCR_FRAGMENTS = {'κω'}
 
+# Keep enough of a mixed-script extraction artifact for Gemini to decide
+# whether a matched Greek/Hebrew segment is a real lexical term.  For example,
+# a regex match of ``θεσ`` inside ``vio[θεσ]iα`` is not independently useful,
+# but Python must not guess which original word the OCR intended.
+OCR_TOKEN_DELIMITERS = re.compile(r'[\s,;:!?"\'“”(){}<>]+')
+ASCII_LETTER_REGEX = re.compile(r'[A-Za-z]')
+GREEK_OR_HEBREW_REGEX = re.compile(r'[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF]')
+
+
+def get_ocr_suspect_evidence(full_text, start, end):
+    """Return the raw token when a foreign-script match is embedded in OCR noise."""
+    token_start = start
+    while token_start > 0 and not OCR_TOKEN_DELIMITERS.match(full_text[token_start - 1]):
+        token_start -= 1
+    token_end = end
+    while token_end < len(full_text) and not OCR_TOKEN_DELIMITERS.match(full_text[token_end]):
+        token_end += 1
+    raw_token = full_text[token_start:token_end]
+    if (
+        ('[' in raw_token or ']' in raw_token)
+        and ASCII_LETTER_REGEX.search(raw_token)
+        and GREEK_OR_HEBREW_REGEX.search(raw_token)
+    ):
+        return raw_token[:160]
+    return None
+
+
+def collect_foreign_matches(full_text, regex):
+    """Collect matches plus any raw mixed-script OCR evidence around them."""
+    matches = []
+    for match in regex.finditer(full_text):
+        word = match.group(0).strip('.,;:!?·\'"()[]{}«»')
+        if not word:
+            continue
+        matches.append((word, get_ocr_suspect_evidence(full_text, match.start(), match.end())))
+    return matches
+
 def load_pdf_text(pdf_path):
     """Extract text from a PDF file using pypdf or PyMuPDF if available."""
     try:
@@ -93,22 +130,31 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
         print(f"Reading PDF text from: {pdf_path} (Mode: {mode}, Target: {target_percentile}%)...")
     full_text = load_pdf_text(pdf_path)
 
+    ocr_suspect_evidence = {}
     if mode == "fantasy_litrpg":
         raw_matches = FANTASY_LITRPG_REGEX.findall(full_text)
         cleaned_matches = [m.strip('.,;:!?·\'"()[]{}«»') for m in raw_matches]
         filtered_matches = [m for m in cleaned_matches if len(m) > 2 and m not in ENGLISH_STOP_WORDS]
     elif mode == "greek_hebrew":
-        raw_matches = GREEK_HEBREW_REGEX.findall(full_text)
-        cleaned_matches = [m.strip('.,;:!?·\'"()[]{}«»') for m in raw_matches]
-        filtered_matches = [m for m in cleaned_matches if len(m) > 1 and m not in STOP_WORDS and m not in KNOWN_OCR_FRAGMENTS]
+        raw_matches = collect_foreign_matches(full_text, GREEK_HEBREW_REGEX)
+        filtered_matches = []
+        for word, evidence in raw_matches:
+            if len(word) > 1 and word not in STOP_WORDS and word not in KNOWN_OCR_FRAGMENTS:
+                filtered_matches.append(word)
+                if evidence:
+                    ocr_suspect_evidence.setdefault(word, set()).add(evidence)
     elif mode == "custom" and query:
         custom_regex = re.compile(re.escape(query), re.IGNORECASE)
         raw_matches = custom_regex.findall(full_text)
         filtered_matches = [m.strip('.,;:!?·\'"()[]{}«»') for m in raw_matches]
     else: # all_foreign (default)
-        raw_matches = ALL_FOREIGN_REGEX.findall(full_text)
-        cleaned_matches = [m.strip('.,;:!?·\'"()[]{}«»') for m in raw_matches]
-        filtered_matches = [m for m in cleaned_matches if len(m) > 1 and m not in STOP_WORDS and m not in KNOWN_OCR_FRAGMENTS]
+        raw_matches = collect_foreign_matches(full_text, ALL_FOREIGN_REGEX)
+        filtered_matches = []
+        for word, evidence in raw_matches:
+            if len(word) > 1 and word not in STOP_WORDS and word not in KNOWN_OCR_FRAGMENTS:
+                filtered_matches.append(word)
+                if evidence:
+                    ocr_suspect_evidence.setdefault(word, set()).add(evidence)
 
     if not filtered_matches:
         if not quiet:
@@ -174,13 +220,17 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
                 contexts.append(context[:320])
             if len(contexts) >= 2:
                 break
-        results.append({
+        result = {
             "word": word,
             "count": freq,
             "percentage": round(pct, 2),
             "pronunciations": pronunciations,
             "contexts": contexts,
-        })
+        }
+        if word in ocr_suspect_evidence:
+            result["ocrSuspect"] = True
+            result["ocrEvidence"] = sorted(ocr_suspect_evidence[word])[:2]
+        results.append(result)
 
     return results
 
