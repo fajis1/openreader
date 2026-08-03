@@ -11,6 +11,15 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-03 — Foreign-word scan modal reconnects after closing
+
+- Persisted `documentId` in new foreign-word scan jobs and extended the authenticated status route to find the latest job for a document, prioritizing active work; a single active legacy job can also be recovered for scans started before this change.
+- Updated the pre-scan modal to warn before closing an active scan, stop only client polling when closed, automatically restore saved progress/results when reopened, and resume polling the same server-side job.
+- Disabled scan configuration and duplicate scan starts while an attached job is queued/running, while continuing to show partial results as they arrive.
+- Added regression coverage for user/document isolation, active-job selection, safe legacy recovery, close confirmation, and modal reconnection.
+- Verified `pnpm exec tsc --noEmit`, all OpenReader unit tests (106/106 files, 622 tests), focused ESLint, and `git diff --check`.
+- Follow-up: rebuild/redeploy and browser-test closing/reopening a newly started scan; the exact-document association applies to jobs created by this version.
+
 ### 2026-08-03 — Fixed SQLite foreign-word global-library persistence
 
 - Replaced the foreign-word scan's shared async global-pronunciation transaction with a provider-specific merge helper: PostgreSQL retains its async advisory-lock transaction, while SQLite uses a synchronous better-sqlite3 callback with `.all()` and `.run()`.

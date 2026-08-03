@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
     const initialJobState = {
       id: jobId,
       userId,
+      documentId,
       status: 'queued',
       stage: 'extracting',
       words: [],

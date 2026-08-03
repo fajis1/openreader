@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 import {
   createGeminiHttpError,
   foreignWordCandidateCacheKey,
+  findLatestForeignWordScanJob,
   GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA,
   GeminiHttpError,
   parseForeignWordCandidateCache,
@@ -82,5 +83,27 @@ describe('Gemini foreign-word structured output', () => {
     expect(route).toContain('err instanceof GeminiHttpError && err.status === 400');
     expect(route).toContain('terminalGeminiError = message;');
     expect(route).toContain("status: terminalGeminiError ? 'failed' : 'completed'");
+  });
+
+  test('finds an active scan for the requested user and document', () => {
+    const jobs = [
+      JSON.stringify({ id: 'other-user', userId: 'user-b', documentId: 'doc-a', status: 'running', updatedAt: 30 }),
+      JSON.stringify({ id: 'completed', userId: 'user-a', documentId: 'doc-a', status: 'completed', updatedAt: 20 }),
+      JSON.stringify({ id: 'active', userId: 'user-a', documentId: 'doc-a', status: 'running', updatedAt: 10 }),
+    ];
+    expect(findLatestForeignWordScanJob(jobs, 'user-a', 'doc-a')?.id).toBe('active');
+    expect(findLatestForeignWordScanJob(jobs, 'user-b', 'doc-a')?.id).toBe('other-user');
+    expect(findLatestForeignWordScanJob(jobs, 'user-a', 'doc-b')).toBeNull();
+  });
+
+  test('reattaches to exactly one active legacy scan without guessing between several', () => {
+    const oneLegacy = [
+      { id: 'legacy', userId: 'user-a', status: 'running', updatedAt: 10 },
+    ];
+    expect(findLatestForeignWordScanJob(oneLegacy, 'user-a', 'doc-a')?.id).toBe('legacy');
+    expect(findLatestForeignWordScanJob([
+      ...oneLegacy,
+      { id: 'legacy-2', userId: 'user-a', status: 'queued', updatedAt: 20 },
+    ], 'user-a', 'doc-a')).toBeNull();
   });
 });

@@ -15,9 +15,19 @@ describe('foreign-word scan modal', () => {
   });
 
   test('guards against duplicate in-flight scan requests', () => {
-    expect(source).toContain('if (scanInFlight.current) return;');
+    expect(source).toContain('if (scanInFlight.current || scanActive) return;');
     expect(source).toContain('scanInFlight.current = true;');
     expect(source).toContain('scanInFlight.current = false;');
+  });
+
+  test('warns before closing an active scan and reconnects when reopened', () => {
+    expect(source).toContain('onClose={handleClose}');
+    expect(source).toContain("scanJobStatus === 'queued' || scanJobStatus === 'running'");
+    expect(source).toContain('This scan will continue safely in the background.');
+    expect(source).toContain('/api/documents/scan-foreign-words/status?documentId=');
+    expect(source).toContain('void reconnectScanJob(documentId, session);');
+    expect(source).toContain('watchScanJob(job.id);');
+    expect(source).toContain('loading || (scanActive && words.length === 0)');
   });
 
   test('opens wider, supports desktop resizing, and constrains long word cells', () => {

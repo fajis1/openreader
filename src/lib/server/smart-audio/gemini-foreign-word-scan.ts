@@ -47,6 +47,61 @@ export interface GeminiForeignWordResult extends Record<string, unknown> {
   term: string;
 }
 
+export interface ForeignWordScanJob extends Record<string, unknown> {
+  id: string;
+  userId: string;
+  documentId?: string;
+  status?: string;
+  updatedAt?: number;
+}
+
+function parseScanJob(value: unknown): ForeignWordScanJob | null {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (
+      !parsed
+      || typeof parsed !== 'object'
+      || typeof (parsed as { id?: unknown }).id !== 'string'
+      || typeof (parsed as { userId?: unknown }).userId !== 'string'
+    ) {
+      return null;
+    }
+    return parsed as ForeignWordScanJob;
+  } catch {
+    return null;
+  }
+}
+
+function isActiveScan(job: ForeignWordScanJob): boolean {
+  return job.status === 'queued' || job.status === 'running';
+}
+
+function newestFirst(a: ForeignWordScanJob, b: ForeignWordScanJob): number {
+  return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+}
+
+export function findLatestForeignWordScanJob(
+  values: readonly unknown[],
+  userId: string,
+  documentId: string,
+): ForeignWordScanJob | null {
+  const userJobs = values
+    .map(parseScanJob)
+    .filter((job): job is ForeignWordScanJob => job?.userId === userId);
+  const documentJobs = userJobs.filter((job) => job.documentId === documentId);
+  const activeDocumentJobs = documentJobs.filter(isActiveScan).sort(newestFirst);
+  if (activeDocumentJobs[0]) return activeDocumentJobs[0];
+  documentJobs.sort(newestFirst);
+  if (documentJobs[0]) return documentJobs[0];
+
+  // Jobs created before document IDs were persisted can only be reattached
+  // safely when this user has exactly one active legacy scan.
+  const activeLegacyJobs = userJobs
+    .filter((job) => !job.documentId && isActiveScan(job))
+    .sort(newestFirst);
+  return activeLegacyJobs.length === 1 ? activeLegacyJobs[0] : null;
+}
+
 export function foreignWordCandidateCacheKey(input: {
   userId: string;
   documentId: string;

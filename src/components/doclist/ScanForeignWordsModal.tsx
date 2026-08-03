@@ -61,6 +61,7 @@ export function ScanForeignWordsModal({
   const [scanJobGeneratedChoices, setScanJobGeneratedChoices] = useState(0);
   const [scanJobError, setScanJobError] = useState<string | null>(null);
   const [scanJobStatusMessage, setScanJobStatusMessage] = useState<string | null>(null);
+  const scanActive = scanJobStatus === 'queued' || scanJobStatus === 'running';
   const [audioWarmStatus, setAudioWarmStatus] = useState<'idle' | 'warming' | 'ready'>('idle');
   const [libraryScanStatus, setLibraryScanStatus] = useState<'idle' | 'scanning' | 'complete' | 'repairing'>('idle');
   const [libraryScan, setLibraryScan] = useState<PronunciationLibraryScan | null>(null);
@@ -69,11 +70,14 @@ export function ScanForeignWordsModal({
   const resizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
   const retryTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
   const scanPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const modalSession = useRef(0);
   const warmedAudio = useRef<Set<string>>(new Set());
   const warmingAudio = useRef<Set<string>>(new Set());
   const audioWarmStarted = useRef(false);
 
   useEffect(() => {
+    modalSession.current += 1;
+    const session = modalSession.current;
     if (isOpen) {
       loadFeedbackExamples();
       setWords([]);
@@ -97,10 +101,12 @@ export function ScanForeignWordsModal({
       if (documentId) {
         setActiveDocId(documentId);
         setActiveDocName(documentName || null);
+        void reconnectScanJob(documentId, session);
       } else {
         loadDocuments();
       }
     } else {
+      stopScanPolling();
       setWords([]);
       setError(null);
       setHasScanned(false);
@@ -203,25 +209,61 @@ export function ScanForeignWordsModal({
     }
   };
 
+  const applyScanJob = (job: Record<string, any>) => {
+    if (Array.isArray(job.words)) {
+      setWords(job.words);
+      void warmGeminiDefaults(job.words);
+    }
+    setHasScanned(true);
+    if (job.status) setScanJobStatus(job.status);
+    setScanJobProgress({ completed: Number(job.completed) || 0, total: Number(job.total) || 0 });
+    setScanJobGenerated(Number(job.generated) || 0);
+    setScanJobGeneratedChoices(Number(job.generatedChoices) || 0);
+    setScanJobError(job.error || (Array.isArray(job.errors) && job.errors.length > 0 ? job.errors.join(' ') : null));
+    setScanJobStatusMessage(typeof job.statusMessage === 'string' ? job.statusMessage : null);
+  };
+
   const pollScanJob = async (jobId: string) => {
     try {
       const res = await fetch(`/api/documents/scan-foreign-words/status?jobId=${encodeURIComponent(jobId)}`);
       if (!res.ok) return;
       const job = await res.json();
-      if (Array.isArray(job.words)) {
-        setWords(job.words);
-        void warmGeminiDefaults(job.words);
-      }
-      if (job.status) setScanJobStatus(job.status);
-      setScanJobProgress({ completed: Number(job.completed) || 0, total: Number(job.total) || 0 });
-      setScanJobGenerated(Number(job.generated) || 0);
-      setScanJobGeneratedChoices(Number(job.generatedChoices) || 0);
-      setScanJobError(job.error || (Array.isArray(job.errors) && job.errors.length > 0 ? job.errors.join(' ') : null));
-      setScanJobStatusMessage(typeof job.statusMessage === 'string' ? job.statusMessage : null);
+      applyScanJob(job);
       if (job.status === 'completed' || job.status === 'failed') stopScanPolling();
     } catch (pollError) {
       console.error('Failed to poll foreign-word scan job:', pollError);
     }
+  };
+
+  const watchScanJob = (jobId: string) => {
+    stopScanPolling();
+    void pollScanJob(jobId);
+    scanPollTimer.current = setInterval(() => void pollScanJob(jobId), 2000);
+  };
+
+  const reconnectScanJob = async (targetId: string, session: number) => {
+    try {
+      const res = await fetch(`/api/documents/scan-foreign-words/status?documentId=${encodeURIComponent(targetId)}`);
+      if (!res.ok || modalSession.current !== session) return;
+      const job = await res.json();
+      if (modalSession.current !== session) return;
+      applyScanJob(job);
+      if ((job.status === 'queued' || job.status === 'running') && typeof job.id === 'string') {
+        watchScanJob(job.id);
+      }
+    } catch (reconnectError) {
+      console.error('Failed to reconnect to foreign-word scan job:', reconnectError);
+    }
+  };
+
+  const handleClose = () => {
+    if (
+      scanActive
+      && !window.confirm('This scan will continue safely in the background. Close this window and reconnect when you reopen it?')
+    ) {
+      return;
+    }
+    onClose();
   };
 
   const warmPreview = async (word: string, phonetic: string) => {
@@ -282,7 +324,7 @@ export function ScanForeignWordsModal({
   const [customQuery, setCustomQuery] = useState<string>('');
 
   const loadWords = async (targetId: string, overrideMode?: string, overrideCoverage?: number, overrideQuery?: string) => {
-    if (scanInFlight.current) return;
+    if (scanInFlight.current || scanActive) return;
 
     scanInFlight.current = true;
     setLoading(true);
@@ -315,8 +357,7 @@ export function ScanForeignWordsModal({
       setScanJobError(null);
       stopScanPolling();
       if (data.scanJobId) {
-        void pollScanJob(data.scanJobId);
-        scanPollTimer.current = setInterval(() => void pollScanJob(data.scanJobId), 2000);
+        watchScanJob(data.scanJobId);
       }
     } catch (err: any) {
       setError(err.message);
@@ -500,7 +541,7 @@ export function ScanForeignWordsModal({
   return (
     <ModalFrame
       open={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       size="xl"
       panelClassName="w-[56rem] !max-w-[calc(100vw-2rem)] sm:min-w-[32rem]"
       panelStyle={panelWidth ? { width: `${panelWidth}px` } : undefined}
@@ -575,7 +616,7 @@ export function ScanForeignWordsModal({
                 <p className="text-[11px] text-green-700 dark:text-green-300">Additional pronunciation audio is ready.</p>
               )}
             </div>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 text-lg font-bold">✕</button>
+            <button onClick={handleClose} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 text-lg font-bold">✕</button>
           </div>
 
           {activeDocId && (
@@ -585,7 +626,7 @@ export function ScanForeignWordsModal({
                 <select
                   value={scanMode}
                   onChange={(e: any) => setScanMode(e.target.value)}
-                  disabled={loading}
+                  disabled={loading || scanActive}
                   className="px-2.5 py-1 text-xs border rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-700 font-medium"
                 >
                   <option value="all_foreign">🌐 All Foreign Languages (Greek, Hebrew, Cyrillic, CJK, etc.)</option>
@@ -599,7 +640,7 @@ export function ScanForeignWordsModal({
                     type="text"
                     value={customQuery}
                     onChange={(e) => setCustomQuery(e.target.value)}
-                    disabled={loading}
+                    disabled={loading || scanActive}
                     placeholder="Enter word to search (e.g. Xylar)"
                     className="px-2.5 py-1 text-xs border rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-700"
                   />
@@ -612,7 +653,7 @@ export function ScanForeignWordsModal({
                   <button
                     type="button"
                     onClick={() => setScanCoverage(80)}
-                    disabled={loading}
+                    disabled={loading || scanActive}
                     className={`px-3 py-1 text-xs font-bold rounded-l-md border ${
                       scanCoverage === 80
                         ? 'bg-blue-600 text-white border-blue-600'
@@ -624,7 +665,7 @@ export function ScanForeignWordsModal({
                   <button
                     type="button"
                     onClick={() => setScanCoverage(100)}
-                    disabled={loading}
+                    disabled={loading || scanActive}
                     className={`px-3 py-1 text-xs font-bold rounded-r-md border-t border-b border-r ${
                       scanCoverage === 100
                         ? 'bg-blue-600 text-white border-blue-600'
@@ -638,7 +679,7 @@ export function ScanForeignWordsModal({
                 <button
                   type="button"
                   onClick={() => activeDocId && loadWords(activeDocId)}
-                  disabled={loading}
+                  disabled={loading || scanActive}
                   className="px-3 py-1 bg-accent hover:bg-secondary-accent text-background font-bold text-xs rounded transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loading ? 'Scanning…' : hasScanned ? 'Scan Again' : 'Start Scan'}
@@ -648,7 +689,7 @@ export function ScanForeignWordsModal({
                     type="checkbox"
                     checked={generateOnlyForNewWords}
                     onChange={(event) => setGenerateOnlyForNewWords(event.target.checked)}
-                    disabled={loading}
+                    disabled={loading || scanActive}
                   />
                   Generate 5 only for new words (skip existing global/profile pronunciations)
                 </label>
@@ -658,7 +699,7 @@ export function ScanForeignWordsModal({
                       type="checkbox"
                       checked={forceUseBackupKey}
                       onChange={(event) => setForceUseBackupKey(event.target.checked)}
-                      disabled={loading}
+                      disabled={loading || scanActive}
                     />
                     ⚡ Force backup API key immediately ({backupApiKeyLast4})
                   </label>
@@ -670,7 +711,7 @@ export function ScanForeignWordsModal({
                         type="checkbox"
                         checked={onlyNewPronunciations}
                         onChange={(event) => setOnlyNewPronunciations(event.target.checked)}
-                        disabled={loading}
+                        disabled={loading || scanActive}
                       />
                       New global choices only
                     </label>
@@ -766,6 +807,8 @@ export function ScanForeignWordsModal({
                       setWords([]);
                       setError(null);
                       setHasScanned(false);
+                      modalSession.current += 1;
+                      void reconnectScanJob(doc.id, modalSession.current);
                     }}
                   >
                     📄 {doc.name}
@@ -774,7 +817,7 @@ export function ScanForeignWordsModal({
                 {documents.length === 0 && <p className="text-sm text-gray-500">No PDFs found in your library.</p>}
               </div>
             </div>
-          ) : loading ? (
+          ) : loading || (scanActive && words.length === 0) ? (
             <div className="flex flex-col items-center justify-center p-12 text-center">
               <div className="text-gray-900 dark:text-gray-100 font-semibold mb-2 text-lg">Scanning document (this may take a minute)...</div>
               <p className="text-gray-500 dark:text-gray-400 text-sm max-w-md">
