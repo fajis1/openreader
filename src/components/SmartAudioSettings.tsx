@@ -894,7 +894,7 @@ export function SmartAudioSettings() {
           ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20 shadow-md'
           : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-sm'
       }`}
-      onClick={() => setUseGlobalPronunciations(!useGlobalPronunciations)}>
+      onClick={() => setUseGlobalPronunciations(true)}>
         <div className="flex items-start gap-3">
           <span className="text-3xl mt-1">🌍</span>
           <div>
@@ -902,7 +902,7 @@ export function SmartAudioSettings() {
               Global Learned Dictionary
             </h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Automatically apply crowdsourced global pronunciations learned across all user audiobooks. Includes up to 5 alternative choices per word that you can review and adopt to your own profile!
+              The global pronunciation and definition libraries are always applied first. A profile or book entry overrides only that individual word.
             </p>
           </div>
         </div>
@@ -928,8 +928,8 @@ export function SmartAudioSettings() {
           >
             View Global List
           </button>
-          <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${useGlobalPronunciations ? 'bg-purple-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${useGlobalPronunciations ? 'translate-x-6' : 'translate-x-1'}`} />
+          <div className="relative inline-flex h-6 w-11 items-center rounded-full bg-purple-600">
+            <span className="inline-block h-4 w-4 translate-x-6 transform rounded-full bg-white" />
           </div>
         </div>
       </div>
@@ -1210,11 +1210,11 @@ export function SmartAudioSettings() {
           <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 font-medium cursor-pointer">
             <input
               type="checkbox"
-              checked={useGlobalPronunciations}
-              onChange={(e) => setUseGlobalPronunciations(e.target.checked)}
+              checked
+              disabled
               className="rounded border-gray-300 dark:border-gray-700 text-purple-600 focus:ring-purple-500"
             />
-            Include Global Learned Pronunciations
+            Global library (always on; local entries override)
           </label>
           <button onClick={loadGlobalPronunciations} className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-2 py-1 rounded cursor-pointer hover:bg-purple-200 self-start">
             View Global Pronunciations

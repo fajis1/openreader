@@ -305,6 +305,93 @@ describe('Smart Audio book lexicon', () => {
     }
   });
 
+  test('seeds an existing global pronunciation before resolving definitions', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          parts: [{
+            text: JSON.stringify({
+              items: [{
+                term: 'λόγος',
+                language: 'koine_greek',
+                pronunciations: [],
+                definition: 'word',
+                definitionOmitted: false,
+                needsReview: false,
+              }],
+            }),
+          }],
+        },
+      }],
+      }), { status: 200 });
+    };
+    try {
+      const { resolveSmartAudioBookLexicon } = await import('../../src/lib/server/smart-audio/book-lexicon');
+      const result = await resolveSmartAudioBookLexicon({
+        profile: {
+          id: 'test',
+          name: 'Test',
+          aiModel: 'cleanup',
+          pronunciationAiModel: 'pronunciation',
+          customTtsPrompt: '',
+          abbreviations: {},
+          pronunciations: {},
+          books: {},
+          geminiApiKey: 'test-only-placeholder',
+        },
+        candidates: [{
+          term: 'λόγος',
+          contexts: ['The λόγος means word.'],
+          pronunciation: '/loʊɡɒs/',
+        }],
+      });
+      expect(result.status).toBe('complete');
+      expect(result.entries.λόγος?.pronunciation).toBe('/loʊɡɒs/');
+      expect(result.entries.λόγος?.definition).toBe('word');
+      expect(fetchCalls).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('does not call Gemini when global pronunciation and definition are both present', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', { status: 500 });
+    };
+    try {
+      const { resolveSmartAudioBookLexicon } = await import('../../src/lib/server/smart-audio/book-lexicon');
+      const result = await resolveSmartAudioBookLexicon({
+        profile: {
+          id: 'test',
+          name: 'Test',
+          aiModel: 'cleanup',
+          pronunciationAiModel: 'pronunciation',
+          customTtsPrompt: '',
+          abbreviations: {},
+          pronunciations: {},
+          books: {},
+        },
+        candidates: [{
+          term: 'λόγος',
+          contexts: ['The λόγος means word.'],
+          pronunciation: '/loʊɡɒs/',
+          definition: 'word',
+        }],
+      });
+      expect(result.status).toBe('complete');
+      expect(fetchCalls).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('preserves Gemini throttle metadata for upstream retry handling', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response('rate limited', {

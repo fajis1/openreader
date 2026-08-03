@@ -52,6 +52,7 @@ import {
   normalizeGlobalPronunciationLibrary,
   recordLearnedGlobalPronunciation,
 } from '@/lib/server/tts/global-pronunciation-library';
+import { mergeGlobalDefinitions, readGlobalDefinitions } from '@/lib/server/smart-audio/global-definition-library';
 
 const SMART_AUDIO_NATS_SUBJECT = 'audiobooks.gemini.clean';
 
@@ -455,8 +456,11 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     const pronunciationsAtAutoScanStart = {
       ...(selectedProfile?.pronunciations || {}),
     };
-    const globalPronunciations = selectedProfile?.useGlobalPronunciations
-      ? await readGlobalPronunciationDefaults()
+    // The global library is always the baseline. Profile pronunciations are
+    // applied afterward and therefore act as per-word local overrides.
+    const globalPronunciations = await readGlobalPronunciationDefaults();
+    const globalDefinitions = selectedProfile?.workerMode === 'scholar'
+      ? await readGlobalDefinitions()
       : {};
     let resolvedPronunciations = filterKokoroCompatiblePronunciationRecord({
       ...globalPronunciations,
@@ -465,6 +469,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     let bookLexicon = selectedProfile?.workerMode === 'scholar'
       ? await readBookLexicon(userId, doc.id)
       : null;
+    const definitionsBeforeAutoScan = new Map(
+      Object.entries(bookLexicon && bookLexicon.profileId === selectedProfile?.id ? bookLexicon.entries : {})
+        .map(([term, entry]) => [term, entry.definition]),
+    );
     let definitionPassRan = false;
 
     if (
@@ -481,6 +489,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       const candidates = collectSmartAudioTermCandidates(
         chapters.map((chapter) => chapter.text),
         resolvedPronunciations,
+        globalDefinitions,
       );
       definitionPassRan = true;
       try {
@@ -544,6 +553,24 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         ...globalPronunciations,
         ...(selectedProfile.pronunciations || {}),
       });
+      const resolvedGlobalDefinitions = await readGlobalDefinitions();
+      for (const [term, definition] of Object.entries(resolvedGlobalDefinitions)) {
+        const entry = bookLexicon.entries[term];
+        if (entry && !entry.definition && entry.definitionOmitted !== true) {
+          entry.definition = definition;
+          entry.definitionOmitted = false;
+        }
+      }
+      await mergeGlobalDefinitions(Object.fromEntries(
+        Object.entries(bookLexicon.entries)
+          .filter(([term, entry]) => (
+            Boolean(entry.definition)
+            && entry.definitionOmitted !== true
+            && !definitionsBeforeAutoScan.get(term)
+          ))
+          .map(([term, entry]) => [term, entry.definition]),
+      ));
+      await writeBookLexicon(userId, doc.id, bookLexicon);
       serverLogger.info({
         event: 'audiobook.queue.scholar_lexicon.completed',
         bookId,
@@ -617,12 +644,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           const geminiApiKey = (currentSelectedProfile?.geminiApiKey || '').trim();
 
           const backupGeminiApiKey = (currentSelectedProfile?.backupGeminiApiKey || '').trim();
-          const currentPronunciations = currentSelectedProfile?.useGlobalPronunciations
-            ? {
-              ...globalPronunciations,
-              ...(currentSelectedProfile.pronunciations || {}),
-            }
-            : currentSelectedProfile?.pronunciations || resolvedPronunciations;
+          const currentPronunciations = {
+            ...globalPronunciations,
+            ...(currentSelectedProfile?.pronunciations || {}),
+          };
           const enrichedChapterText = enrichTextFromBookLexicon(
             chapter.text,
             bookLexicon,

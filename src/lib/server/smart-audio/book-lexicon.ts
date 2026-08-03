@@ -34,6 +34,7 @@ export type SmartAudioTermCandidate = {
   term: string;
   contexts: string[];
   pronunciation?: string;
+  definition?: string;
 };
 
 function parseStoredSettings(value: unknown) {
@@ -119,6 +120,7 @@ function contextAround(text: string, start: number, end: number): string {
 export function collectSmartAudioTermCandidates(
   texts: readonly string[],
   knownPronunciations: Record<string, string> = {},
+  knownDefinitions: Record<string, string> = {},
 ): SmartAudioTermCandidate[] {
   const candidates = new Map<string, SmartAudioTermCandidate>();
   const normalizedKnown = new Map(
@@ -138,6 +140,7 @@ export function collectSmartAudioTermCandidates(
         term,
         contexts: [],
         pronunciation: normalizedKnown.get(key),
+        definition: knownDefinitions[term],
       };
       const context = contextAround(text, match.index, match.index + term.length);
       if (context && !existing.contexts.includes(context) && existing.contexts.length < 2) {
@@ -172,9 +175,6 @@ export async function resolveSmartAudioBookLexicon(input: {
     tokens: GeminiTokenUsage;
   }) => void;
 }): Promise<SmartAudioBookLexicon> {
-  const apiKey = (input.profile.geminiApiKey || '').trim();
-  if (!apiKey) throw new Error('Gemini API key is not configured for the selected Smart Audio profile.');
-  const model = resolvePronunciationAiModel(input.profile);
   const candidateTerms = new Set(input.candidates.map((candidate) => candidate.term));
   const entries: Record<string, SmartAudioBookLexiconEntry> = Object.fromEntries(
     Object.entries(input.existing?.entries || {})
@@ -188,10 +188,56 @@ export async function resolveSmartAudioBookLexicon(input: {
         }
         : entry]),
   );
+  // A valid global or personal pronunciation is already resolved for this
+  // document, even if an earlier book-lexicon write was interrupted. Seed it
+  // before calculating unresolved work so Gemini never regenerates it.
+  for (const candidate of input.candidates) {
+    if (entries[candidate.term]) {
+      if (!entries[candidate.term].definition && candidate.definition) {
+        entries[candidate.term].definition = candidate.definition;
+        entries[candidate.term].definitionOmitted = false;
+      }
+      continue;
+    }
+    if (!candidate.pronunciation) continue;
+    const pronunciation = normalizePronunciation(candidate.pronunciation);
+    if (!pronunciation) continue;
+    entries[candidate.term] = {
+      term: candidate.term,
+      pronunciation,
+      definition: null,
+      language: HEBREW.test(candidate.term)
+        ? 'biblical_hebrew'
+        : GREEK.test(candidate.term)
+          ? 'koine_greek'
+          : 'other',
+      context: candidate.contexts[0],
+      definitionOmitted: false,
+    };
+    if (candidate.definition) entries[candidate.term].definition = candidate.definition;
+  }
   const unresolved = input.candidates.filter((candidate) => {
     const current = entries[candidate.term];
     return !current?.pronunciation || (!current.definition && current.definitionOmitted !== true);
   });
+
+  // A complete global/local library must be usable without requiring a
+  // Gemini key. Only validate the key and model when generation is needed.
+  if (unresolved.length === 0) {
+    const model = resolvePronunciationAiModel(input.profile);
+    return {
+      schemaVersion: 1,
+      status: 'complete',
+      definitionScanComplete: true,
+      profileId: input.profile.id,
+      pronunciationModel: model,
+      scannedAt: Date.now(),
+      entries,
+    };
+  }
+  const apiKey = (input.profile.geminiApiKey || '').trim();
+  if (!apiKey) throw new Error('Gemini API key is not configured for the selected Smart Audio profile.');
+  const model = resolvePronunciationAiModel(input.profile);
 
   for (let offset = 0; offset < unresolved.length; offset += 15) {
     const batch = unresolved.slice(offset, offset + 15);

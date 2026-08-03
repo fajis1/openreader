@@ -63,6 +63,7 @@ import {
   selectPronunciationsForText,
   writeBookLexicon,
 } from '@/lib/server/smart-audio/book-lexicon';
+import { readGlobalDefinitions } from '@/lib/server/smart-audio/global-definition-library';
 import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
 
 const SMART_AUDIO_NATS_SUBJECT = 'audiobooks.gemini.clean';
@@ -672,7 +673,7 @@ export async function POST(request: NextRequest) {
           const knownPronunciations = filterKokoroCompatiblePronunciationRecord(
             selectedProfile.pronunciations || {},
           );
-          if (selectedProfile.useGlobalPronunciations) {
+          {
             const globalRows = await db.select()
               .from(adminSettings)
               .where(eq(adminSettings.key, 'global_pronunciations'))
@@ -707,7 +708,11 @@ export async function POST(request: NextRequest) {
           }
           bookLexicon = await resolveSmartAudioBookLexicon({
             profile: selectedProfile,
-            candidates: collectSmartAudioTermCandidates([data.text], knownPronunciations),
+            candidates: collectSmartAudioTermCandidates(
+              [data.text],
+              knownPronunciations,
+              await readGlobalDefinitions(),
+            ),
             existing: previousBookLexicon,
             onUsage: (usage) => {
               serverLogger.info({
@@ -742,7 +747,7 @@ export async function POST(request: NextRequest) {
           let finalPronunciations = filterKokoroCompatiblePronunciationRecord(
             selectedProfile?.pronunciations || {},
           );
-          if (selectedProfile?.useGlobalPronunciations) {
+          {
             const globalSettingsRow = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_pronunciations')).limit(1);
             if (globalSettingsRow && globalSettingsRow.length > 0) {
               try {

@@ -11,6 +11,21 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-03 — Global dictionary baseline with local overrides
+
+- Added a provider-safe `global_definitions` admin library alongside the existing global pronunciation library; foreign-word scans and Scholar audiobook preparation now persist usable definitions there.
+- Global pronunciations and definitions are always loaded as the baseline. Profile/book lexicon entries are applied afterward as individual-word overrides, and the audiobook lexicon resolver seeds both fields before deciding whether Gemini is needed.
+- A fully resolved global/local entry now completes without requiring a Gemini key or making a redundant Gemini request. The Smart Audio settings UI describes the global library as always enabled.
+- Verified TypeScript, focused lexicon/data-integrity/definition-policy tests (39 tests), and `git diff --check`.
+- Follow-up: rebuild/redeploy the web image and rerun the affected audiobook job; existing global definitions will prevent another lookup for already-resolved words.
+
+### 2026-08-03 — Persist scan results after every successful batch
+
+- Foreign-word scans now merge accepted global pronunciation choices and usable definitions immediately after each successful Gemini batch, while retaining the final idempotent persistence/completion stage.
+- Added batch persistence events with database-provider and applied-count metadata. A Reader restart can no longer discard all generated choices from earlier completed batches.
+- Verified TypeScript, focused lexicon/data-integrity/definition-policy tests (39 tests), and `git diff --check`.
+- Follow-up: rebuild/redeploy before the next scan; existing in-memory results from a currently running old image cannot be recovered after interruption.
+
 ### 2026-08-03 — Fixed SQLite Smart Audio profile persistence
 
 - Split `writeSmartAudioProfilesDocument` and `mergeGeneratedPronunciationsIntoLatestProfile` into PostgreSQL async/advisory-lock and SQLite synchronous better-sqlite3 transaction paths.

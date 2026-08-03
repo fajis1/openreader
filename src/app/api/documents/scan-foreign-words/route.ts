@@ -30,6 +30,7 @@ import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
 import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemini-failover';
 import { mergeGeneratedGlobalPronunciations } from '@/lib/server/smart-audio/global-pronunciation-merge';
+import { mergeGlobalDefinitions, readGlobalDefinitions } from '@/lib/server/smart-audio/global-definition-library';
 import {
   createGeminiHttpError,
   collectGeminiPronunciationRepairRequests,
@@ -201,6 +202,7 @@ export async function POST(req: NextRequest) {
 
         const profilesDoc = await readSmartAudioProfilesDocument(userId);
         const activeProfile = findSmartAudioProfileById(profilesDoc, profilesDoc.selectedProfileId);
+        const globalDefinitions = await readGlobalDefinitions();
         
         const overrides = activeProfile?.pronunciations || {};
         const compatibleOverrides = Object.fromEntries(
@@ -240,6 +242,13 @@ export async function POST(req: NextRequest) {
               needsReview: false,
             };
           }
+          if (!entry.definition && globalDefinitions[term]) {
+            lexiconEntries[term] = {
+              ...lexiconEntries[term],
+              definition: globalDefinitions[term],
+              definitionOmitted: false,
+            };
+          }
         }
         for (const w of words) {
           const term = w.word;
@@ -255,7 +264,8 @@ export async function POST(req: NextRequest) {
             lexiconEntries[term] = {
               term,
               pronunciation: libraryPron,
-              definition: null,
+              definition: globalDefinitions[term] || null,
+              definitionOmitted: globalDefinitions[term] ? false : undefined,
               language: languageForTerm(term),
               context: Array.isArray(w.contexts) ? w.contexts[0] : undefined,
             };
@@ -277,7 +287,8 @@ export async function POST(req: NextRequest) {
               && language !== 'other'
               && (!lexiconEntry || (
                 lexiconEntry.language !== 'other'
-                && !lexiconEntry.definition
+              && !lexiconEntry.definition
+                && !globalDefinitions[w.word]
                 && lexiconEntry.definitionOmitted !== true
               ));
             return needsPronunciations || needsDefinition;
@@ -342,6 +353,8 @@ export async function POST(req: NextRequest) {
           await new Promise((resolve) => setTimeout(resolve, 500));
         }
         const chunk = wordsMissingOptions.slice(i, i + chunkSize);
+        const libraryAtBatchStart = JSON.parse(JSON.stringify(globalDict)) as Record<string, any[]>;
+        const batchUpdatedWords = new Set<string>();
         const terms = chunk.map((word: string) => {
           const scanned = words.find((item: any) => item.word === word);
           const storedPronunciation = compatibleOverrides[word]
@@ -499,6 +512,7 @@ ${JSON.stringify(repairRequests)}`;
                   existingPhonetics.add(p);
                   acceptedChoices += 1;
                   acceptedWords.add(w);
+                  batchUpdatedWords.add(w);
                   updatedGlobalWords.add(w);
                 }
               }
@@ -565,6 +579,39 @@ ${JSON.stringify(repairRequests)}`;
               `Gemini omitted ${omittedWords.length} terms from batch ${i / chunkSize + 1}`,
             );
           }
+
+          // Persist each successful batch immediately. The job checkpoint and
+          // the generated library now advance together, so a process restart
+          // cannot discard all choices accumulated before the final save.
+          if (batchUpdatedWords.size > 0) {
+            const persistedWords = await mergeGeneratedGlobalPronunciations({
+              generatedLibrary: globalDict,
+              libraryAtScanStart: libraryAtBatchStart,
+              updatedWords: batchUpdatedWords,
+            });
+            serverLogger.info({
+              event: 'pdf.scan.global_pronunciations.batch_persisted',
+              jobId,
+              databaseProvider: process.env.POSTGRES_URL ? 'postgresql' : 'sqlite',
+              batch: i / chunkSize + 1,
+              requestedWords: batchUpdatedWords.size,
+              persistedWords: persistedWords.length,
+            }, 'Persisted generated global pronunciations for completed batch');
+          }
+          const batchDefinitions = Object.fromEntries(
+            chunk
+              .map((term: string) => [term, lexiconEntries[term]?.definition] as const)
+              .filter(([, definition]) => Boolean(definition)),
+          );
+          if (Object.keys(batchDefinitions).length > 0) {
+            const persistedDefinitions = await mergeGlobalDefinitions(batchDefinitions);
+            serverLogger.info({
+              event: 'pdf.scan.global_definitions.batch_persisted',
+              jobId,
+              batch: i / chunkSize + 1,
+              persistedDefinitions: persistedDefinitions.length,
+            }, 'Persisted generated global definitions for completed batch');
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Unknown Gemini error';
           serverLogger.error({
@@ -586,6 +633,11 @@ ${JSON.stringify(repairRequests)}`;
         }
 
     const generated = Object.keys(geminiRecommendations).length;
+    const generatedDefinitions = Object.fromEntries(
+      Object.entries(lexiconEntries)
+        .filter(([, entry]) => Boolean(entry.definition) && entry.definitionOmitted !== true)
+        .map(([term, entry]) => [term, entry.definition]),
+    );
     await saveJob({
       stage: 'persisting',
       generated,
@@ -606,6 +658,14 @@ ${JSON.stringify(repairRequests)}`;
         requestedWords: updatedGlobalWords.size,
         persistedWords: persistedWords.length,
       }, 'Persisted generated global pronunciations');
+    }
+    if (Object.keys(generatedDefinitions).length > 0) {
+      const persistedDefinitions = await mergeGlobalDefinitions(generatedDefinitions);
+      serverLogger.info({
+        event: 'pdf.scan.global_definitions.persisted',
+        jobId,
+        persistedDefinitions: persistedDefinitions.length,
+      }, 'Persisted generated global definitions');
     }
 
     if (activeProfile) {

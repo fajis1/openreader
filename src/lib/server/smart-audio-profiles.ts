@@ -123,7 +123,9 @@ function sanitizeProfile(profile: Partial<SmartAudioProfile> & { id?: string; na
     abbreviations: profile.abbreviations || {},
     pronunciations: profile.pronunciations || {},
     books: profile.books || {},
-    useGlobalPronunciations: profile.useGlobalPronunciations ?? false,
+    // Global pronunciations are always the baseline; local profile entries
+    // override individual words. Keep this field for legacy clients.
+    useGlobalPronunciations: true,
     pronunciationPromptMode: profile.pronunciationPromptMode === 'custom' ? 'custom' : 'default',
     customPronunciationPrompt: profile.customPronunciationPrompt || '',
     workerMode: profile.workerMode || 'standard',

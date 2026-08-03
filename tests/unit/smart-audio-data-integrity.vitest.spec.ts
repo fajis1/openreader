@@ -31,6 +31,15 @@ describe('Smart Audio data-integrity guards', () => {
     expect(profiles).toContain('}).run();');
   });
 
+  test('keeps global pronunciation and definition libraries separate and reusable', () => {
+    const definitions = source('src/lib/server/smart-audio/global-definition-library.ts');
+    const worker = source('src/lib/server/audiobooks/worker.ts');
+    expect(definitions).toContain("const GLOBAL_DEFINITIONS_KEY = 'global_definitions';");
+    expect(definitions).toContain('mergeGlobalDefinitions');
+    expect(worker).toContain('readGlobalDefinitions');
+    expect(worker).toContain('globalDefinitions');
+  });
+
   test('preflights every selected batch document before creating queue jobs', () => {
     const sidebar = source('src/components/doclist/BatchAudiobookSidebar.tsx');
     const preflight = sidebar.indexOf('preflightOnly: true');
