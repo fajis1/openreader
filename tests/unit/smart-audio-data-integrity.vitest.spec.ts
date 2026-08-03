@@ -36,8 +36,20 @@ describe('Smart Audio data-integrity guards', () => {
     const worker = source('src/lib/server/audiobooks/worker.ts');
     expect(definitions).toContain("const GLOBAL_DEFINITIONS_KEY = 'global_definitions';");
     expect(definitions).toContain('mergeGlobalDefinitions');
+    expect(definitions).toContain('previewGlobalDefinitionImport');
     expect(worker).toContain('readGlobalDefinitions');
     expect(worker).toContain('globalDefinitions');
+  });
+
+  test('exports and imports the global definition library with pronunciation transfers', () => {
+    const exportRoute = source('src/app/api/tts/global-pronunciations/export/route.ts');
+    const importRoute = source('src/app/api/tts/global-pronunciations/route.ts');
+    expect(exportRoute).toContain("format: 'openreader-global-dictionary'");
+    expect(exportRoute).toContain('definitions');
+    expect(exportRoute).toContain('readGlobalDefinitions');
+    expect(importRoute).toContain('previewGlobalDefinitionImport');
+    expect(importRoute).toContain('mergeGlobalDefinitions');
+    expect(importRoute).toContain('importedDefinitions');
   });
 
   test('preflights every selected batch document before creating queue jobs', () => {

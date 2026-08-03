@@ -38,6 +38,7 @@ import {
   GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA,
   GeminiHttpError,
   mergeGeminiPronunciationRepairResults,
+  isUsableForeignWordCandidate,
   parseForeignWordCandidateCache,
   parseGeminiForeignWordResults,
 } from '@/lib/server/smart-audio/gemini-foreign-word-scan';
@@ -188,7 +189,7 @@ export async function POST(req: NextRequest) {
           if (!Array.isArray(words)) {
             throw new Error('PDF foreign-word scanner returned an invalid candidate list.');
           }
-          const cachedCandidates = JSON.stringify({ version: 2, words });
+          const cachedCandidates = JSON.stringify({ version: 3, words });
           await db.insert(adminSettings).values({
             key: candidateCacheKey,
             valueJson: cachedCandidates,
@@ -201,6 +202,18 @@ export async function POST(req: NextRequest) {
               updatedAt: Date.now(),
             },
           });
+        }
+
+        if (mode !== 'custom') {
+          const originalCount = words.length;
+          words = words.filter(isUsableForeignWordCandidate);
+          const skippedPhraseCandidates = originalCount - words.length;
+          if (skippedPhraseCandidates > 0) {
+            serverLogger.info(
+              { event: 'pdf.scan.candidates.filtered', documentId, skippedPhraseCandidates },
+              'Excluded non-lexical multi-word or IPA-key foreign-word candidates',
+            );
+          }
         }
 
         // Fetch global pronunciations

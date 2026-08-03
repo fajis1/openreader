@@ -120,6 +120,11 @@ describe('global pronunciation administration', () => {
     expect(component).toContain("action: 'preview-import'");
     expect(component).toContain("action: 'import'");
     expect(component).toContain('Replace existing choices for imported words');
+    expect(component).toContain('Use Global');
+    expect(component).toContain('Personal pronunciation for ${item.key}');
+    expect(component).toContain('savePersonalSuspectPronunciation');
+    expect(component).toContain('validDefinitions');
+    expect(component).toContain('Import ${globalImportPreview.validWords} Safe Words and ${globalImportPreview.validDefinitions} Definitions');
     expect(route).toContain("body.action === 'set-default'");
     expect(route).toContain("body.action === 'replace-choices'");
     expect(route).toContain("body.action === 'delete-choice'");
@@ -132,6 +137,8 @@ describe('global pronunciation administration', () => {
     expect(route).toContain("body.action === 'preview-import'");
     expect(route).toContain("body.action === 'import'");
     expect(route).toContain('previewGlobalPronunciationImport');
+    expect(route).toContain('previewGlobalDefinitionImport');
+    expect(route).toContain('mergeGlobalDefinitions');
     expect(route).toContain('.limit(1)\n        .all();');
     expect(route).toContain('}).run();');
     expect(route).not.toContain('Object.keys(parsed).length === 0');

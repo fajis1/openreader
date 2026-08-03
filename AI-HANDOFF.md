@@ -11,6 +11,34 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-03 — Transfer global definitions with global dictionary JSON
+
+- Global JSON export/import now transfers both validated pronunciation choices and usable global definitions (format version 2), while retaining support for older pronunciation-only exports.
+- Import preview reports definition counts and rejects blank or placeholder definitions; default merge preserves existing target definitions, while replace mode may intentionally replace definitions for imported terms.
+- This prevents Scholar-mode scans from re-requesting Gemini definitions solely because IPA was imported without its cached English gloss.
+- Verified TypeScript, 46 focused Vitest tests, two Python scanner tests, and `git diff --check`.
+- Follow-up: export a fresh version-2 global dictionary from the source Reader and import it into the target Reader before the next Scholar pre-scan.
+
+### 2026-08-03 — Excluded phrase candidates from foreign-word dictionaries
+
+- Foreign-word scans now exclude whitespace-containing phrases and accidental slash-delimited IPA keys before sending candidates to Gemini or using them as reusable dictionary entries.
+- Bumped the candidate-cache version so future scans do not reuse an earlier candidate list; custom searches remain exempt to preserve intentional multi-word queries.
+- Verified TypeScript, 27 focused Vitest tests, two Python scanner tests, and `git diff --check`.
+- Follow-up: rebuild/redeploy and run a scan of the affected document; remove the existing personal phrase override once, then the scanner will not recreate it.
+
+### 2026-08-03 — Added manual personal-pronunciation repair controls
+
+- Added Edit and Use Global controls beside each malformed personal/profile pronunciation in the Global Pronunciations health panel.
+- Manual values are normalized to slash-delimited IPA and blocked unless they pass the same Kokoro safety checks; Use Global removes only the personal override so an existing global choice can apply.
+- Verified TypeScript, focused global-pronunciation and scan-modal tests (15 tests), and `git diff --check`.
+- Follow-up: browser-test edit/save and use-global flows in a real profile before deployment.
+
+### 2026-08-03 — Reflowed global library admin actions
+
+- Moved Export Global JSON and Import Global JSON to a second action row below the primary document/inspection/global-list controls, preventing them from running off-screen on narrower settings layouts.
+- Verified TypeScript, focused global-pronunciation tests (8 tests), and `git diff --check`.
+- Follow-up: browser-check the settings card at the deployment's target screen width after rebuild/redeploy.
+
 ### 2026-08-03 — Added admin global-pronunciation import preview
 
 - Added an admin-only Import Global JSON control beside the global-library export action.

@@ -62,6 +62,20 @@ export type GeminiForeignWordTerm = {
   currentPronunciation: string | null;
 };
 
+/**
+ * The foreign-word scanner is a lexical dictionary builder. It must not send
+ * OCR-extracted multi-word phrases (or an accidental IPA value used as a key)
+ * to Gemini as though they were single reusable dictionary terms.
+ */
+export function isUsableForeignWordCandidate(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const word = (value as { word?: unknown }).word;
+  return typeof word === 'string'
+    && Boolean(word.trim())
+    && !/\s/u.test(word)
+    && !/^\/.*\/$/u.test(word.trim());
+}
+
 export type GeminiPronunciationRepairRequest = GeminiForeignWordTerm & {
   acceptedPronunciations: string[];
   rejectedPronunciations: Array<{
@@ -198,7 +212,7 @@ export function foreignWordCandidateCacheKey(input: {
   const scopeHash = createHash('sha256')
     .update(JSON.stringify(input))
     .digest('hex');
-  return `foreign_word_candidates:v2:${scopeHash}`;
+  return `foreign_word_candidates:v3:${scopeHash}`;
 }
 
 export function parseForeignWordCandidateCache(value: unknown): unknown[] | null {
@@ -207,7 +221,7 @@ export function parseForeignWordCandidateCache(value: unknown): unknown[] | null
     if (
       !parsed
       || typeof parsed !== 'object'
-      || (parsed as { version?: unknown }).version !== 2
+      || (parsed as { version?: unknown }).version !== 3
       || !Array.isArray((parsed as { words?: unknown }).words)
     ) {
       return null;

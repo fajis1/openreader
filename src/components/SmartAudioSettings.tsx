@@ -79,6 +79,8 @@ type GlobalPronunciationImportPreview = {
   validWords: number;
   validChoices: number;
   issues: Array<{ word: string; pronunciation?: string; reason: string }>;
+  validDefinitions: number;
+  definitionIssues: Array<{ term: string; reason: string }>;
 };
 
 export function SmartAudioSettings() {
@@ -124,6 +126,9 @@ export function SmartAudioSettings() {
   const [globalRefineStatus, setGlobalRefineStatus] = useState<Record<string, string>>({});
   const [globalRefineChoices, setGlobalRefineChoices] = useState<Record<string, string[]>>({});
   const [globalRefineDefault, setGlobalRefineDefault] = useState<Record<string, number>>({});
+  const [editingPersonalSuspect, setEditingPersonalSuspect] = useState<string | null>(null);
+  const [personalSuspectEditValue, setPersonalSuspectEditValue] = useState('');
+  const [isSavingPersonalSuspect, setIsSavingPersonalSuspect] = useState(false);
   const globalImportInputRef = useRef<HTMLInputElement>(null);
   const [globalImportPreview, setGlobalImportPreview] = useState<GlobalPronunciationImportPreview | null>(null);
   const [replaceImportedGlobalEntries, setReplaceImportedGlobalEntries] = useState(false);
@@ -293,7 +298,7 @@ export function SmartAudioSettings() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'openreader-global-pronunciations.json';
+      link.download = 'openreader-global-dictionary.json';
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -338,7 +343,7 @@ export function SmartAudioSettings() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Failed to import global pronunciations');
-      toast.success(`Imported ${data.importedChoices || 0} pronunciation choice${data.importedChoices === 1 ? '' : 's'} across ${data.importedWords || 0} word${data.importedWords === 1 ? '' : 's'}.`);
+      toast.success(`Imported ${data.importedChoices || 0} pronunciation choice${data.importedChoices === 1 ? '' : 's'} and ${data.importedDefinitions || 0} definition${data.importedDefinitions === 1 ? '' : 's'}.`);
       setGlobalImportPreview(null);
       await loadGlobalPronunciations();
     } catch (error) {
@@ -569,6 +574,51 @@ export function SmartAudioSettings() {
       toast.error(error instanceof Error ? error.message : 'Pronunciation rescan failed');
     } finally {
       setIsRescanningSuspects(false);
+    }
+  };
+
+  const savePersonalSuspectPronunciation = async (word: string, value: string | null) => {
+    const current = buildCurrentProfile();
+    if (!current) return;
+    const rawValue = value?.trim() || '';
+    const normalized = rawValue
+      ? (rawValue.startsWith('/') && rawValue.endsWith('/') ? rawValue : `/${rawValue.replace(/^\/+|\/+$/g, '')}/`)
+      : null;
+    if (normalized) {
+      const warnings = getKokoroPronunciationQualityWarnings(word, normalized);
+      if (warnings.length > 0) {
+        toast.error(`Cannot save ${word}: ${warnings.join(' ')}`);
+        return;
+      }
+    }
+    const nextPronunciations = { ...current.pronunciations };
+    if (normalized) nextPronunciations[word] = normalized;
+    else delete nextPronunciations[word];
+    const nextCurrent = { ...current, pronunciations: nextPronunciations };
+    const nextProfiles = profiles.some((profile) => profile.id === nextCurrent.id)
+      ? profiles.map((profile) => (profile.id === nextCurrent.id ? nextCurrent : profile))
+      : [nextCurrent, ...profiles];
+    setIsSavingPersonalSuspect(true);
+    try {
+      const response = await fetch('/api/tts-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          smartAudioProfiles: nextProfiles,
+          selectedSmartAudioProfileId: nextCurrent.id,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to save personal pronunciation');
+      setPronunciations(objectToEntries(nextPronunciations));
+      setProfiles(Array.isArray(data.smartAudioProfiles) ? data.smartAudioProfiles : nextProfiles);
+      setEditingPersonalSuspect(null);
+      setPersonalSuspectEditValue('');
+      toast.success(normalized ? `Updated the personal pronunciation for ${word}.` : `Removed the personal override for ${word}; the global entry can now apply.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to save personal pronunciation');
+    } finally {
+      setIsSavingPersonalSuspect(false);
     }
   };
 
@@ -966,7 +1016,7 @@ export function SmartAudioSettings() {
         </div>
       </div>
 
-      <div className={`p-4 rounded-xl border-2 transition-all duration-150 flex items-center justify-between gap-4 cursor-pointer ${
+      <div className={`p-4 rounded-xl border-2 transition-all duration-150 flex flex-col items-stretch gap-4 xl:flex-row xl:items-center xl:justify-between cursor-pointer ${
         useGlobalPronunciations
           ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20 shadow-md'
           : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-purple-300 dark:hover:border-purple-700 hover:shadow-sm'
@@ -983,30 +1033,35 @@ export function SmartAudioSettings() {
             </p>
           </div>
         </div>
-        <div className="shrink-0 flex flex-col sm:flex-row items-center gap-2">
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setIsScannerOpen(true); }}
-            className="text-xs font-semibold px-3 py-1.5 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors sm:mr-2"
-          >
-            Pre-Scan a Document 🔍
-          </button>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); setIsInspectorOpen(true); }}
-            className="text-xs font-semibold px-3 py-1.5 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors sm:mr-2"
-          >
-            Inspect Book Pronunciations 📚
-          </button>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); loadGlobalPronunciations(); }} 
-            className="text-xs font-semibold px-3 py-1.5 bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200 rounded hover:bg-purple-300 dark:hover:bg-purple-700 transition-colors sm:mr-2"
-          >
-            View Global List
-          </button>
+        <div className="shrink-0 space-y-2 xl:text-right">
+          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setIsScannerOpen(true); }}
+              className="text-xs font-semibold px-3 py-1.5 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+            >
+              Pre-Scan a Document 🔍
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setIsInspectorOpen(true); }}
+              className="text-xs font-semibold px-3 py-1.5 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+            >
+              Inspect Book Pronunciations 📚
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); loadGlobalPronunciations(); }}
+              className="text-xs font-semibold px-3 py-1.5 bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200 rounded hover:bg-purple-300 dark:hover:bg-purple-700 transition-colors"
+            >
+              View Global List
+            </button>
+            <div className="relative inline-flex h-6 w-11 items-center rounded-full bg-purple-600">
+              <span className="inline-block h-4 w-4 translate-x-6 transform rounded-full bg-white" />
+            </div>
+          </div>
           {isAdmin && (
-            <>
+            <div className="flex flex-wrap items-center gap-2 xl:justify-end">
               <input
                 ref={globalImportInputRef}
                 type="file"
@@ -1017,7 +1072,7 @@ export function SmartAudioSettings() {
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); void exportGlobalPronunciations(); }}
-                className="text-xs font-semibold px-3 py-1.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800 transition-colors sm:mr-2"
+                className="text-xs font-semibold px-3 py-1.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800 transition-colors"
               >
                 Export Global JSON
               </button>
@@ -1028,11 +1083,8 @@ export function SmartAudioSettings() {
               >
                 Import Global JSON
               </button>
-            </>
+            </div>
           )}
-          <div className="relative inline-flex h-6 w-11 items-center rounded-full bg-purple-600">
-            <span className="inline-block h-4 w-4 translate-x-6 transform rounded-full bg-white" />
-          </div>
         </div>
       </div>
 
@@ -1042,7 +1094,7 @@ export function SmartAudioSettings() {
             <div>
               <h3 className="text-sm font-bold text-indigo-900 dark:text-indigo-100">Global pronunciation import preview</h3>
               <p className="mt-1 text-xs text-indigo-800 dark:text-indigo-200">
-                {globalImportPreview.validWords} safe words and {globalImportPreview.validChoices} safe choices are ready to import. {globalImportPreview.issues.length} entries will be skipped.
+                {globalImportPreview.validWords} safe words, {globalImportPreview.validChoices} safe pronunciation choices, and {globalImportPreview.validDefinitions} usable definitions are ready to import. {globalImportPreview.issues.length + globalImportPreview.definitionIssues.length} entries will be skipped.
               </p>
             </div>
             <button
@@ -1062,28 +1114,28 @@ export function SmartAudioSettings() {
             />
             <span>Replace existing choices for imported words. Leave unchecked to safely add imported choices without changing existing defaults.</span>
           </label>
-          {globalImportPreview.issues.length > 0 && (
+          {(globalImportPreview.issues.length > 0 || globalImportPreview.definitionIssues.length > 0) && (
             <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
               <p className="font-semibold">Skipped malformed or duplicate entries</p>
               <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                {globalImportPreview.issues.slice(0, 20).map((issue, index) => (
-                  <li key={`${issue.word}-${issue.pronunciation || ''}-${index}`}>
-                    <span className="font-mono">{issue.word || '(unnamed entry)'}</span>{issue.pronunciation ? ` — ${issue.pronunciation}` : ''}: {issue.reason}
+                {[...globalImportPreview.issues.map((issue) => ({ term: issue.word, value: issue.pronunciation, reason: issue.reason })), ...globalImportPreview.definitionIssues.map((issue) => ({ term: issue.term, value: undefined, reason: issue.reason }))].slice(0, 20).map((issue, index) => (
+                  <li key={`${issue.term}-${issue.value || ''}-${index}`}>
+                    <span className="font-mono">{issue.term || '(unnamed entry)'}</span>{issue.value ? ` — ${issue.value}` : ''}: {issue.reason}
                   </li>
                 ))}
               </ul>
-              {globalImportPreview.issues.length > 20 && (
-                <p className="mt-1">Showing the first 20 of {globalImportPreview.issues.length} skipped entries.</p>
+              {globalImportPreview.issues.length + globalImportPreview.definitionIssues.length > 20 && (
+                <p className="mt-1">Showing the first 20 of {globalImportPreview.issues.length + globalImportPreview.definitionIssues.length} skipped entries.</p>
               )}
             </div>
           )}
           <button
             type="button"
-            disabled={globalImportPreview.validWords === 0 || isImportingGlobalPronunciations}
+            disabled={(globalImportPreview.validWords === 0 && globalImportPreview.validDefinitions === 0) || isImportingGlobalPronunciations}
             onClick={() => void importGlobalPronunciations()}
             className="mt-3 rounded bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isImportingGlobalPronunciations ? 'Importing…' : `Import ${globalImportPreview.validWords} Safe Words`}
+            {isImportingGlobalPronunciations ? 'Importing…' : `Import ${globalImportPreview.validWords} Safe Words and ${globalImportPreview.validDefinitions} Definitions`}
           </button>
         </div>
       )}
@@ -1484,10 +1536,60 @@ export function SmartAudioSettings() {
                   <ul className="space-y-2">
                     {suspectPersonalPronunciations.map((item) => (
                       <li key={item.key} className="text-xs text-amber-800 dark:text-amber-200">
-                        <strong>{item.key}</strong>: <code>{item.value}</code>
-                        {getKokoroPronunciationQualityWarnings(item.key, item.value).map((warning) => (
-                          <span key={warning} className="ml-2">— {warning}</span>
-                        ))}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <strong>{item.key}</strong>: <code>{item.value}</code>
+                          {getKokoroPronunciationQualityWarnings(item.key, item.value).map((warning) => (
+                            <span key={warning}>— {warning}</span>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingPersonalSuspect(item.key);
+                              setPersonalSuspectEditValue(item.value);
+                            }}
+                            className="rounded border border-amber-400 bg-white px-2 py-0.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 dark:bg-gray-900 dark:text-amber-100"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isSavingPersonalSuspect}
+                            onClick={() => {
+                              if (window.confirm(`Remove the personal override for ${item.key}? The global pronunciation will apply when one exists.`)) {
+                                void savePersonalSuspectPronunciation(item.key, null);
+                              }
+                            }}
+                            className="rounded border border-amber-400 bg-white px-2 py-0.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50 dark:bg-gray-900 dark:text-amber-100"
+                          >
+                            Use Global
+                          </button>
+                        </div>
+                        {editingPersonalSuspect === item.key && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <input
+                              value={personalSuspectEditValue}
+                              onChange={(event) => setPersonalSuspectEditValue(event.target.value)}
+                              className="min-w-64 flex-1 rounded border border-amber-400 bg-white px-2 py-1 font-mono text-xs text-gray-900 dark:bg-gray-900 dark:text-gray-100"
+                              aria-label={`Personal pronunciation for ${item.key}`}
+                            />
+                            <button
+                              type="button"
+                              disabled={isSavingPersonalSuspect}
+                              onClick={() => void savePersonalSuspectPronunciation(item.key, personalSuspectEditValue)}
+                              className="rounded bg-amber-700 px-2 py-1 text-[11px] font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+                            >
+                              {isSavingPersonalSuspect ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isSavingPersonalSuspect}
+                              onClick={() => setEditingPersonalSuspect(null)}
+                              className="text-[11px] font-semibold hover:underline disabled:opacity-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>

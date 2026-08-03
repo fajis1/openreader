@@ -4,6 +4,7 @@ import { adminSettings } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { requireAdminContext } from '@/lib/server/auth/admin';
 import { normalizeGlobalPronunciationLibrary } from '@/lib/server/tts/global-pronunciation-library';
+import { readGlobalDefinitions } from '@/lib/server/smart-audio/global-definition-library';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { serverLogger } from '@/lib/server/logger';
 
@@ -19,18 +20,20 @@ export async function GET(req: NextRequest) {
     const raw = rows[0]?.valueJson;
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
     const library = normalizeGlobalPronunciationLibrary(parsed || {});
+    const definitions = await readGlobalDefinitions();
     const payload = `${JSON.stringify({
-      format: 'openreader-global-pronunciations',
-      version: 1,
+      format: 'openreader-global-dictionary',
+      version: 2,
       exportedAt: new Date().toISOString(),
       pronunciations: library,
+      definitions,
     }, null, 2)}\n`;
 
     return new NextResponse(payload, {
       status: 200,
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Content-Disposition': 'attachment; filename="openreader-global-pronunciations.json"',
+        'Content-Disposition': 'attachment; filename="openreader-global-dictionary.json"',
         'Cache-Control': 'no-store',
       },
     });

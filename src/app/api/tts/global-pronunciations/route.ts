@@ -14,6 +14,11 @@ import {
 } from '@/lib/server/tts/global-pronunciation-library';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { serverLogger } from '@/lib/server/logger';
+import {
+  mergeGlobalDefinitions,
+  previewGlobalDefinitionImport,
+  readGlobalDefinitions,
+} from '@/lib/server/smart-audio/global-definition-library';
 
 const DEFAULT_SEED_PRONUNCIATIONS: Record<string, string[]> = {
   "Eather": ["/iːθər/"],
@@ -132,21 +137,28 @@ export async function POST(req: NextRequest) {
       const admin = await requireAdminContext(req);
       if (admin instanceof Response) return admin;
       const preview = previewGlobalPronunciationImport(body.library);
+      const definitionsValue = body.library && typeof body.library === 'object'
+        ? (body.library as { definitions?: unknown }).definitions
+        : undefined;
+      const definitionPreview = previewGlobalDefinitionImport(definitionsValue);
       if (isImportPreviewAction) {
         return NextResponse.json({
           validWords: preview.validWords,
           validChoices: preview.validChoices,
           issues: preview.issues,
+          validDefinitions: definitionPreview.validDefinitions,
+          definitionIssues: definitionPreview.issues,
         });
       }
-      if (preview.validWords === 0) {
+      if (preview.validWords === 0 && definitionPreview.validDefinitions === 0) {
         return NextResponse.json({
-          error: 'No safe global pronunciations were found in this import.',
+          error: 'No safe global pronunciations or usable definitions were found in this import.',
           issues: preview.issues,
+          definitionIssues: definitionPreview.issues,
         }, { status: 400 });
       }
       const replaceExisting = body.mode === 'replace-imported';
-      const result = await mutateGlobalPronunciationLibrary((latestLibrary) => {
+      const result = preview.validWords > 0 ? await mutateGlobalPronunciationLibrary((latestLibrary) => {
         let importedWords = 0;
         let importedChoices = 0;
         for (const [word, imported] of Object.entries(preview.library)) {
@@ -168,12 +180,21 @@ export async function POST(req: NextRequest) {
           result: { importedWords, importedChoices },
           changed: importedWords > 0,
         };
-      });
+      }) : { importedWords: 0, importedChoices: 0 };
+      const existingDefinitions = await readGlobalDefinitions();
+      const definitionsToImport = Object.fromEntries(
+        Object.entries(definitionPreview.definitions).filter(([term]) => (
+          replaceExisting || !existingDefinitions[term]
+        )),
+      );
+      const importedDefinitions = await mergeGlobalDefinitions(definitionsToImport);
       serverLogger.info({
         event: 'tts.global_pronunciations.imported',
         importedWords: result.importedWords,
         importedChoices: result.importedChoices,
         rejectedChoices: preview.issues.length,
+        importedDefinitions: importedDefinitions.length,
+        rejectedDefinitions: definitionPreview.issues.length,
         replaceExisting,
       }, 'Imported validated global pronunciations');
       return NextResponse.json({
@@ -181,6 +202,9 @@ export async function POST(req: NextRequest) {
         validWords: preview.validWords,
         validChoices: preview.validChoices,
         issues: preview.issues,
+        importedDefinitions: importedDefinitions.length,
+        validDefinitions: definitionPreview.validDefinitions,
+        definitionIssues: definitionPreview.issues,
       });
     }
 

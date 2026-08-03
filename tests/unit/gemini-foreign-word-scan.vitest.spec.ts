@@ -9,6 +9,7 @@ import {
   GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA,
   GeminiHttpError,
   mergeGeminiPronunciationRepairResults,
+  isUsableForeignWordCandidate,
   parseForeignWordCandidateCache,
   parseGeminiForeignWordResults,
 } from '@/lib/server/smart-audio/gemini-foreign-word-scan';
@@ -73,10 +74,17 @@ describe('Gemini foreign-word structured output', () => {
       mode: 'greek_hebrew',
     }));
     expect(parseForeignWordCandidateCache(JSON.stringify({
-      version: 2,
+      version: 3,
       words: [{ word: 'λόγος' }],
     }))).toEqual([{ word: 'λόγος' }]);
     expect(parseForeignWordCandidateCache('{invalid')).toBeNull();
+  });
+
+  test('excludes multi-word phrases and IPA keys from the reusable dictionary candidate list', () => {
+    expect(isUsableForeignWordCandidate({ word: 'λόγος' })).toBe(true);
+    expect(isUsableForeignWordCandidate({ word: 'kol-hannōgēaʿ yiqdāʃ' })).toBe(false);
+    expect(isUsableForeignWordCandidate({ word: '/koʊl-hɑnnoʊgɛɑ jikdɑʃ/' })).toBe(false);
+    expect(isUsableForeignWordCandidate({ word: '   ' })).toBe(false);
   });
 
   test('stops and fails the job after a deterministic Gemini HTTP 400', () => {
