@@ -712,7 +712,7 @@ export function ScanForeignWordsModal({
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="space-y-0.5">
                   <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                    Gemini pronunciation generation: {scanJobProgress.total > 0 ? `${scanJobProgress.completed}/${scanJobProgress.total} words processed` : 'queued'}…
+                    Gemini scan: {scanJobProgress.total > 0 ? `${scanJobProgress.completed}/${scanJobProgress.total} terms processed` : 'queued'}…
                   </p>
                   {scanJobStatusMessage && (
                     <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300 animate-pulse">
@@ -730,9 +730,9 @@ export function ScanForeignWordsModal({
                 </div>
               ) : scanJobStatus === 'completed' && scanJobProgress.total > 0 ? (
                 scanJobError ? (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-300">Gemini generated {scanJobGeneratedChoices} choices for {scanJobGenerated}/{scanJobProgress.total} new words. {scanJobError}</p>
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300">Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated {scanJobGeneratedChoices} new pronunciation choices. {scanJobError}</p>
                 ) : (
-                  <p className="text-[11px] text-green-700 dark:text-green-300">Gemini generated {scanJobGeneratedChoices} choices for {scanJobGenerated}/{scanJobProgress.total} new words.</p>
+                  <p className="text-[11px] text-green-700 dark:text-green-300">Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated {scanJobGeneratedChoices} new pronunciation choices.</p>
                 )
               ) : scanJobStatus === 'failed' ? (
                 <p className="text-[11px] text-red-600 dark:text-red-400">Pronunciation generation failed: {scanJobError || 'check server logs'}</p>

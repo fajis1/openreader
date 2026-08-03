@@ -6,6 +6,7 @@ import {
   replaceGlobalPronunciationChoices,
   recordLearnedGlobalPronunciation,
   removeGlobalPronunciationChoice,
+  previewGlobalPronunciationImport,
   setGlobalPronunciationDefault,
   type GlobalPronunciationLibrary,
 } from '../../src/lib/server/tts/global-pronunciation-library';
@@ -40,6 +41,28 @@ describe('global pronunciation administration', () => {
   test('rejects malformed or suspect replacement sets', () => {
     expect(replaceGlobalPronunciationChoices('στοιχεῖα', [''], 0)).toBeNull();
     expect(replaceGlobalPronunciationChoices('στοιχεῖα', ['/styyia/'], 0)).toBeNull();
+  });
+
+  test('previews global imports without admitting unsafe pronunciations', () => {
+    const preview = previewGlobalPronunciationImport({
+      format: 'openreader-global-pronunciations',
+      pronunciations: {
+        'καλός': [{ phonetic: '/kalos/' }, { phonetic: '/styyia/' }],
+        'κτλ': ['/K, T, L/', '/KTL/'],
+        '': ['/valid/'],
+      },
+    });
+    expect(preview.library).toEqual({
+      'καλός': [expect.objectContaining({ phonetic: '/kalos/' })],
+      'κτλ': [expect.objectContaining({ phonetic: '/K, T, L/' })],
+    });
+    expect(preview.validWords).toBe(2);
+    expect(preview.validChoices).toBe(2);
+    expect(preview.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ word: 'καλός', reason: expect.stringContaining('adjacent') }),
+      expect.objectContaining({ word: 'κτλ', reason: expect.stringContaining('grouped capital') }),
+      expect.objectContaining({ reason: 'Word is blank.' }),
+    ]));
   });
 
   test('keeps the global default first while learning and evicting alternatives', () => {
@@ -93,6 +116,10 @@ describe('global pronunciation administration', () => {
     expect(component).toContain("action: 'delete-choice'");
     expect(component).toContain("trimmed.startsWith('/') && trimmed.endsWith('/')");
     expect(component).toContain('{isAdmin &&');
+    expect(component).toContain('Import Global JSON');
+    expect(component).toContain("action: 'preview-import'");
+    expect(component).toContain("action: 'import'");
+    expect(component).toContain('Replace existing choices for imported words');
     expect(route).toContain("body.action === 'set-default'");
     expect(route).toContain("body.action === 'replace-choices'");
     expect(route).toContain("body.action === 'delete-choice'");
@@ -102,6 +129,9 @@ describe('global pronunciation administration', () => {
     expect(route).toContain('pg_advisory_xact_lock');
     expect(route).toContain('const latestLibrary = normalizeGlobalPronunciationLibrary');
     expect(route).toContain('mutateGlobalPronunciationLibrary');
+    expect(route).toContain("body.action === 'preview-import'");
+    expect(route).toContain("body.action === 'import'");
+    expect(route).toContain('previewGlobalPronunciationImport');
     expect(route).toContain('.limit(1)\n        .all();');
     expect(route).toContain('}).run();');
     expect(route).not.toContain('Object.keys(parsed).length === 0');

@@ -12,6 +12,19 @@ export type GlobalPronunciationChoice = {
 
 export type GlobalPronunciationLibrary = Record<string, GlobalPronunciationChoice[]>;
 
+export type GlobalPronunciationImportIssue = {
+  word: string;
+  pronunciation?: string;
+  reason: string;
+};
+
+export type GlobalPronunciationImportPreview = {
+  library: GlobalPronunciationLibrary;
+  validWords: number;
+  validChoices: number;
+  issues: GlobalPronunciationImportIssue[];
+};
+
 export function removeGlobalPronunciationChoice(
   library: GlobalPronunciationLibrary,
   word: string,
@@ -95,6 +108,78 @@ export function normalizeGlobalPronunciationLibrary(value: unknown): GlobalPronu
     }).slice(0, 5);
   }
   return normalized;
+}
+
+/**
+ * Accept both an exported library envelope and the legacy raw dictionary
+ * shape, while rejecting entries that Kokoro cannot safely pronounce.
+ */
+export function previewGlobalPronunciationImport(value: unknown): GlobalPronunciationImportPreview {
+  const source = value && typeof value === 'object' && 'pronunciations' in value
+    ? (value as { pronunciations?: unknown }).pronunciations
+    : value;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return {
+      library: {},
+      validWords: 0,
+      validChoices: 0,
+      issues: [{ word: '', reason: 'The import must contain a pronunciations object.' }],
+    };
+  }
+
+  const library: GlobalPronunciationLibrary = {};
+  const issues: GlobalPronunciationImportIssue[] = [];
+  for (const [rawWord, rawChoices] of Object.entries(source as Record<string, unknown>)) {
+    const word = rawWord.trim();
+    if (!word) {
+      issues.push({ word: rawWord, reason: 'Word is blank.' });
+      continue;
+    }
+    const choices = Array.isArray(rawChoices) ? rawChoices : [rawChoices];
+    const accepted: GlobalPronunciationChoice[] = [];
+    for (const rawChoice of choices) {
+      const rawPhonetic = typeof rawChoice === 'string'
+        ? rawChoice
+        : rawChoice && typeof rawChoice === 'object' && typeof (rawChoice as { phonetic?: unknown }).phonetic === 'string'
+          ? (rawChoice as { phonetic: string }).phonetic
+          : '';
+      const phonetic = normalizeGlobalPronunciation(rawPhonetic);
+      const warnings = phonetic ? getKokoroPronunciationQualityWarnings(word, phonetic) : [];
+      if (!phonetic || warnings.length > 0) {
+        issues.push({
+          word,
+          pronunciation: rawPhonetic || undefined,
+          reason: warnings[0] || 'Pronunciation must be a valid slash-delimited Kokoro IPA value.',
+        });
+        continue;
+      }
+      if (accepted.some((choice) => choice.phonetic === phonetic)) {
+        issues.push({ word, pronunciation: phonetic, reason: 'Duplicate pronunciation choice.' });
+        continue;
+      }
+      if (accepted.length === 5) {
+        issues.push({ word, pronunciation: phonetic, reason: 'Only the first five safe choices are imported.' });
+        continue;
+      }
+      const record: Partial<GlobalPronunciationChoice> = rawChoice && typeof rawChoice === 'object'
+        ? rawChoice as GlobalPronunciationChoice
+        : {};
+      accepted.push({
+        phonetic,
+        usageCount: typeof record.usageCount === 'number' ? record.usageCount : 0,
+        isUserCustom: record.isUserCustom === true,
+        timestamp: typeof record.timestamp === 'number' ? record.timestamp : Date.now(),
+      });
+    }
+    if (accepted.length > 0) library[word] = accepted;
+    else if (choices.length > 0) issues.push({ word, reason: 'No safe pronunciation choices were found for this word.' });
+  }
+  return {
+    library,
+    validWords: Object.keys(library).length,
+    validChoices: Object.values(library).reduce((count, choices) => count + choices.length, 0),
+    issues,
+  };
 }
 
 export function setGlobalPronunciationDefault(

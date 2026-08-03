@@ -1,7 +1,7 @@
 /* eslint-disable no-restricted-syntax */
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BASE_ABBREVIATIONS, BASE_BOOKS, PRESET_MODELS, PRESET_PROMPTS } from './constants';
 import type { SmartAudioProfile } from '@/types/client';
 import { toast } from 'react-hot-toast';
@@ -74,6 +74,13 @@ function formatMaskedKey(configured?: boolean, last4?: string): string | null {
   return `••••••••••••${last4 || ''}`;
 }
 
+type GlobalPronunciationImportPreview = {
+  library: unknown;
+  validWords: number;
+  validChoices: number;
+  issues: Array<{ word: string; pronunciation?: string; reason: string }>;
+};
+
 export function SmartAudioSettings() {
   const { data: session } = useAuthSession();
   const previewSettings = useTtsPreviewSettings();
@@ -117,6 +124,10 @@ export function SmartAudioSettings() {
   const [globalRefineStatus, setGlobalRefineStatus] = useState<Record<string, string>>({});
   const [globalRefineChoices, setGlobalRefineChoices] = useState<Record<string, string[]>>({});
   const [globalRefineDefault, setGlobalRefineDefault] = useState<Record<string, number>>({});
+  const globalImportInputRef = useRef<HTMLInputElement>(null);
+  const [globalImportPreview, setGlobalImportPreview] = useState<GlobalPronunciationImportPreview | null>(null);
+  const [replaceImportedGlobalEntries, setReplaceImportedGlobalEntries] = useState(false);
+  const [isImportingGlobalPronunciations, setIsImportingGlobalPronunciations] = useState(false);
 
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
@@ -289,6 +300,51 @@ export function SmartAudioSettings() {
       URL.revokeObjectURL(url);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to export global pronunciations');
+    }
+  };
+
+  const previewGlobalPronunciationImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const library = JSON.parse(await file.text()) as unknown;
+      const response = await fetch('/api/tts/global-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'preview-import', library }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to validate global pronunciation import');
+      setGlobalImportPreview({ library, ...data });
+      setReplaceImportedGlobalEntries(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to read global pronunciation import');
+    }
+  };
+
+  const importGlobalPronunciations = async () => {
+    if (!globalImportPreview || globalImportPreview.validWords === 0) return;
+    setIsImportingGlobalPronunciations(true);
+    try {
+      const response = await fetch('/api/tts/global-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'import',
+          library: globalImportPreview.library,
+          mode: replaceImportedGlobalEntries ? 'replace-imported' : 'merge',
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to import global pronunciations');
+      toast.success(`Imported ${data.importedChoices || 0} pronunciation choice${data.importedChoices === 1 ? '' : 's'} across ${data.importedWords || 0} word${data.importedWords === 1 ? '' : 's'}.`);
+      setGlobalImportPreview(null);
+      await loadGlobalPronunciations();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to import global pronunciations');
+    } finally {
+      setIsImportingGlobalPronunciations(false);
     }
   };
 
@@ -950,19 +1006,87 @@ export function SmartAudioSettings() {
             View Global List
           </button>
           {isAdmin && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); void exportGlobalPronunciations(); }}
-              className="text-xs font-semibold px-3 py-1.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800 transition-colors sm:mr-2"
-            >
-              Export Global JSON
-            </button>
+            <>
+              <input
+                ref={globalImportInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(event) => void previewGlobalPronunciationImport(event)}
+              />
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); void exportGlobalPronunciations(); }}
+                className="text-xs font-semibold px-3 py-1.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded hover:bg-green-200 dark:hover:bg-green-800 transition-colors sm:mr-2"
+              >
+                Export Global JSON
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); globalImportInputRef.current?.click(); }}
+                className="text-xs font-semibold px-3 py-1.5 bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 rounded hover:bg-indigo-200 dark:hover:bg-indigo-800 transition-colors"
+              >
+                Import Global JSON
+              </button>
+            </>
           )}
           <div className="relative inline-flex h-6 w-11 items-center rounded-full bg-purple-600">
             <span className="inline-block h-4 w-4 translate-x-6 transform rounded-full bg-white" />
           </div>
         </div>
       </div>
+
+      {isAdmin && globalImportPreview && (
+        <div className="rounded-xl border border-indigo-300 bg-indigo-50 p-4 dark:border-indigo-800 dark:bg-indigo-950/30">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-indigo-900 dark:text-indigo-100">Global pronunciation import preview</h3>
+              <p className="mt-1 text-xs text-indigo-800 dark:text-indigo-200">
+                {globalImportPreview.validWords} safe words and {globalImportPreview.validChoices} safe choices are ready to import. {globalImportPreview.issues.length} entries will be skipped.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGlobalImportPreview(null)}
+              className="text-xs font-semibold text-indigo-800 hover:underline dark:text-indigo-200"
+            >
+              Cancel
+            </button>
+          </div>
+          <label className="mt-3 flex items-start gap-2 text-xs text-indigo-950 dark:text-indigo-100">
+            <input
+              type="checkbox"
+              checked={replaceImportedGlobalEntries}
+              onChange={(event) => setReplaceImportedGlobalEntries(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>Replace existing choices for imported words. Leave unchecked to safely add imported choices without changing existing defaults.</span>
+          </label>
+          {globalImportPreview.issues.length > 0 && (
+            <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
+              <p className="font-semibold">Skipped malformed or duplicate entries</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                {globalImportPreview.issues.slice(0, 20).map((issue, index) => (
+                  <li key={`${issue.word}-${issue.pronunciation || ''}-${index}`}>
+                    <span className="font-mono">{issue.word || '(unnamed entry)'}</span>{issue.pronunciation ? ` — ${issue.pronunciation}` : ''}: {issue.reason}
+                  </li>
+                ))}
+              </ul>
+              {globalImportPreview.issues.length > 20 && (
+                <p className="mt-1">Showing the first 20 of {globalImportPreview.issues.length} skipped entries.</p>
+              )}
+            </div>
+          )}
+          <button
+            type="button"
+            disabled={globalImportPreview.validWords === 0 || isImportingGlobalPronunciations}
+            onClick={() => void importGlobalPronunciations()}
+            className="mt-3 rounded bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isImportingGlobalPronunciations ? 'Importing…' : `Import ${globalImportPreview.validWords} Safe Words`}
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="space-y-4 p-4 border rounded dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">

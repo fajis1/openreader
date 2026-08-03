@@ -11,6 +11,21 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-03 — Added admin global-pronunciation import preview
+
+- Added an admin-only Import Global JSON control beside the global-library export action.
+- Imports accept OpenReader export envelopes or raw pronunciation dictionaries, validate every choice against the Kokoro safety policy, preview malformed/duplicate entries, and require a second explicit import action before writing.
+- Safe merge is the default and preserves existing defaults; an admin may explicitly replace choices only for imported words.
+- Verified TypeScript, focused global-pronunciation and scan-modal tests (15 tests), and `git diff --check`.
+- Follow-up: rebuild/redeploy the web image and browser-test import preview/merge with an exported library.
+
+### 2026-08-03 — Clarified foreign-word scan progress wording
+
+- Updated the scan modal to report terms processed separately from newly generated pronunciation choices.
+- Removed the misleading implication that the scan total represents missing/new pronunciation words; Scholar-mode definition/review queues now display accurately.
+- Verified TypeScript and the focused scan-modal unit test.
+- Follow-up: rebuild/redeploy the web image to expose the wording change.
+
 ### 2026-08-03 — Added admin global-pronunciation export
 
 - Added admin-authenticated `GET /api/tts/global-pronunciations/export`, returning the normalized global library as a downloadable JSON file with no credentials or private settings.

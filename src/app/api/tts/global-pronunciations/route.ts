@@ -9,6 +9,7 @@ import {
   removeGlobalPronunciationChoice,
   replaceGlobalPronunciationChoices,
   setGlobalPronunciationDefault,
+  previewGlobalPronunciationImport,
   type GlobalPronunciationLibrary,
 } from '@/lib/server/tts/global-pronunciation-library';
 import { errorResponse } from '@/lib/server/errors/next-response';
@@ -125,6 +126,64 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as Record<string, unknown>;
+    const isImportPreviewAction = body.action === 'preview-import';
+    const isImportAction = body.action === 'import';
+    if (isImportPreviewAction || isImportAction) {
+      const admin = await requireAdminContext(req);
+      if (admin instanceof Response) return admin;
+      const preview = previewGlobalPronunciationImport(body.library);
+      if (isImportPreviewAction) {
+        return NextResponse.json({
+          validWords: preview.validWords,
+          validChoices: preview.validChoices,
+          issues: preview.issues,
+        });
+      }
+      if (preview.validWords === 0) {
+        return NextResponse.json({
+          error: 'No safe global pronunciations were found in this import.',
+          issues: preview.issues,
+        }, { status: 400 });
+      }
+      const replaceExisting = body.mode === 'replace-imported';
+      const result = await mutateGlobalPronunciationLibrary((latestLibrary) => {
+        let importedWords = 0;
+        let importedChoices = 0;
+        for (const [word, imported] of Object.entries(preview.library)) {
+          const existing = replaceExisting ? [] : (latestLibrary[word] || []);
+          const combined = [...existing, ...imported]
+            .filter((choice, index, choices) => choices.findIndex(
+              (candidate) => candidate.phonetic === choice.phonetic,
+            ) === index)
+            .slice(0, 5);
+          if (JSON.stringify(existing) !== JSON.stringify(combined)) {
+            latestLibrary[word] = combined;
+            importedWords += 1;
+            importedChoices += replaceExisting
+              ? combined.length
+              : combined.filter((choice) => !existing.some((current) => current.phonetic === choice.phonetic)).length;
+          }
+        }
+        return {
+          result: { importedWords, importedChoices },
+          changed: importedWords > 0,
+        };
+      });
+      serverLogger.info({
+        event: 'tts.global_pronunciations.imported',
+        importedWords: result.importedWords,
+        importedChoices: result.importedChoices,
+        rejectedChoices: preview.issues.length,
+        replaceExisting,
+      }, 'Imported validated global pronunciations');
+      return NextResponse.json({
+        ...result,
+        validWords: preview.validWords,
+        validChoices: preview.validChoices,
+        issues: preview.issues,
+      });
+    }
+
     const word = typeof body.word === 'string' ? body.word.trim() : '';
     const phonetic = typeof body.phonetic === 'string' ? body.phonetic : '';
     const isReplaceAction = body.action === 'replace-choices';
