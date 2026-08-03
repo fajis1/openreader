@@ -18,7 +18,9 @@ describe('Gemini foreign-word structured output', () => {
     expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.type).toBe('array');
     expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.type).toBe('object');
     expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.properties.term.type).toBe('string');
+    expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.properties.definitionOmitted.type).toBe('boolean');
     expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.required).toContain('term');
+    expect(GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA.items.required).toContain('definitionOmitted');
   });
 
   test('parses result arrays and recovers complete entries from truncation', () => {
@@ -71,7 +73,7 @@ describe('Gemini foreign-word structured output', () => {
       mode: 'greek_hebrew',
     }));
     expect(parseForeignWordCandidateCache(JSON.stringify({
-      version: 1,
+      version: 2,
       words: [{ word: 'λόγος' }],
     }))).toEqual([{ word: 'λόγος' }]);
     expect(parseForeignWordCandidateCache('{invalid')).toBeNull();

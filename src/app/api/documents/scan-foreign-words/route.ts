@@ -40,6 +40,10 @@ import {
   parseForeignWordCandidateCache,
   parseGeminiForeignWordResults,
 } from '@/lib/server/smart-audio/gemini-foreign-word-scan';
+import {
+  normalizeDictionaryDefinition,
+  shouldOmitDictionaryDefinition,
+} from '@/lib/shared/dictionary-definition-policy';
 
 const execFileAsync = util.promisify(execFile);
 const GREEK = /[\u0370-\u03ff\u1f00-\u1fff]/u;
@@ -49,11 +53,6 @@ function languageForTerm(term: string): SmartAudioBookLexiconEntry['language'] {
   if (HEBREW.test(term)) return 'biblical_hebrew';
   if (GREEK.test(term)) return 'koine_greek';
   return 'other';
-}
-
-function normalizeDefinition(value: unknown): string | null {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  return value.trim().split(/\s+/).slice(0, 4).join(' ');
 }
 
 export async function POST(req: NextRequest) {
@@ -169,7 +168,7 @@ export async function POST(req: NextRequest) {
           if (!Array.isArray(words)) {
             throw new Error('PDF foreign-word scanner returned an invalid candidate list.');
           }
-          const cachedCandidates = JSON.stringify({ version: 1, words });
+          const cachedCandidates = JSON.stringify({ version: 2, words });
           await db.insert(adminSettings).values({
             key: candidateCacheKey,
             valueJson: cachedCandidates,
@@ -232,6 +231,16 @@ export async function POST(req: NextRequest) {
         const lexiconEntries: Record<string, SmartAudioBookLexiconEntry> = {
           ...(activeProfile && existingLexicon?.profileId === activeProfile.id ? existingLexicon.entries : {}),
         };
+        for (const [term, entry] of Object.entries(lexiconEntries)) {
+          if (shouldOmitDictionaryDefinition(entry.definition)) {
+            lexiconEntries[term] = {
+              ...entry,
+              definition: null,
+              definitionOmitted: true,
+              needsReview: false,
+            };
+          }
+        }
         for (const w of words) {
           const term = w.word;
           if (!term || typeof term !== 'string') continue;
@@ -266,7 +275,11 @@ export async function POST(req: NextRequest) {
             const lexiconEntry = lexiconEntries[w.word];
             const needsDefinition = needsScholarDefinition
               && language !== 'other'
-              && (!lexiconEntry || (lexiconEntry.language !== 'other' && !lexiconEntry.definition));
+              && (!lexiconEntry || (
+                lexiconEntry.language !== 'other'
+                && !lexiconEntry.definition
+                && lexiconEntry.definitionOmitted !== true
+              ));
             return needsPronunciations || needsDefinition;
           })
           .map((w: any) => w.word);
@@ -296,6 +309,7 @@ export async function POST(req: NextRequest) {
             pronunciationSource: userPronunciation ? 'personal' : globalPronunciation ? 'global' : geminiRecommendations[w.word] ? 'gemini' : 'none',
             geminiRecommendedPronunciation: geminiRecommendations[w.word] || null,
             definition: lexiconEntries[w.word]?.definition || null,
+            definitionOmitted: lexiconEntries[w.word]?.definitionOmitted === true,
             definitionNeedsReview: lexiconEntries[w.word]?.needsReview === true,
           };
         });
@@ -348,6 +362,8 @@ If currentPronunciation is supplied, preserve it exactly and return it as the on
 For Koine Greek or Biblical Hebrew, use the supplied contexts to return a contextual English definition of one to four words.
 If the surrounding book context already states the definition, return that same concise gloss; OpenReader will recognize the author-supplied definition and will not speak it twice.
 Set language to "koine_greek", "biblical_hebrew", or "other". For other languages, abbreviations, or invented names, set language to "other" and definition to null.
+If a token is an OCR fragment, an unidentifiable fragment, or an inflected form with no reliable contextual English gloss, return definition as null and definitionOmitted as true. Never use placeholder text such as "Fragment or inflected form" as a definition.
+Otherwise return a useful contextual definition and set definitionOmitted to false.
 Return a JSON array with exactly one result object per requested term. Copy each requested term exactly into that result object's "term" field.
 
 Terms:
@@ -496,7 +512,11 @@ ${JSON.stringify(repairRequests)}`;
                   geminiRecommendations[w] = pronunciation;
                 }
                 const scanned = words.find((item: any) => item.word === w);
-                const definition = normalizeDefinition(result.definition);
+                const definitionOmitted = result.definitionOmitted === true
+                  || shouldOmitDictionaryDefinition(result.definition);
+                const definition = definitionOmitted
+                  ? null
+                  : normalizeDictionaryDefinition(result.definition);
                 const language = result.language === 'other'
                   ? 'other'
                   : result.language === 'biblical_hebrew'
@@ -508,12 +528,13 @@ ${JSON.stringify(repairRequests)}`;
                   term: w,
                   pronunciation,
                   definition,
+                  definitionOmitted,
                   language,
                   context: Array.isArray(scanned?.contexts) ? scanned.contexts[0] : undefined,
                   confidence: typeof result.confidence === 'number'
                     ? Math.max(0, Math.min(1, result.confidence))
                     : undefined,
-                  needsReview: result.needsReview === true
+                  needsReview: (result.needsReview === true && !definitionOmitted)
                     || unresolvedQualityTerms.has(w)
                     || (needsScholarDefinition && language !== 'other' && !definition),
                 };

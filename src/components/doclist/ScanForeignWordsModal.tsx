@@ -17,6 +17,12 @@ type PronunciationLibraryScan = {
   profileName: string;
 };
 
+type SuspectDefinition = {
+  term: string;
+  definition: string;
+  warnings: string[];
+};
+
 export function ScanForeignWordsModal({
   isOpen,
   onClose,
@@ -41,6 +47,8 @@ export function ScanForeignWordsModal({
   // Map to store temporary inline edits before saving
   const [editingWord, setEditingWord] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>('');
+  const [editingDefinition, setEditingDefinition] = useState<string | null>(null);
+  const [definitionEditValue, setDefinitionEditValue] = useState<string>('');
 
   const [feedbackExamples, setFeedbackExamples] = useState<string[]>([]);
   const [pronunciationModel, setPronunciationModel] = useState<string | null>(null);
@@ -66,6 +74,9 @@ export function ScanForeignWordsModal({
   const [libraryScanStatus, setLibraryScanStatus] = useState<'idle' | 'scanning' | 'complete' | 'repairing'>('idle');
   const [libraryScan, setLibraryScan] = useState<PronunciationLibraryScan | null>(null);
   const [libraryScanError, setLibraryScanError] = useState<string | null>(null);
+  const [definitionAuditStatus, setDefinitionAuditStatus] = useState<'idle' | 'scanning' | 'complete' | 'removing'>('idle');
+  const [suspectDefinitions, setSuspectDefinitions] = useState<SuspectDefinition[] | null>(null);
+  const [definitionAuditError, setDefinitionAuditError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const resizeStart = useRef<{ startX: number; startWidth: number } | null>(null);
   const retryTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
@@ -95,6 +106,9 @@ export function ScanForeignWordsModal({
       setLibraryScanStatus('idle');
       setLibraryScan(null);
       setLibraryScanError(null);
+      setDefinitionAuditStatus('idle');
+      setSuspectDefinitions(null);
+      setDefinitionAuditError(null);
       warmedAudio.current.clear();
       warmingAudio.current.clear();
       audioWarmStarted.current = false;
@@ -122,6 +136,9 @@ export function ScanForeignWordsModal({
       setLibraryScanStatus('idle');
       setLibraryScan(null);
       setLibraryScanError(null);
+      setDefinitionAuditStatus('idle');
+      setSuspectDefinitions(null);
+      setDefinitionAuditError(null);
       warmedAudio.current.clear();
       warmingAudio.current.clear();
       audioWarmStarted.current = false;
@@ -199,6 +216,85 @@ export function ScanForeignWordsModal({
       setLibraryScanError(message);
       setLibraryScanStatus('complete');
       toast.error(message);
+    }
+  };
+
+  const scanSavedDefinitions = async () => {
+    if (!activeDocId) return;
+    setDefinitionAuditStatus('scanning');
+    setDefinitionAuditError(null);
+    try {
+      const response = await fetch(`/api/documents/scan-foreign-words/definitions?documentId=${encodeURIComponent(activeDocId)}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Saved definition scan failed');
+      setSuspectDefinitions(Array.isArray(data.suspects) ? data.suspects : []);
+      setDefinitionAuditStatus('complete');
+    } catch (auditError) {
+      setDefinitionAuditError(auditError instanceof Error ? auditError.message : 'Saved definition scan failed');
+      setDefinitionAuditStatus('idle');
+    }
+  };
+
+  const removeSuspectDefinitions = async () => {
+    if (!activeDocId || !suspectDefinitions?.length) return;
+    setDefinitionAuditStatus('removing');
+    setDefinitionAuditError(null);
+    try {
+      const response = await fetch('/api/documents/scan-foreign-words/definitions', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId: activeDocId,
+          terms: suspectDefinitions.map(({ term }) => term),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Definition cleanup failed');
+      const removed = new Set(Array.isArray(data.removed) ? data.removed : []);
+      setWords((current) => current.map((word) => (
+        removed.has(word.word)
+          ? { ...word, definition: null, definitionNeedsReview: false, definitionOmitted: true }
+          : word
+      )));
+      toast.success(`Removed ${removed.size} unusable saved definition${removed.size === 1 ? '' : 's'}.`);
+      await scanSavedDefinitions();
+    } catch (cleanupError) {
+      const message = cleanupError instanceof Error ? cleanupError.message : 'Definition cleanup failed';
+      setDefinitionAuditError(message);
+      setDefinitionAuditStatus('complete');
+      toast.error(message);
+    }
+  };
+
+  const saveDefinition = async (term: string) => {
+    if (!activeDocId) return;
+    try {
+      const response = await fetch('/api/documents/scan-foreign-words/definitions', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId: activeDocId,
+          term,
+          definition: definitionEditValue.trim() || null,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Definition update failed');
+      setWords((current) => current.map((word) => (
+        word.word === term
+          ? {
+            ...word,
+            definition: data.definition,
+            definitionOmitted: data.definitionOmitted,
+            definitionNeedsReview: false,
+          }
+          : word
+      )));
+      setEditingDefinition(null);
+      setDefinitionEditValue('');
+      toast.success(data.definition ? `Updated the definition for ${term}.` : `Omitted the definition for ${term}.`);
+    } catch (updateError) {
+      toast.error(updateError instanceof Error ? updateError.message : 'Definition update failed');
     }
   };
 
@@ -790,6 +886,57 @@ export function ScanForeignWordsModal({
               </div>
             )}
           </div>
+
+          {activeDocId && (
+            <div className="rounded-lg border border-line bg-surface p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground">Saved definition health check</h4>
+                  <p className="mt-0.5 text-xs text-soft">
+                    Find placeholder glosses such as &quot;Fragment or inflected form&quot; in this document and remove them from audiobook narration.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void scanSavedDefinitions()}
+                    disabled={definitionAuditStatus === 'scanning' || definitionAuditStatus === 'removing'}
+                    className="rounded border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent-wash disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {definitionAuditStatus === 'scanning' ? 'Scanning definitions…' : suspectDefinitions ? 'Scan Again' : 'Scan Saved Definitions'}
+                  </button>
+                  {suspectDefinitions && suspectDefinitions.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void removeSuspectDefinitions()}
+                      disabled={definitionAuditStatus === 'scanning' || definitionAuditStatus === 'removing'}
+                      className="rounded bg-danger px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {definitionAuditStatus === 'removing' ? 'Removing definitions…' : 'Remove All Suspect Definitions'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {definitionAuditError && (
+                <p className="mt-2 text-xs font-medium text-danger">{definitionAuditError}</p>
+              )}
+              {suspectDefinitions && (
+                <div className="mt-3 text-xs text-foreground">
+                  {suspectDefinitions.length === 0 ? (
+                    <p className="text-accent">No unusable saved definitions were found for this document.</p>
+                  ) : (
+                    <div className="max-h-36 space-y-1 overflow-y-auto rounded border border-line bg-surface p-2">
+                      {suspectDefinitions.map((suspect) => (
+                        <p key={suspect.term} className="[overflow-wrap:anywhere]">
+                          <strong>{suspect.term}</strong>: &quot;{suspect.definition}&quot; — {suspect.warnings.join(' ')}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="p-4 overflow-y-auto flex-1">
           {!activeDocId ? (
@@ -807,6 +954,9 @@ export function ScanForeignWordsModal({
                       setWords([]);
                       setError(null);
                       setHasScanned(false);
+                      setSuspectDefinitions(null);
+                      setDefinitionAuditStatus('idle');
+                      setDefinitionAuditError(null);
                       modalSession.current += 1;
                       void reconnectScanJob(doc.id, modalSession.current);
                     }}
@@ -1016,7 +1166,38 @@ export function ScanForeignWordsModal({
                       </div>
                     </td>
                     <td className="px-4 py-3 align-top">
-                      {w.definition ? (
+                      {editingDefinition === w.word ? (
+                        <div className="flex min-w-48 flex-col gap-2">
+                          <input
+                            type="text"
+                            value={definitionEditValue}
+                            onChange={(event) => setDefinitionEditValue(event.target.value)}
+                            placeholder="Blank omits this definition"
+                            className="w-full rounded border border-blue-500 bg-white px-2 py-1 text-sm text-gray-900 dark:bg-gray-900 dark:text-gray-100"
+                            autoFocus
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') void saveDefinition(w.word);
+                              if (event.key === 'Escape') setEditingDefinition(null);
+                            }}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void saveDefinition(w.word)}
+                              className="rounded bg-green-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                            >
+                              Save Definition
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingDefinition(null)}
+                              className="rounded bg-gray-200 px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : w.definition ? (
                         <div>
                           <span className={w.definitionNeedsReview
                             ? 'text-amber-700 dark:text-amber-300'
@@ -1029,13 +1210,39 @@ export function ScanForeignWordsModal({
                               Double-check this definition
                             </p>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingDefinition(w.word);
+                              setDefinitionEditValue(w.definition || '');
+                            }}
+                            className="mt-1 block text-[10px] font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                          >
+                            Edit definition
+                          </button>
                         </div>
                       ) : (
-                        <span className="text-xs italic text-gray-500">
-                          {scanJobStatus === 'queued' || scanJobStatus === 'running'
-                            ? 'Waiting for scan…'
-                            : 'No contextual definition'}
-                        </span>
+                        <div>
+                          <span className="text-xs italic text-gray-500">
+                            {scanJobStatus === 'queued' || scanJobStatus === 'running'
+                              ? 'Waiting for scan…'
+                              : w.definitionOmitted
+                                ? 'Definition intentionally omitted'
+                                : 'No contextual definition'}
+                          </span>
+                          {!scanActive && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingDefinition(w.word);
+                                setDefinitionEditValue('');
+                              }}
+                              className="mt-1 block text-[10px] font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                            >
+                              Add definition
+                            </button>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 align-top">

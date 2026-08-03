@@ -4,6 +4,7 @@ export interface SmartAudioBookLexiconEntry {
   term: string;
   pronunciation: string;
   definition: string | null;
+  definitionOmitted?: boolean;
   language: 'koine_greek' | 'biblical_hebrew' | 'other';
   context?: string;
   confidence?: number;

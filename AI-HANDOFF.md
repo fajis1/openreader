@@ -11,6 +11,15 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-03 — Dictionary placeholder suppression and editing
+
+- Added a shared definition-quality policy that converts meta-glosses such as “Fragment or inflected form,” “OCR fragment,” and “inflected form” to intentional `null` definitions so they are never inserted into audiobook narration.
+- Extended both foreign-word Gemini prompts and structured output with `definitionOmitted`; intentional omissions now satisfy lexicon completion without repeated scans, while useful contextual definitions remain unchanged.
+- Filtered the known `κω` OCR fragment from both Greek/Hebrew and all-foreign Python scans and bumped the candidate-cache version so older cached candidates are not reused.
+- Added a document-level saved-definition health check with bulk removal plus per-row add/edit/clear controls; cleanup preserves the pronunciation while removing only the unusable definition.
+- Verified TypeScript, targeted ESLint, 36 focused unit tests, all OpenReader unit tests (107/107 files, 629 tests), two Python scanner tests, and `git diff --check`.
+- Follow-up: rebuild/redeploy, audit the affected document, remove its saved placeholder definitions, and browser-test manual editing; no live Gemini or audiobook generation was run from this workspace.
+
 ### 2026-08-03 — One-pass Gemini pronunciation quality correction
 
 - Bumped the Kokoro pronunciation policy to version 3, explicitly rejecting adjacent `/y/`/`/j` glides and grouped capital sequences while preserving comma-separated initialism letters.

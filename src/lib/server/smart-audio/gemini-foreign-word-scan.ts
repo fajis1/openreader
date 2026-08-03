@@ -27,6 +27,10 @@ export const GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA = {
       definition: {
         type: ['string', 'null'],
       },
+      definitionOmitted: {
+        type: 'boolean',
+        description: 'True only when no useful contextual gloss should be spoken.',
+      },
       confidence: {
         type: 'number',
         minimum: 0,
@@ -41,6 +45,7 @@ export const GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA = {
       'language',
       'pronunciations',
       'definition',
+      'definitionOmitted',
       'confidence',
       'needsReview',
     ],
@@ -193,7 +198,7 @@ export function foreignWordCandidateCacheKey(input: {
   const scopeHash = createHash('sha256')
     .update(JSON.stringify(input))
     .digest('hex');
-  return `foreign_word_candidates:v1:${scopeHash}`;
+  return `foreign_word_candidates:v2:${scopeHash}`;
 }
 
 export function parseForeignWordCandidateCache(value: unknown): unknown[] | null {
@@ -202,7 +207,7 @@ export function parseForeignWordCandidateCache(value: unknown): unknown[] | null
     if (
       !parsed
       || typeof parsed !== 'object'
-      || (parsed as { version?: unknown }).version !== 1
+      || (parsed as { version?: unknown }).version !== 2
       || !Array.isArray((parsed as { words?: unknown }).words)
     ) {
       return null;

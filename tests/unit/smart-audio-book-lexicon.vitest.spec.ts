@@ -259,6 +259,52 @@ describe('Smart Audio book lexicon', () => {
     }
   });
 
+  test('turns Gemini form-description placeholders into intentional null definitions', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          parts: [{
+            text: JSON.stringify({
+              items: [{
+                term: 'κω',
+                language: 'koine_greek',
+                pronunciations: ['/koʊ/'],
+                definition: 'Fragment or inflected form',
+                definitionOmitted: false,
+                needsReview: false,
+              }],
+            }),
+          }],
+        },
+      }],
+    }), { status: 200 });
+    try {
+      const { resolveSmartAudioBookLexicon } = await import('../../src/lib/server/smart-audio/book-lexicon');
+      const result = await resolveSmartAudioBookLexicon({
+        profile: {
+          id: 'test',
+          name: 'Test',
+          aiModel: 'cleanup',
+          pronunciationAiModel: 'pronunciation',
+          customTtsPrompt: '',
+          abbreviations: {},
+          pronunciations: {},
+          books: {},
+          geminiApiKey: 'test-only-placeholder',
+        },
+        candidates: [{ term: 'κω', contexts: ['An OCR fragment κω appeared.'] }],
+      });
+      expect(result.status).toBe('complete');
+      expect(result.entries.κω?.definition).toBeNull();
+      expect(result.entries.κω?.definitionOmitted).toBe(true);
+      expect(enrichTextFromBookLexicon('The κω appears.', result, { includeDefinitions: true }))
+        .toBe('The [κω](/koʊ/) appears.');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('preserves Gemini throttle metadata for upstream retry handling', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response('rate limited', {

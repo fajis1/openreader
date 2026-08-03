@@ -18,6 +18,10 @@ import {
   type GeminiTokenUsage,
 } from '@/lib/server/smart-audio/gemini-usage';
 import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemini-failover';
+import {
+  normalizeDictionaryDefinition,
+  shouldOmitDictionaryDefinition,
+} from '@/lib/shared/dictionary-definition-policy';
 
 const FOREIGN_WORD = /[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff][\u0300-\u036f\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]*/gu;
 const FOREIGN_WORD_BEFORE = /[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff][\u0300-\u036f\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]*\s+$/u;
@@ -174,11 +178,19 @@ export async function resolveSmartAudioBookLexicon(input: {
   const candidateTerms = new Set(input.candidates.map((candidate) => candidate.term));
   const entries: Record<string, SmartAudioBookLexiconEntry> = Object.fromEntries(
     Object.entries(input.existing?.entries || {})
-      .filter(([term]) => candidateTerms.has(term)),
+      .filter(([term]) => candidateTerms.has(term))
+      .map(([term, entry]) => [term, shouldOmitDictionaryDefinition(entry.definition)
+        ? {
+          ...entry,
+          definition: null,
+          definitionOmitted: true,
+          needsReview: false,
+        }
+        : entry]),
   );
   const unresolved = input.candidates.filter((candidate) => {
     const current = entries[candidate.term];
-    return !current?.pronunciation || !current.definition;
+    return !current?.pronunciation || (!current.definition && current.definitionOmitted !== true);
   });
 
   for (let offset = 0; offset < unresolved.length; offset += 15) {
@@ -189,9 +201,11 @@ Create an audiobook lexicon for the following isolated Koine Greek or Biblical H
 Use the supplied context to choose a short contextual English gloss of one to four words.
 If the context already states the term's definition, return that same concise gloss; OpenReader suppresses duplicate insertion locally.
 If a term is not Koine Greek or Biblical Hebrew, set definition to null.
+If a token is an OCR fragment, an unidentifiable fragment, or an inflected form with no reliable contextual English gloss, return definition as null and definitionOmitted as true. Never return placeholder prose such as "Fragment or inflected form" as the definition.
+Otherwise return a useful contextual definition and set definitionOmitted to false.
 If a pronunciation is supplied, preserve it exactly. Otherwise provide five Kokoro-compatible IPA choices and put the best first.
 Return JSON only in this shape:
-{"items":[{"term":"λόγος","language":"koine_greek","pronunciations":["/pron1/","/pron2/","/pron3/","/pron4/","/pron5/"],"definition":"word","confidence":0.95,"needsReview":false}]}
+{"items":[{"term":"λόγος","language":"koine_greek","pronunciations":["/pron1/","/pron2/","/pron3/","/pron4/","/pron5/"],"definition":"word","definitionOmitted":false,"confidence":0.95,"needsReview":false}]}
 
 Terms:
 ${JSON.stringify(batch)}`;
@@ -253,12 +267,13 @@ ${JSON.stringify(batch)}`;
             : GREEK.test(term)
               ? 'koine_greek'
               : 'other';
+      const definitionOmitted = item.definitionOmitted === true
+        || shouldOmitDictionaryDefinition(item.definition);
       entries[term] = {
         term,
         pronunciation,
-        definition: typeof item.definition === 'string' && item.definition.trim()
-          ? item.definition.trim().split(/\s+/).slice(0, 4).join(' ')
-          : null,
+        definition: definitionOmitted ? null : normalizeDictionaryDefinition(item.definition),
+        definitionOmitted,
         language,
         context: candidate.contexts[0],
         confidence: typeof item.confidence === 'number' ? Math.max(0, Math.min(1, item.confidence)) : undefined,
@@ -281,7 +296,11 @@ ${JSON.stringify(batch)}`;
 
   const incomplete = input.candidates.filter((candidate) => {
     const entry = entries[candidate.term];
-    return !entry?.pronunciation || (entry.language !== 'other' && !entry.definition);
+    return !entry?.pronunciation || (
+      entry.language !== 'other'
+      && !entry.definition
+      && entry.definitionOmitted !== true
+    );
   });
   if (incomplete.length > 0) {
     throw new Error(

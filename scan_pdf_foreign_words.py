@@ -36,6 +36,10 @@ STOP_WORDS = {
     'אֵת', 'אֶת', 'וְ', 'הַ', 'בְּ', 'לְ', 'כְּ', 'מִ', 'עַל', 'אֶל', 'כִּי', 'אֲשֶׁר', 'עַד', 'עִם'
 }
 
+# Known extraction fragments that are not usable standalone dictionary terms.
+# Keep this intentionally narrow; Gemini handles genuine inflected forms using context.
+KNOWN_OCR_FRAGMENTS = {'κω'}
+
 def load_pdf_text(pdf_path):
     """Extract text from a PDF file using pypdf or PyMuPDF if available."""
     try:
@@ -96,7 +100,7 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
     elif mode == "greek_hebrew":
         raw_matches = GREEK_HEBREW_REGEX.findall(full_text)
         cleaned_matches = [m.strip('.,;:!?·\'"()[]{}«»') for m in raw_matches]
-        filtered_matches = [m for m in cleaned_matches if len(m) > 1 and m not in STOP_WORDS]
+        filtered_matches = [m for m in cleaned_matches if len(m) > 1 and m not in STOP_WORDS and m not in KNOWN_OCR_FRAGMENTS]
     elif mode == "custom" and query:
         custom_regex = re.compile(re.escape(query), re.IGNORECASE)
         raw_matches = custom_regex.findall(full_text)
@@ -104,7 +108,7 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
     else: # all_foreign (default)
         raw_matches = ALL_FOREIGN_REGEX.findall(full_text)
         cleaned_matches = [m.strip('.,;:!?·\'"()[]{}«»') for m in raw_matches]
-        filtered_matches = [m for m in cleaned_matches if len(m) > 1 and m not in STOP_WORDS]
+        filtered_matches = [m for m in cleaned_matches if len(m) > 1 and m not in STOP_WORDS and m not in KNOWN_OCR_FRAGMENTS]
 
     if not filtered_matches:
         if not quiet:
