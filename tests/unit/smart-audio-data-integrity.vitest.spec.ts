@@ -65,6 +65,7 @@ describe('Smart Audio data-integrity guards', () => {
   test('merges global replacements under a transaction and updates personal entries separately', () => {
     const route = source('src/app/api/tts/global-pronunciations/rescan/route.ts');
     const scanRoute = source('src/app/api/documents/scan-foreign-words/route.ts');
+    const scanMerge = source('src/lib/server/smart-audio/global-pronunciation-merge.ts');
     expect(route).toContain('await db.transaction');
     expect(route).toContain('pg_advisory_xact_lock');
     expect(route).toContain('const latestLibrary = normalizeGlobalLibrary');
@@ -74,7 +75,12 @@ describe('Smart Audio data-integrity guards', () => {
     expect(route).toContain('JSON.stringify(latestLibrary[word] || []) === JSON.stringify(library[word] || [])');
     expect(scanRoute).toContain('updatedGlobalWords');
     expect(scanRoute).toContain('globalDictAtScanStart');
-    expect(scanRoute).toContain('pg_advisory_xact_lock');
+    expect(scanRoute).toContain('mergeGeneratedGlobalPronunciations');
+    expect(scanMerge).toContain('pg_advisory_xact_lock');
+    expect(scanMerge).toContain("if (usePostgres) {");
+    expect(scanMerge).toContain('database.transaction((tx: Database) => {');
+    expect(scanMerge).toContain('.limit(1)\n      .all();');
+    expect(scanMerge).toContain('globalLibraryUpsert(tx, latestLibrary).run();');
   });
 
   test('removes foreign passages at five words while preserving one-to-four-word terms', () => {

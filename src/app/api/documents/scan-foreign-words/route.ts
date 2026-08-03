@@ -23,12 +23,13 @@ import { execFile } from 'child_process';
 import util from 'util';
 import { db } from '@/db';
 import { adminSettings } from '@/db/schema';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { generateTTSBuffer } from '@/lib/server/tts/generate';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
 import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemini-failover';
+import { mergeGeneratedGlobalPronunciations } from '@/lib/server/smart-audio/global-pronunciation-merge';
 import {
   createGeminiHttpError,
   foreignWordCandidateCacheKey,
@@ -503,60 +504,27 @@ ${JSON.stringify(terms)}`;
       }
         }
 
+    const generated = Object.keys(geminiRecommendations).length;
+    await saveJob({
+      stage: 'persisting',
+      generated,
+      generatedChoices: acceptedChoices,
+      words: enrichWords(),
+    });
+
     if (updatedGlobalWords.size > 0) {
-      await db.transaction(async (tx: typeof db) => {
-        if (process.env.POSTGRES_URL) {
-          await tx.execute(sql`
-            select pg_advisory_xact_lock(
-              hashtextextended('openreader:global_pronunciations', 0)
-            )
-          `);
-        }
-        const latestRows = await tx.select()
-          .from(adminSettings)
-          .where(eq(adminSettings.key, 'global_pronunciations'))
-          .limit(1);
-        const latestDict: Record<string, any[]> = {};
-        try {
-          const parsed = typeof latestRows[0]?.valueJson === 'string'
-            ? JSON.parse(latestRows[0].valueJson)
-            : latestRows[0]?.valueJson || {};
-          for (const [word, value] of Object.entries(parsed as Record<string, unknown>)) {
-            if (Array.isArray(value)) {
-              latestDict[word] = value.map((item: any) => (
-                typeof item === 'string' ? { phonetic: item, usageCount: 0 } : item
-              ));
-            } else if (typeof value === 'string') {
-              latestDict[word] = [{ phonetic: value, usageCount: 0 }];
-            } else if (
-              value
-              && typeof value === 'object'
-              && typeof (value as { phonetic?: unknown }).phonetic === 'string'
-            ) {
-              latestDict[word] = [value as any];
-            }
-          }
-        } catch (error) {
-          throw new Error('Cannot safely merge generated pronunciations into the current global library.', {
-            cause: error,
-          });
-        }
-        for (const word of updatedGlobalWords) {
-          if (
-            JSON.stringify(latestDict[word] || [])
-            === JSON.stringify(globalDictAtScanStart[word] || [])
-          ) {
-            latestDict[word] = globalDict[word];
-          }
-        }
-        await tx.insert(adminSettings).values({
-          key: 'global_pronunciations',
-          valueJson: JSON.stringify(latestDict),
-        }).onConflictDoUpdate({
-          target: adminSettings.key,
-          set: { valueJson: JSON.stringify(latestDict) },
-        });
+      const persistedWords = await mergeGeneratedGlobalPronunciations({
+        generatedLibrary: globalDict,
+        libraryAtScanStart: globalDictAtScanStart,
+        updatedWords: updatedGlobalWords,
       });
+      serverLogger.info({
+        event: 'pdf.scan.global_pronunciations.persisted',
+        jobId,
+        databaseProvider: process.env.POSTGRES_URL ? 'postgresql' : 'sqlite',
+        requestedWords: updatedGlobalWords.size,
+        persistedWords: persistedWords.length,
+      }, 'Persisted generated global pronunciations');
     }
 
     if (activeProfile) {
@@ -636,7 +604,6 @@ ${JSON.stringify(terms)}`;
       }
     }
 
-        const generated = Object.keys(geminiRecommendations).length;
         const errors = Array.isArray(jobState.errors) ? jobState.errors : [];
         await saveJob({
           status: terminalGeminiError ? 'failed' : 'completed',

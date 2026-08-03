@@ -11,6 +11,15 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-03 — Fixed SQLite foreign-word global-library persistence
+
+- Replaced the foreign-word scan's shared async global-pronunciation transaction with a provider-specific merge helper: PostgreSQL retains its async advisory-lock transaction, while SQLite uses a synchronous better-sqlite3 callback with `.all()` and `.run()`.
+- Preserved the compare-before-merge concurrency guard so a scan cannot overwrite global choices changed after the scan began.
+- Checkpointed generated word/choice counts and enriched results before persistence, added a `persisting` stage, and logged the database provider plus requested/applied merge counts.
+- Added an in-memory SQLite integration suite covering empty and existing libraries, concurrent-change preservation, and transaction rollback on serialization failure.
+- Verified `pnpm exec tsc --noEmit`, all OpenReader unit tests (106/106 files, 619 tests), focused ESLint, and `git diff --check`.
+- Follow-up: rebuild/redeploy the web image and rerun the cached scan; live container validation was not performed from this workspace.
+
 ### 2026-08-02 — Repaired Gemini foreign-word structured output requests
 
 - Replaced the foreign-word scan's deprecated dynamic `responseSchema` object with a lowercase `responseJsonSchema` array of explicit result objects, including exact `term` fields that are mapped back only to terms in the requested batch.
