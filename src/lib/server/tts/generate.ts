@@ -895,7 +895,9 @@ export function buildOpenAiCompatibleSpeechParams(
     speed: request.speed,
   };
 
-
+  if (request.model === 'kokoro' && request.provider === 'custom-openai') {
+    createParams.normalization_options = { normalize: false };
+  }
 
   return createParams;
 }

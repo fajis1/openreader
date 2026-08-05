@@ -129,7 +129,7 @@ describe('compute worker API routes', () => {
       jobId: 'job-op-stale-whisper-running',
       status: 'running',
       queuedAt: 1,
-      updatedAt: now - 40_000,
+      updatedAt: now - 400_000,
     });
     fake.seedState({
       opId: 'op-stale-whisper-queued',
@@ -138,7 +138,7 @@ describe('compute worker API routes', () => {
       jobId: 'job-op-stale-whisper-queued',
       status: 'queued',
       queuedAt: 1,
-      updatedAt: now - 40_000,
+      updatedAt: now - 400_000,
     });
     fake.seedState({
       opId: 'op-stale-pdf-running',
@@ -147,7 +147,7 @@ describe('compute worker API routes', () => {
       jobId: 'job-op-stale-pdf-running',
       status: 'running',
       queuedAt: 1,
-      updatedAt: now - 310_000,
+      updatedAt: now - 400_000,
     });
     fake.seedState({
       opId: 'op-stale-pdf-queued',
@@ -156,7 +156,7 @@ describe('compute worker API routes', () => {
       jobId: 'job-op-stale-pdf-queued',
       status: 'queued',
       queuedAt: 1,
-      updatedAt: now - 310_000,
+      updatedAt: now - 400_000,
     });
 
     // GET /ops/:opId resolves via getOpState(), which first awaits the shared

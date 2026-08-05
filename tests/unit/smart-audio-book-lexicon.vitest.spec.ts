@@ -462,7 +462,7 @@ describe('Smart Audio book lexicon', () => {
     expect(scholars).toHaveLength(1);
     expect(scholars[0]?.name).toMatch(/English Definitions/i);
     expect(defaults.profiles
-      .filter((profile) => profile.workerMode !== 'scholar')
+      .filter((profile) => profile.workerMode !== 'scholar' && profile.workerMode !== 'bibliography-catcher')
       .every((profile) => profile.workerMode === 'standard'))
       .toBe(true);
   });

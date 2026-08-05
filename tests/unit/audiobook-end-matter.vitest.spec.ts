@@ -20,7 +20,7 @@ describe('audiobook end-matter filtering', () => {
   });
 
   test('recognizes an end-matter heading at the start of generic EPUB text', () => {
-    expect(chapterStartsWithEndMatter('\n INDEX\nAaron 23\nAbraham 14')).toBe(true);
+    expect(chapterStartsWithEndMatter('\n INDEX\nAaron 23\nAbraham 14')).toMatchObject({ found: true });
   });
 
   test('removes the index and all later chapters before API processing', () => {
