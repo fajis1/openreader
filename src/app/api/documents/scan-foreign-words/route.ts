@@ -329,6 +329,11 @@ export async function POST(req: NextRequest) {
             return needsPronunciations || needsDefinition;
           })
           .map((w: any) => w.word);
+        const updatedGlobalWords = new Set<string>();
+        const confirmedOcrFragments = new Set<string>();
+        let acceptedChoices = 0;
+        let updatedLexicon = false;
+        let terminalGeminiError: string | null = null;
 
         const enrichWords = () => words.map((w: any) => {
           const userPronunciation = compatibleOverrides[w.word] || null;
@@ -370,11 +375,7 @@ export async function POST(req: NextRequest) {
           completed: 0,
         });
 
-        const updatedGlobalWords = new Set<string>();
-        const confirmedOcrFragments = new Set<string>();
-        let acceptedChoices = 0;
-        let updatedLexicon = false;
-        let terminalGeminiError: string | null = null;
+
 
         if (wordsMissingOptions.length > 0) {
           if (!activeProfile?.geminiApiKey && !activeProfile?.backupGeminiApiKey) {
