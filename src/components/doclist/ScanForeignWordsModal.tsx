@@ -62,6 +62,8 @@ export function ScanForeignWordsModal({
   const [generateOnlyForNewWords, setGenerateOnlyForNewWords] = useState(true);
   const [forceUseBackupKey, setForceUseBackupKey] = useState(false);
   const [sortMissingFirst, setSortMissingFirst] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [hideHealthChecks, setHideHealthChecks] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const [scanJobStatus, setScanJobStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>('idle');
   const [scanJobId, setScanJobId] = useState<string | null>(null);
@@ -97,6 +99,7 @@ export function ScanForeignWordsModal({
       setHasScanned(false);
       setOnlyNewPronunciations(false);
       setGenerateOnlyForNewWords(true);
+      setSearchQuery('');
       setPanelWidth(null);
       setScanJobStatus('idle');
       setScanJobId(null);
@@ -128,6 +131,7 @@ export function ScanForeignWordsModal({
       setHasScanned(false);
       setOnlyNewPronunciations(false);
       setGenerateOnlyForNewWords(true);
+      setSearchQuery('');
       setPanelWidth(null);
       setScanJobStatus('idle');
       setScanJobId(null);
@@ -269,7 +273,7 @@ export function ScanForeignWordsModal({
     }
   };
 
-  const saveDefinition = async (term: string) => {
+  const saveDefinition = async (term: string, overrideValue?: string) => {
     if (!activeDocId) return;
     try {
       const response = await fetch('/api/documents/scan-foreign-words/definitions', {
@@ -278,7 +282,7 @@ export function ScanForeignWordsModal({
         body: JSON.stringify({
           documentId: activeDocId,
           term,
-          definition: definitionEditValue.trim() || null,
+          definition: (overrideValue !== undefined ? overrideValue : definitionEditValue.trim()) || null,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -818,6 +822,14 @@ export function ScanForeignWordsModal({
                       />
                       New global choices only
                     </label>
+                    <label className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={hideHealthChecks}
+                        onChange={(event) => setHideHealthChecks(event.target.checked)}
+                      />
+                      Hide health checks
+                    </label>
                     <label className="flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 font-semibold whitespace-nowrap" title="Pin words missing Gemini pronunciations or needing review to the top of the table.">
                       <input
                         type="checkbox"
@@ -833,8 +845,9 @@ export function ScanForeignWordsModal({
             </div>
           )}
 
-          <div className="rounded-lg border border-accent-line bg-accent-wash p-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+          {!hideHealthChecks && (
+            <div className="rounded-lg border border-accent-line bg-accent-wash p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h4 className="text-sm font-semibold text-foreground">Saved pronunciation health check</h4>
                 <p className="mt-0.5 text-xs text-soft">
@@ -892,9 +905,11 @@ export function ScanForeignWordsModal({
                 )}
               </div>
             )}
+            )}
           </div>
+          )}
 
-          {activeDocId && (
+          {!hideHealthChecks && activeDocId && (
             <div className="rounded-lg border border-line bg-surface p-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -946,6 +961,17 @@ export function ScanForeignWordsModal({
           )}
         </div>
         <div className="p-4 overflow-y-auto flex-1">
+          {hasScanned && (
+            <div className="mb-4">
+              <input
+                type="text"
+                placeholder="Search words..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full max-w-sm px-3 py-1.5 text-sm border rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-700 focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+          )}
           {!activeDocId ? (
             <div className="space-y-4">
               <p className="text-sm text-gray-600 dark:text-gray-400">Choose a PDF from your library to scan for foreign words:</p>
@@ -1014,7 +1040,9 @@ export function ScanForeignWordsModal({
                       return b.count - a.count;
                     })
                   : words
-                ).map((w, i) => {
+                )
+                  .filter((w) => !searchQuery || w.word.toLowerCase().includes(searchQuery.toLowerCase()))
+                  .map((w, i) => {
                   const isMissing = (!w.pronunciations || w.pronunciations.length === 0) && !w.userOverride;
                   return (
                   <tr key={i} className={`transition-colors ${isMissing ? 'bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-100/60 dark:hover:bg-amber-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}>
@@ -1202,6 +1230,13 @@ export function ScanForeignWordsModal({
                             >
                               Cancel
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => void saveDefinition(w.word, '')}
+                              className="rounded bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-300 ml-auto"
+                            >
+                              Null
+                            </button>
                           </div>
                         </div>
                       ) : w.definition ? (
@@ -1280,6 +1315,13 @@ export function ScanForeignWordsModal({
                               onClick={() => setEditingWord(null)}
                             >
                               Cancel
+                            </button>
+                            <button
+                              type="button"
+                              className="px-2.5 py-1 text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 rounded hover:bg-red-200 ml-auto"
+                              onClick={() => handleSaveOverride(w.word, '[OMIT]')}
+                            >
+                              Null
                             </button>
                           </div>
                         </div>
