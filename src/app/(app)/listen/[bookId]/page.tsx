@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, use, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { HTMLViewer } from "@/components/views/HTMLViewer";
 import { parseHtmlBlocks } from "@/lib/client/html/blocks";
+import { BookPronunciationInspectorModal } from "@/components/doclist/BookPronunciationInspectorModal";
 
 interface Chapter {
   index: number;
@@ -24,6 +25,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [chapterText, setChapterText] = useState("");
   const [isTextLoading, setIsTextLoading] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isPronunciationModalOpen, setIsPronunciationModalOpen] = useState(false);
 
   const blocks = useMemo(() => {
     if (!chapterText) return [];
@@ -192,13 +194,22 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         <div className="w-full md:w-1/3 flex flex-col bg-surface-raised border-l border-line-soft">
           <div className="p-4 border-b border-line-soft flex justify-between items-center bg-surface">
             <h2 className="font-semibold text-text-strong">Edit Text</h2>
-            <button 
-              onClick={handleRegenerate} 
-              disabled={isRegenerating || isTextLoading}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded text-sm font-medium disabled:opacity-50"
-            >
-              {isRegenerating ? "Rebuilding..." : "Save to Audiobook"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsPronunciationModalOpen(true)}
+                className="bg-surface-raised border border-line-soft hover:bg-surface-sunken text-text-strong px-3 py-1.5 rounded text-sm font-medium"
+                title="Open Global Dictionary Lookup"
+              >
+                Dictionary 🔍
+              </button>
+              <button 
+                onClick={handleRegenerate} 
+                disabled={isRegenerating || isTextLoading}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded text-sm font-medium disabled:opacity-50"
+              >
+                {isRegenerating ? "Rebuilding..." : "Save to Audiobook"}
+              </button>
+            </div>
           </div>
           <div className="flex-1 p-4 overflow-hidden relative">
             <textarea
@@ -228,6 +239,12 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           <div className="text-text-soft text-sm py-3">Loading audio...</div>
         )}
       </div>
+      
+      <BookPronunciationInspectorModal
+        isOpen={isPronunciationModalOpen}
+        onClose={() => setIsPronunciationModalOpen(false)}
+        initialBookId="" // Use global by default
+      />
     </div>
   );
 }

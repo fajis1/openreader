@@ -16,6 +16,7 @@ export function BookPronunciationInspectorModal({
   const [selectedBookId, setSelectedBookId] = useState<string>(initialBookId || '');
   const [letterFilter, setLetterFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [useFuzzySearch, setUseFuzzySearch] = useState<boolean>(false);
   
   const [audiobooks, setAudiobooks] = useState<any[]>([]);
   const [words, setWords] = useState<any[]>([]);
@@ -152,7 +153,36 @@ export function BookPronunciationInspectorModal({
 
   if (!isOpen) return null;
 
-  const filteredWords = words.filter(w => w.word.toLowerCase().includes(searchQuery.toLowerCase()));
+  const isSimilar = (a: string, b: string) => {
+    if (!a || !b) return false;
+    const aa = a.toLowerCase();
+    const bb = b.toLowerCase();
+    if (aa === bb) return true;
+    if (aa.length > 3 && bb.includes(aa)) return true;
+    if (bb.length > 3 && aa.includes(bb)) return true;
+    if (aa.length < 4 || Math.abs(aa.length - bb.length) > 2) return false;
+    
+    const track = Array(bb.length + 1).fill(null).map(() => Array(aa.length + 1).fill(null));
+    for (let i = 0; i <= aa.length; i += 1) track[0][i] = i;
+    for (let j = 0; j <= bb.length; j += 1) track[j][0] = j;
+    for (let j = 1; j <= bb.length; j += 1) {
+      for (let i = 1; i <= aa.length; i += 1) {
+        const indicator = aa[i - 1] === bb[j - 1] ? 0 : 1;
+        track[j][i] = Math.min(
+          track[j][i - 1] + 1,
+          track[j - 1][i] + 1,
+          track[j - 1][i - 1] + indicator
+        );
+      }
+    }
+    return track[bb.length][aa.length] <= 2;
+  };
+
+  const filteredWords = words.filter(w => {
+    if (!searchQuery) return true;
+    if (useFuzzySearch) return isSimilar(w.word, searchQuery);
+    return w.word.toLowerCase().includes(searchQuery.toLowerCase());
+  });
 
   return (
     <ModalFrame open={isOpen} onClose={onClose}>
@@ -177,6 +207,15 @@ export function BookPronunciationInspectorModal({
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
           />
+          <label className="flex items-center gap-2 cursor-pointer text-sm font-medium">
+            <input 
+              type="checkbox"
+              checked={useFuzzySearch}
+              onChange={e => setUseFuzzySearch(e.target.checked)}
+              className="rounded text-blue-600 focus:ring-blue-500 bg-gray-50 border-gray-300"
+            />
+            Fuzzy Match (find similar)
+          </label>
         </div>
 
         <div className="flex flex-wrap gap-1 mb-4">
