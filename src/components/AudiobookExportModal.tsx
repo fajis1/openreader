@@ -68,6 +68,7 @@ export function AudiobookExportModal({
   const [nativeSpeed, setNativeSpeed] = useState<number>(voiceSpeed);
   const [postSpeed, setPostSpeed] = useState<number>(audioPlayerSpeed);
   const [useSmartAudio, setUseSmartAudio] = useState<boolean>(false);
+  const [useScholarDefinitions, setUseScholarDefinitions] = useState<boolean>(true);
   const [smartAudioProfiles, setSmartAudioProfiles] = useState<SmartAudioProfile[]>([]);
   const [selectedSmartAudioProfileId, setSelectedSmartAudioProfileId] = useState<string>(smartAudioProfileId || '');
   const [savedSettings, setSavedSettings] = useState<AudiobookGenerationSettings | null>(null);
@@ -177,13 +178,14 @@ export function AudiobookExportModal({
       format,
       useSmartAudio,
       smartAudioProfileId: selectedSmartAudioProfileId || smartAudioProfileId || undefined,
+      scholarIncludeDefinitions: useScholarDefinitions,
       ttsInstructions: providerModelPolicy.supportsInstructions ? ttsInstructions : undefined,
       language: resolveTtsLanguage({
         configuredLanguage: documentLanguage,
         voice: nextVoice,
       }),
     };
-  }, [savedSettings, audiobookVoice, configVoice, availableVoices, providerRef, providerType, ttsModel, ttsInstructions, effectiveNativeSpeed, postSpeed, format, providerModelPolicy.supportsInstructions, documentLanguage, useSmartAudio, selectedSmartAudioProfileId, smartAudioProfileId]);
+  }, [savedSettings, audiobookVoice, configVoice, availableVoices, providerRef, providerType, ttsModel, ttsInstructions, effectiveNativeSpeed, postSpeed, format, providerModelPolicy.supportsInstructions, documentLanguage, useSmartAudio, useScholarDefinitions, selectedSmartAudioProfileId, smartAudioProfileId]);
   const languageWarnings = useMemo(() => getTtsLanguageCompatibilityWarnings({
     model: effectiveSettings?.ttsModel,
     voice: effectiveSettings?.voice,
@@ -897,7 +899,31 @@ export function AudiobookExportModal({
                                           </Card>
                                         )}
 
-			                              {/* Action buttons */}
+                                        {/* 📖 Scholar Definitions Toggle — only for scholar-like profiles */}
+                                        {useSmartAudio && (
+                                          selectedSmartAudioProfile?.workerMode === 'scholar' ||
+                                          selectedSmartAudioProfile?.workerMode === 'bibliography-catcher'
+                                        ) && (
+                                          <div className="rounded-lg border border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/40 p-3">
+                                            <label className="flex items-center justify-between cursor-pointer">
+                                              <div className="space-y-0.5 pr-4">
+                                                <span className="text-sm font-medium text-blue-900 dark:text-blue-100">Inject English Definitions</span>
+                                                <p className="text-xs text-blue-700 dark:text-blue-300">When enabled, cached contextual English definitions are inserted inline next to foreign-language terms before the Gemini cleanup pass. Disable to get IPA pronunciation markup only.</p>
+                                              </div>
+                                              <div className="relative inline-flex items-center shrink-0">
+                                                <input
+                                                  type="checkbox"
+                                                  className="peer sr-only"
+                                                  checked={useScholarDefinitions}
+                                                  onChange={(e) => setUseScholarDefinitions(e.target.checked)}
+                                                  disabled={settingsLocked}
+                                                />
+                                                <div className="h-6 w-11 rounded-full bg-blue-200 dark:bg-blue-900 border border-blue-300 dark:border-blue-700 peer-checked:bg-red-500 peer-checked:border-red-500 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-full peer-disabled:opacity-50"></div>
+                                              </div>
+                                            </label>
+                                          </div>
+                                        )}
+
 			                              <div className="mt-4 flex items-center gap-2">
 			                                {chapters.length === 0 && (
 			                                  <Button

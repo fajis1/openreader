@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
           : profiles.selectedProfileId,
       );
       resolvedSmartAudioProfileId = profile?.id || null;
-      if (profile?.workerMode === 'scholar') {
+      if (profile?.workerMode === 'scholar' || profile?.workerMode === 'bibliography-catcher') {
         const lexicon = await readBookLexicon(userId, documentId);
         const hasCompletedDefinitionScan = lexicon?.status === 'complete'
           && lexicon.definitionScanComplete === true

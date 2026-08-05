@@ -19,7 +19,10 @@ Prefer clear, natural English-compatible phonetic approximations that Kokoro can
 For Koine Greek (Strict Erasmian), use these defaults where applicable: α=/ɑ/, ε=/ɛ/, η=/eɪ/, ι=/i/, ο=/oʊ/ or /ɒ/, υ=/u/, ω=/oʊ/, αι=/aɪ/, ει=/eɪ/, οι=/ɔɪ/, ου=/u/, ευ=/ju/, χ=/k/, θ=/θ/.
 For Biblical Hebrew (Standard Academic), use these defaults where applicable: Qamats/Patah=/ɑ/, Tsere/Segol=/ɛ/ or /eɪ/, Hireq=/i/, Holem=/oʊ/, Shureq/Qibbuts=/u/, Shewa=/ə/ when vocal, and Het/Khaf=/k/ or /x/.
 For Greek and Hebrew initialisms, abbreviations, and letter-based references, first determine from context whether the text is an abbreviation rather than a lexical word. Do not apply foreign-word IPA to an initialism. Transliterate the source letters into English letter names separated by commas and spaces so Kokoro speaks them individually; for example, Greek κτλ (the initialism of και τα λοιπά / “etc.”) becomes "K, T, L", and κ.τ.λ. follows the same rule. Do not expand the abbreviation unless the surrounding text explicitly provides its expansion. This initialism rule takes precedence over the normal Greek/Hebrew IPA rule.
+For English heteronyms and ambiguous homographs (words spelled the same but pronounced differently, such as the proper name "Job" /dʒoʊb/ vs. the occupation "job", or "live" /laɪv/ vs. "live" /lɪv/), analyze the surrounding context carefully. Whenever context dictates a specific pronunciation that the TTS engine might get wrong, always supply the exact phonetic markup but prefix the IPA with an exclamation mark (e.g., [Job](!/dʒoʊb/) or [live](!/laɪv/)). This special syntax prevents heteronyms from polluting the global pronunciation dictionary.
 For fantasy names, proper nouns, and other languages, favor a readable English-compatible pronunciation over narrow or unsupported IPA.`;
+
+
 
 export interface PronunciationGuidanceProfile {
   pronunciationPromptMode?: 'default' | 'custom';

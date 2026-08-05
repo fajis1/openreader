@@ -52,6 +52,12 @@ export interface AudiobookGenerationSettings {
   useSmartAudio?: boolean;
   /** Internal queue acknowledgement that an unresolved Scholar lexicon may be auto-scanned. */
   scholarAutoScan?: boolean;
+  /**
+   * Scholar / bibliography-catcher only. When true, the cached English contextual definitions
+   * are injected inline next to foreign terms before the Gemini cleanup pass.
+   * Defaults to true when absent (preserves existing Scholar behavior).
+   */
+  scholarIncludeDefinitions?: boolean;
   /** Internal chapter-map version. Missing/1 retains legacy 4K resume boundaries; 2 uses 12K cleanup batches. */
   cleanupBatchVersion?: number;
 }
@@ -101,9 +107,10 @@ export interface SmartAudioProfile {
    * single Smart Audio cleanup pass.
    * 'standard' → pronunciation markup only
    * 'scholar'  → pronunciation markup plus the cached contextual definition
+   * 'bibliography-catcher' → provides structural layout tags to Gemini for better end-matter pruning
    * Defaults to 'standard' when absent.
    */
-  workerMode?: 'standard' | 'scholar';
+  workerMode?: 'standard' | 'scholar' | 'bibliography-catcher';
 }
 
 

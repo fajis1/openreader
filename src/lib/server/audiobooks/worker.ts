@@ -17,6 +17,7 @@ import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
 import { encodeChapterFileName } from '@/lib/server/audiobooks/chapters';
 import { createOrReuseCurrentPdfParseOperation } from '@/lib/server/pdf-parse/operation';
+import { extractPdfToc, computeTocBoundaries } from '@/lib/server/pdf-parse/toc';
 import JSZip from 'jszip';
 import type { ParsedPdfDocument } from '@/types/parsed-pdf';
 import { serverLogger } from '@/lib/server/logger';
@@ -55,6 +56,13 @@ import {
 import { mergeGlobalDefinitions, readGlobalDefinitions } from '@/lib/server/smart-audio/global-definition-library';
 
 const SMART_AUDIO_NATS_SUBJECT = 'audiobooks.gemini.clean';
+// Scholar and bibliography-catcher both use the scholar Python worker,
+// which produces changelogs, chapter titles, and inline definitions.
+const SCHOLAR_NATS_SUBJECT = 'audiobooks.scholar.clean';
+
+function isScholarLikeMode(mode: string | undefined): boolean {
+  return mode === 'scholar' || mode === 'bibliography-catcher';
+}
 
 async function recordLearnedGlobalPronunciations(
   learned: Record<string, string>,
@@ -296,6 +304,19 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     let chapters: { index: number; title: string; text: string }[] = [];
     let tocSectionsSkipped = 0;
 
+    const useSmartAudio = Boolean(jobSettings.useSmartAudio);
+    const profilesDocument = useSmartAudio
+      ? await readSmartAudioProfilesDocument(userId)
+      : null;
+    let selectedProfile = profilesDocument
+      ? findSmartAudioProfileById(profilesDocument, String(jobSettings.smartAudioProfileId || ''))
+      : null;
+    const isBibliographyCatcher = selectedProfile?.workerMode === 'bibliography-catcher';
+    // Scholar and bibliography-catcher both get layout engine structural tags so
+    // Gemini can understand PDF structure. Previously only bib-catcher had this.
+    const useLayoutTags = isScholarLikeMode(selectedProfile?.workerMode);
+
+
     if (doc.type === 'pdf') {
       let artifact = await readCurrentParsedPdfArtifact({ documentId: doc.id, namespace: testNamespace });
       if (!artifact) {
@@ -326,10 +347,60 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       }
       const parsedPdf = JSON.parse(artifact.bytes.toString('utf-8')) as ParsedPdfDocument;
       
-      const pdfBlocks = parsedPdf.pages.flatMap((page) => page.blocks.map((block) => ({
-        ...block,
-        pageNumber: page.pageNumber,
-      })));
+      const buffer = await getDocumentBlob(doc.id, testNamespace);
+      const toc = await extractPdfToc(buffer);
+      let boundaries = computeTocBoundaries(toc, doc.pages || 9999);
+      
+      // FALLBACK MULTIVALENT SYSTEM: If digital TOC is missing, scan the vision-engine text!
+      if (toc.length === 0 && parsedPdf && parsedPdf.pages) {
+        console.log('\n[FALLBACK SCANNER] Digital TOC missing. Scanning vision engine text for boundaries...');
+        
+        // --- 1. Find Start Matter (scan first 30% forwards) ---
+        const startLimit = Math.floor(parsedPdf.pages.length * 0.3);
+        const frontMatterRegex = /^(introduction|chapter 1\b|part 1\b|foreword|preface|prologue)/i;
+        for (let i = 0; i <= startLimit; i++) {
+          const page = parsedPdf.pages[i];
+          const hasStartMatterTitle = page.blocks.some(b => 
+            (b.kind === 'paragraph_title' || b.kind === 'doc_title') && 
+            b.text.trim().length < 50 &&
+            frontMatterRegex.test(b.text.trim())
+          );
+          if (hasStartMatterTitle) {
+            boundaries.startPage = page.pageNumber;
+            console.log(`[FALLBACK SCANNER] Found Start Matter (Introduction/Chapter 1)! Setting start page to ${boundaries.startPage}`);
+            break;
+          }
+        }
+
+        // --- 2. Find End Matter (scan last 30% backwards) ---
+        let fallbackEndPage = boundaries.endPage;
+        const endMatterRegex = /^(bibliography|index|indexes|works cited|notes|appendix)/i;
+        const endLimit = Math.floor(parsedPdf.pages.length * 0.7);
+        for (let i = parsedPdf.pages.length - 1; i >= endLimit; i--) {
+          const page = parsedPdf.pages[i];
+          const hasEndMatterTitle = page.blocks.some(b => 
+            (b.kind === 'paragraph_title' || b.kind === 'doc_title') && 
+            b.text.trim().length < 50 &&
+            endMatterRegex.test(b.text.trim())
+          );
+          if (hasEndMatterTitle) {
+            fallbackEndPage = page.pageNumber - 1;
+          }
+        }
+        if (fallbackEndPage < boundaries.endPage) {
+          boundaries.endPage = fallbackEndPage;
+          console.log(`[FALLBACK SCANNER] Found End Matter! Setting end page to ${boundaries.endPage}`);
+        }
+      }
+
+      serverLogger.info({ event: 'audiobook.toc.boundaries', startPage: boundaries.startPage, endPage: boundaries.endPage }, 'Computed TOC boundaries for PDF');
+      console.log(`\n==========================================\n  TOC BOUNDARY CALCULATED\n  Start Page (Gemini hint before this): ${boundaries.startPage}\n  End Page (Gemini hint after this): ${boundaries.endPage}\n==========================================\n`);
+
+      const pdfBlocks = parsedPdf.pages
+        .flatMap((page) => page.blocks.map((block) => ({
+          ...block,
+          pageNumber: page.pageNumber,
+        })));
       const tocFiltered = usesCurrentBatching
         ? removePdfTableOfContents(pdfBlocks, parsedPdf.pages.length)
         : { blocks: pdfBlocks, skipped: false };
@@ -349,9 +420,14 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       let currentLength = 0;
       let lastBlockWasTitle = false;
       
+      let isInEndMatter = false;
+      
       const flush = () => {
-        const text = currentText.join('\n\n').trim();
+        let text = currentText.join('\n\n').trim();
         if (text) {
+          if (isInEndMatter) {
+             text = `[SYSTEM HINT: The layout engine detected that this section is located in the end-matter (e.g. bibliography, index, or notes) of the book. If this text is not part of the core narrative prose, please silently omit it.]\n\n` + text;
+          }
           chapters.push({ index: chapters.length, title: currentTitle, text });
         }
         currentText = [];
@@ -364,6 +440,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         const blockText = block.text.trim();
         if (!blockText) continue;
 
+        if (block.pageNumber < boundaries.startPage) {
+           continue;
+        }
+        
         if (chapterBoundaryKinds.has(block.kind)) {
           if (
             usesCurrentBatching
@@ -371,16 +451,19 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             blockIndex / Math.max(allBlocks.length, 1) >= 0.7
             && isAudiobookEndMatterHeading(blockText)
           ) {
-            flush();
-            break;
+            isInEndMatter = true;
           }
+          if (block.pageNumber > boundaries.endPage) {
+            isInEndMatter = true;
+          }
+          
           if (currentLength >= cleanupTargetCharacters) {
             flush();
             currentTitle = blockText || `Chapter ${chapters.length + 1}`;
           } else if (currentText.length === 0) {
             currentTitle = blockText || `Chapter ${chapters.length + 1}`;
           }
-          currentText.push(blockText);
+          currentText.push(useLayoutTags ? `\n\n[LAYOUT_ENGINE_TAG: ${block.kind.toUpperCase()}]\n${blockText}` : blockText);
           currentLength += blockText.length + 2;
           lastBlockWasTitle = true;
         } else {
@@ -397,7 +480,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             currentText[lastIndex] += ' ' + blockText;
             currentLength += blockText.length + 1;
           } else {
-            currentText.push(blockText);
+            currentText.push(useLayoutTags ? `\n\n[LAYOUT_ENGINE_TAG: ${block.kind.toUpperCase()}]\n${blockText}` : blockText);
             currentLength += blockText.length + 2;
           }
           lastBlockWasTitle = false;
@@ -445,28 +528,20 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     let processedLength = 0;
     let totalBytes = 0;
     const totalLength = chapters.reduce((sum, c) => sum + c.text.length, 0);
-
-    const useSmartAudio = Boolean(settings.useSmartAudio);
-    const profilesDocument = useSmartAudio
-      ? await readSmartAudioProfilesDocument(userId)
-      : null;
-    let selectedProfile = profilesDocument
-      ? findSmartAudioProfileById(profilesDocument, String(settings.smartAudioProfileId || ''))
-      : null;
     const pronunciationsAtAutoScanStart = {
       ...(selectedProfile?.pronunciations || {}),
     };
     // The global library is always the baseline. Profile pronunciations are
     // applied afterward and therefore act as per-word local overrides.
     const globalPronunciations = await readGlobalPronunciationDefaults();
-    const globalDefinitions = selectedProfile?.workerMode === 'scholar'
+    const globalDefinitions = isScholarLikeMode(selectedProfile?.workerMode)
       ? await readGlobalDefinitions()
       : {};
     let resolvedPronunciations = filterKokoroCompatiblePronunciationRecord({
       ...globalPronunciations,
       ...(selectedProfile?.pronunciations || {}),
     });
-    let bookLexicon = selectedProfile?.workerMode === 'scholar'
+    let bookLexicon = isScholarLikeMode(selectedProfile?.workerMode)
       ? await readBookLexicon(userId, doc.id)
       : null;
     const definitionsBeforeAutoScan = new Map(
@@ -476,7 +551,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     let definitionPassRan = false;
 
     if (
-      selectedProfile?.workerMode === 'scholar'
+      isScholarLikeMode(selectedProfile?.workerMode)
       && (
         bookLexicon?.status !== 'complete'
         || bookLexicon.definitionScanComplete !== true
@@ -585,7 +660,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       jobId: job.id,
       bookId,
       worker_mode: selectedProfile?.workerMode || 'standard',
-      nats_subject: useSmartAudio ? SMART_AUDIO_NATS_SUBJECT : null,
+      nats_subject: useSmartAudio ? (isScholarLikeMode(selectedProfile?.workerMode) ? SCHOLAR_NATS_SUBJECT : SMART_AUDIO_NATS_SUBJECT) : null,
       definition_pass_ran: definitionPassRan,
       definitions_found: Object.values(bookLexicon?.entries || {})
         .filter((entry) => Boolean(entry.definition)).length,
@@ -652,7 +727,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             chapter.text,
             bookLexicon,
             {
-              includeDefinitions: currentSelectedProfile?.workerMode === 'scholar',
+              // scholarIncludeDefinitions defaults to true when absent to preserve existing Scholar behavior
+              includeDefinitions: isScholarLikeMode(currentSelectedProfile?.workerMode)
+                && ((settings as Record<string, unknown>).scholarIncludeDefinitions !== false),
               pronunciationOverrides: currentPronunciations,
             },
           );
@@ -674,7 +751,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             books: currentSelectedProfile?.books || {}
           });
 
-          const msg = await nc.request(SMART_AUDIO_NATS_SUBJECT, sc.encode(payload), { timeout: 120000 });
+          const natsSubject = isScholarLikeMode(currentSelectedProfile?.workerMode)
+            ? SCHOLAR_NATS_SUBJECT
+            : SMART_AUDIO_NATS_SUBJECT;
+          const msg = await nc.request(natsSubject, sc.encode(payload), { timeout: 120000 });
           const workerResult = JSON.parse(sc.decode(msg.data));
 
           if (workerResult.status === "rate_limit") {
@@ -693,6 +773,12 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
           if (workerResult.status === "success" && workerResult.cleaned_text) {
             processedTextForTts = workerResult.cleaned_text;
+            if (workerResult.chapter_title) {
+              chapter.title = workerResult.chapter_title;
+              await db.update(audiobookChapters)
+                .set({ title: workerResult.chapter_title })
+                .where(eq(audiobookChapters.id, chapter.id));
+            }
             serverLogger.info({
               event: 'audiobook.queue.gemini.usage',
               jobId: job.id,
@@ -744,6 +830,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           }
         } catch (e) {
           serverLogger.error({ event: 'audiobook.queue.smart_audio.failed', error: e }, 'Smart audio processing failed. Aborting generation.');
+          require('fs').appendFileSync('/home/cisco/openreader/audiobook_err.txt', String((e as any).stack || e) + '\n');
           if (nc) await nc.close();
           
           const jobSettingsParsed = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
@@ -778,6 +865,18 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           throw new Error('Smart audio processing failed after auto-retry (Python worker unreachable). Job aborted so it can be requeued later.');
         }
       }
+      
+      // ABORT END-MATTER: If Gemini confirmed this was end-matter and omitted it!
+      const cleanedTrimmed = processedTextForTts.trim();
+      if ((!cleanedTrimmed || cleanedTrimmed === '[OMITTED]' || cleanedTrimmed === '[OMIT]') && chapter.text.includes('end-matter (e.g. bibliography')) {
+          serverLogger.info({ event: 'audiobook.queue.smart_audio.end_matter_confirmed', bookId }, 'Gemini confirmed end-matter and omitted it. Halting generation for the rest of the book!');
+          break; // Stop generating the rest of the book!
+      }
+      
+      // If the text is empty but it wasn't end-matter (e.g. just a blank page or copyright), we skip TTS but continue to next chapter
+      if (!cleanedTrimmed || cleanedTrimmed === '[OMITTED]' || cleanedTrimmed === '[OMIT]') {
+          continue;
+      }
 
       const ttsBuffer = await generateSegmentedAudiobookTtsBuffer({
         text: processedTextForTts,
@@ -793,6 +892,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       const contentType = format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';
       totalBytes += ttsBuffer.length;
       await putAudiobookObject(bookId, userId, chapterFileName, ttsBuffer, contentType, testNamespace);
+      
+      // Save the cleaned text so the user can review and edit it later in the new listen UI
+      const textFileName = `${String(chapter.index + 1).padStart(4, '0')}__text.txt`;
+      await putAudiobookObject(bookId, userId, textFileName, Buffer.from(processedTextForTts, 'utf8'), 'text/plain; charset=utf-8', testNamespace).catch(() => {});
 
       let duration = 0;
       try {

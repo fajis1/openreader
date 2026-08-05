@@ -94,7 +94,9 @@ async def process_message(msg):
         dict_string = json.dumps(pronunciations, indent=2, ensure_ascii=False)
         dynamic_constraints = f"CRITICAL CONTINUITY RULE: Use these exact phonetic spellings:\n{dict_string}\n\n"
         
-        full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\nText to clean:\n{pre_cleaned_text}"
+        title_instruction = "CHAPTER TITLE GENERATION: At the very end of your response, after the cleaned text, you MUST add exactly one blank line and then output a 3 to 5 word descriptive title summarizing the text wrapped in tags like this: [CHAPTER_TITLE: Three Word Summary]. Do not include the chapter number or 'continued', just a descriptive title.\n\n"
+        
+        full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\n{title_instruction}Text to clean:\n{pre_cleaned_text}"
         final_text = ""
         
         api_state = API_STATES.setdefault(api_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})
@@ -167,10 +169,19 @@ async def process_message(msg):
                     # If it's a different error, throw it down to the main exception handler
                     raise e
         # --- END OF RATE LIMITER ---
-        # PHASE 3: Option B - Two-Way Sync Extraction
+        # PHASE 3: Option B - Two-Way Sync Extraction & Title
+        title_match = re.search(r'\[CHAPTER_TITLE:\s*(.*?)\]', final_text)
+        chapter_title = ""
+        if title_match:
+            chapter_title = title_match.group(1).strip()
+            final_text = final_text[:title_match.start()].strip()
+
         learned_words = extract_learned_words(final_text, pronunciations)
         if learned_words:
             print(f"  -> [LEARNED] Discovered {len(learned_words)} new phonetic overrides!")
+
+        # Strip out the bypass exclamation mark from heteronym tags so TTS gets valid markup
+        final_text = re.sub(r'\[([^\]]+)\]\(!(/[^/]+/)\)', r'[\1](\2)', final_text)
 
         # PHASE 4: Changelog Generation
         import difflib
@@ -189,6 +200,7 @@ async def process_message(msg):
             "cleaned_text": final_text,
             "new_pronunciations": learned_words,
             "changelog": changelog,
+            "chapter_title": chapter_title,
             "usage": extract_gemini_usage(response),
         }
         

@@ -79,6 +79,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
 
   // ── Smart AI ─────────────────────────────────────────────────────────────
   const [useSmartAudio, setUseSmartAudio] = useState(false);
+  const [useScholarDefinitions, setUseScholarDefinitions] = useState(true);
   const [smartAudioProfiles, setSmartAudioProfiles] = useState<SmartAudioProfile[]>([]);
   const [selectedSmartAudioProfileId, setSelectedSmartAudioProfileId] = useState(smartAudioProfileId || '');
   const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
@@ -150,6 +151,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
         postSpeed: audioPlayerSpeed || 1,
         useSmartAudio,
         smartAudioProfileId: useSmartAudio ? selectedSmartAudioProfileId : undefined,
+        scholarIncludeDefinitions: useScholarDefinitions,
       };
 
       if (!confirmScholarAutoScan) {
@@ -339,6 +341,32 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
               )}
             </div>
           </Card>
+        )}
+
+        {/* 📖 Scholar Definitions Toggle — only for scholar-like profiles */}
+        {useSmartAudio && (
+          selectedSmartAudioProfile?.workerMode === 'scholar' ||
+          selectedSmartAudioProfile?.workerMode === 'bibliography-catcher'
+        ) && (
+          <div className="rounded-lg border border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/40 p-3">
+            <label className="flex items-center justify-between cursor-pointer">
+              <div className="space-y-0.5 pr-4">
+                <span className="text-sm font-medium text-blue-900 dark:text-blue-100">Inject English Definitions</span>
+                <p className="text-xs text-blue-700 dark:text-blue-300">
+                  Insert cached contextual English definitions inline next to isolated foreign-language terms before the Gemini cleanup pass. Disable to get IPA pronunciation markup only.
+                </p>
+              </div>
+              <div className="relative inline-flex items-center shrink-0">
+                <input
+                  type="checkbox"
+                  className="peer sr-only"
+                  checked={useScholarDefinitions}
+                  onChange={(e) => setUseScholarDefinitions(e.target.checked)}
+                />
+                <div className="h-6 w-11 rounded-full bg-blue-200 dark:bg-blue-900 border border-blue-300 dark:border-blue-700 peer-checked:bg-red-500 peer-checked:border-red-500 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-full" />
+              </div>
+            </label>
+          </div>
         )}
 
         {/* Selected documents preview */}

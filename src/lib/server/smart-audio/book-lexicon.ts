@@ -22,6 +22,7 @@ import {
   normalizeDictionaryDefinition,
   shouldOmitDictionaryDefinition,
 } from '@/lib/shared/dictionary-definition-policy';
+import { serverLogger } from '@/lib/server/logger';
 
 const FOREIGN_WORD = /[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff][\u0300-\u036f\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]*/gu;
 const FOREIGN_WORD_BEFORE = /[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff][\u0300-\u036f\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]*\s+$/u;
@@ -349,11 +350,11 @@ ${JSON.stringify(batch)}`;
     );
   });
   if (incomplete.length > 0) {
-    throw new Error(
+    serverLogger.warn(
       `Gemini did not resolve pronunciation and definition defaults for: ${incomplete
         .slice(0, 10)
         .map((candidate) => candidate.term)
-        .join(', ')}${incomplete.length > 10 ? '…' : ''}.`,
+        .join(', ')}${incomplete.length > 10 ? '…' : ''}. Proceeding with resolved entries.`
     );
   }
 

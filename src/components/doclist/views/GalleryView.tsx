@@ -306,6 +306,15 @@ export function GalleryView({
                     Pre-Scan Foreign Words
                   </Button>
                 )}
+                {activeHasAudiobook && (
+                  <ButtonLink
+                    href={`/listen/${encodeURIComponent(activeDoc.id)}`}
+                    variant="secondary"
+                    size="sm"
+                  >
+                    Audiobook Review
+                  </ButtonLink>
+                )}
                 <Button
                   type="button"
                   onClick={() => onDeleteDoc(activeDoc)}

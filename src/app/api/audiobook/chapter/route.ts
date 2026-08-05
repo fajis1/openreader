@@ -964,6 +964,17 @@ export async function POST(request: NextRequest) {
     const finalChapterBytes = await readFile(chapterOutputTempPath);
     await putAudiobookObject(bookId, storageUserId, finalChapterName, finalChapterBytes, chapterFileMimeType(format), testNamespace);
 
+    // Save the edited text so it persists in the Review UI
+    const textFileName = `${String(chapterIndex + 1).padStart(4, '0')}__text.txt`;
+    await putAudiobookObject(
+      bookId,
+      storageUserId,
+      textFileName,
+      Buffer.from(processedTextForTts || data.text, 'utf8'),
+      'text/plain; charset=utf-8',
+      testNamespace
+    );
+
     const chapterPrefix = `${String(chapterIndex + 1).padStart(4, '0')}__`;
     for (const fileName of objectNames) {
       if (!fileName.startsWith(chapterPrefix)) continue;

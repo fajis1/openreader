@@ -11,6 +11,49 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-05 — Dev Server Stability, Heteronym Bypass, and Chapter Title Fixes
+
+- **Dev Server Stability:**
+  - **Problem:** Node.js routinely OOM crashed during heavy `audiobooks` batch processes, leaving orphaned `next-server` processes that blocked Port 3003 (causing `EADDRINUSE` upon manual restart).
+  - **Fix:** Increased Node max heap to 8GB (`NODE_OPTIONS=--max-old-space-size=8192`) in `package.json` dev scripts. Added a crash-recovery loop to `scripts/openreader-entrypoint.mjs` to auto-restart the main app if it crashes unexpectedly.
+- **Heteronym & Homograph TTS Rule:**
+  - **Problem:** Global pronunciation dictionary was indiscriminately learning and misapplying heteronyms (e.g., forcing the biblical "Job" /dʒoʊb/ pronunciation on the occupation "job" everywhere).
+  - **Fix:** Added a new rule to `src/lib/shared/kokoro-pronunciation-policy.ts` instructing Gemini to output heteronyms using a stealth syntax: `[Word](!/IPA/)`. The global dictionary scraper ignores the `(!/IPA/)` pattern. `audiobook_worker.py` and `biblical_scholar_worker.py` then use regex to strip out the `!` exclamation mark right before sending the text back to Node.js, ensuring Kokoro TTS receives valid markup without polluting the global dictionary.
+- **Chapter Titles:**
+  - **Problem:** AI chapter titles were not generating for standard audiobooks, and when they did generate for scholar, they were never saved to the database (and therefore not embedded in the `.m4b` metadata).
+  - **Fix:** Appended the `[CHAPTER_TITLE: ...]` generation and extraction logic to `audiobook_worker.py`. Added a `db.update(audiobookChapters)` call to `src/lib/server/audiobooks/worker.ts` so the title is permanently saved, ensuring it automatically passes through to the FFMpeg `FFMETADATA` file.
+
+### 2026-08-05 — bibliography-catcher mode now equals scholar feature set
+
+- **Problem:** `bibliography-catcher` workerMode routed to `audiobook_worker.py` on `audiobooks.gemini.clean`, giving it only standard-mode features (no definitions, no changelog, no chapter titles).
+- **Fix in [`src/lib/server/audiobooks/worker.ts`](src/lib/server/audiobooks/worker.ts):**
+  - Added `SCHOLAR_NATS_SUBJECT = 'audiobooks.scholar.clean'` constant.
+  - Added `isScholarLikeMode(mode)` helper that returns true for both `'scholar'` and `'bibliography-catcher'`.
+  - All `workerMode === 'scholar'` guards expanded to `isScholarLikeMode(...)`: global definitions loading, book lexicon loading, auto-scan gate, and `includeDefinitions` flag.
+  - NATS request now routes to `SCHOLAR_NATS_SUBJECT` when `isScholarLikeMode` is true, so bibliography-catcher hits `biblical_scholar_worker.py` which already generates changelog diffs and chapter titles.
+  - Log line updated to reflect the correct NATS subject per mode.
+- **Net result:** bibliography-catcher now requires a book pre-scan, inserts English definitions, produces a changelog diff, and generates chapter titles — identical to scholar mode, plus its existing layout-engine structural tags.
+- **Follow-up:** Server restart required for `worker.ts` changes to take effect (Next.js hot-reload applies only to UI code in dev mode; the background queue worker process must be restarted).
+
+### 2026-08-05 — Fixed Kokoro IPA phonetic tag stripping bug
+
+- **Root cause found and fixed:** `preprocessSentenceForAudio` in [`src/lib/shared/audio-text.ts`](src/lib/shared/audio-text.ts) had a regex `.replace(/\[([^\]]+)\]\(\/([^\/]+)\/\)/g, '$2')` that was intended to extract IPA for Kokoro but instead stripped the full `[Word](/IPA/)` tag and sent only the raw IPA characters (e.g., `hyioʊθɛsiɑ`) to the TTS engine. Kokoro read each character as an individual letter instead of using its phoneme parser.
+- **Fix:** Removed the stripping regex. Kokoro's server-side normalizer natively parses the `[Word](/IPA/)` markdown tag format. The full tag is now passed through untouched.
+- **Cache purge:** Deleted 10 stale `tts_segment_entries` from `docstore/sqlite3.db` (segments keyed by the old stripped-IPA text). Fresh audio with correct phoneme pronunciation will be generated on next playback.
+- **Verified:** `audio-text.ts` change does not affect highlight-char-map (which imports individual pattern constants, not the stripping regex). The `normalizeMappedChars` position-preserving path is unaffected.
+- **Also implemented:** Chapter title generation via Gemini — `biblical_scholar_worker.py` now appends a `[CHAPTER_TITLE: N-word summary]` tag after the cleaned text; `worker.ts` parses `workerResult.chapter_title` and assigns it to `chapter.title` before DB insert. Requires server restart to take effect.
+- **Follow-up:** A server restart is needed to pick up both `audio-text.ts` (frontend/server build) and `biblical_scholar_worker.py` changes.
+
+### 2026-08-04 — Added Review Audiobook button and fixed listen page infinite loop
+
+- Fixed an infinite rendering loop in the `ListenPage` component caused by `setTTSText` in a `useEffect` dependency array; playback toggles no longer trigger a re-render crash.
+- Fixed a bug in `TTSContext` where it failed to read the `bookId` URL parameter, previously causing it to block playback on the `/listen/[bookId]` route.
+- Cleaned up orphaned Next.js and Python worker background processes after a development server crash, restoring embedded `SeaweedFS` storage connectivity.
+- Added a "Review Audiobook" button next to "Pre-Scan Foreign Words" in the `DocumentList` action bar for quick navigation.
+- Fixed layout alignment and date/icon overlap in `ListView.tsx` by dynamically sizing the actions column using `min-content`.
+- Verified user testing of the dev server UI.
+- Follow-up: none.
+
 ### 2026-08-03 — Routed mixed-script OCR fragments through Gemini review
 
 - Python now retains raw evidence when a Greek/Hebrew regex match is embedded in a mixed Latin/bracketed OCR token (for example, `vio[θεσ]iα`) instead of silently discarding that context.
@@ -518,6 +561,21 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 - Documented the external-worker setup, PVE/LXC constraints, P100 lack of MIG isolation, shared S3/NATS requirements, CUDA/CPU fallback, VRAM release, and the requirement that unrelated services such as Surya cooperate with the same lease.
 - Verified all 34 compute tests, both compute TypeScript projects, the production Next.js build, and `git diff --check`. Docker/GPU image execution could not be tested locally because this workspace has no Docker daemon or NVIDIA device; GitHub Actions will build the new image after push.
 - Follow-up: deploy the CUDA worker in the GPU LXC, verify `/health/ready`, confirm `nvidia-smi` shows PP-DocLayout inference, and configure the same host-backed lease contract in every GPU service that must be serialized.
+
+### 2026-08-04 — Layout Engine Hints for Bibliography Catcher Profile
+
+- Exposed PDF layout block kinds (e.g., `reference`, `table`) directly to the Gemini TTS text generation process.
+- Created a new Smart Audio profile worker mode, `bibliography-catcher`, which injects structural tags like `[LAYOUT_ENGINE_TAG: REFERENCE]` directly into the text chunk.
+- Added a new default Smart Audio profile named "Bibliography Catcher (Test)" with instructions instructing Gemini to ruthlessly delete any end-matter blocks flagged with these layout tags.
+- Verified build and TypeScript compatibility.
+
+### 2026-08-04 (Part 2) — Table of Contents Page Cutoff via pdfjs-dist
+
+- Implemented deterministic PDF page cutoffs by parsing the embedded digital Table of Contents (Outline) directly from the raw PDF using `pdfjs-dist`.
+- Added `src/lib/server/pdf-parse/toc.ts` to identify the start page of Chapter 1 and the exact start page of end matter (Bibliography, Index, Works Cited).
+- Integrated this TOC filter directly into `src/lib/server/audiobooks/worker.ts`. Any PDF pages before the first chapter, or after the end matter, are now entirely dropped before the smart audiobook process even sees them.
+- Wrote and executed a script (`fix_profiles.ts`) to forcibly push the "Bibliography Catcher (Test)" profile into the user's database state to ensure they could see it in the UI.
+- Next Agent: The user is currently testing the 18 MB "adoption as sons" PDF against this new logic locally. If they need further refinements, check how `computeTocBoundaries` matches the section titles.
 
 <!-- Add newest entries above this line. -->
 

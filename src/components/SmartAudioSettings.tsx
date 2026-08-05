@@ -94,7 +94,7 @@ export function SmartAudioSettings() {
   const [backupApiKey, setBackupApiKey] = useState('');
   const [maskedBackupKey, setMaskedBackupKey] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<SmartAudioProfile[]>([]);
-  const [workerMode, setWorkerMode] = useState<'standard' | 'scholar'>('standard');
+  const [workerMode, setWorkerMode] = useState<'standard' | 'scholar' | 'bibliography-catcher'>('standard');
   const [useGlobalPronunciations, setUseGlobalPronunciations] = useState<boolean>(true);
   const [pronunciationPromptMode, setPronunciationPromptMode] = useState<'default' | 'custom'>('default');
   const [customPronunciationPrompt, setCustomPronunciationPrompt] = useState('');
@@ -119,7 +119,10 @@ export function SmartAudioSettings() {
   const [isGlobalModalOpen, setIsGlobalModalOpen] = useState(false);
   const [globalPronunciations, setGlobalPronunciations] = useState<{key: string; values: string[]}[]>([]);
   const [isLoadingGlobal, setIsLoadingGlobal] = useState(false);
+  // Tracks the single currently-playing variant as "word::phonetic" so only that row is disabled
   const [playingKey, setPlayingKey] = useState<string | null>(null);
+  const [globalLangFilter, setGlobalLangFilter] = useState<'all' | 'greek' | 'hebrew' | 'latin'>('all');
+  const [globalAlphaFilter, setGlobalAlphaFilter] = useState<string | null>(null);
   const [showSuspectPronunciationsOnly, setShowSuspectPronunciationsOnly] = useState(false);
   const [isRescanningSuspects, setIsRescanningSuspects] = useState(false);
   const [globalRefineInput, setGlobalRefineInput] = useState<Record<string, string>>({});
@@ -503,8 +506,9 @@ export function SmartAudioSettings() {
   };
 
   const playPreview = async (word: string, phonetic: string) => {
+    const compositeKey = `${word}::${phonetic}`;
     try {
-      setPlayingKey(word);
+      setPlayingKey(compositeKey);
       const textToSynthesize = phonetic.startsWith('/') ? `[${word}](${phonetic})` : phonetic;
       const res = await fetch('/api/tts/preview', {
         method: 'POST',
@@ -1503,6 +1507,38 @@ export function SmartAudioSettings() {
               </div>
               <button onClick={() => setIsGlobalModalOpen(false)} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">✕</button>
             </div>
+
+            {/* Language filter tabs */}
+            {!isLoadingGlobal && globalPronunciations.length > 0 && (() => {
+              const hasGreek = globalPronunciations.some((item) => /[\u0370-\u03FF\u1F00-\u1FFF]/u.test(item.key));
+              const hasHebrew = globalPronunciations.some((item) => /[\u0590-\u05FF]/u.test(item.key));
+              const hasLatin = globalPronunciations.some((item) => /[a-zA-Z]/u.test(item.key));
+              const tabs: Array<{ id: 'all' | 'greek' | 'hebrew' | 'latin'; label: string }> = [
+                { id: 'all', label: `All (${globalPronunciations.length})` },
+                ...(hasGreek ? [{ id: 'greek' as const, label: 'Greek (Α α)' }] : []),
+                ...(hasHebrew ? [{ id: 'hebrew' as const, label: 'Hebrew (א)' }] : []),
+                ...(hasLatin ? [{ id: 'latin' as const, label: 'Latin (A a)' }] : []),
+              ];
+              return (
+                <div className="px-4 pt-3 flex gap-2 flex-wrap border-b dark:border-gray-800 pb-2">
+                  {tabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => { setGlobalLangFilter(tab.id); setGlobalAlphaFilter(null); }}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                        globalLangFilter === tab.id
+                          ? 'bg-purple-600 text-white border-purple-600'
+                          : 'border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
+
             <div className="p-4 overflow-y-auto flex-1">
               {!isLoadingGlobal && globalPronunciations.length > 0 && (
                 <div className="mb-4 rounded border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
@@ -1599,156 +1635,221 @@ export function SmartAudioSettings() {
                 <div className="flex justify-center p-8"><span className="text-gray-500">Loading...</span></div>
               ) : globalPronunciations.length === 0 ? (
                 <div className="text-center p-8 text-gray-500">No global pronunciations found.</div>
-              ) : (
-                <ul className="space-y-3">
-                  {globalPronunciations
-                    .filter((item) => !showSuspectPronunciationsOnly || suspectGlobalWords.includes(item.key))
-                    .map((item) => (
-                    <li key={item.key} className="flex flex-col gap-2 bg-gray-50 dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-700">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <strong className="block text-sm">{item.key}</strong>
-                        {isAdmin && (
+              ) : (() => {
+                // Filter by language script
+                const langFiltered = globalPronunciations
+                  .filter((item) => !showSuspectPronunciationsOnly || suspectGlobalWords.includes(item.key))
+                  .filter((item) => {
+                    if (globalLangFilter === 'greek') return /[\u0370-\u03FF\u1F00-\u1FFF]/u.test(item.key);
+                    if (globalLangFilter === 'hebrew') return /[\u0590-\u05FF]/u.test(item.key);
+                    if (globalLangFilter === 'latin') return /[a-zA-Z]/u.test(item.key) && !/[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF]/u.test(item.key);
+                    return true;
+                  });
+
+                // Build alphabet index from the filtered list
+                const getAlphaKey = (word: string): string => {
+                  // Normalize to NFC so accented Greek is treated as a letter
+                  const first = word.normalize('NFC')[0] ?? '#';
+                  // For Hebrew, map to canonical block first char
+                  if (/[\u0590-\u05FF]/u.test(first)) return first;
+                  // For Greek, uppercase canonical
+                  if (/[\u0370-\u03FF\u1F00-\u1FFF]/u.test(first)) return first.toLocaleUpperCase('el');
+                  // Latin uppercase
+                  if (/[a-zA-Z]/u.test(first)) return first.toUpperCase();
+                  return '#';
+                };
+
+                const alphaKeys = [...new Set(langFiltered.map((item) => getAlphaKey(item.key)))].sort(
+                  (a, b) => a.localeCompare(b, 'und', { sensitivity: 'base' })
+                );
+
+                const alphaFiltered = globalAlphaFilter
+                  ? langFiltered.filter((item) => getAlphaKey(item.key) === globalAlphaFilter)
+                  : langFiltered;
+
+                return (
+                  <>
+                    {/* Alphabet index bar */}
+                    {alphaKeys.length > 1 && (
+                      <div className="mb-4 flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setGlobalAlphaFilter(null)}
+                          className={`rounded px-2 py-0.5 text-xs font-bold border ${
+                            globalAlphaFilter === null
+                              ? 'bg-purple-600 text-white border-purple-600'
+                              : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                          }`}
+                        >
+                          All
+                        </button>
+                        {alphaKeys.map((letter) => (
                           <button
+                            key={letter}
                             type="button"
-                            onClick={() => void handleDeleteGlobalWord(item.key)}
-                            className="rounded bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700"
+                            onClick={() => setGlobalAlphaFilter(letter === globalAlphaFilter ? null : letter)}
+                            className={`rounded px-2 py-0.5 text-xs font-bold border ${
+                              globalAlphaFilter === letter
+                                ? 'bg-purple-600 text-white border-purple-600'
+                                : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                            }`}
                           >
-                            Delete Word from Global Library
+                            {letter}
                           </button>
-                        )}
+                        ))}
                       </div>
-                      <div className="flex flex-col gap-2">
-                        {item.values.map((phonetic, idx) => {
-                          const warnings = getKokoroPronunciationQualityWarnings(item.key, phonetic);
-                          return (
-                          <div key={idx} className={`flex flex-wrap items-center gap-3 p-2 rounded border ${warnings.length > 0 ? 'border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30' : idx === 0 ? 'border-green-500 bg-green-50 dark:border-green-800 dark:bg-green-950/30' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'}`}>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <code className="text-xs text-purple-600 dark:text-purple-400">{phonetic}</code>
-                                {idx === 0 && (
-                                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-green-800 dark:bg-green-900 dark:text-green-100">
-                                    Global default
-                                  </span>
-                                )}
-                              </div>
-                              {warnings.map((warning) => (
-                                <p key={warning} className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">{warning}</p>
-                              ))}
-                            </div>
-                            <button
-                              onClick={() => playPreview(item.key, phonetic)}
-                              disabled={playingKey === item.key}
-                              className="px-2 py-1 bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-semibold disabled:opacity-50"
-                            >
-                              {playingKey === item.key ? 'Playing...' : 'Listen'}
-                            </button>
-                            <button
-                              onClick={() => handleAdoptGlobal(item.key, phonetic)}
-                              className="px-2 py-1 bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs font-semibold"
-                            >
-                              Adopt to My Profile
-                            </button>
-                            {isAdmin && idx !== 0 && (
-                              <button
-                                type="button"
-                                onClick={() => void handleSetGlobalDefault(item.key, phonetic)}
-                                className="rounded bg-green-600 px-2 py-1 text-xs font-semibold text-white hover:bg-green-700"
-                              >
-                                Make Global Default
-                              </button>
-                            )}
+                    )}
+                    <p className="mb-2 text-xs text-soft">{alphaFiltered.length} word{alphaFiltered.length !== 1 ? 's' : ''}</p>
+                    <ul className="space-y-3">
+                      {alphaFiltered.map((item) => (
+                        <li key={item.key} className="flex flex-col gap-2 bg-gray-50 dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-700">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <strong className="block text-sm">{item.key}</strong>
                             {isAdmin && (
                               <button
                                 type="button"
-                                onClick={() => void handleDeleteGlobalChoice(item.key, phonetic)}
-                                className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300"
+                                onClick={() => void handleDeleteGlobalWord(item.key)}
+                                className="rounded bg-red-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-700"
                               >
-                                Remove Choice
+                                Delete Word from Global Library
                               </button>
                             )}
                           </div>
-                          );
-                        })}
-                      </div>
-                      {isAdmin && (
-                        <div className="rounded border border-purple-300 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-950/30">
-                          <label className="block text-xs font-semibold text-purple-900 dark:text-purple-100" htmlFor={`global-ai-guidance-${item.key}`}>
-                            Administrator AI pronunciation guidance
-                          </label>
-                          <textarea
-                            id={`global-ai-guidance-${item.key}`}
-                            value={globalRefineInput[item.key] || ''}
-                            onChange={(event) => setGlobalRefineInput((current) => ({
-                              ...current,
-                              [item.key]: event.target.value,
-                            }))}
-                            placeholder="Describe how it should sound, the pronunciation tradition, or an English approximation."
-                            className="mt-2 min-h-20 w-full rounded border border-purple-200 bg-white p-2 text-xs text-gray-900 dark:border-purple-800 dark:bg-gray-900 dark:text-gray-100"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => void handleRefineGlobal(item.key, item.values)}
-                            disabled={Boolean(globalRefineStatus[item.key])}
-                            className="mt-2 rounded bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50"
-                          >
-                            {globalRefineStatus[item.key] || 'Ask AI for 5 Replacement Choices'}
-                          </button>
-                          {(globalRefineChoices[item.key] || []).length > 0 && (
-                            <div className="mt-3 space-y-2">
-                              <p className="text-xs text-purple-900 dark:text-purple-100">
-                                Review the generated choices and select which one should become the global default.
-                              </p>
-                              {(globalRefineChoices[item.key] || []).map((choice, choiceIndex) => {
-                                const warnings = getKokoroPronunciationQualityWarnings(item.key, choice);
-                                return (
-                                  <label
-                                    key={choice}
-                                    className={`flex flex-wrap items-center gap-2 rounded border p-2 text-xs ${warnings.length > 0 ? 'border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30' : 'border-purple-200 bg-white dark:border-purple-800 dark:bg-gray-900'}`}
+                          <div className="flex flex-col gap-2">
+                            {item.values.map((phonetic, idx) => {
+                              const warnings = getKokoroPronunciationQualityWarnings(item.key, phonetic);
+                              const compositeKey = `${item.key}::${phonetic}`;
+                              return (
+                              <div key={idx} className={`flex flex-wrap items-center gap-3 p-2 rounded border ${warnings.length > 0 ? 'border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30' : idx === 0 ? 'border-green-500 bg-green-50 dark:border-green-800 dark:bg-green-950/30' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'}`}>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <code className="text-xs text-purple-600 dark:text-purple-400">{phonetic}</code>
+                                    {idx === 0 && (
+                                      <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-green-800 dark:bg-green-900 dark:text-green-100">
+                                        Global default
+                                      </span>
+                                    )}
+                                  </div>
+                                  {warnings.map((warning) => (
+                                    <p key={warning} className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">{warning}</p>
+                                  ))}
+                                </div>
+                                <button
+                                  onClick={() => void playPreview(item.key, phonetic)}
+                                  disabled={playingKey === compositeKey}
+                                  className="px-2 py-1 bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-xs font-semibold disabled:opacity-50"
+                                >
+                                  {playingKey === compositeKey ? 'Playing...' : 'Listen'}
+                                </button>
+                                <button
+                                  onClick={() => handleAdoptGlobal(item.key, phonetic)}
+                                  className="px-2 py-1 bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs font-semibold"
+                                >
+                                  Adopt to My Profile
+                                </button>
+                                {isAdmin && idx !== 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleSetGlobalDefault(item.key, phonetic)}
+                                    className="rounded bg-green-600 px-2 py-1 text-xs font-semibold text-white hover:bg-green-700"
                                   >
-                                    <input
-                                      type="radio"
-                                      name={`global-default-${item.key}`}
-                                      checked={(globalRefineDefault[item.key] || 0) === choiceIndex}
-                                      onChange={() => setGlobalRefineDefault((current) => ({
-                                        ...current,
-                                        [item.key]: choiceIndex,
-                                      }))}
-                                    />
-                                    <code className="min-w-0 flex-1 [overflow-wrap:anywhere]">{choice}</code>
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.preventDefault();
-                                        void playPreview(item.key, choice);
-                                      }}
-                                      className="rounded bg-blue-100 px-2 py-1 font-semibold text-blue-700 hover:bg-blue-200 dark:bg-blue-900/50 dark:text-blue-300"
-                                    >
-                                      Listen
-                                    </button>
-                                    {warnings.map((warning) => (
-                                      <span key={warning} className="w-full text-[10px] text-amber-700 dark:text-amber-300">{warning}</span>
-                                    ))}
-                                  </label>
-                                );
-                              })}
+                                    Make Global Default
+                                  </button>
+                                )}
+                                {isAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleDeleteGlobalChoice(item.key, phonetic)}
+                                    className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-200 dark:bg-red-950/40 dark:text-red-300"
+                                  >
+                                    Remove Choice
+                                  </button>
+                                )}
+                              </div>
+                              );
+                            })}
+                          </div>
+                          {isAdmin && (
+                            <div className="rounded border border-purple-300 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-950/30">
+                              <label className="block text-xs font-semibold text-purple-900 dark:text-purple-100" htmlFor={`global-ai-guidance-${item.key}`}>
+                                Administrator AI pronunciation guidance
+                              </label>
+                              <textarea
+                                id={`global-ai-guidance-${item.key}`}
+                                value={globalRefineInput[item.key] || ''}
+                                onChange={(event) => setGlobalRefineInput((current) => ({
+                                  ...current,
+                                  [item.key]: event.target.value,
+                                }))}
+                                placeholder="Describe how it should sound, the pronunciation tradition, or an English approximation."
+                                className="mt-2 min-h-20 w-full rounded border border-purple-200 bg-white p-2 text-xs text-gray-900 dark:border-purple-800 dark:bg-gray-900 dark:text-gray-100"
+                              />
                               <button
                                 type="button"
-                                onClick={() => void handleApplyGlobalChoices(item.key)}
-                                disabled={(globalRefineChoices[item.key] || []).some(
-                                  (choice) => getKokoroPronunciationQualityWarnings(item.key, choice).length > 0,
-                                )}
-                                className="rounded bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                onClick={() => void handleRefineGlobal(item.key, item.values)}
+                                disabled={Boolean(globalRefineStatus[item.key])}
+                                className="mt-2 rounded bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50"
                               >
-                                Apply Reviewed Choices Globally
+                                {globalRefineStatus[item.key] || 'Ask AI for 5 Replacement Choices'}
                               </button>
+                              {(globalRefineChoices[item.key] || []).length > 0 && (
+                                <div className="mt-3 space-y-2">
+                                  <p className="text-xs text-purple-900 dark:text-purple-100">
+                                    Review the generated choices and select which one should become the global default.
+                                  </p>
+                                  {(globalRefineChoices[item.key] || []).map((choice, choiceIndex) => {
+                                    const warnings = getKokoroPronunciationQualityWarnings(item.key, choice);
+                                    return (
+                                      <label
+                                        key={choice}
+                                        className={`flex flex-wrap items-center gap-2 rounded border p-2 text-xs ${warnings.length > 0 ? 'border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30' : 'border-purple-200 bg-white dark:border-purple-800 dark:bg-gray-900'}`}
+                                      >
+                                        <input
+                                          type="radio"
+                                          name={`global-default-${item.key}`}
+                                          checked={(globalRefineDefault[item.key] || 0) === choiceIndex}
+                                          onChange={() => setGlobalRefineDefault((current) => ({
+                                            ...current,
+                                            [item.key]: choiceIndex,
+                                          }))}
+                                        />
+                                        <code className="min-w-0 flex-1 [overflow-wrap:anywhere]">{choice}</code>
+                                        <button
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.preventDefault();
+                                            void playPreview(item.key, choice);
+                                          }}
+                                          className="rounded bg-blue-100 px-2 py-1 font-semibold text-blue-700 hover:bg-blue-200 dark:bg-blue-900/50 dark:text-blue-300"
+                                        >
+                                          Listen
+                                        </button>
+                                        {warnings.map((warning) => (
+                                          <span key={warning} className="w-full text-[10px] text-amber-700 dark:text-amber-300">{warning}</span>
+                                        ))}
+                                      </label>
+                                    );
+                                  })}
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleApplyGlobalChoices(item.key)}
+                                    disabled={(globalRefineChoices[item.key] || []).some(
+                                      (choice) => getKokoroPronunciationQualityWarnings(item.key, choice).length > 0,
+                                    )}
+                                    className="rounded bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Apply Reviewed Choices Globally
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                );
+              })()}
             </div>
             <div className="p-4 border-t dark:border-gray-800 flex justify-end">
               <button onClick={() => setIsGlobalModalOpen(false)} className="px-4 py-2 bg-gray-200 dark:bg-gray-800 rounded font-semibold text-sm">Close</button>

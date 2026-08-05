@@ -43,7 +43,9 @@ import { JobsInlineView } from './views/JobsInlineView';
 import { ScanForeignWordsModal } from './ScanForeignWordsModal';
 import { BookPronunciationInspectorModal } from './BookPronunciationInspectorModal';
 import { DocumentSelectionModal } from '@/components/documents/DocumentSelectionModal';
+import { PDFIcon } from '@/components/icons/Icons';
 import toast from 'react-hot-toast';
+import { useRouter } from 'next/navigation';
 
 let cachedDocumentListState: DocumentListState | null = null;
 
@@ -201,6 +203,7 @@ function DocumentListStateLoader() {
 }
 
 function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
+  const router = useRouter();
   const cachedState = cachedDocumentListState;
   const [sortBy, setSortBy] = useState<SortBy>(cachedState?.sortBy ?? DEFAULT_STATE.sortBy);
   const [sortDirection, setSortDirection] = useState<SortDirection>(
@@ -819,6 +822,33 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
                   className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-md shadow transition-all flex items-center gap-1.5"
                 >
                   🔍 Pre-Scan Foreign Words
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const selected = selection.getSelectedDocs();
+                    if (selected.length > 0) {
+                      router.push(`/listen/${selected[0].id}`);
+                    } else {
+                      if (allDocuments.length > 0) {
+                        setSelectionModalProps({
+                          title: 'Select Document to Review',
+                          confirmLabel: 'Review Audiobook',
+                          defaultSelected: false,
+                          onConfirmAction: (docs) => {
+                            if (docs.length > 0) router.push(`/listen/${docs[0].id}`);
+                          },
+                        });
+                        setIsActionSelectionModalOpen(true);
+                      } else {
+                        toast('Please upload a document first.', { icon: 'ℹ️' });
+                      }
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-md shadow transition-all flex items-center gap-1.5"
+                >
+                  <PDFIcon className="w-4 h-4 text-white" />
+                  Review Audiobook
                 </button>
                 <button
                   type="button"

@@ -459,13 +459,15 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   } = useAuthRateLimit();
 
   // Get document ID and reader type from URL
-  const { id } = useParams();
+  const { id, bookId } = useParams();
   const pathname = usePathname();
   const documentId = useMemo(() => {
     if (typeof id === 'string') return id;
     if (Array.isArray(id)) return id[0];
+    if (typeof bookId === 'string') return bookId;
+    if (Array.isArray(bookId)) return bookId[0];
     return '';
-  }, [id]);
+  }, [id, bookId]);
 
   const currentReaderType: ReaderType = useMemo(() => {
     if (pathname.startsWith('/epub/')) return 'epub';

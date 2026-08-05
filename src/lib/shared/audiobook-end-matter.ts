@@ -1,4 +1,4 @@
-const END_MATTER_HEADING = /^(?:(?:(?:author|name|subject|scripture|biblical|general)\s+)?(?:index|indexes|indices)|bibliography|works\s+cited|references)$/i;
+const END_MATTER_HEADING = /^(?:(?:(?:author|name|subject|scripture|biblical|general)\s+)?(?:index|indexes|indices)|(?:select(?:ed)?|primary|secondary|brief)?\s*bibliography|works\s+cited|references?|notes?)$/i;
 
 function normalizeHeading(value: string): string {
   return value
@@ -13,12 +13,29 @@ export function isAudiobookEndMatterHeading(value: string): boolean {
   return END_MATTER_HEADING.test(normalizeHeading(value));
 }
 
-export function chapterStartsWithEndMatter(text: string): boolean {
-  const firstMeaningfulLine = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean);
-  return Boolean(firstMeaningfulLine && isAudiobookEndMatterHeading(firstMeaningfulLine));
+export function chapterStartsWithEndMatter(text: string): { found: boolean, truncateAt: number } {
+  const lines = text.split(/\r?\n/);
+  let passedMeaningfulLines = 0;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    
+    passedMeaningfulLines++;
+    
+    // If we find an end matter heading, we truncate right before it
+    if (isAudiobookEndMatterHeading(line)) {
+      // Find the character index of this line to truncate the string
+      const matchIndex = text.indexOf(lines[i]);
+      return { found: true, truncateAt: matchIndex };
+    }
+    
+    // We only want to search the first few meaningful lines of a chunk
+    // just in case a random sentence says "This is not a bibliography".
+    // But since chunks can be 10,000 characters, we search the first 10 lines.
+    if (passedMeaningfulLines > 10) break;
+  }
+  return { found: false, truncateAt: -1 };
 }
 
 export function extractEpubChapterHeading(html: string): string {
@@ -110,14 +127,42 @@ export function truncateAudiobookEndMatter<T extends { title: string; text: stri
   for (let index = 0; index < chapters.length; index += 1) {
     const chapter = chapters[index];
     const progress = processedLength / totalLength;
-    if (
-      progress >= minimumProgress
-      && (
-        isAudiobookEndMatterHeading(chapter.title)
-        || chapterStartsWithEndMatter(chapter.text)
-      )
-    ) {
-      return chapters.slice(0, index);
+    if (progress >= minimumProgress) {
+      if (isAudiobookEndMatterHeading(chapter.title)) {
+        return chapters.slice(0, index);
+      }
+      
+      const textCheck = chapterStartsWithEndMatter(chapter.text);
+      if (textCheck.found) {
+        // We found an end matter heading inside the text!
+        // We want to keep this chapter, but truncate its text right before the heading.
+        const truncatedChapters = chapters.slice(0, index);
+        if (textCheck.truncateAt > 0) {
+          truncatedChapters.push({
+            ...chapter,
+            text: chapter.text.substring(0, textCheck.truncateAt).trim()
+          });
+        }
+        return truncatedChapters;
+      }
+
+      // If we are very deep into the book (>85%), check if this chapter is just a wall of citations/indexes
+      // by measuring the density of narrative prose.
+      if (progress >= 0.85) {
+        const lines = chapter.text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (lines.length > 5) {
+          let proseLines = 0;
+          for (const line of lines) {
+            if (looksLikeNarrativeProse(line)) {
+              proseLines++;
+            }
+          }
+          // If less than 25% of the lines in this chapter look like normal prose, it's definitely an index/bibliography.
+          if (proseLines / lines.length < 0.25) {
+            return chapters.slice(0, index);
+          }
+        }
+      }
     }
     processedLength += chapter.text.length;
   }

@@ -194,6 +194,7 @@ function spawnMainCommand(command, env) {
     env,
     stdio: 'inherit',
     shell: process.platform === 'win32',
+    detached: process.platform !== 'win32',
   });
 
   const exitPromise = new Promise((resolve) => {
@@ -404,7 +405,7 @@ async function main() {
     isShuttingDown = true;
     shutdownPromise = (async () => {
       await Promise.all([
-        terminateChild(appProc, signal, 4000),
+        terminateChild(appProc, signal, 4000, true),
         terminateChild(workerProc, 'SIGTERM', 4000),
         terminateChild(pyWorkerProc, 'SIGTERM', 4000),
         terminateChild(pyScholarWorkerProc, 'SIGTERM', 4000),
@@ -669,13 +670,31 @@ async function main() {
       throw new Error('COMPUTE_WORKER_URL and COMPUTE_WORKER_TOKEN are required when embedded compute worker startup is disabled.');
     }
 
-    const { child, exitPromise } = spawnMainCommand(command, runtimeEnv);
-    appProc = child;
-    const exitInfo = await exitPromise;
-    const exitCode = typeof exitInfo?.code === 'number' ? exitInfo.code : 1;
-    console.error(
-      `Main command finished with code=${exitInfo?.code ?? 'null'} signal=${exitInfo?.signal ?? 'null'} launchError=${Boolean(exitInfo?.launchError)}.`,
-    );
+    let exitCode = 1;
+    while (!isShuttingDown) {
+      console.log(`Starting main application process: ${command.join(' ')}`);
+      const { child, exitPromise } = spawnMainCommand(command, runtimeEnv);
+      appProc = child;
+      
+      const exitInfo = await exitPromise;
+      exitCode = typeof exitInfo?.code === 'number' ? exitInfo.code : 1;
+      
+      console.error(
+        `Main command finished with code=${exitInfo?.code ?? 'null'} signal=${exitInfo?.signal ?? 'null'} launchError=${Boolean(exitInfo?.launchError)}.`,
+      );
+
+      // If we are gracefully shutting down, break out of the loop
+      if (isShuttingDown) break;
+
+      // If it exited cleanly (code 0) without a signal, it means it intended to shut down
+      if (exitCode === 0 && !exitInfo?.signal) {
+        break;
+      }
+
+      console.error('Main process crashed. Auto-restarting in 3 seconds to recover from potential OOM...');
+      appProc = null; // Clear the dead reference
+      await delay(3000);
+    }
 
     await shutdown('SIGTERM');
     exitOnce(exitCode);

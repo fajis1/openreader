@@ -128,7 +128,7 @@ function sanitizeProfile(profile: Partial<SmartAudioProfile> & { id?: string; na
     useGlobalPronunciations: true,
     pronunciationPromptMode: profile.pronunciationPromptMode === 'custom' ? 'custom' : 'default',
     customPronunciationPrompt: profile.customPronunciationPrompt || '',
-    workerMode: profile.workerMode || 'standard',
+    workerMode: profile.workerMode === 'bibliography-catcher' ? 'bibliography-catcher' : (profile.workerMode || 'standard'),
     // Keep the key if already stored; never default to a non-empty string
     geminiApiKey: (profile.geminiApiKey || '').trim() || undefined,
     backupGeminiApiKey: (profile.backupGeminiApiKey || '').trim() || undefined,

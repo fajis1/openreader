@@ -169,7 +169,7 @@ function DocRow({
       data-doc-tile
       aria-selected={isSelected}
       className={
-        'grid grid-cols-[36px_minmax(0,1fr)_44px_72px_104px_56px] sm:grid-cols-[36px_minmax(0,1fr)_56px_96px_140px_64px] items-center text-[12px] border-b border-line-soft transition-colors duration-base ease-standard ' +
+        'grid grid-cols-[36px_minmax(0,1fr)_44px_72px_104px_min-content] sm:grid-cols-[36px_minmax(0,1fr)_56px_96px_140px_min-content] items-center text-[12px] border-b border-line-soft transition-colors duration-base ease-standard ' +
         // iOS: suppress the long-press link preview/callout and selection magnifier so the
         // long-press is handed to the touch DnD backend instead of the native preview.
         'select-none [-webkit-touch-callout:none] ' +
@@ -270,6 +270,26 @@ function DocRow({
                 </svg>
               </IconButton>
             )}
+            {hasAudiobook && (
+              <>
+                <Link
+                  href={`/${doc.type}/${encodeURIComponent(doc.id)}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center justify-center w-8 h-8 text-foreground hover:bg-accent hover:text-white transition-colors rounded-md"
+                  title="Read Document"
+                >
+                  <KindIcon doc={doc} />
+                </Link>
+                <Link
+                  href={`/listen/${encodeURIComponent(doc.id)}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center justify-center w-8 h-8 text-foreground hover:bg-accent hover:text-white transition-colors rounded-md"
+                  title="Audiobook Review"
+                >
+                  <PDFIcon className="w-4 h-4 text-emerald-500" />
+                </Link>
+              </>
+            )}
             <a
               href={`/api/documents/blob/get/fallback?id=${encodeURIComponent(doc.id)}&download=true`}
               download
@@ -330,7 +350,7 @@ export function ListView({
 
   return (
     <div onClick={handleBackgroundClick} className="flex-1 min-h-0 overflow-y-auto">
-      <div className="sticky top-0 z-10 bg-surface border-b border-line-soft grid grid-cols-[36px_minmax(0,1fr)_44px_72px_104px_56px] sm:grid-cols-[36px_minmax(0,1fr)_56px_96px_140px_64px]">
+      <div className="sticky top-0 z-10 bg-surface border-b border-line-soft grid grid-cols-[36px_minmax(0,1fr)_44px_72px_104px_min-content] sm:grid-cols-[36px_minmax(0,1fr)_56px_96px_140px_min-content]">
         <div className="flex items-center justify-center pl-2">
           {/* Header checkbox could go here in the future if a select-all feature is needed */}
         </div>

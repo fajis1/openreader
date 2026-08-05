@@ -1023,11 +1023,14 @@ export async function alignAudioWithText(
   })();
 
   alignmentInFlight.set(inFlightKey, run);
+  // Attach a no-op catch to the finalizer chain so that when `run` rejects
+  // (e.g. timeout), the orphaned .finally() promise does not become an
+  // unhandled rejection and crash the Node.js process.
   run.finally(() => {
     if (alignmentInFlight.get(inFlightKey) === run) {
       alignmentInFlight.delete(inFlightKey);
     }
-  });
+  }).catch(() => {});
   return run;
 }
 
