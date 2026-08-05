@@ -513,6 +513,13 @@ async function main() {
       }
     }
 
+    // Seed global pronunciation and definitions from git JSON files if the database is empty
+    spawnSync('node', ['scripts/sync-dict-to-git.mjs', '--import-defaults'], {
+      env: runtimeEnv,
+      stdio: 'inherit',
+    });
+
+
     const embeddedWorkerPort = Number.parseInt(withDefault(runtimeEnv.EMBEDDED_COMPUTE_WORKER_PORT, '8081'), 10);
     const embeddedNatsPort = Number.parseInt(withDefault(runtimeEnv.EMBEDDED_NATS_PORT, '4222'), 10);
     const embeddedNatsMonitorPort = Number.parseInt(withDefault(runtimeEnv.EMBEDDED_NATS_MONITOR_PORT, '8222'), 10);

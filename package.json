@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "NODE_OPTIONS=--max-old-space-size=8192 node scripts/openreader-entrypoint.mjs -- pnpm dev:raw",
     "dev:raw": "NODE_OPTIONS=--max-old-space-size=8192 next dev --turbopack -p 3003",
+    "dict:sync": "node scripts/sync-dict-to-git.mjs",
     "build": "next build",
     "build:bundle-guard": "node scripts/check-next-server-bundle.mjs",
     "start": "node scripts/openreader-entrypoint.mjs -- pnpm start:raw",
