@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
 import { audiobooks } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, inArray, and } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import {
   listAudiobookObjects,
@@ -18,13 +18,54 @@ export async function POST(request: NextRequest) {
     
     const userId = ctx.userId;
     const body = await request.json().catch(() => ({}));
-    const { bookId } = body;
+    const { bookId, bookIds, dryRun } = body;
 
-    let booksToProcess: { id: string }[] = [];
-    if (bookId) {
-      booksToProcess = [{ id: bookId }];
+    let booksToProcess: { id: string, name?: string | null }[] = [];
+    if (bookIds && Array.isArray(bookIds) && bookIds.length > 0) {
+      booksToProcess = await db.select({ id: audiobooks.id, name: audiobooks.name })
+                               .from(audiobooks)
+                               .where(and(eq(audiobooks.userId, userId), inArray(audiobooks.id, bookIds)));
+    } else if (bookId) {
+      booksToProcess = await db.select({ id: audiobooks.id, name: audiobooks.name })
+                               .from(audiobooks)
+                               .where(and(eq(audiobooks.userId, userId), eq(audiobooks.id, bookId)));
     } else {
-      booksToProcess = await db.select({ id: audiobooks.id }).from(audiobooks).where(eq(audiobooks.userId, userId));
+      booksToProcess = await db.select({ id: audiobooks.id, name: audiobooks.name })
+                               .from(audiobooks)
+                               .where(eq(audiobooks.userId, userId));
+    }
+
+    if (dryRun) {
+      const results = [];
+      for (const book of booksToProcess) {
+        try {
+          const objects = await listAudiobookObjects(book.id, userId, null);
+          const txtFiles = objects.filter(o => o.fileName.endsWith('.txt') && !o.fileName.includes('__changelog'));
+          const audioFiles = objects.filter(o => o.fileName.endsWith('.mp3') || o.fileName.endsWith('.m4b'));
+          
+          const audioFileMap = new Map(audioFiles.map(a => {
+            const decoded = decodeChapterFileName(a.fileName);
+            return [decoded?.index ?? -1, a];
+          }));
+
+          let modifiedCount = 0;
+          for (const txt of txtFiles) {
+             const decoded = decodeChapterFileName(txt.fileName);
+             if (!decoded) continue;
+             
+             const correspondingAudio = audioFileMap.get(decoded.index);
+             if (!correspondingAudio || txt.lastModified > correspondingAudio.lastModified) {
+                modifiedCount++;
+             }
+          }
+          if (modifiedCount > 0) {
+            results.push({ bookId: book.id, bookName: book.name || 'Unknown Book', modifiedChunks: modifiedCount });
+          }
+        } catch (e) {
+          console.error('Error scanning book for dry run', book.id, e);
+        }
+      }
+      return NextResponse.json({ success: true, needsRegeneration: results });
     }
 
     const host = request.headers.get('host');

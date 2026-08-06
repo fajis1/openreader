@@ -35,6 +35,8 @@ export function BookPronunciationInspectorModal({
   const [refineExpanded, setRefineExpanded] = useState<{ [word: string]: boolean }>({});
   const [batchReplaceStatus, setBatchReplaceStatus] = useState<{ [word: string]: string }>({});
   const [rebuildStatus, setRebuildStatus] = useState<string>('');
+  const [pendingRebuildBooks, setPendingRebuildBooks] = useState<any[] | null>(null);
+  const [selectedRebuildBooks, setSelectedRebuildBooks] = useState<Record<string, boolean>>({});
 
   const ALPHABET = ['ALL', 'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z', '#'];
 
@@ -185,19 +187,54 @@ export function BookPronunciationInspectorModal({
   };
 
   const handleRebuildModified = async () => {
-    if (!confirm('This will trigger TTS audio generation in the background for ALL textbook chunks that you have modified (i.e., chunks where the text is newer than the MP3). This may take a while to finish in the background. Continue?')) return;
+    setRebuildStatus('Scanning...');
+    try {
+      const res = await fetch('/api/audiobooks/batch-regenerate', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId: selectedBookId || undefined, dryRun: true }) 
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.needsRegeneration && data.needsRegeneration.length > 0) {
+           setPendingRebuildBooks(data.needsRegeneration);
+           const initialSelected: Record<string, boolean> = {};
+           data.needsRegeneration.forEach((b: any) => { initialSelected[b.bookId] = true; });
+           setSelectedRebuildBooks(initialSelected);
+           setRebuildStatus('');
+        } else {
+           toast.success('No modified chunks found! Everything is up to date.');
+           setRebuildStatus('');
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to scan');
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Error scanning books');
+      setRebuildStatus('');
+    }
+  };
+
+  const confirmRebuild = async () => {
+    const bookIds = Object.keys(selectedRebuildBooks).filter(id => selectedRebuildBooks[id]);
+    if (bookIds.length === 0) {
+      setPendingRebuildBooks(null);
+      return;
+    }
     
     setRebuildStatus('Starting...');
     try {
       const res = await fetch('/api/audiobooks/batch-regenerate', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bookId: selectedBookId || undefined }) 
+        body: JSON.stringify({ bookIds }) 
       });
       if (res.ok) {
         setRebuildStatus('Rebuilding in background...');
-        toast.success('Background rebuild started!');
+        toast.success('Background rebuild started for selected books!');
         setTimeout(() => setRebuildStatus(''), 8000);
+        setPendingRebuildBooks(null);
       } else {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Failed to start rebuild');
@@ -205,6 +242,7 @@ export function BookPronunciationInspectorModal({
     } catch (e: any) {
       toast.error(e.message || 'Error starting background rebuild');
       setRebuildStatus('');
+      setPendingRebuildBooks(null);
     }
   };
 
@@ -246,8 +284,52 @@ export function BookPronunciationInspectorModal({
 
   return (
     <ModalFrame open={isOpen} onClose={onClose}>
-      <div className="flex flex-col h-full max-h-[80vh] min-w-[600px] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-4">
+      <div className="flex flex-col h-full max-h-[80vh] min-w-[600px] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-4 relative">
         
+        {pendingRebuildBooks && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-lg w-full border dark:border-gray-700">
+              <h3 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">Rebuild Modified Audio</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                The following books have modified text chunks. Select which ones you want to regenerate TTS audio for:
+              </p>
+              <div className="max-h-60 overflow-y-auto mb-4 border rounded dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                {pendingRebuildBooks.map(b => (
+                  <label key={b.bookId} className="flex items-center gap-3 p-3 border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={!!selectedRebuildBooks[b.bookId]}
+                      onChange={(e) => setSelectedRebuildBooks(prev => ({ ...prev, [b.bookId]: e.target.checked }))}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <div className="flex-1 text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {b.bookName}
+                    </div>
+                    <div className="text-xs text-orange-600 dark:text-orange-400 font-semibold bg-orange-50 dark:bg-orange-900/30 px-2 py-1 rounded">
+                      {b.modifiedChunks} chunk{b.modifiedChunks !== 1 ? 's' : ''}
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button 
+                  className="px-4 py-2 border dark:border-gray-600 rounded text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  onClick={() => setPendingRebuildBooks(null)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm font-semibold disabled:opacity-50"
+                  onClick={confirmRebuild}
+                  disabled={!Object.values(selectedRebuildBooks).some(Boolean)}
+                >
+                  Rebuild Selected Books
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-4 mb-4 items-center flex-wrap">
           <select
             className="p-2 border rounded bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
