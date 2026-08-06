@@ -25,6 +25,11 @@ export function JobsInlineView() {
       await fetch(`/api/audiobooks/queue?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
     } catch {}
   };
+  const onTogglePauseJob = async (id: string, action: 'pause' | 'resume') => {
+    try {
+      await fetch('/api/audiobooks/queue', { method: 'PATCH', body: JSON.stringify({ id, action }) });
+    } catch {}
+  };
   const [jobs, setJobs] = useState<Job[]>([]);
   const [activeGlobalJob, setActiveGlobalJob] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -139,7 +144,22 @@ export function JobsInlineView() {
                   <div className="text-right text-xs text-soft">
                     Created: {new Date(job.createdAt).toLocaleString()}
                     {job.error && <p className="text-danger mt-1">Error: {job.error}</p>}
-                    <div className="mt-2 flex gap-2">
+                    <div className="mt-2 flex gap-2 justify-end">
+                      {['queued', 'running', 'paused'].includes(job.status) && (
+                        <a href={`/listen/${job.documentId}`} className="text-accent font-semibold hover:underline bg-surface-sunken border border-accent px-2 py-1 rounded">
+                          Review Progress
+                        </a>
+                      )}
+                      {['queued', 'running', 'waiting_for_pdf'].includes(job.status) && (
+                        <button onClick={() => { onTogglePauseJob(job.id, 'pause'); fetchJobs(); }} className="text-warning font-semibold hover:underline bg-surface-sunken border border-warning px-2 py-1 rounded">
+                          Pause
+                        </button>
+                      )}
+                      {job.status === 'paused' && (
+                        <button onClick={() => { onTogglePauseJob(job.id, 'resume'); fetchJobs(); }} className="text-success font-semibold hover:underline bg-surface-sunken border border-success px-2 py-1 rounded">
+                          Resume
+                        </button>
+                      )}
                       <button onClick={() => { onCancelJob(job.id); fetchJobs(); }} className="text-danger font-semibold hover:underline bg-surface-sunken border border-danger px-2 py-1 rounded">
                         {job.status === 'error' ? 'Dismiss' : 'Cancel Generation'}
                       </button>

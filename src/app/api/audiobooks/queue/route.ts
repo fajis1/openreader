@@ -1,6 +1,6 @@
 import { NextResponse, NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
-import { eq, and, asc, lt } from 'drizzle-orm';
+import { eq, and, asc, lt, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { audiobookChapters, audiobookJobs, documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
@@ -267,5 +267,36 @@ export async function PUT(req: NextRequest) {
   } catch (error) {
     serverLogger.error({ event: 'audiobook.queue.put.error', error: errorToLog(error) }, 'Failed to requeue audiobook job');
     return errorResponse(error, { apiErrorMessage: 'Failed to requeue audiobook job' });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const ctxOrRes = await requireAuthContext(req);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+    if (!ctxOrRes.userId) return new NextResponse('Unauthorized', { status: 401 });
+    
+    const body = await req.json();
+    const { id, action } = body;
+    if (!id || !action || !['pause', 'resume'].includes(action)) {
+      return NextResponse.json({ error: 'Missing or invalid id/action' }, { status: 400 });
+    }
+
+    if (action === 'pause') {
+      await db.update(audiobookJobs)
+        .set({ status: 'paused', updatedAt: Date.now() })
+        .where(and(eq(audiobookJobs.id, id), eq(audiobookJobs.userId, ctxOrRes.userId), inArray(audiobookJobs.status, ['queued', 'running', 'waiting_for_pdf'])));
+    } else if (action === 'resume') {
+      await db.update(audiobookJobs)
+        .set({ status: 'queued', updatedAt: Date.now() })
+        .where(and(eq(audiobookJobs.id, id), eq(audiobookJobs.userId, ctxOrRes.userId), eq(audiobookJobs.status, 'paused')));
+      
+      runTaskNow('process-audiobook-queue').catch((err) => serverLogger.error({ event: 'audiobook.queue.wake.error', error: errorToLog(err) }, 'Failed to wake queue'));
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    serverLogger.error({ event: 'audiobook.queue.patch.error', error: errorToLog(error) }, 'Failed to pause/resume audiobook job');
+    return errorResponse(error, { apiErrorMessage: 'Failed to update audiobook job status' });
   }
 }
