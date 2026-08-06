@@ -33,6 +33,7 @@ export function BookPronunciationInspectorModal({
   const [refineInput, setRefineInput] = useState<{ [word: string]: string }>({});
   const [refineStatus, setRefineStatus] = useState<{ [word: string]: string }>({});
   const [refineExpanded, setRefineExpanded] = useState<{ [word: string]: boolean }>({});
+  const [batchReplaceStatus, setBatchReplaceStatus] = useState<{ [word: string]: string }>({});
 
   const ALPHABET = ['ALL', 'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z', '#'];
 
@@ -154,6 +155,31 @@ export function BookPronunciationInspectorModal({
       const errMsg = e.message || 'Failed.';
       toast.error(errMsg, { duration: 6000 });
       setRefineStatus(prev => ({ ...prev, [word]: `⚠️ ${errMsg}` }));
+    }
+  };
+
+  const handleBatchReplace = async (word: string, newPhonetic: string) => {
+    if (!confirm(`Are you sure you want to replace all occurrences of [${word}] with phonetics /${newPhonetic}/ in ALL your generated audiobook text chapters?`)) return;
+    
+    setBatchReplaceStatus(prev => ({ ...prev, [word]: 'Replacing...' }));
+    try {
+      const res = await fetch('/api/audiobooks/batch-replace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word, newPhonetic })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBatchReplaceStatus(prev => ({ ...prev, [word]: `Updated ${data.updatedCount} files.` }));
+        toast.success(`Updated ${data.updatedCount} text files.`);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to replace');
+      }
+    } catch (e: any) {
+       console.error(e);
+       toast.error(e.message || 'Error executing batch replace');
+       setBatchReplaceStatus(prev => ({ ...prev, [word]: 'Failed' }));
     }
   };
 
@@ -333,7 +359,20 @@ export function BookPronunciationInspectorModal({
                          <div className="flex flex-col gap-1 items-start">
                            <span className="font-mono text-sm text-blue-600 dark:text-blue-400 font-bold">{w.userOverride || '-'}</span>
                            {w.userOverride && (
-                             <button className="px-2 py-0.5 text-[10px] bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300" onClick={() => handleListen(w.word, w.userOverride)}>Listen 🔊</button>
+                             <>
+                               <button className="px-2 py-0.5 text-[10px] bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300" onClick={() => handleListen(w.word, w.userOverride)}>Listen 🔊</button>
+                               <button 
+                                 className="px-2 py-0.5 text-[10px] bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200 rounded hover:opacity-80 disabled:opacity-50" 
+                                 onClick={() => handleBatchReplace(w.word, w.userOverride)}
+                                 disabled={!!batchReplaceStatus[w.word]}
+                                 title="Updates this word in ALL audiobook text chunks to use this phonetic"
+                               >
+                                 Batch Replace in Books ⚡
+                               </button>
+                               {batchReplaceStatus[w.word] && (
+                                 <div className="text-[10px] text-orange-600 dark:text-orange-400 font-medium">{batchReplaceStatus[w.word]}</div>
+                               )}
+                             </>
                            )}
                            <button className="px-2 py-0.5 text-[10px] bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300" onClick={() => { setEditingWord(w.word); setEditValue(w.userOverride || ''); }}>Custom Edit</button>
                          </div>
