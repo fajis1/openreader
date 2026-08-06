@@ -6,17 +6,21 @@ import { useTtsPreviewSettings } from '@/hooks/audio/useTtsPreviewSettings';
 export function BookPronunciationInspectorModal({
   isOpen,
   onClose,
-  initialBookId
+  initialBookId,
+  initialSearchQuery,
+  initialUseFuzzySearch
 }: {
   isOpen: boolean;
   onClose: () => void;
   initialBookId?: string | null;
+  initialSearchQuery?: string;
+  initialUseFuzzySearch?: boolean;
 }) {
   const previewSettings = useTtsPreviewSettings();
   const [selectedBookId, setSelectedBookId] = useState<string>(initialBookId || '');
   const [letterFilter, setLetterFilter] = useState<string>('ALL');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [useFuzzySearch, setUseFuzzySearch] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>(initialSearchQuery || '');
+  const [useFuzzySearch, setUseFuzzySearch] = useState<boolean>(initialUseFuzzySearch || false);
   
   const [audiobooks, setAudiobooks] = useState<any[]>([]);
   const [words, setWords] = useState<any[]>([]);
@@ -55,9 +59,11 @@ export function BookPronunciationInspectorModal({
 
   useEffect(() => {
     if (isOpen) {
+      if (initialSearchQuery) setSearchQuery(initialSearchQuery);
+      if (initialUseFuzzySearch !== undefined) setUseFuzzySearch(initialUseFuzzySearch);
       fetchPronunciations(selectedBookId, letterFilter);
     }
-  }, [isOpen, selectedBookId, letterFilter]);
+  }, [isOpen, selectedBookId, letterFilter, initialSearchQuery, initialUseFuzzySearch]);
 
   const handleListen = async (word: string, phonetic: string) => {
     try {
@@ -184,6 +190,9 @@ export function BookPronunciationInspectorModal({
     return w.word.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
+  const maxRender = 100;
+  const renderedWords = filteredWords.slice(0, maxRender);
+
   return (
     <ModalFrame open={isOpen} onClose={onClose}>
       <div className="flex flex-col h-full max-h-[80vh] min-w-[600px] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-4">
@@ -238,6 +247,7 @@ export function BookPronunciationInspectorModal({
           ) : filteredWords.length === 0 ? (
             <div className="p-4 text-center text-gray-500">No words found.</div>
           ) : (
+            <>
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-sm font-semibold">
@@ -247,7 +257,7 @@ export function BookPronunciationInspectorModal({
                 </tr>
               </thead>
               <tbody>
-                {filteredWords.map((w, idx) => (
+                {renderedWords.map((w, idx) => (
                   <tr key={idx} className="border-b dark:border-gray-700">
                     <td className="p-3 align-top">
                       <div className="font-bold text-lg">{w.word}</div>
@@ -333,6 +343,12 @@ export function BookPronunciationInspectorModal({
                 ))}
               </tbody>
             </table>
+            {filteredWords.length > maxRender && (
+              <div className="p-4 text-center text-sm text-gray-500 font-medium">
+                Showing top {maxRender} of {filteredWords.length} results. Type to search for a specific word.
+              </div>
+            )}
+            </>
           )}
         </div>
       </div>

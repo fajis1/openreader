@@ -26,6 +26,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [isTextLoading, setIsTextLoading] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isPronunciationModalOpen, setIsPronunciationModalOpen] = useState(false);
+  const [selectedText, setSelectedText] = useState("");
 
   const blocks = useMemo(() => {
     if (!chapterText) return [];
@@ -215,6 +216,18 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
             <textarea
               value={chapterText}
               onChange={(e) => setChapterText(e.target.value)}
+              onSelect={(e) => {
+                const target = e.target as HTMLTextAreaElement;
+                const start = target.selectionStart;
+                const end = target.selectionEnd;
+                if (start !== end && start !== undefined) {
+                  // Only capture if it's a reasonably sized word (e.g., < 50 chars)
+                  const text = target.value.substring(start, end).trim();
+                  if (text && text.length < 50) {
+                    setSelectedText(text);
+                  }
+                }
+              }}
               className="absolute inset-4 w-[calc(100%-2rem)] h-[calc(100%-2rem)] bg-surface border border-line-soft rounded-lg text-text-strong p-4 text-sm font-mono leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
               placeholder="Edit the text here..."
             />
@@ -244,6 +257,8 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         isOpen={isPronunciationModalOpen}
         onClose={() => setIsPronunciationModalOpen(false)}
         initialBookId="" // Use global by default
+        initialSearchQuery={selectedText}
+        initialUseFuzzySearch={!!selectedText} // Auto-fuzzy search if they selected a word
       />
     </div>
   );
