@@ -19,12 +19,18 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
   - Added support to `worker.ts` for pausing audiobook jobs when the character mapping is incomplete, and passing continuity states (`[CONTINUITY: ...]`) and chapter titles (`[TITLE: ...]`) between Gemini API calls to ensure context is maintained across chunks.
   - Added support to inject `pronunciations` from the global dictionary directly into Gemini 3.6's prompt during voice assignment, ensuring LitRPG custom words are automatically swapped to Kokoro IPA.
 
-- **Audio-Drama Review Studio:**
+- **Audio-Drama Review Studio & Custom Pronunciations:**
   - Built `MultiVoiceReviewStudio.tsx` to let users review the assigned XML voice tags (`<voice name="af_heart">Hello</voice>`) for an entire chapter after it's generated.
   - Added features like "✂️ Split Segment at Cursor" to fix Gemini grouping multiple speakers into one chunk.
   - Added a "Kokoro Prosody Toolbar" allowing 1-click insertion of stress marks (`ˈ`, `ˌ`) and volume adjustments (`(-1)`, `(+1)`).
-  - Added an in-studio "📖 Add to Dictionary" modal connected to the existing `/api/tts/global-pronunciations` and `/api/tts/refine-pronunciations` API endpoints, so users can add words and ask Gemini to suggest phonetic spellings on the fly.
+  - Extended the global Pronunciation Library (`BookPronunciationInspectorModal.tsx`) with a full "+ Add Custom Word" UI, allowing users to manually enter words missed by the scanner.
+  - Integrated Gemini phonetics suggestion (via the `/api/tts/refine-pronunciations` endpoint) directly into both the Review Studio's dictionary and the main Pronunciation Library modals, enabling automatic Kokoro IPA suggestions for new custom words.
   - Wired the Review Studio into `/listen/[bookId]/page.tsx`, allowing it to be launched on desktop while the background audiobook process is still running.
+
+- **Audiobook Queue Management & CI/CD Stability:**
+  - Added "Pause" and "Resume" functionality to the audiobook queue (`JobsInlineView.tsx`), complete with a `/api/audiobooks/queue` PATCH route to update job statuses dynamically.
+  - Implemented a "Review Progress" button in the queue that opens partial audiobooks (e.g., at 25% completion) for live review.
+  - Repaired a critical CI/CD issue where redundant GitHub Actions workflows queue up for hours; implemented `concurrency` groups across all `.yml` workflows (`vitest.yml`, `playwright.yml`, `docker-publish.yml`, `docs-check.yml`) with `cancel-in-progress: true` to instantly cancel obsolete runs upon new pushes.
 
 - **Mobile Review Player:**
   - Built `MobileReviewPlayer.tsx`, a sleek mobile-first player that automatically mounts on small screens on the `/listen/[bookId]` page.
