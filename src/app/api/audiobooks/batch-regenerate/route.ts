@@ -1,0 +1,107 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/db';
+import { audiobooks } from '@/db/schema';
+import { eq } from 'drizzle-orm';
+import { requireAuthContext } from '@/lib/server/auth/auth';
+import {
+  listAudiobookObjects,
+  getAudiobookObjectBuffer
+} from '@/lib/server/audiobooks/blobstore';
+import { decodeChapterFileName } from '@/lib/server/audiobooks/chapters';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(request: NextRequest) {
+  try {
+    const ctx = await requireAuthContext(request);
+    if (ctx instanceof Response) return ctx;
+    
+    const userId = ctx.userId;
+    const body = await request.json().catch(() => ({}));
+    const { bookId } = body;
+
+    let booksToProcess: { id: string }[] = [];
+    if (bookId) {
+      booksToProcess = [{ id: bookId }];
+    } else {
+      booksToProcess = await db.select({ id: audiobooks.id }).from(audiobooks).where(eq(audiobooks.userId, userId));
+    }
+
+    const host = request.headers.get('host');
+    const protocol = request.nextUrl.protocol || 'http:';
+    const baseUrl = `${protocol}//${host}`;
+    const cookieHeader = request.headers.get('cookie') || '';
+    
+    // Background execution
+    (async () => {
+      let rebuildCount = 0;
+      
+      for (const book of booksToProcess) {
+        try {
+          const objects = await listAudiobookObjects(book.id, userId, null);
+          const txtFiles = objects.filter(o => o.fileName.endsWith('.txt') && !o.fileName.includes('__changelog'));
+          const audioFiles = objects.filter(o => o.fileName.endsWith('.mp3') || o.fileName.endsWith('.m4b'));
+          
+          const audioFileMap = new Map(audioFiles.map(a => {
+            const decoded = decodeChapterFileName(a.fileName);
+            return [decoded?.index ?? -1, a];
+          }));
+
+          const chaptersToRebuild = [];
+
+          for (const txt of txtFiles) {
+             const decoded = decodeChapterFileName(txt.fileName);
+             if (!decoded) continue;
+             
+             const correspondingAudio = audioFileMap.get(decoded.index);
+             // If audio doesn't exist OR txt is newer than audio
+             if (!correspondingAudio || txt.lastModified > correspondingAudio.lastModified) {
+                chaptersToRebuild.push({
+                   index: decoded.index,
+                   title: decoded.title,
+                   format: correspondingAudio ? (correspondingAudio.fileName.endsWith('.m4b') ? 'm4b' : 'mp3') : 'mp3',
+                   txtFileName: txt.fileName
+                });
+             }
+          }
+
+          // Rebuild sequentially to not overload TTS/memory
+          for (const chap of chaptersToRebuild) {
+             try {
+                const buf = await getAudiobookObjectBuffer(book.id, userId, chap.txtFileName, null);
+                const text = buf.toString('utf-8');
+                
+                await fetch(`${baseUrl}/api/audiobook/chapter`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Cookie': cookieHeader
+                  },
+                  body: JSON.stringify({
+                    bookId: book.id,
+                    documentId: book.id,
+                    chapterIndex: chap.index,
+                    chapterTitle: chap.title,
+                    text,
+                    useSmartAudio: false,
+                    format: chap.format
+                  })
+                });
+                rebuildCount++;
+             } catch (err) {
+                console.error(`Failed to rebuild chapter ${chap.index} for book ${book.id}:`, err);
+             }
+          }
+        } catch (e) {
+           console.error(`Failed to list/rebuild objects for book ${book.id}:`, e);
+        }
+      }
+      console.log(`Finished background batch rebuild. Rebuilt ${rebuildCount} chapters.`);
+    })().catch(console.error);
+
+    return NextResponse.json({ success: true, message: 'Background rebuild started for modified chunks.' });
+  } catch (err: any) {
+    console.error('Batch regenerate failed:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}

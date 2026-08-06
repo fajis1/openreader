@@ -34,6 +34,7 @@ export function BookPronunciationInspectorModal({
   const [refineStatus, setRefineStatus] = useState<{ [word: string]: string }>({});
   const [refineExpanded, setRefineExpanded] = useState<{ [word: string]: boolean }>({});
   const [batchReplaceStatus, setBatchReplaceStatus] = useState<{ [word: string]: string }>({});
+  const [rebuildStatus, setRebuildStatus] = useState<string>('');
 
   const ALPHABET = ['ALL', 'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z', '#'];
 
@@ -183,6 +184,30 @@ export function BookPronunciationInspectorModal({
     }
   };
 
+  const handleRebuildModified = async () => {
+    if (!confirm('This will trigger TTS audio generation in the background for ALL textbook chunks that you have modified (i.e., chunks where the text is newer than the MP3). This may take a while to finish in the background. Continue?')) return;
+    
+    setRebuildStatus('Starting...');
+    try {
+      const res = await fetch('/api/audiobooks/batch-regenerate', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId: selectedBookId || undefined }) 
+      });
+      if (res.ok) {
+        setRebuildStatus('Rebuilding in background...');
+        toast.success('Background rebuild started!');
+        setTimeout(() => setRebuildStatus(''), 8000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to start rebuild');
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Error starting background rebuild');
+      setRebuildStatus('');
+    }
+  };
+
   if (!isOpen) return null;
 
   const isSimilar = (a: string, b: string) => {
@@ -251,6 +276,16 @@ export function BookPronunciationInspectorModal({
             />
             Fuzzy Match (find similar)
           </label>
+          <div className="flex-1 text-right">
+            <button
+              onClick={handleRebuildModified}
+              disabled={!!rebuildStatus}
+              className="px-3 py-1.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 rounded text-sm font-semibold hover:bg-emerald-200 dark:hover:bg-emerald-800 disabled:opacity-50"
+              title="Automatically rebuild the TTS audio for any text chunk that was modified"
+            >
+              {rebuildStatus || 'Rebuild Modified Audio 🔄'}
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-1 mb-4">
