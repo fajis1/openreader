@@ -17,22 +17,23 @@ export async function POST(request: NextRequest) {
     if (ctx instanceof Response) return ctx;
     
     const userId = ctx.userId;
+    if (!userId) return new Response("Unauthorized", { status: 401 });
     const body = await request.json().catch(() => ({}));
     const { bookId, bookIds, dryRun } = body;
 
     let booksToProcess: { id: string, name?: string | null }[] = [];
     if (bookIds && Array.isArray(bookIds) && bookIds.length > 0) {
-      booksToProcess = await db.select({ id: audiobooks.id, name: audiobooks.name })
+      booksToProcess = (await db.select({ id: audiobooks.id, title: audiobooks.title })
                                .from(audiobooks)
-                               .where(and(eq(audiobooks.userId, userId), inArray(audiobooks.id, bookIds)));
+                               .where(and(eq(audiobooks.userId, userId), inArray(audiobooks.id, bookIds)))).map((b: any) => ({ id: b.id, name: b.title }));
     } else if (bookId) {
-      booksToProcess = await db.select({ id: audiobooks.id, name: audiobooks.name })
+      booksToProcess = (await db.select({ id: audiobooks.id, title: audiobooks.title })
                                .from(audiobooks)
-                               .where(and(eq(audiobooks.userId, userId), eq(audiobooks.id, bookId)));
+                               .where(and(eq(audiobooks.userId, userId), eq(audiobooks.id, bookId)))).map((b: any) => ({ id: b.id, name: b.title }));
     } else {
-      booksToProcess = await db.select({ id: audiobooks.id, name: audiobooks.name })
+      booksToProcess = (await db.select({ id: audiobooks.id, title: audiobooks.title })
                                .from(audiobooks)
-                               .where(eq(audiobooks.userId, userId));
+                               .where(eq(audiobooks.userId, userId))).map((b: any) => ({ id: b.id, name: b.title }));
     }
 
     if (dryRun) {

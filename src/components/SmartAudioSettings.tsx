@@ -94,7 +94,7 @@ export function SmartAudioSettings() {
   const [backupApiKey, setBackupApiKey] = useState('');
   const [maskedBackupKey, setMaskedBackupKey] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<SmartAudioProfile[]>([]);
-  const [workerMode, setWorkerMode] = useState<'standard' | 'scholar' | 'bibliography-catcher'>('standard');
+  const [workerMode, setWorkerMode] = useState<'standard' | 'scholar' | 'bibliography-catcher' | 'multi-voice'>('standard');
   const [useGlobalPronunciations, setUseGlobalPronunciations] = useState<boolean>(true);
   const [pronunciationPromptMode, setPronunciationPromptMode] = useState<'default' | 'custom'>('default');
   const [customPronunciationPrompt, setCustomPronunciationPrompt] = useState('');

@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
     if (ctx instanceof Response) return ctx;
     
     const userId = ctx.userId;
+    if (!userId) return new Response("Unauthorized", { status: 401 });
     const { word, newPhonetic, bookId } = await request.json();
 
     if (!word || typeof newPhonetic !== 'string') {
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
               });
 
               if (changed) {
-                await putAudiobookObject(book.id, userId, fileObj.fileName, Buffer.from(newText, 'utf-8'), null);
+                await putAudiobookObject(book.id, userId, fileObj.fileName, Buffer.from(newText, 'utf-8'), 'text/plain', null);
                 updatedCount++;
               }
             } catch (e) {

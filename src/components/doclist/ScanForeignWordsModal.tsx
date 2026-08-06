@@ -905,7 +905,6 @@ export function ScanForeignWordsModal({
                 )}
               </div>
             )}
-            )}
           </div>
           )}
 

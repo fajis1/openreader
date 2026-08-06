@@ -111,6 +111,7 @@ export interface SmartAudioProfile {
    * Defaults to 'standard' when absent.
    */
   workerMode?: 'standard' | 'scholar' | 'bibliography-catcher' | 'multi-voice';
+  resolvedDictionaryHash?: string | null;
 }
 
 

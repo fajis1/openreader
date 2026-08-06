@@ -6,15 +6,14 @@ import { getDocumentBlob } from '@/lib/server/documents/blobstore';
 import { readSmartAudioProfilesDocument, findSmartAudioProfileById } from '@/lib/server/smart-audio-profiles';
 import { serverLogger } from '@/lib/server/logger';
 import { SmartAudioCharacterMap } from '@/types/document-settings';
-import { getSession } from '@/lib/server/auth/session'; // Adjust if this isn't the correct auth function
+import { requireAuthContext } from '@/lib/server/auth/auth';
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getSession(req);
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const userId = session.user.id;
+    const ctx = await requireAuthContext(req);
+    if (ctx instanceof Response) return ctx;
+    const userId = ctx.userId;
+    if (!userId) return new Response("Unauthorized", { status: 401 });
 
     const body = await req.json();
     const documentId = typeof body.documentId === 'string' ? body.documentId : '';
@@ -57,7 +56,7 @@ export async function POST(req: NextRequest) {
       user_id: userId,
       api_key: geminiApiKey,
       backup_api_key: (selectedProfile.backupGeminiApiKey || '').trim(),
-      raw_text: rawText.substring(0, 3000000), # Truncate to safe size for now
+      raw_text: rawText.substring(0, 3000000), // Truncate to safe size for now
       ai_model: selectedProfile.aiModel || 'gemini-2.5-flash-8b'
     });
 

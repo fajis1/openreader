@@ -26,6 +26,7 @@ export interface SmartAudioCharacterEntry {
   description: string;
   sampleText: string;
   voiceId?: string | null;
+  aliasFor?: string | null;
 }
 
 export interface SmartAudioCharacterMap {

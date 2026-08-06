@@ -285,6 +285,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       {/* Multi-Voice Studio Overlay */}
       {showMultiVoiceStudio && isMultiVoice && (
         <MultiVoiceReviewStudio
+          bookId={bookId}
           chapterIndex={currentChapterIndex}
           initialText={chapterText}
           onClose={() => setShowMultiVoiceStudio(false)}

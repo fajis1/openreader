@@ -8,9 +8,9 @@ async function main() {
   for (const user of users) {
     let data = user.dataJson ? (typeof user.dataJson === 'string' ? JSON.parse(user.dataJson) : user.dataJson) : {};
     if (data.smartAudioProfiles && data.smartAudioProfiles.profiles) {
-      const hasCatcher = data.smartAudioProfiles.profiles.some(p => p.id === 'profile-bibliography-catcher');
+      const hasCatcher = data.smartAudioProfiles.profiles.some((p: any) => p.id === 'profile-bibliography-catcher');
       if (!hasCatcher) {
-        const catcher = defaultData.profiles.find(p => p.id === 'profile-bibliography-catcher');
+        const catcher = defaultData.profiles.find((p: any) => p.id === 'profile-bibliography-catcher');
         if (catcher) {
            data.smartAudioProfiles.profiles.push(catcher);
            await db.update(userPreferences).set({ dataJson: JSON.stringify(data) }).where(eq(userPreferences.userId, user.userId));

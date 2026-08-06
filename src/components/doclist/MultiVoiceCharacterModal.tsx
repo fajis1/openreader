@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { SmartAudioCharacterMap, SmartAudioCharacterEntry } from '@/types/document-settings';
-import { useTTSVoices } from '@/lib/client/hooks/useTTSVoices';
+import { Dialog } from '@headlessui/react';
+import type { SmartAudioCharacterMap } from '@/types/document-settings';
+
 
 interface MultiVoiceCharacterModalProps {
   documentId: string;
@@ -17,7 +18,8 @@ export function MultiVoiceCharacterModal({
   onSave,
   initialCharacterMap
 }: MultiVoiceCharacterModalProps) {
-  const { voices } = useTTSVoices();
+  const voices = ['af_heart', 'af_alloy', 'af_aoede', 'af_bella', 'af_jessica', 'af_kore', 'af_nicole', 'af_nova', 'af_river', 'af_sarah', 'af_sky', 'am_adam', 'am_echo', 'am_eric', 'am_fenrir', 'am_liam', 'am_michael', 'am_onyx', 'am_puck', 'am_santa'];
+
   const [characterMap, setCharacterMap] = useState<SmartAudioCharacterMap | null>(initialCharacterMap || null);
   const [isPlaying, setIsPlaying] = useState<string | null>(null);
 

@@ -551,7 +551,8 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     let definitionPassRan = false;
 
     if (
-      isScholarLikeMode(selectedProfile?.workerMode)
+      selectedProfile &&
+      isScholarLikeMode(selectedProfile.workerMode)
       && (
         bookLexicon?.status !== 'complete'
         || bookLexicon.definitionScanComplete !== true
@@ -839,7 +840,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               chapter.title = workerResult.chapter_title;
               await db.update(audiobookChapters)
                 .set({ title: workerResult.chapter_title })
-                .where(eq(audiobookChapters.id, chapter.id));
+                .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.chapterIndex, chapter.index)));
             }
             serverLogger.info({
               event: 'audiobook.queue.gemini.usage',
