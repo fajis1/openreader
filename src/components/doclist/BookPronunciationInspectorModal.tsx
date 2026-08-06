@@ -38,6 +38,12 @@ export function BookPronunciationInspectorModal({
   const [pendingRebuildBooks, setPendingRebuildBooks] = useState<any[] | null>(null);
   const [selectedRebuildBooks, setSelectedRebuildBooks] = useState<Record<string, boolean>>({});
 
+  const [showAddWord, setShowAddWord] = useState(false);
+  const [newWord, setNewWord] = useState('');
+  const [newPhonetic, setNewPhonetic] = useState('');
+  const [isSuggestingNew, setIsSuggestingNew] = useState(false);
+  const [isSavingNew, setIsSavingNew] = useState(false);
+
   const ALPHABET = ['ALL', 'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z', '#'];
 
   const fetchPronunciations = async (bookId: string, letter: string) => {
@@ -183,6 +189,55 @@ export function BookPronunciationInspectorModal({
        console.error(e);
        toast.error(e.message || 'Error executing batch replace');
        setBatchReplaceStatus(prev => ({ ...prev, [word]: 'Failed' }));
+    }
+  };
+
+  const handleSuggestNew = async () => {
+    if (!newWord.trim()) return;
+    setIsSuggestingNew(true);
+    try {
+      const res = await fetch('/api/tts/refine-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          word: newWord.trim(), 
+          feedback: "Provide the most accurate Kokoro IPA phonetic spelling for this word.",
+          currentChoices: [] 
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.newChoices && data.newChoices.length > 0) {
+          setNewPhonetic(data.newChoices[0]);
+        }
+      }
+    } finally {
+      setIsSuggestingNew(false);
+    }
+  };
+
+  const handleSaveNew = async () => {
+    if (!newWord.trim() || !newPhonetic.trim()) return;
+    setIsSavingNew(true);
+    try {
+      let phonetic = newPhonetic.trim();
+      if (!phonetic.startsWith('/')) phonetic = '/' + phonetic;
+      if (!phonetic.endsWith('/')) phonetic = phonetic + '/';
+      
+      const res = await fetch('/api/tts/global-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word: newWord.trim(), phonetic })
+      });
+      if (res.ok) {
+        toast.success(`Added ${newWord.trim()} to library`);
+        setShowAddWord(false);
+        setNewWord('');
+        setNewPhonetic('');
+        fetchPronunciations(selectedBookId, letterFilter);
+      }
+    } finally {
+      setIsSavingNew(false);
     }
   };
 
@@ -370,7 +425,7 @@ export function BookPronunciationInspectorModal({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-1 mb-4">
+        <div className="flex flex-wrap gap-1 mb-4 items-center">
           {ALPHABET.map(l => (
             <button
               key={l}
@@ -380,7 +435,55 @@ export function BookPronunciationInspectorModal({
               {l}
             </button>
           ))}
+          <div className="flex-1 text-right">
+            <button
+              onClick={() => setShowAddWord(!showAddWord)}
+              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded shadow transition-all"
+            >
+              {showAddWord ? 'Close Form' : '+ Add Custom Word'}
+            </button>
+          </div>
         </div>
+
+        {showAddWord && (
+          <div className="mb-4 p-4 border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg flex flex-col gap-3">
+            <h3 className="text-sm font-bold text-indigo-900 dark:text-indigo-200">Add Global Pronunciation</h3>
+            <p className="text-xs text-indigo-700 dark:text-indigo-400">Add a unique LitRPG word to fix it across your entire library.</p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input 
+                type="text" 
+                placeholder="Original Word (e.g. Aetherian)" 
+                value={newWord}
+                onChange={e => setNewWord(e.target.value)}
+                className="bg-white dark:bg-gray-800 border border-indigo-200 dark:border-gray-700 rounded-lg p-2 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none flex-1"
+              />
+              <div className="flex gap-2 flex-1">
+                <input 
+                  type="text" 
+                  placeholder="Phonetic (e.g. /iːθərɪən/)" 
+                  value={newPhonetic}
+                  onChange={e => setNewPhonetic(e.target.value)}
+                  className="bg-white dark:bg-gray-800 border border-indigo-200 dark:border-gray-700 rounded-lg p-2 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none flex-1"
+                />
+                <button 
+                  onClick={handleSuggestNew}
+                  disabled={isSuggestingNew || !newWord}
+                  className="px-3 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-800 dark:hover:bg-indigo-700 disabled:opacity-50 text-indigo-700 dark:text-indigo-200 text-sm font-semibold rounded-lg transition-colors border border-indigo-200 dark:border-indigo-700"
+                  title="Ask Gemini for a suggested pronunciation"
+                >
+                  {isSuggestingNew ? '✨...' : '✨ Suggest'}
+                </button>
+              </div>
+              <button 
+                onClick={handleSaveNew}
+                disabled={isSavingNew || !newWord || !newPhonetic}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-all"
+              >
+                {isSavingNew ? 'Saving...' : 'Save Word'}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-auto border rounded dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
           {loading ? (
