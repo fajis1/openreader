@@ -11,6 +11,29 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-06 — Multi-Voice Audiobook Generation & Review Pipeline
+
+- **Multi-Voice Generation Pipeline:**
+  - Implemented `audiobooks.multivoice.extract` and `audiobooks.multivoice.assign` in the Python worker (`multivoice_worker.py`) using Gemini 3.1 Flash and 3.6 to natively orchestrate Multi-Voice audiobooks.
+  - Implemented an interactive mapping UI (`MultiVoiceCharacterModal.tsx`) allowing users to assign standard Kokoro TTS voices (like `af_heart` or `am_adam`) to Gemini-identified characters before audio generation starts.
+  - Added support to `worker.ts` for pausing audiobook jobs when the character mapping is incomplete, and passing continuity states (`[CONTINUITY: ...]`) and chapter titles (`[TITLE: ...]`) between Gemini API calls to ensure context is maintained across chunks.
+  - Added support to inject `pronunciations` from the global dictionary directly into Gemini 3.6's prompt during voice assignment, ensuring LitRPG custom words are automatically swapped to Kokoro IPA.
+
+- **Audio-Drama Review Studio:**
+  - Built `MultiVoiceReviewStudio.tsx` to let users review the assigned XML voice tags (`<voice name="af_heart">Hello</voice>`) for an entire chapter after it's generated.
+  - Added features like "✂️ Split Segment at Cursor" to fix Gemini grouping multiple speakers into one chunk.
+  - Added a "Kokoro Prosody Toolbar" allowing 1-click insertion of stress marks (`ˈ`, `ˌ`) and volume adjustments (`(-1)`, `(+1)`).
+  - Added an in-studio "📖 Add to Dictionary" modal connected to the existing `/api/tts/global-pronunciations` and `/api/tts/refine-pronunciations` API endpoints, so users can add words and ask Gemini to suggest phonetic spellings on the fly.
+  - Wired the Review Studio into `/listen/[bookId]/page.tsx`, allowing it to be launched on desktop while the background audiobook process is still running.
+
+- **Mobile Review Player:**
+  - Built `MobileReviewPlayer.tsx`, a sleek mobile-first player that automatically mounts on small screens on the `/listen/[bookId]` page.
+  - Features a massive "🚩 Flag Error" button so users can flag timestamp locations of incorrect voices or pronunciations while listening on their commute, which can later be reviewed and fixed on the Desktop Review Studio.
+  - Persists playback state across sessions via `localStorage`.
+
+- **Follow-up:** 
+  - Need to hook the mobile flags data to the backend DB (currently it just console logs).
+
 ### 2026-08-05 — Dev Server Stability, Heteronym Bypass, and Chapter Title Fixes
 
 - **Dev Server Stability:**
@@ -584,3 +607,18 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 - Updated `filterKokoroCompatiblePronunciationRecord` in `kokoro-pronunciation-policy.ts` to reject words containing brackets, digits, or mixed Latin/Greek/Hebrew characters.
 - This ensures that if the Gemini audiobook generator attempts to fix or pronounce an OCR corrupted string like `vio[θεσ]iα` without removing the corruption, the malformed string will not be learned and saved into the global pronunciation dictionary.
 - Verified all TypeScript tests pass.
+
+## 2026-08-06 Multi-Voice Audio-Drama Implementation
+
+**What Changed:**
+- Created `multivoice_worker.py` to handle character extraction and voice assignment via Gemini.
+- Updated `src/types/client.ts` to add `multi-voice` to `workerMode`.
+- Updated `src/types/document-settings.ts` to add `SmartAudioCharacterMap` to `DocumentSettings`, including the `aliasFor` field for merging duplicate characters.
+- Created `src/app/api/audiobook/characters/scan/route.ts` to manually trigger the Pass 1 extraction.
+
+**Next Steps:**
+- Update `src/lib/server/audiobooks/worker.ts` to pause generation if voices aren't assigned (status `waiting_for_voices`).
+- Update `worker.ts` to send chunks to `audiobooks.multivoice.assign` with the mapped character list and continuity state.
+- Create the UI for mapping characters.
+- Build the Review Studio UI for editing character segments and forcing a regeneration.
+

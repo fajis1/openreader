@@ -96,18 +96,60 @@ export async function generateSegmentedAudiobookTtsBuffer(
   signal?: AbortSignal,
   runtimeSettings?: TtsUpstreamRuntimeSettings,
 ): Promise<Buffer> {
-  const textSegments = splitAudiobookTextForTts(request.text, request.language);
-  if (textSegments.length === 0) {
+  const audioSegments: Buffer[] = [];
+  
+  // Regex to match <voice name="...">...</voice>
+  const voiceTagRegex = /<voice\s+name="([^"]+)">([\s\S]*?)<\/voice>/gi;
+  
+  // If the text contains voice tags, we parse them. Otherwise, we treat the whole text as one segment.
+  const parsedChunks: { text: string; voice: string }[] = [];
+  let lastIndex = 0;
+  
+  let match;
+  while ((match = voiceTagRegex.exec(request.text)) !== null) {
+    // Add any untagged text before this match using the default voice
+    const beforeText = request.text.substring(lastIndex, match.index).trim();
+    if (beforeText) {
+      parsedChunks.push({ text: beforeText, voice: request.voice });
+    }
+    
+    // Add the tagged text
+    const assignedVoice = match[1].trim() || request.voice;
+    const innerText = match[2].trim();
+    if (innerText) {
+      parsedChunks.push({ text: innerText, voice: assignedVoice });
+    }
+    
+    lastIndex = voiceTagRegex.lastIndex;
+  }
+  
+  // Add any remaining untagged text
+  const afterText = request.text.substring(lastIndex).trim();
+  if (afterText) {
+    parsedChunks.push({ text: afterText, voice: request.voice });
+  }
+
+  // If no tags were found at all, just push the original text
+  if (parsedChunks.length === 0) {
+    parsedChunks.push({ text: request.text, voice: request.voice });
+  }
+
+  // Now, for each chunk, we still need to run it through splitAudiobookTextForTts
+  // to ensure no chunk exceeds the TTS engine's character limits (e.g. 4000 chars)
+  for (const chunk of parsedChunks) {
+    const subSegments = splitAudiobookTextForTts(chunk.text, request.language);
+    for (const text of subSegments) {
+      audioSegments.push(await generateTTSBuffer(
+        { ...request, text, voice: chunk.voice, format: 'mp3' },
+        signal,
+        runtimeSettings,
+      ));
+    }
+  }
+
+  if (audioSegments.length === 0) {
     throw new Error('No speakable text remained after TTS segmentation.');
   }
 
-  const audioSegments: Buffer[] = [];
-  for (const text of textSegments) {
-    audioSegments.push(await generateTTSBuffer(
-      { ...request, text, format: 'mp3' },
-      signal,
-      runtimeSettings,
-    ));
-  }
   return concatenateMp3Segments(audioSegments, signal);
 }

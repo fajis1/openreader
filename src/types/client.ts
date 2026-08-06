@@ -110,7 +110,7 @@ export interface SmartAudioProfile {
    * 'bibliography-catcher' → provides structural layout tags to Gemini for better end-matter pruning
    * Defaults to 'standard' when absent.
    */
-  workerMode?: 'standard' | 'scholar' | 'bibliography-catcher';
+  workerMode?: 'standard' | 'scholar' | 'bibliography-catcher' | 'multi-voice';
 }
 
 

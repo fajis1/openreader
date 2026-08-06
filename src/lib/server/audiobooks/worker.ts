@@ -7,7 +7,7 @@ import {
 } from '@/lib/server/smart-audio-profiles';
 import { eq, and, asc, lt, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { audiobookJobs, documents, audiobooks, audiobookChapters, adminSettings } from '@/db/schema';
+import { audiobookJobs, documents, audiobooks, audiobookChapters, adminSettings, documentSettings } from '@/db/schema';
 import { readCurrentParsedPdfArtifact } from '@/lib/server/pdf-parse/artifact';
 import { getDocumentBlob } from '@/lib/server/documents/blobstore';
 import { checkSystemResources } from '@/lib/server/audiobooks/system-monitor';
@@ -655,6 +655,45 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       }, 'Built the Scholar pronunciation and definition lexicon before cleanup.');
     }
 
+    let multiVoiceCharacters: any[] = [];
+    if (selectedProfile?.workerMode === 'multi-voice') {
+      const docSettingsRows = await db.select().from(documentSettings).where(and(eq(documentSettings.documentId, doc.id), eq(documentSettings.userId, userId)));
+      const dataJson = typeof docSettingsRows[0]?.dataJson === 'string' ? JSON.parse(docSettingsRows[0].dataJson) : (docSettingsRows[0]?.dataJson || {});
+      const charMap = dataJson.smartAudioCharacters;
+      
+      let needsVoices = true;
+      if (charMap?.status === 'complete' && charMap.entries) {
+        const primaryChars = Object.values(charMap.entries).filter((c: any) => !c.aliasFor);
+        const unassigned = primaryChars.filter((c: any) => !c.voiceId);
+        if (primaryChars.length > 0 && unassigned.length === 0) {
+          needsVoices = false;
+          // Build character list with aliases combined
+          multiVoiceCharacters = primaryChars.map((primary: any) => {
+             const aliases = Object.values(charMap.entries)
+               .filter((c: any) => c.aliasFor === primary.name)
+               .map((c: any) => c.name);
+             return {
+                name: aliases.length > 0 ? `${primary.name} (Aliases: ${aliases.join(', ')})` : primary.name,
+                voiceId: primary.voiceId,
+             };
+          });
+        }
+      }
+
+      if (needsVoices) {
+        serverLogger.info({ event: 'audiobook.queue.multivoice.waiting_for_voices', bookId }, 'Job is paused waiting for user to map voices in UI');
+        await db.update(audiobookJobs)
+          .set({
+            status: 'queued',
+            error: 'waiting_for_voices',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          })
+          .where(eq(audiobookJobs.id, job.id));
+        return;
+      }
+    }
+
     serverLogger.info({
       event: 'audiobook.queue.smart_audio.plan',
       jobId: job.id,
@@ -681,6 +720,8 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         serverLogger.warn({ event: 'audiobook.queue.smart_audio.error', error: e }, 'Failed to connect to NATS, smart audio will fail');
       }
     }
+
+    let continuityState = "Beginning of book.";
 
     for (const chapter of chapters) {
       // ABORT CHECK: If user cancelled/deleted the job from the UI, abort processing
@@ -738,22 +779,40 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             currentPronunciations,
           );
 
-          const payload = JSON.stringify({
-            backup_api_key: backupGeminiApiKey,
-            user_id: userId,
-            api_key: geminiApiKey,
-            ai_model: resolveCleanupAiModel(currentSelectedProfile),
-            prompt: currentSelectedProfile?.customTtsPrompt || "You are an expert audiobook preparation assistant...",
-            pronunciation_prompt: buildKokoroPronunciationInstructions(currentSelectedProfile),
-            raw_text: enrichedChapterText,
-            pronunciations: applicablePronunciations,
-            abbreviations: currentSelectedProfile?.abbreviations || {},
-            books: currentSelectedProfile?.books || {}
-          });
+          let payload: string;
+          let natsSubject: string;
 
-          const natsSubject = isScholarLikeMode(currentSelectedProfile?.workerMode)
-            ? SCHOLAR_NATS_SUBJECT
-            : SMART_AUDIO_NATS_SUBJECT;
+          if (currentSelectedProfile?.workerMode === 'multi-voice') {
+            payload = JSON.stringify({
+              backup_api_key: backupGeminiApiKey,
+              user_id: userId,
+              api_key: geminiApiKey,
+              ai_model: resolveCleanupAiModel(currentSelectedProfile),
+              raw_text: enrichedChapterText,
+              characters: multiVoiceCharacters,
+              continuity_state: continuityState,
+              pronunciations: applicablePronunciations,
+              pronunciation_prompt: buildKokoroPronunciationInstructions(currentSelectedProfile)
+            });
+            natsSubject = 'audiobooks.multivoice.assign';
+          } else {
+            payload = JSON.stringify({
+              backup_api_key: backupGeminiApiKey,
+              user_id: userId,
+              api_key: geminiApiKey,
+              ai_model: resolveCleanupAiModel(currentSelectedProfile),
+              prompt: currentSelectedProfile?.customTtsPrompt || "You are an expert audiobook preparation assistant...",
+              pronunciation_prompt: buildKokoroPronunciationInstructions(currentSelectedProfile),
+              raw_text: enrichedChapterText,
+              pronunciations: applicablePronunciations,
+              abbreviations: currentSelectedProfile?.abbreviations || {},
+              books: currentSelectedProfile?.books || {}
+            });
+            natsSubject = isScholarLikeMode(currentSelectedProfile?.workerMode)
+              ? SCHOLAR_NATS_SUBJECT
+              : SMART_AUDIO_NATS_SUBJECT;
+          }
+
           const msg = await nc.request(natsSubject, sc.encode(payload), { timeout: 120000 });
           const workerResult = JSON.parse(sc.decode(msg.data));
 
@@ -771,8 +830,11 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             return;
           }
 
-          if (workerResult.status === "success" && workerResult.cleaned_text) {
-            processedTextForTts = workerResult.cleaned_text;
+          if (workerResult.status === "success" && (workerResult.cleaned_text || workerResult.tagged_text)) {
+            processedTextForTts = workerResult.tagged_text || workerResult.cleaned_text;
+            if (workerResult.continuity_state) {
+              continuityState = workerResult.continuity_state;
+            }
             if (workerResult.chapter_title) {
               chapter.title = workerResult.chapter_title;
               await db.update(audiobookChapters)

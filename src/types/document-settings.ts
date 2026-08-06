@@ -21,6 +21,20 @@ export interface SmartAudioBookLexicon {
   entries: Record<string, SmartAudioBookLexiconEntry>;
 }
 
+export interface SmartAudioCharacterEntry {
+  name: string;
+  description: string;
+  sampleText: string;
+  voiceId?: string | null;
+}
+
+export interface SmartAudioCharacterMap {
+  schemaVersion: 1;
+  status: 'partial' | 'complete';
+  scannedAt: number;
+  entries: Record<string, SmartAudioCharacterEntry>;
+}
+
 export interface DocumentSettings {
   schemaVersion: 1;
   language?: string;
@@ -28,6 +42,7 @@ export interface DocumentSettings {
     skipBlockKinds: ParsedPdfBlockKind[];
   };
   smartAudioLexicon?: SmartAudioBookLexicon;
+  smartAudioCharacters?: SmartAudioCharacterMap;
 }
 
 export const DEFAULT_DOCUMENT_SETTINGS: DocumentSettings = {

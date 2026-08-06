@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { HTMLViewer } from "@/components/views/HTMLViewer";
 import { parseHtmlBlocks } from "@/lib/client/html/blocks";
 import { BookPronunciationInspectorModal } from "@/components/doclist/BookPronunciationInspectorModal";
+import { MultiVoiceReviewStudio } from "@/components/audiobooks/MultiVoiceReviewStudio";
+import { MobileReviewPlayer } from "@/components/audiobooks/MobileReviewPlayer";
 
 interface Chapter {
   index: number;
@@ -27,6 +29,11 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isPronunciationModalOpen, setIsPronunciationModalOpen] = useState(false);
   const [selectedText, setSelectedText] = useState("");
+  
+  const [showMultiVoiceStudio, setShowMultiVoiceStudio] = useState(false);
+  const [showMobilePlayer, setShowMobilePlayer] = useState(false);
+
+  const isMultiVoice = chapterText.includes('<voice');
 
   const blocks = useMemo(() => {
     if (!chapterText) return [];
@@ -134,9 +141,23 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           <h1 className="text-xl font-bold text-text-strong line-clamp-1">Review: {currentChapter.title}</h1>
           <p className="text-text-soft text-sm">Chapter {currentChapterIndex + 1} of {chapters.length}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {isMultiVoice && (
+            <button
+              onClick={() => setShowMultiVoiceStudio(true)}
+              className="hidden md:flex px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium text-sm gap-2"
+            >
+              🎬 Open Audio-Drama Studio
+            </button>
+          )}
           <button
-            className="px-3 py-1.5 border border-line-soft rounded text-sm disabled:opacity-50"
+            onClick={() => setShowMobilePlayer(true)}
+            className="md:hidden px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded font-medium text-sm gap-2"
+          >
+            📱 Mobile Player
+          </button>
+          <button
+            className="px-3 py-1.5 border border-line-soft rounded text-sm disabled:opacity-50 ml-2"
             onClick={() => setCurrentChapterIndex(i => i - 1)}
             disabled={currentChapterIndex === 0}
           >
@@ -260,6 +281,60 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         initialSearchQuery={selectedText}
         initialUseFuzzySearch={!!selectedText} // Auto-fuzzy search if they selected a word
       />
+
+      {/* Multi-Voice Studio Overlay */}
+      {showMultiVoiceStudio && isMultiVoice && (
+        <MultiVoiceReviewStudio
+          chapterIndex={currentChapterIndex}
+          initialText={chapterText}
+          onClose={() => setShowMultiVoiceStudio(false)}
+          onSaveAndRegenerate={async (newXml) => {
+            setChapterText(newXml);
+            // Trigger the regenerate logic with newXml
+            setIsRegenerating(true);
+            try {
+              const res = await fetch(`/api/audiobook/chapter`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  bookId,
+                  documentId: bookId,
+                  chapterIndex: currentChapterIndex,
+                  chapterTitle: currentChapter.title,
+                  text: newXml,
+                  useSmartAudio: false,
+                  format: currentChapter.format,
+                }),
+              });
+              if (!res.ok) throw new Error("Failed to regenerate audio");
+              alert("Successfully rebuilt background audiobook chapter!");
+            } catch (err) {
+              console.error(err);
+              alert("Error regenerating audio.");
+            } finally {
+              setIsRegenerating(false);
+              setShowMultiVoiceStudio(false);
+            }
+          }}
+        />
+      )}
+
+      {/* Mobile Player Overlay */}
+      {showMobilePlayer && (
+        <MobileReviewPlayer
+          bookId={bookId}
+          chapterIndex={currentChapterIndex}
+          chapterTitle={currentChapter.title}
+          audioUrl={`/api/audiobook/chapter?bookId=${bookId}&chapterIndex=${currentChapterIndex}`}
+          onFlagError={async (timeMs) => {
+            console.log("Flagged error for mobile review at ms:", timeMs);
+            // Future: Post this to a DB table to render in Desktop Studio
+          }}
+          onNextChapter={() => setCurrentChapterIndex(i => Math.min(chapters.length - 1, i + 1))}
+          onPrevChapter={() => setCurrentChapterIndex(i => Math.max(0, i - 1))}
+          onExit={() => setShowMobilePlayer(false)}
+        />
+      )}
     </div>
   );
 }
