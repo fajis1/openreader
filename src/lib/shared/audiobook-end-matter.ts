@@ -1,4 +1,4 @@
-const END_MATTER_HEADING = /^(?:(?:(?:author|name|subject|scripture|biblical|general)\s+)?(?:index|indexes|indices)|(?:select(?:ed)?|primary|secondary|brief)?\s*bibliography|works\s+cited|references?|notes?)$/i;
+const END_MATTER_HEADING = /^(?:(?:(?:author|name|subject|scripture|biblical|general)\s+)?(?:index|indexes|indices)|(?:select(?:ed)?|primary|secondary|brief)?\s*bibliography|works\s+cited|references?|notes?|abbreviations?)$/i;
 
 function normalizeHeading(value: string): string {
   return value

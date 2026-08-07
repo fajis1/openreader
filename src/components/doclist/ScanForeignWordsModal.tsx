@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ModalFrame } from '@/components/ui';
 import toast from 'react-hot-toast';
 import { useTtsPreviewSettings } from '@/hooks/audio/useTtsPreviewSettings';
+import { useAuthSession } from '@/hooks/useAuthSession';
+import { BookPronunciationInspectorModal } from './BookPronunciationInspectorModal';
 
 type SuspectPronunciation = {
   word: string;
@@ -34,6 +36,8 @@ export function ScanForeignWordsModal({
   documentId?: string | null;
   documentName?: string | null;
 }) {
+  const { data: session } = useAuthSession();
+  const isAdmin = Boolean((session?.user as unknown as { isAdmin?: boolean } | undefined)?.isAdmin);
   const previewSettings = useTtsPreviewSettings();
   const [activeDocId, setActiveDocId] = useState<string | null>(documentId || null);
   const [activeDocName, setActiveDocName] = useState<string | null>(documentName || null);
@@ -49,6 +53,7 @@ export function ScanForeignWordsModal({
   const [editValue, setEditValue] = useState<string>('');
   const [editingDefinition, setEditingDefinition] = useState<string | null>(null);
   const [definitionEditValue, setDefinitionEditValue] = useState<string>('');
+  const [inspectWord, setInspectWord] = useState<string | null>(null);
 
   const [feedbackExamples, setFeedbackExamples] = useState<string[]>([]);
   const [pronunciationModel, setPronunciationModel] = useState<string | null>(null);
@@ -538,15 +543,38 @@ export function ScanForeignWordsModal({
       });
 
       // Also post to global pronunciations
+      const globalPayload: any = { word, phonetic: newPronunciation };
+      if (isAdmin) {
+        globalPayload.action = 'set-default';
+      }
       await fetch('/api/tts/global-pronunciations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word, phonetic: newPronunciation })
+        body: JSON.stringify(globalPayload)
       });
 
       // Update local state
       setWords(words.map(w => w.word === word ? { ...w, userOverride: newPronunciation } : w));
       setEditingWord(null);
+      setInspectWord(word); // Open the fuzzy search modal side-by-side
+      
+      // Automatically replace in text chunks
+      toast.promise(
+        fetch('/api/audiobooks/batch-replace', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ word, newPhonetic: newPronunciation })
+        }).then(async res => {
+          if (!res.ok) throw new Error('Failed to replace');
+          return res.json();
+        }),
+        {
+          loading: `Searching and replacing ${word} in text...`,
+          success: (data: any) => `Replaced all in document! (${data.updatedCount} text chunks updated)`,
+          error: 'Failed to replace in text.'
+        }
+      );
+
     } catch (e) {
       console.error('Failed to save override', e);
     }
@@ -660,15 +688,26 @@ export function ScanForeignWordsModal({
 
 
   return (
-    <ModalFrame
-      open={isOpen}
-      onClose={handleClose}
-      size="xl"
-      panelClassName="w-[56rem] !max-w-[calc(100vw-2rem)] sm:min-w-[32rem]"
-      panelStyle={panelWidth ? { width: `${panelWidth}px` } : undefined}
-      panelRef={panelRef}
-      panelTestId="scan-foreign-words-modal"
-    >
+    <>
+      {inspectWord && (
+        <BookPronunciationInspectorModal
+          isOpen={true}
+          onClose={() => setInspectWord(null)}
+          initialSearchQuery={inspectWord}
+          initialUseFuzzySearch={true}
+          isShiftedRight={true}
+          initialBookId={activeDocId || undefined}
+        />
+      )}
+      <ModalFrame
+        open={isOpen}
+        onClose={handleClose}
+        size="xl"
+        panelClassName={`w-[56rem] !max-w-[calc(100vw-2rem)] sm:min-w-[32rem] transition-transform duration-300 ${inspectWord ? '-translate-x-[25vw]' : ''}`}
+        panelStyle={panelWidth ? { width: `${panelWidth}px` } : undefined}
+        panelRef={panelRef}
+        panelTestId="scan-foreign-words-modal"
+      >
       <div className="relative flex flex-col max-h-[80vh]">
         <div className="p-4 border-b dark:border-gray-800 flex flex-col gap-3">
           <div className="flex justify-between items-center">
@@ -1381,5 +1420,6 @@ export function ScanForeignWordsModal({
         </div>
       </div>
     </ModalFrame>
+    </>
   );
 }

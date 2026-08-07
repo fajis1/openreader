@@ -12,6 +12,8 @@ interface MultiVoiceReviewStudioProps {
   initialText: string;
   onSaveAndRegenerate: (newXmlText: string) => Promise<void>;
   onClose: () => void;
+  onRebuildAllModified?: () => Promise<void>;
+  isRebuildingAll?: boolean;
 }
 
 export function MultiVoiceReviewStudio({
@@ -20,6 +22,8 @@ export function MultiVoiceReviewStudio({
   initialText,
   onClose,
   onSaveAndRegenerate,
+  onRebuildAllModified,
+  isRebuildingAll,
 }: MultiVoiceReviewStudioProps) {
   // Hardcoded Kokoro Voices
   const voices = ['af_heart', 'af_alloy', 'af_aoede', 'af_bella', 'af_jessica', 'af_kore', 'af_nicole', 'af_nova', 'af_river', 'af_sarah', 'af_sky', 'am_adam', 'am_echo', 'am_eric', 'am_fenrir', 'am_liam', 'am_michael', 'am_onyx', 'am_puck', 'am_santa'];
@@ -208,9 +212,19 @@ export function MultiVoiceReviewStudio({
           >
             📖 Add to Dictionary
           </button>
+          {onRebuildAllModified && (
+            <button
+              onClick={onRebuildAllModified}
+              disabled={isRebuildingAll || isSaving}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-sm font-semibold rounded-full shadow-lg transition-all flex items-center gap-2"
+              title="Automatically rebuild the TTS audio for any text chunk that was modified via the Dictionary or text edits"
+            >
+              {isRebuildingAll ? "Scanning..." : "Rebuild Modified Audio 🔄"}
+            </button>
+          )}
           <button 
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || isRebuildingAll}
             className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-full shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2"
           >
             {isSaving ? 'Regenerating...' : '💾 Save & Regenerate Audio'}

@@ -26,7 +26,8 @@ export async function GET(request: NextRequest) {
 
     const storageUserId = ctxOrRes.userId;
     const testNamespace = getOpenReaderTestNamespace(request.headers);
-    const textFileName = `${String(chapterIndex + 1).padStart(4, '0')}__text.txt`;
+    const type = request.nextUrl.searchParams.get('type');
+    const textFileName = `${String(chapterIndex + 1).padStart(4, '0')}__${type === 'original' ? 'original' : 'text'}.txt`;
 
     try {
       const textBuffer = await getAudiobookObjectBuffer(bookId, storageUserId, textFileName, testNamespace);

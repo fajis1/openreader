@@ -17,7 +17,7 @@ def academic_pre_clean(text, user_abbreviations, biblical_books):
     """Phase 1: Regex & Structural Expansion"""
     pt = text
     for short, full in biblical_books.items():
-        pattern = rf"\b{re.escape(short)}\s+(\d+):(\d+)([-–](\d+))?"
+        pattern = rf"\b{re.escape(short)}\.?\s+(\d+):(\d+)([-–](\d+))?"
         def replace_range(match):
             chapter, verse_start, _, verse_end = match.groups()
             if verse_end:
@@ -81,7 +81,7 @@ async def process_message(msg):
         
         dict_string = json.dumps(pronunciations, indent=2, ensure_ascii=False)
         dynamic_constraints = f"CRITICAL CONTINUITY RULE: Use these exact phonetic spellings:\n{dict_string}\n\n"
-        title_instruction = "CHAPTER TITLE GENERATION: At the very end of your response, after the cleaned text, you MUST add exactly one blank line and then output a 3 to 5 word descriptive title summarizing the text wrapped in tags like this: [CHAPTER_TITLE: Three Word Summary]. Do not include the chapter number or 'continued', just a descriptive title.\n\n"
+        title_instruction = "CHAPTER TITLE GENERATION: You MUST summarize the provided text into a unique 3 to 5 word descriptive title based on its actual contents. DO NOT just copy the existing chapter title (e.g. 'Foreword' or 'Chapter 1'). At the very end of your response, after the cleaned text, you MUST add exactly one blank line and then output the title wrapped in tags exactly like this: [CHAPTER_TITLE: Three Word Summary]. Do not include the chapter number or 'continued'.\n\n"
         
         full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\n{title_instruction}Text to clean:\n{enriched_text}"
         final_text = ""
@@ -118,6 +118,10 @@ async def process_message(msg):
                         model=ai_model,
                         contents=full_prompt
                     )
+                    
+                    if not response.text:
+                        raise ValueError(f"Gemini returned an empty response or blocked it. Safety ratings: {response.candidates[0].safety_ratings if response.candidates else 'Unknown'}")
+                        
                     final_text = response.text.strip()
                     
                     if api_state["current_delay"] > 0:
@@ -150,7 +154,7 @@ async def process_message(msg):
                     raise e
 
         # PHASE 3: Two-Way Sync Extraction & Title
-        title_match = re.search(r'\[CHAPTER_TITLE:\s*(.*?)\]', final_text)
+        title_match = re.search(r'\[\s*CHAPTER_TITLE\s*:\s*(.*?)\]', final_text, re.IGNORECASE)
         chapter_title = ""
         if title_match:
             chapter_title = title_match.group(1).strip()

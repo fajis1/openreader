@@ -1,0 +1,15 @@
+--- src/app/(app)/listen/[bookId]/page.tsx
++++ src/app/(app)/listen/[bookId]/page.tsx
+@@ -58,6 +58,14 @@
+ 
+   const isMultiVoice = chapterText.includes('<voice');
+ 
++  useEffect(() => {
++    const handleOpenSettings = () => setIsSettingsModalOpen(true);
++    window.addEventListener('open-smart-audio-settings', handleOpenSettings);
++    return () => {
++      window.removeEventListener('open-smart-audio-settings', handleOpenSettings);
++    };
++  }, []);
++
+   const blocks = useMemo(() => {

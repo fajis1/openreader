@@ -9,6 +9,8 @@ import {
 } from '@/lib/server/audiobooks/blobstore';
 import { decodeChapterFileName } from '@/lib/server/audiobooks/chapters';
 
+import { AudiobookBlobObject } from '@/lib/server/audiobooks/blobstore';
+
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
@@ -44,7 +46,7 @@ export async function POST(request: NextRequest) {
           const txtFiles = objects.filter(o => o.fileName.endsWith('.txt') && !o.fileName.includes('__changelog'));
           const audioFiles = objects.filter(o => o.fileName.endsWith('.mp3') || o.fileName.endsWith('.m4b'));
           
-          const audioFileMap = new Map(audioFiles.map(a => {
+          const audioFileMap = new Map<number, AudiobookBlobObject>(audioFiles.map(a => {
             const decoded = decodeChapterFileName(a.fileName);
             return [decoded?.index ?? -1, a];
           }));
@@ -84,7 +86,7 @@ export async function POST(request: NextRequest) {
           const txtFiles = objects.filter(o => o.fileName.endsWith('.txt') && !o.fileName.includes('__changelog'));
           const audioFiles = objects.filter(o => o.fileName.endsWith('.mp3') || o.fileName.endsWith('.m4b'));
           
-          const audioFileMap = new Map(audioFiles.map(a => {
+          const audioFileMap = new Map<number, AudiobookBlobObject>(audioFiles.map(a => {
             const decoded = decodeChapterFileName(a.fileName);
             return [decoded?.index ?? -1, a];
           }));

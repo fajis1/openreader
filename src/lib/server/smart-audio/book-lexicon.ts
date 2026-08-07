@@ -25,8 +25,8 @@ import {
 import { serverLogger } from '@/lib/server/logger';
 
 const FOREIGN_WORD = /[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff][\u0300-\u036f\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]*/gu;
-const FOREIGN_WORD_BEFORE = /[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff][\u0300-\u036f\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]*\s+$/u;
-const FOREIGN_WORD_AFTER = /^\s+[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]/u;
+const FOREIGN_WORD_BEFORE = /[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff][\u0300-\u036f\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]*[\p{P}\p{S}\p{Z}\s]*$/u;
+const FOREIGN_WORD_AFTER = /^[\p{P}\p{S}\p{Z}\s]*[\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]/u;
 const FOREIGN_TERM_CHARACTER_CLASS = String.raw`\u0300-\u036f\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff`;
 const GREEK = /[\u0370-\u03ff\u1f00-\u1fff]/u;
 const HEBREW = /[\u0590-\u05ff]/u;
@@ -422,8 +422,11 @@ export function enrichTextFromBookLexicon(
   return enriched.replace(pattern, (term, offset: number) => {
     const entry = entriesByTerm.get(term);
     if (!entry) return term;
-    const before = enriched.slice(0, offset);
-    const after = enriched.slice(offset + term.length);
+    const beforeRaw = enriched.slice(0, offset);
+    const afterRaw = enriched.slice(offset + term.length);
+    // Strip HTML tags so that formatting like <i> or <span> doesn't hide adjacent foreign words
+    const before = beforeRaw.replace(/<[^>]+>/g, ' ');
+    const after = afterRaw.replace(/<[^>]+>/g, ' ');
     const isIsolated = !FOREIGN_WORD_BEFORE.test(before) && !FOREIGN_WORD_AFTER.test(after);
     const definitionAlreadyPresent = Boolean(
       entry.definition

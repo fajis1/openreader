@@ -126,7 +126,7 @@ export function JobsInlineView() {
                         ) : null}
                         {job.status === 'running' && job.startedAt && typeof job.progress === 'number' ? (
                           <span className="ml-3 text-faint">
-                            (~{formatMs(getRemainingMs(now, job.startedAt, job.updatedAt || job.startedAt, job.progress))} remaining)
+                            ({Math.round(job.progress || 0)}% done &bull; ~{formatMs(getRemainingMs(now, job.startedAt, job.updatedAt || job.startedAt, job.progress))} remaining)
                           </span>
                         ) : null}
                       </div>

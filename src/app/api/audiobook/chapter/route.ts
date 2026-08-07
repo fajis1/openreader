@@ -381,6 +381,9 @@ export async function POST(request: NextRequest) {
         fallbackProviderRef: runtimeConfig.defaultTtsProvider,
       });
       if (!incomingResult.settings) {
+        if (typeof data.settings === 'object' && data.settings !== null && !('providerRef' in data.settings) && !('ttsProvider' in data.settings)) {
+          return undefined;
+        }
         return null;
       }
       return normalizeNativeSpeedForSettings(incomingResult.settings);
@@ -797,7 +800,10 @@ export async function POST(request: NextRequest) {
             books: selectedProfile?.books || {}
           });
 
-          const msg = await nc.request(SMART_AUDIO_NATS_SUBJECT, sc.encode(payload), { timeout: 120000 });
+          const SCHOLAR_NATS_SUBJECT = 'audiobooks.scholar.clean';
+          const isScholarLikeMode = selectedProfile?.workerMode === 'scholar' || selectedProfile?.workerMode === 'bibliography-catcher';
+          const targetSubject = isScholarLikeMode ? SCHOLAR_NATS_SUBJECT : SMART_AUDIO_NATS_SUBJECT;
+          const msg = await nc.request(targetSubject, sc.encode(payload), { timeout: 120000 });
           const workerResult = JSON.parse(sc.decode(msg.data));
 
           if (workerResult.status === "success" && workerResult.cleaned_text) {
@@ -1160,9 +1166,34 @@ export async function GET(request: NextRequest) {
     }
 
     const mimeType = chapter.format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';
+    
+    // Support seeking (Range requests) for HTML5 audio players
+    const rangeHeader = request.headers.get('range');
+    if (rangeHeader) {
+      const parts = rangeHeader.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : buffer.length - 1;
+      const chunksize = (end - start) + 1;
+      
+      const chunk = buffer.subarray(start, end + 1);
+      
+      return new NextResponse(chunk as any, {
+        status: 206,
+        headers: {
+          'Content-Range': `bytes ${start}-${end}/${buffer.length}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize.toString(),
+          'Content-Type': mimeType,
+          'Content-Disposition': contentDispositionAttachment(`${chapter.title}.${chapter.format}`),
+          'Cache-Control': 'no-cache',
+        },
+      });
+    }
 
     return new NextResponse(streamBuffer(buffer), {
       headers: {
+        'Accept-Ranges': 'bytes',
+        'Content-Length': buffer.length.toString(),
         'Content-Type': mimeType,
         'Content-Disposition': contentDispositionAttachment(`${chapter.title}.${chapter.format}`),
         'Cache-Control': 'no-cache',

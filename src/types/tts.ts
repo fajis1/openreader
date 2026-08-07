@@ -67,4 +67,5 @@ export interface TTSAudiobookChapter {
   status: 'pending' | 'generating' | 'completed' | 'error';
   bookId?: string;
   format?: TTSAudiobookFormat;
+  isEmptyText?: boolean;
 }

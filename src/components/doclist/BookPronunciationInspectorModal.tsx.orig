@@ -413,24 +413,11 @@ export function BookPronunciationInspectorModal({
     return track[bb.length][aa.length] <= 2;
   };
 
-  const filterCache = React.useRef(new Map<string, boolean>());
-
-  React.useEffect(() => {
-    filterCache.current.clear();
-  }, [searchQuery, useFuzzySearch]);
-
-  const filteredWords = React.useMemo(() => {
-    return words.filter(w => {
-      if (!searchQuery) return true;
-      let matched = filterCache.current.get(w.word);
-      if (matched === undefined) {
-         const isMatch = useFuzzySearch ? isSimilar(w.word, searchQuery) : w.word.toLowerCase().includes(searchQuery.toLowerCase());
-         filterCache.current.set(w.word, isMatch);
-         return isMatch;
-      }
-      return matched;
-    });
-  }, [words, searchQuery, useFuzzySearch]);
+  const filteredWords = words.filter(w => {
+    if (!searchQuery) return true;
+    if (useFuzzySearch) return isSimilar(w.word, searchQuery);
+    return w.word.toLowerCase().includes(searchQuery.toLowerCase());
+  });
 
   const maxRender = 100;
   const renderedWords = filteredWords.slice(0, maxRender);
@@ -439,8 +426,8 @@ export function BookPronunciationInspectorModal({
     <ModalFrame 
       open={isOpen} 
       onClose={onClose} 
-      size="xl" 
-      panelClassName={isShiftedRight ? "transition-transform duration-300 translate-x-[25vw] max-w-[50vw]" : "transition-transform duration-300 !max-w-7xl"}
+      size="4xl" 
+      panelClassName={isShiftedRight ? "transition-transform duration-300 translate-x-[25vw] max-w-[50vw]" : "transition-transform duration-300"}
     >
       <div className="flex flex-col h-[85vh] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-4 relative">
         
@@ -487,10 +474,6 @@ export function BookPronunciationInspectorModal({
             </div>
           </div>
         )}
-
-        <div className="mb-2 text-xs text-gray-500 dark:text-gray-400 italic">
-          💡 Hint: You can double-click any word in the review text to instantly highlight it, then open this Dictionary to fix its pronunciation.
-        </div>
 
         <div className="flex gap-4 mb-4 items-center flex-wrap">
           <select
@@ -607,7 +590,6 @@ export function BookPronunciationInspectorModal({
                   <th className="p-3 w-1/5">Word</th>
                   <th className="p-3 w-1/5">Global Choices</th>
                   <th className="p-3 w-1/5">My Active Profile</th>
-                  <th className="p-3 w-1/5">AI Generator</th>
                   <th className="p-3 w-1/5">Definition</th>
                 </tr>
               </thead>
@@ -626,23 +608,49 @@ export function BookPronunciationInspectorModal({
                       >
                         Listen 🔊
                       </button>
+                      <div className="mt-2">
+                        <button
+                          className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline text-left flex items-center gap-1"
+                          onClick={() => {
+                            const isOpening = !refineExpanded[w.word];
+                            setRefineExpanded(prev => ({ ...prev, [w.word]: isOpening }));
+                            if (isOpening && (!w.globalChoices || w.globalChoices.length === 0)) {
+                              void handleRefine(w.word);
+                            }
+                          }}
+                        >
+                          Refine with AI Prompt ▼
+                        </button>
+                        {refineExpanded[w.word] && (
+                          <div className="mt-1 flex flex-col gap-1">
+                            <textarea
+                              className="w-full p-1 text-xs border rounded bg-white dark:bg-gray-800 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                              placeholder="e.g. Make the ending sound like -een"
+                              value={refineInput[w.word] || ''}
+                              onChange={e => setRefineInput(prev => ({ ...prev, [w.word]: e.target.value }))}
+                            />
+                            <button
+                              className="self-start px-2 py-1 text-[10px] font-semibold bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 rounded disabled:opacity-50"
+                              onClick={() => handleRefine(w.word)}
+                              disabled={!!refineStatus[w.word]}
+                            >
+                              Generate 5 AI Options ✨
+                            </button>
+                            {refineStatus[w.word] && <div className="text-[10px] text-amber-600 dark:text-amber-400 animate-pulse">{refineStatus[w.word]}</div>}
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3 align-top">
                       <div className="flex flex-col gap-2">
-                        {(() => {
-                          const choicesToRender = [...(w.globalChoices || [])];
-                          if (w.globalDefault && !choicesToRender.includes(w.globalDefault)) {
-                            choicesToRender.unshift(w.globalDefault);
-                          }
-                          return choicesToRender.map((choice: string, cIdx: number) => (
+                        {w.globalChoices && w.globalChoices.map((choice: string, cIdx: number) => (
                           <div key={cIdx} className={`flex items-center gap-2 p-1.5 border rounded ${choice === w.globalDefault ? 'bg-purple-50 dark:bg-purple-900/30 border-purple-200 dark:border-purple-800' : 'bg-white dark:bg-gray-900 dark:border-gray-700'}`}>
                             <span className="font-mono text-xs flex-1 truncate">{choice}</span>
                             {choice === w.globalDefault && <span className="px-1 py-0.5 text-[8px] uppercase font-bold bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 rounded">Global Default</span>}
                             <button className="px-2 py-0.5 text-[10px] bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300" onClick={() => handleListen(w.word, choice)}>🔊</button>
                             <button className="px-2 py-0.5 text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200 rounded" onClick={() => handleSaveOverride(w.word, choice)}>Adopt</button>
                           </div>
-                          ));
-                        })()}
+                        ))}
                       </div>
                     </td>
                     <td className="p-3 align-top">
@@ -669,41 +677,6 @@ export function BookPronunciationInspectorModal({
                          </div>
                       )}
                     </td>
-                    <td className="p-3 align-top min-w-[180px]">
-                      <div className="flex flex-col gap-2">
-                        <button
-                          className="px-3 py-1.5 text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-200 dark:hover:bg-indigo-800 text-center flex items-center justify-center gap-1 transition-colors"
-                          onClick={() => {
-                            const isOpening = !refineExpanded[w.word];
-                            setRefineExpanded(prev => ({ ...prev, [w.word]: isOpening }));
-                            if (isOpening && (!w.globalChoices || w.globalChoices.length === 0)) {
-                              void handleRefine(w.word);
-                            }
-                          }}
-                        >
-                          ✨ Refine with AI
-                        </button>
-                        {refineExpanded[w.word] && (
-                          <div className="mt-1 flex flex-col gap-1">
-                            <textarea
-                              className="w-full p-1 text-xs border rounded bg-white dark:bg-gray-800 dark:border-gray-700 text-gray-900 dark:text-gray-100"
-                              placeholder="e.g. Make the ending sound like -een"
-                              value={refineInput[w.word] || ''}
-                              onChange={e => setRefineInput(prev => ({ ...prev, [w.word]: e.target.value }))}
-                            />
-                            <button
-                              className="self-start px-2 py-1 text-[10px] font-semibold bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 rounded disabled:opacity-50"
-                              onClick={() => handleRefine(w.word)}
-                              disabled={!!refineStatus[w.word]}
-                            >
-                              Generate 5 AI Options ✨
-                            </button>
-                            {refineStatus[w.word] && <div className="text-[10px] text-amber-600 dark:text-amber-400 animate-pulse">{refineStatus[w.word]}</div>}
-                          </div>
-                        )}
-                      </div>
-                    </td>
-
                     <td className="p-3 align-top min-w-[200px]">
                       {editingDefinition === w.word ? (
                         <div className="flex flex-col gap-1">

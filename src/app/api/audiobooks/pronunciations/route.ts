@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { readSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
 import { listAudiobookObjects, getAudiobookObjectBuffer } from '@/lib/server/audiobooks/blobstore';
+import { readGlobalDefinitions } from '@/lib/server/smart-audio/global-definition-library';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,10 +41,11 @@ export async function GET(request: NextRequest) {
     const profilesDoc = await readSmartAudioProfilesDocument(userId);
     const activeProfile = profilesDoc.profiles.find(p => p.id === profilesDoc.selectedProfileId) || profilesDoc.profiles[0];
     const userPronunciations = activeProfile?.pronunciations || {};
+    const definitions = await readGlobalDefinitions();
 
     const allUserBooks = await db.select({ id: audiobooks.id, title: audiobooks.title }).from(audiobooks).where(eq(audiobooks.userId, userId as string));
 
-    const wordMap: Record<string, { word: string, phonetic: string, count: number, globalChoices: string[], userOverride: string | null }> = {};
+    const wordMap: Record<string, { word: string, phonetic: string, count: number, globalChoices: string[], globalDefault: string | null, userOverride: string | null, definition: string | null }> = {};
 
     if (bookId) {
       const objects = await listAudiobookObjects(bookId, userId, null);
@@ -65,7 +67,9 @@ export async function GET(request: NextRequest) {
                  phonetic,
                  count: 0,
                  globalChoices: globalDict[word]?.map((g: any) => g.phonetic) || [],
-                 userOverride: userPronunciations[word] || null
+                 globalDefault: globalDict[word]?.[0]?.phonetic || null,
+                 userOverride: userPronunciations[word] || null,
+                 definition: definitions[word] || null
                };
             }
             wordMap[word].count++;
@@ -82,7 +86,9 @@ export async function GET(request: NextRequest) {
             phonetic: userPronunciations[word] || (globalDict[word] ? globalDict[word][0]?.phonetic : ''),
             count: 1,
             globalChoices: globalDict[word]?.map((g: any) => g.phonetic) || [],
-            userOverride: userPronunciations[word] || null
+            globalDefault: globalDict[word]?.[0]?.phonetic || null,
+            userOverride: userPronunciations[word] || null,
+            definition: definitions[word] || null
           };
        }
     }

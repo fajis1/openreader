@@ -101,7 +101,7 @@ Follow these rules STRICTLY:
 
 3. SMART CITATION FILTERING: Handle biblical and academic citations based on context:
    - KEEP the citation if it follows an actual quoted Bible verse or direct textual quote.
-   - REMOVE the citation if it is a "long list" (e.g., "(cf. Gen 1:26, 2:7; Rom 5:12)").
+   - ALWAYS REMOVE parenthetical lists of multiple biblical citations, even if they contain full book names (e.g., "(Galatians 4:5; Romans 8:15, 23; 9:4; Ephesians 1:5)", "(cf. Gen 1:26, 2:7; Rom 5:12)").
    - REMOVE standard academic author/date markers (e.g., "(Smith 1999, 45)").
    - REMOVE stranded footnotes that bled into the text (e.g., lines starting with numbers followed by historians, like "98. Cassius Dio, Roman History...").
 
@@ -134,6 +134,7 @@ Follow these rules STRICTLY:
    - This rule still applies even if an English conjunction (like "and", "or") bridges two long foreign phrases. Destroy the whole block.
    - DO NOT rewrite, paraphrase, or add new English words to bridge the gap left by the deletion. 
    - Mechanically close the gap: Simply remove the foreign text and join the remaining punctuation, or insert an ellipsis (...) to indicate the omission, leaving the surrounding English text exactly as the author wrote it.
+   - IMPORTANT: The text may have already been pre-processed by a dictionary engine that wrapped foreign words in Kokoro IPA markup (e.g., '[λόγος](/ˈlɒɡɒs/)'). You MUST STILL treat these marked-up words as "foreign words" when counting for pruning. A string of 5 or more marked-up foreign words is still a long foreign quote and MUST be deleted.
    - ONLY after pruning the long quotes should you apply Rule 2's pronunciation rules to the surviving short terms.
 
 12. SECTION HEADING PACING: When you encounter a section heading or a verse marker starting a new thought (e.g., "The Purification Offering", "NOTES", "6:2."), you MUST force a natural pause before and after it. Do this by isolating the header with double newlines.
@@ -224,7 +225,7 @@ Follow these rules STRICTLY:
 
 3. SMART CITATION FILTERING: Handle biblical and academic citations based on context:
    - KEEP the citation if it follows an actual quoted Bible verse or direct textual quote.
-   - REMOVE the citation if it is a "long list" (e.g., "(cf. Gen 1:26, 2:7; Rom 5:12)").
+   - ALWAYS REMOVE parenthetical lists of multiple biblical citations, even if they contain full book names (e.g., "(Galatians 4:5; Romans 8:15, 23; 9:4; Ephesians 1:5)", "(cf. Gen 1:26, 2:7; Rom 5:12)").
    - REMOVE standard academic author/date markers (e.g., "(Smith 1999, 45)").
    - REMOVE stranded footnotes that bled into the text (e.g., lines starting with numbers followed by historians, like "98. Cassius Dio, Roman History...").
 
@@ -257,6 +258,7 @@ Follow these rules STRICTLY:
    - This rule still applies even if an English conjunction (like "and", "or") bridges two long foreign phrases. Destroy the whole block.
    - DO NOT rewrite, paraphrase, or add new English words to bridge the gap left by the deletion.
    - Mechanically close the gap: Simply remove the foreign text and join the remaining punctuation, or insert an ellipsis (...) to indicate the omission.
+   - IMPORTANT: The text may have already been pre-processed by a dictionary engine that wrapped foreign words in Kokoro IPA markup (e.g., '[λόγος](/ˈlɒɡɒs/)'). You MUST STILL treat these marked-up words as "foreign words" when counting for pruning. A string of 5 or more marked-up foreign words is still a long foreign quote and MUST be deleted.
    - ONLY after pruning long quotes should you apply Rule 2's IPA markup to surviving short terms.
 
 # ==========================================

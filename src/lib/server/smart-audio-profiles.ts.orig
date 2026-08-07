@@ -65,8 +65,6 @@ export function redactSmartAudioProfileSecrets(profile: SmartAudioProfile): Smar
     backupGeminiApiKeyLast4: profile.backupGeminiApiKey
       ? profile.backupGeminiApiKey.slice(-4)
       : undefined,
-    geminiApiKeySourceProfileId: profile.geminiApiKeySourceProfileId || profile.id,
-    backupGeminiApiKeySourceProfileId: profile.backupGeminiApiKeySourceProfileId || profile.id,
   };
 }
 

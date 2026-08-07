@@ -48,13 +48,9 @@ export function resolvePdfjsWorkerSrc(): string {
   return pathToFileURL(resolvePdfjsPackageFile('legacy/build/pdf.worker.mjs')).href;
 }
 
-export function configurePdfjsNodeRuntime(pdfjs: {
-  GlobalWorkerOptions?: {
-    workerSrc?: string;
-    workerPort?: unknown;
-  };
-}): void {
-  if (!pdfjs.GlobalWorkerOptions) return;
-  pdfjs.GlobalWorkerOptions.workerSrc = resolvePdfjsWorkerSrc();
-  pdfjs.GlobalWorkerOptions.workerPort = null;
+export function configurePdfjsNodeRuntime(pdfjs: any): void {
+  const options = pdfjs.GlobalWorkerOptions || pdfjs.default?.GlobalWorkerOptions;
+  if (!options) return;
+  options.workerSrc = resolvePdfjsWorkerSrc();
+  options.workerPort = null;
 }

@@ -1,0 +1,34 @@
+--- src/components/doclist/BookPronunciationInspectorModal.tsx
++++ src/components/doclist/BookPronunciationInspectorModal.tsx
+@@ -588,6 +588,7 @@
+               <thead>
+                 <tr className="border-b dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-sm font-semibold">
+                   <th className="p-3 w-1/5">Word</th>
++                  <th className="p-3 w-1/5">AI Generator</th>
+                   <th className="p-3 w-1/5">Global Choices</th>
+                   <th className="p-3 w-1/5">My Active Profile</th>
+                   <th className="p-3 w-1/5">Definition</th>
+@@ -608,19 +609,21 @@
+                       >
+                         Listen 🔊
+                       </button>
+-                      <div className="mt-2">
++                    </td>
++                    <td className="p-3 align-top min-w-[180px]">
++                      <div className="flex flex-col gap-2">
+                         <button
+-                          className="text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline text-left flex items-center gap-1"
++                          className="px-3 py-1.5 text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-200 dark:hover:bg-indigo-800 text-center flex items-center justify-center gap-1 transition-colors"
+                           onClick={() => {
+                             const isOpening = !refineExpanded[w.word];
+                             setRefineExpanded(prev => ({ ...prev, [w.word]: isOpening }));
+                             if (isOpening && (!w.globalChoices || w.globalChoices.length === 0)) {
+                               void handleRefine(w.word);
+                             }
+                           }}
+                         >
+-                          Refine with AI Prompt ▼
++                          ✨ Generate New Pronunciation
+                         </button>
+                         {refineExpanded[w.word] && (
+                           <div className="mt-1 flex flex-col gap-1">

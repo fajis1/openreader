@@ -68,7 +68,7 @@ export function HomeContent() {
             onClick={() => setSmartAiOpen(false)}
           />
           {/* Panel */}
-          <div className="relative z-10 w-full max-w-4xl max-h-[90vh] flex flex-col bg-surface rounded-xl shadow-2xl border border-line overflow-hidden">
+          <div className="relative z-10 w-[95vw] max-w-7xl max-h-[90vh] flex flex-col bg-surface rounded-xl shadow-2xl border border-line overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-line shrink-0">
               <div className="flex items-center gap-2">

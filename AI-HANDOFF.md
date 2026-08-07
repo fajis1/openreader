@@ -11,6 +11,138 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-07 — Fixed Smart Audio API Endpoint Settings Parsing and NATS Routing
+
+- **Smart Audio Payload & NATS Bug Fix:**
+  - Fixed a `409 Conflict` (and subsequently `400 Invalid audiobook settings payload`) issue where clicking "✨ Clean with AI" on the review page instantly failed.
+  - The UI now passes the `scholarAutoScan: true` flag in the settings payload to grant permission for single-chapter Scholar definition scans.
+  - Adjusted `coerceAudiobookGenerationSettings` in `src/lib/server/audiobooks/settings.ts` (via `route.ts` fallback) so that if the UI only sends smart audio toggles (without full TTS fields like `providerRef`), the backend gracefully falls back to the saved `audiobook.meta.json` settings instead of outright rejecting the request.
+  - Fixed NATS subject routing in `src/app/api/audiobook/chapter/route.ts` so that single-chapter requests correctly respect `workerMode === 'scholar'` and route to `audiobooks.scholar.clean` (the `biblical_scholar_worker.py`) instead of the hardcoded standard cleaner subject.
+
+### 2026-08-07 — Fixed AI Reading Long Lists of Biblical Citations
+
+- **Gemini TTS Prompt Update:**
+  - Modified the `SMART CITATION FILTERING` and `STRIP IN-LINE CITATIONS` rules in `src/components/constants.ts`, `src/lib/server/default_smart_audio_profiles.json`, `config/default_book_tts_settings.json`, and `config/smart_audio_profiles.json`.
+  - Gemini is now explicitly instructed to `ALWAYS REMOVE parenthetical lists of multiple biblical citations, even if they contain full book names (e.g., "(Galatians 4:5; Romans 8:15, 23; 9:4; Ephesians 1:5)", "(cf. Gen 1:26, 2:7; Rom 5:12)")`.
+  - This solves an issue where `biblical_scholar_worker.py` expands short-form biblical books to full words (e.g., `Gal` to `Galatians`), causing the previous prompt rule (which only looked for abbreviations) to fail and allowed long lists of verses to be read aloud, disrupting the listening experience.
+  - Deployed a one-off database migration script to actively patch the updated prompt constraints into existing user preferences.
+
+### 2026-08-07 — Reordered Dictionary UI and Fixed API Key Modal
+
+- **UI Enhancements in BookPronunciationInspectorModal:**
+  - Reordered the table columns to match user specifications: Word | Global Choices | My Active Profile | AI Generator | Definition.
+  - The "Refine with AI" button is now explicitly located in the "AI Generator" column.
+  - The "Definition" column is correctly placed on the far right and retains its inline editing capabilities.
+- **Settings Modal Z-Index Fix:**
+  - Increased the z-index of `SmartAudioSettings.tsx` to `z-[60]`.
+  - This ensures that if the user hits an API key error when clicking "Refine with AI", the settings modal will successfully appear on top of the dictionary modal instead of being hidden behind it.
+
+### 2026-08-07 — Fixed HTML Tag Disruption in Foreign Word Isolation Detection
+
+- **Isolated Word Detection Fix:**
+  - Resolved an issue where `enrichTextFromBookLexicon` incorrectly injected English dictionary terms into consecutive foreign words if they were wrapped in HTML formatting tags (e.g., `<i>ἔσται</i>`).
+  - The previous regex (`[\p{P}\p{Z}\s]`) did not treat HTML tag characters (`<`, `>`, `i`, `span`, etc.) as valid punctuation, causing the `FOREIGN_WORD_BEFORE/AFTER` checks to fail.
+  - Updated the logic to strip HTML tags using `replace(/<[^>]+>/g, ' ')` before testing strings for adjacency, and updated the character class to `[\p{P}\p{S}\p{Z}\s]*` to include math symbols (`<`, `>`, `=`) and allow zero-width boundaries.
+
+### 2026-08-07 — Fuzzy Pronunciation Dictionary Enhancements
+
+- **Fuzzy Search Performance Optimization:**
+  - Memoized the Levenshtein distance calculation in `BookPronunciationInspectorModal.tsx` using a `useRef` cache.
+  - This prevents the entire dictionary from freezing/re-filtering every time a user adopts a single pronunciation.
+- **Global Default Visibility:**
+  - Updated the "Global Choices" rendering logic to ensure the current `globalDefault` is always visible as an option, even if it wasn't returned in the AI's top 5 suggestions.
+- **Dictionary UX Hint:**
+  - Added a visible hint inside the Dictionary Modal instructing users: "💡 Hint: You can double-click any word in the review text to instantly highlight it, then open this Dictionary to fix its pronunciation."
+
+### 2026-08-07 — Fixed Foreign Word Pruning Ignoring Pre-processed IPA
+
+- **Foreign Word Pruning Rule (Rule 11) Enhancement:**
+  - Added explicit instructions to the Gemini prompt in `default_smart_audio_profiles.json` and `constants.ts` to treat words wrapped in Kokoro IPA markup (e.g., `[word](/ipa/)`) as "foreign words" when counting for the 5+ word pruning rule.
+  - This fixes an issue where the pre-processor (`enrichTextFromBookLexicon`) applied IPA tags to long foreign phrases, causing Gemini to mistakenly treat them as English text and skip pruning.
+  - Verified JSON/TS syntax and applied to all profiles using Rule 11.
+
+### 2026-08-07 — UI Improvements, Title Generation, & PDF Fix
+
+- **Compute Core Update:**
+  - Fixed an issue in `compute/core/src/pdf/pdfjs-runtime.ts` where `GlobalWorkerOptions.workerSrc` was failing to be set because the `pdfjs` dynamic import was returning a module namespace object with a `.default` property under Next.js/Turbopack, causing `!pdfjs.GlobalWorkerOptions` to bail out silently.
+  - The fallback to `.default?.GlobalWorkerOptions` now correctly configures the fake worker and resolves the `DOCUMENT_PREVIEW_GENERATE_FAILED` errors in the logs.
+- **Python Workers (Gemini Clean/Scholar):**
+  - Clarified the prompt in `audiobook_worker.py` and `biblical_scholar_worker.py` to strongly require a 3-5 word descriptive summary title, not just the word 'continued'.
+  - Improved the `[CHAPTER_TITLE: ...]` parsing regex to ignore whitespace padding and case to reliably extract the chunk's AI-generated title instead of falling back to the layout engine's default.
+- **Frontend Move:**
+  - Moved the "Rebuild Modified Audio" button from the main `page.tsx` review view directly into the `MultiVoiceReviewStudio.tsx` overlay, per user request.
+  - Implemented live-polling on the `listen/[bookId]/page.tsx` view so that the Context/Chapter list (with AI titles) and the Editor text automatically refresh every 5 seconds as Gemini and Kokoro background workers process the chunks. Auto-refresh safely pauses if the user manually edits the text to prevent data loss.
+  - Updated the middle pane in the review view to display the original, pre-cleanup chunk text side-by-side with the editable cleaned text, making it much easier to review the AI's OCR corrections.
+  - Added toggle buttons ("List", "Original", "Edit") to the review page header to allow users to hide/show columns, saving screen real estate on mobile devices and small monitors. Also updated the right pane header to "Edit text (after Smart AI Processing)".
+  - Added the exact percentage of completion (`X% done`) alongside the time estimation in the global `JobsInlineView.tsx` background queue UI.
+  - Fixed audio player seeking by implementing proper HTTP `Range` request support (`206 Partial Content`) in the `/api/audiobook/chapter/route.ts` API endpoint, allowing users to scrub to the middle of the audio without it snapping back to the beginning.
+  - Added a "✨ Clean with AI" button to the "Original Text" column on the review page, allowing users to easily select a failed or messy chunk and re-send its raw text back through the Gemini Smart Audio worker queue.
+  - Tightened the prompt instructions in both `audiobook_worker.py` and `biblical_scholar_worker.py` to explicitly forbid Gemini from copying the existing chapter title (like "Foreword") and force it to generate a unique 3-5 word summary based on the actual chunk contents.
+  - Fixed a regex bug in the Python worker's pre-clean phase where biblical abbreviations with periods (e.g., `Lev. 26:12`) were failing to expand because the script only matched abbreviations without periods (e.g., `Lev 26:12`).
+  - Added a Smart Audio Profile dropdown and a settings shortcut (⚙️) next to the "✨ Clean with AI" button on the Review page. Users can now seamlessly switch between their AI profiles (e.g., swapping to a lighter model) before re-running a chunk.
+  - Added a "Clean Edited" checkbox next to the "✨ Clean with AI" button. When checked, the background worker will use the *manually edited text* (from the right column) instead of the original raw OCR text, allowing for a second AI pass over custom edits.
+  - Added a "Fix Abbreviations" button to the "Edit Text" column header. This button performs an instant, local regex pass (matching the Python worker's pre-clean phase) over the current text to expand biblical books, verses, and custom abbreviations from the user's active profile, bypassing the need for an AI call.
+  - Added a new API endpoint (`/api/audiobooks/fix-abbreviations-all`) and two new buttons to the top navigation bar of the Review page: **"Fix All Abbreviations"** (which runs the regex pass over all chunks in the book in the background) and **"Rebuild Modified Chunks"** (which scans for any modified text files and queues their MP3s to be re-recorded).
+  - Consolidated all chunk action buttons (Clean with AI, Fix Abbreviations, Dictionary, Save to Audiobook, and AI settings) into a single unified global toolbar at the top of the screen so they remain visible even when hiding the original or edit columns.
+
+### 2026-08-07 — Global Pronunciation Import Diff Viewer
+
+- **Smart Audio Settings Update:**
+  - Expanded the Smart AI Profiles modal width on the login/home page from `max-w-4xl` to `w-[95vw] max-w-7xl` to provide ample horizontal space.
+  - Added a built-in diff viewer to the "Global pronunciation import preview" interface. It now displays a scrollable list of all differences between the incoming (Git JSON) library and the current global default (Docker DB).
+  - Included a "Listen 🔊" button for both the current and imported pronunciations directly inside the diff viewer so administrators can preview and compare phonetic changes before completing the import.
+
+### 2026-08-07 — Added Abbreviations to End-Matter Filter
+
+- **End-Matter Filtering Update:**
+  - Added "abbreviations" to the `END_MATTER_HEADING` regex in `src/lib/shared/audiobook-end-matter.ts`.
+  - The system will now automatically omit tedious abbreviation lists and dictionaries when they appear at the beginning or end of a book chapter.
+
+### 2026-08-07 — Strict IPA Output for Biblical Scholarship
+
+- **Gemini TTS Prompt Update:**
+  - Modified Rule 5 ("MANDATORY TRANSLITERATION & PHONETICS") and Rule 13 ("FIX BROKEN TTS TAGS") in the `Biblical Scholarship` profile.
+  - Gemini is now explicitly instructed to *always* wrap its Greek/Hebrew transliterations in Kokoro IPA tags using the phonetic reference guide (e.g., `[huiothesia](/huioʊθɛsiɑ/)`) rather than outputting bare Latinized words. This gives Kokoro strict phonetic instructions for every non-Latin word.
+
+### 2026-08-07 — Added Broken TTS Tag Cleanup Rule
+
+- **Gemini TTS Prompt Update:**
+  - Added Rule 13 ("FIX BROKEN TTS TAGS") to the `Biblical Scholarship` default profile in `config/smart_audio_profiles.json` and actively patched the user's current database profile.
+  - Gemini will now correctly identify and merge fragmented Greek/Hebrew words that were split by OCR and mistakenly wrapped in separate TTS phonetic tags (e.g., `[υἱοθε](/niːoʊθɛ/)[σία](/siːɑ/)`), discarding the broken tags and outputting a single, fully-transliterated English word (e.g., `huiothesia`).
+
+### 2026-08-07 — Added Long Foreign Quotation Cleanup Rule
+
+- **Gemini TTS Prompt Update:**
+  - Added Rule 12 ("LONG FOREIGN QUOTATIONS") to the `Biblical Scholarship` default profile in `config/smart_audio_profiles.json` and actively patched the user's current database profile.
+  - Gemini will now automatically omit consecutive strings of 4 or more foreign words (including raw Greek/Hebrew or phonetic tags like `[word](/IPA/)`) so the listener doesn't have to hear long, unintelligible foreign sentences being read aloud phonetically.
+
+### 2026-08-07 — Fixed Consecutive Foreign Word Definition Suppression
+
+- **Consecutive Foreign Word Bug:**
+  - Fixed a bug in `src/lib/server/smart-audio/book-lexicon.ts` where the logic designed to suppress dictionary definitions for consecutive foreign words (to avoid overwhelming the listener) failed if the words were separated by punctuation (like commas).
+  - The `FOREIGN_WORD_BEFORE` and `FOREIGN_WORD_AFTER` regexes were overly strict (`\s+`) and only checked for spaces. They were updated to `[\p{P}\p{Z}\s]+` to correctly account for any Unicode punctuation or separators between the foreign words.
+
+### 2026-08-07 — Added Stray Foreign Letters Cleanup Rule
+
+- **Gemini TTS Prompt Update:**
+  - Added Rule 11 ("STRAY FOREIGN LETTERS") to the `Biblical Scholarship` default profile in `config/smart_audio_profiles.json` and actively patched the user's current database profile.
+  - Gemini will now automatically omit isolated/stray Greek and Hebrew letters (like 'δ' or 'א') from the final text instead of leaving them in for Kokoro to mistakenly read aloud as spelled-out words (e.g., "delta").
+
+### 2026-08-07 — Fixed Stale Chapter Text Caching after Batch Replace
+
+- **Chapter Text Caching Fix:**
+  - Added `cache: 'no-store'` and a `t=${Date.now()}` query parameter to the `fetchChapterText` call in `listen/[bookId]/page.tsx`.
+  - This prevents aggressive browser caching of GET requests, ensuring that when users navigate between chunks after executing a "Queue Modified Audio (Batch Replace)", the text area instantly loads the fresh text from the server rather than stale text from cache.
+
+### 2026-08-07 — Clearer UI for Batch Replace and Rebuild Modified Audio
+
+- **Batch Replace UI Clarification:**
+  - Renamed the `Batch Replace in Books ⚡` button inside the Dictionary Modal to `Queue Modified Audio (Batch Replace) ⚡`. This clarifies to users that clicking the button modifies the text chunks immediately (effectively "queuing" them for audio regeneration), but does *not* rebuild the audio instantly.
+- **Rebuild Modified Audio from Listen Page:**
+  - Added a `Rebuild Modified Audio 🔄` button directly to the `listen/[bookId]/page.tsx` editor header. 
+  - This allows users to make multiple text edits or dictionary replacements, and then trigger the background rebuild process for the book directly from the review page without having to reopen the dictionary modal.
+  - The new handler `handleRebuildAllModified` uses the `/api/audiobooks/batch-regenerate` endpoint (bypassing the modal's multi-book confirmation and strictly executing the current book).
+
 ### 2026-08-06 — Multi-Voice Audiobook Generation & Review Pipeline
 
 - **Multi-Voice Generation Pipeline:**
@@ -628,3 +760,8 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 - Create the UI for mapping characters.
 - Build the Review Studio UI for editing character segments and forcing a regeneration.
 
+
+## 2026-08-07
+* **Changed:** Updated `BookPronunciationInspectorModal.tsx` in Next.js to properly parse and display the 5 newly generated Kokoro IPA pronunciation options returned by Gemini instead of blindly refetching data from the server.
+* **Verified:** The bug was traced from `fetchPronunciations` wiping the local state over `data.newChoices`. The fix updates local state appropriately when new choices are successfully returned from `/api/tts/refine-pronunciations`.
+* **Follow-up:** None.

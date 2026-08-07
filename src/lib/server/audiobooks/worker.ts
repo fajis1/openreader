@@ -959,6 +959,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       // Save the cleaned text so the user can review and edit it later in the new listen UI
       const textFileName = `${String(chapter.index + 1).padStart(4, '0')}__text.txt`;
       await putAudiobookObject(bookId, userId, textFileName, Buffer.from(processedTextForTts, 'utf8'), 'text/plain; charset=utf-8', testNamespace).catch(() => {});
+      
+      // Save the original text so the user can see what Gemini changed
+      const originalFileName = `${String(chapter.index + 1).padStart(4, '0')}__original.txt`;
+      await putAudiobookObject(bookId, userId, originalFileName, Buffer.from(chapter.text, 'utf8'), 'text/plain; charset=utf-8', testNamespace).catch(() => {});
 
       let duration = 0;
       try {

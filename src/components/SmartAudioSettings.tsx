@@ -533,6 +533,32 @@ export function SmartAudioSettings() {
     }
   };
 
+  const importDiffs = useMemo(() => {
+    if (!globalImportPreview?.library) return [];
+    
+    // First create a quick lookup for current global pronunciations
+    const currentDict: Record<string, string> = {};
+    globalPronunciations.forEach(item => {
+      if (item.values && item.values.length > 0) {
+        currentDict[item.key] = item.values[0];
+      }
+    });
+
+    const diffs: { word: string; importedPhonetic: string; currentPhonetic: string | null }[] = [];
+    
+    for (const [word, choices] of Object.entries(globalImportPreview.library)) {
+      if (!choices || choices.length === 0) continue;
+      const importedPhonetic = choices[0].phonetic;
+      const currentPhonetic = currentDict[word] || null;
+      
+      if (importedPhonetic !== currentPhonetic) {
+        diffs.push({ word, importedPhonetic, currentPhonetic });
+      }
+    }
+    
+    return diffs;
+  }, [globalImportPreview, globalPronunciations]);
+
   const suspectGlobalWords = useMemo(
     () => globalPronunciations
       .filter((item) => item.values.some(
@@ -1118,6 +1144,36 @@ export function SmartAudioSettings() {
             />
             <span>Replace existing choices for imported words. Leave unchecked to safely add imported choices without changing existing defaults.</span>
           </label>
+          
+          {importDiffs.length > 0 && (
+            <div className="mt-4 bg-white dark:bg-gray-900 border border-indigo-200 dark:border-indigo-800 rounded shadow-sm overflow-hidden flex flex-col max-h-96">
+              <div className="bg-indigo-100 dark:bg-indigo-900 p-2 text-xs font-bold text-indigo-900 dark:text-indigo-100">
+                Pronunciation Differences ({importDiffs.length} total)
+              </div>
+              <div className="overflow-y-auto flex-1 p-2 space-y-2">
+                {importDiffs.map((diff, idx) => (
+                  <div key={idx} className="flex flex-wrap items-center gap-2 p-2 bg-gray-50 dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700 text-xs">
+                    <div className="w-full sm:w-1/3 font-bold text-gray-900 dark:text-gray-100 truncate">
+                      {diff.word}
+                    </div>
+                    <div className="flex-1 flex flex-col sm:flex-row gap-2">
+                      <div className="flex-1 p-1.5 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded flex items-center justify-between">
+                        <span className="truncate text-red-800 dark:text-red-200" title="Current DB default">Current: {diff.currentPhonetic || 'None'}</span>
+                        {diff.currentPhonetic && (
+                          <button onClick={() => void playPreview(diff.word, diff.currentPhonetic!)} className="px-1.5 py-0.5 bg-red-100 dark:bg-red-800 hover:bg-red-200 dark:hover:bg-red-700 rounded text-[10px]" title="Listen">🔊</button>
+                        )}
+                      </div>
+                      <div className="flex-1 p-1.5 bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-900/30 rounded flex items-center justify-between">
+                        <span className="truncate text-green-800 dark:text-green-200" title="Incoming Git default">Imported: {diff.importedPhonetic}</span>
+                        <button onClick={() => void playPreview(diff.word, diff.importedPhonetic)} className="px-1.5 py-0.5 bg-green-100 dark:bg-green-800 hover:bg-green-200 dark:hover:bg-green-700 rounded text-[10px]" title="Listen">🔊</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {(globalImportPreview.issues.length > 0 || globalImportPreview.definitionIssues.length > 0) && (
             <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-100">
               <p className="font-semibold">Skipped malformed or duplicate entries</p>
@@ -1496,7 +1552,7 @@ export function SmartAudioSettings() {
       </div>
 
       {isGlobalModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-4xl flex flex-col max-h-[90vh]">
             <div className="p-4 border-b dark:border-gray-800 flex justify-between items-center gap-4">
               <div>

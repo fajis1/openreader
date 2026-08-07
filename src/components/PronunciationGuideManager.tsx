@@ -50,6 +50,13 @@ export function PronunciationGuideManager({ guideName, items, onChange }: Pronun
   const [generatingPreviews, setGeneratingPreviews] = useState<string[]>([]);
   const [playingPreview, setPlayingPreview] = useState<string | null>(null);
 
+  const [showAiGenerator, setShowAiGenerator] = useState(false);
+  const [aiFeedback, setAiFeedback] = useState('');
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [aiChoices, setAiChoices] = useState<string[]>([]);
+  const [generatingAiPreview, setGeneratingAiPreview] = useState<string | null>(null);
+  const [playingAiPreview, setPlayingAiPreview] = useState<string | null>(null);
+
   useEffect(() => {
     previewUrlsRef.current = previewUrls;
   }, [previewUrls]);
@@ -182,6 +189,66 @@ export function PronunciationGuideManager({ guideName, items, onChange }: Pronun
     setNewEntry({ key: '', value: '' });
   };
 
+  const handleSuggestPronunciation = async () => {
+    const word = newEntry.key.trim();
+    const feedback = aiFeedback.trim();
+    if (!word) {
+      toast.error("Please enter a word first!");
+      return;
+    }
+    if (!feedback) {
+      toast.error("Please provide some feedback on how it should sound.");
+      return;
+    }
+    setIsGeneratingAi(true);
+    try {
+      const response = await fetch('/api/tts/refine-pronunciations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word, feedback, currentChoices: [] }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to generate pronunciation choices');
+      const choices = Array.isArray(data.newChoices)
+        ? data.newChoices
+          .filter((choice: unknown): choice is string => typeof choice === 'string')
+          .map((choice: string) => {
+            const trimmed = choice.trim();
+            return trimmed.startsWith('/') && trimmed.endsWith('/')
+              ? trimmed
+              : `/${trimmed.replace(/^\/+|\/+$/g, '')}/`;
+          })
+          .filter((choice: string, index: number, all: string[]) => (
+            choice.length > 2 && all.indexOf(choice) === index
+          ))
+        : [];
+      if (choices.length === 0) throw new Error('Gemini returned no usable pronunciation choices.');
+      setAiChoices(choices);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to generate choices');
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  };
+
+  const handleListenAiChoice = async (choice: string) => {
+    if (playingAiPreview === choice) return;
+    try {
+      setGeneratingAiPreview(choice);
+      const audioUrl = await generatePreview({ key: newEntry.key.trim(), value: choice });
+      setGeneratingAiPreview(null);
+      setPlayingAiPreview(choice);
+      const audio = new Audio(audioUrl);
+      audio.onended = () => setPlayingAiPreview(null);
+      audio.onerror = () => setPlayingAiPreview(null);
+      await audio.play();
+    } catch (error) {
+      setGeneratingAiPreview(null);
+      setPlayingAiPreview(null);
+      toast.error(error instanceof Error ? error.message : 'Failed to play preview');
+    }
+  };
+
   return (
     <>
       <div className="space-y-4 p-4 border rounded dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
@@ -214,9 +281,59 @@ export function PronunciationGuideManager({ guideName, items, onChange }: Pronun
 
         <div className="flex gap-2">
           <input type="text" placeholder="Word" className="w-1/2 p-2 text-sm border rounded bg-white dark:bg-gray-900 dark:border-gray-700 text-gray-900 dark:text-gray-100" value={newEntry.key} onChange={(event) => setNewEntry({ ...newEntry, key: event.target.value })} />
-          <input type="text" placeholder="Phonetic" className="w-1/2 p-2 text-sm border rounded bg-white dark:bg-gray-900 dark:border-gray-700 text-gray-900 dark:text-gray-100" value={newEntry.value} onChange={(event) => setNewEntry({ ...newEntry, value: event.target.value })} />
-          <button type="button" onClick={addEntry} className="px-3 bg-accent text-background rounded font-bold shadow-sm">+</button>
+          <input type="text" placeholder="Phonetic (optional if using AI)" className="w-1/2 p-2 text-sm border rounded bg-white dark:bg-gray-900 dark:border-gray-700 text-gray-900 dark:text-gray-100" value={newEntry.value} onChange={(event) => setNewEntry({ ...newEntry, value: event.target.value })} />
+          <button type="button" onClick={() => setShowAiGenerator(!showAiGenerator)} className="px-3 bg-purple-600 hover:bg-purple-700 text-white rounded font-bold shadow-sm text-xs" title="Smart Generator">✨ AI</button>
+          <button type="button" onClick={addEntry} disabled={!newEntry.key || !newEntry.value} className="px-3 bg-accent text-background rounded font-bold shadow-sm disabled:opacity-50">+</button>
         </div>
+
+        {showAiGenerator && (
+          <div className="p-3 border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20 rounded text-sm space-y-3">
+            <h4 className="font-bold text-purple-900 dark:text-purple-100">✨ Smart Generator</h4>
+            <div className="flex gap-2">
+              <input 
+                type="text" 
+                placeholder="How should it sound? (e.g. 'rhymes with boat' or 'sounds like A-theer-ee-an')"
+                value={aiFeedback}
+                onChange={e => setAiFeedback(e.target.value)}
+                className="flex-1 p-2 text-sm border border-purple-200 dark:border-purple-700 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+              />
+              <button 
+                type="button" 
+                onClick={handleSuggestPronunciation}
+                disabled={isGeneratingAi || !newEntry.key.trim() || !aiFeedback.trim()}
+                className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded font-semibold disabled:opacity-50"
+              >
+                {isGeneratingAi ? 'Generating...' : 'Get 5 Options'}
+              </button>
+            </div>
+            
+            {aiChoices.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-purple-800 dark:text-purple-200">Listen and select the best one:</p>
+                {aiChoices.map(choice => (
+                  <label key={choice} className="flex items-center gap-2 p-2 border border-purple-200 dark:border-purple-700 bg-white dark:bg-gray-800 rounded cursor-pointer hover:bg-purple-100 dark:hover:bg-gray-700">
+                    <input 
+                      type="radio" 
+                      name="aiChoice" 
+                      checked={newEntry.value === choice}
+                      onChange={() => setNewEntry({ ...newEntry, value: choice })}
+                      className="text-purple-600"
+                    />
+                    <code className="flex-1 font-mono text-sm">{choice}</code>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleListenAiChoice(choice); }}
+                      disabled={generatingAiPreview === choice || playingAiPreview === choice}
+                      className="px-2 py-1 bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/50 dark:text-purple-300 dark:hover:bg-purple-800 rounded text-xs font-semibold disabled:opacity-50"
+                    >
+                      {generatingAiPreview === choice ? 'Wait...' : playingAiPreview === choice ? 'Playing...' : 'Listen 🔊'}
+                    </button>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <ul className="space-y-2 mt-4 max-h-96 overflow-y-auto pr-2">
           {items.map((item) => {

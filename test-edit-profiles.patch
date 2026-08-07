@@ -1,0 +1,10 @@
+--- src/lib/server/smart-audio-profiles.ts
++++ src/lib/server/smart-audio-profiles.ts
+@@ -66,6 +66,8 @@
+     backupGeminiApiKeyLast4: profile.backupGeminiApiKey
+       ? profile.backupGeminiApiKey.slice(-4)
+       : undefined,
++    geminiApiKeySourceProfileId: profile.geminiApiKeySourceProfileId || profile.id,
++    backupGeminiApiKeySourceProfileId: profile.backupGeminiApiKeySourceProfileId || profile.id,
+   };
+ }

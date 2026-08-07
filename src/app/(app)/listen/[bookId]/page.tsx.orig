@@ -55,14 +55,6 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
 
   const isMultiVoice = chapterText.includes('<voice');
 
-  useEffect(() => {
-    const handleOpenSettings = () => setIsSettingsModalOpen(true);
-    window.addEventListener('open-smart-audio-settings', handleOpenSettings);
-    return () => {
-      window.removeEventListener('open-smart-audio-settings', handleOpenSettings);
-    };
-  }, []);
-
   const blocks = useMemo(() => {
     // Show original text in middle pane, fallback to chapterText if original isn't ready
     const textToRender = originalText || chapterText;
@@ -462,15 +454,11 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                     chapterTitle: chapters[currentChapterIndex]?.title,
                     text: textToSend,
                     useSmartAudio: true,
-                    settings: { smartAudioProfileId: selectedProfileId, scholarAutoScan: true },
+                    settings: { smartAudioProfileId: selectedProfileId },
                     format: chapters[currentChapterIndex]?.format,
                   }),
-              }).then(async res => {
-                if (!res.ok) {
-                  const txt = await res.text().catch(() => '');
-                  console.error("API error text:", txt);
-                  throw new Error(`Failed to queue AI cleanup: ${res.status} ${txt.substring(0, 100)}`);
-                }
+              }).then(res => {
+                if (!res.ok) throw new Error("Failed to queue AI cleanup");
                 toast.success("Queued for AI Cleanup! (Waiting for worker...)");
               }).catch(err => {
                 console.error(err);

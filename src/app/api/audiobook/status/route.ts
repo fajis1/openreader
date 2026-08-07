@@ -110,14 +110,21 @@ export async function GET(request: NextRequest) {
       durationByIndex.set(row.chapterIndex, Number(row.duration ?? 0));
     }
 
-    const chapters: TTSAudiobookChapter[] = chapterObjects.map((chapter) => ({
-      index: chapter.index,
-      title: chapter.title,
-      duration: durationByIndex.get(chapter.index),
-      status: 'completed',
-      bookId,
-      format: chapter.format,
-    }));
+    const chapters: TTSAudiobookChapter[] = chapterObjects.map((chapter) => {
+      const oneBasedPrefix = String(chapter.index + 1).padStart(4, '0') + '__';
+      const txtFileObj = objects.find(o => o.fileName.startsWith(oneBasedPrefix) && o.fileName.endsWith('.txt'));
+      const isEmptyText = !txtFileObj || txtFileObj.size < 5; // empty or extremely small
+      
+      return {
+        index: chapter.index,
+        title: chapter.title,
+        duration: durationByIndex.get(chapter.index),
+        status: 'completed',
+        bookId,
+        format: chapter.format,
+        isEmptyText,
+      };
+    });
 
     let settings: AudiobookGenerationSettings | null = null;
     try {
