@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
-import { audiobooks } from '@/db/schema';
+import { audiobooks, audiobookJobs } from '@/db/schema';
+import { randomUUID } from 'crypto';
 import { eq, inArray, and } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import {
@@ -81,6 +82,7 @@ export async function POST(request: NextRequest) {
       let rebuildCount = 0;
       
       for (const book of booksToProcess) {
+        const jobId = randomUUID();
         try {
           const objects = await listAudiobookObjects(book.id, userId, null);
         const txtFiles = objects.filter(o => o.fileName.endsWith('.txt') && !o.fileName.includes('__changelog'));
@@ -110,6 +112,25 @@ export async function POST(request: NextRequest) {
             }
         }
 
+        if (chaptersToRebuild.length > 0) {
+          try {
+            await db.insert(audiobookJobs).values({
+              id: jobId,
+              userId,
+              documentId: book.id,
+              status: 'running',
+              progress: 0,
+              settingsJson: { batchRegenerate: true },
+              createdAt: Date.now(),
+              startedAt: Date.now(),
+              updatedAt: Date.now()
+            });
+          } catch (e) {
+            console.error('Failed to create background job row', e);
+          }
+        }
+
+        let localRebuildCount = 0;
         // Rebuild sequentially to not overload TTS/memory
         for (const chap of chaptersToRebuild) {
             try {
@@ -161,9 +182,21 @@ export async function POST(request: NextRequest) {
               await putAudiobookObject(book.id, userId, outName, Buffer.from(audioBuffer), chap.format === 'mp3' ? 'audio/mpeg' : 'audio/mp4');
               
               rebuildCount++;
+              localRebuildCount++;
+              
+              await db.update(audiobookJobs)
+                .set({ progress: Math.floor((localRebuildCount / chaptersToRebuild.length) * 100), updatedAt: Date.now() })
+                .where(eq(audiobookJobs.id, jobId));
+                
             } catch (err) {
               console.error(`Failed to rebuild chapter ${chap.index} for book ${book.id}:`, err);
             }
+        }
+        
+        if (chaptersToRebuild.length > 0) {
+           await db.update(audiobookJobs)
+             .set({ status: 'completed', progress: 100, updatedAt: Date.now() })
+             .where(eq(audiobookJobs.id, jobId));
         }
       } catch (e) {
           console.error(`Failed to list/rebuild objects for book ${book.id}:`, e);
