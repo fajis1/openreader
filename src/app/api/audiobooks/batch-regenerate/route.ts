@@ -7,9 +7,10 @@ import {
   listAudiobookObjects,
   getAudiobookObjectBuffer
 } from '@/lib/server/audiobooks/blobstore';
-import { decodeChapterFileName } from '@/lib/server/audiobooks/chapters';
-
-import { AudiobookBlobObject } from '@/lib/server/audiobooks/blobstore';
+import { decodeChapterFileName, encodeChapterFileName } from '@/lib/server/audiobooks/chapters';
+import { generateSegmentedAudiobookTtsBuffer } from '@/lib/server/audiobooks/segmented-tts';
+import { coerceAudiobookGenerationSettings } from '@/lib/server/audiobooks/settings';
+import { AudiobookBlobObject, putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,11 +76,13 @@ export async function POST(request: NextRequest) {
     const baseUrl = `http://127.0.0.1:${process.env.PORT || 3003}`;
     const cookieHeader = request.headers.get('cookie') || '';
     
-    let rebuildCount = 0;
-
-    for (const book of booksToProcess) {
-      try {
-        const objects = await listAudiobookObjects(book.id, userId, null);
+    // Run the rebuild in the background so the UI doesn't hang
+    (async () => {
+      let rebuildCount = 0;
+      
+      for (const book of booksToProcess) {
+        try {
+          const objects = await listAudiobookObjects(book.id, userId, null);
         const txtFiles = objects.filter(o => o.fileName.endsWith('.txt') && !o.fileName.includes('__changelog'));
         const audioFiles = objects.filter(o => o.fileName.endsWith('.mp3') || o.fileName.endsWith('.m4b'));
         
@@ -113,22 +116,50 @@ export async function POST(request: NextRequest) {
               const buf = await getAudiobookObjectBuffer(book.id, userId, chap.txtFileName, null);
               const text = buf.toString('utf-8');
               
-              await fetch(`${baseUrl}/api/audiobook/chapter`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Cookie': cookieHeader
-                },
-                body: JSON.stringify({
-                  bookId: book.id,
-                  documentId: book.id,
-                  chapterIndex: chap.index,
-                  chapterTitle: chap.title,
+              let provider = 'openai';
+              let voice = 'am_michael';
+              let speed = 1.0;
+              let model = 'kokoro-v1';
+              try {
+                const parsedSettings = JSON.parse(
+                  (await getAudiobookObjectBuffer(book.id, userId, 'audiobook.meta.json', null)).toString('utf8')
+                );
+                const existingResult = coerceAudiobookGenerationSettings(parsedSettings, {
+                  fallbackProviderRef: 'openai',
+                });
+                if (existingResult.settings) {
+                  provider = existingResult.settings.provider || provider;
+                  voice = existingResult.settings.voice || voice;
+                  speed = existingResult.settings.speed || speed;
+                  model = existingResult.settings.model || model;
+                }
+              } catch (e) {
+                console.error(`Could not parse settings for ${book.id}, using defaults`, e);
+              }
+              
+              const audioBuffer = await generateSegmentedAudiobookTtsBuffer(
+                {
                   text,
-                  useSmartAudio: false,
-                  format: chap.format
-                })
-              });
+                  format: chap.format as any,
+                  voice: mergedSettings?.voice || 'am_michael',
+                  speed: mergedSettings?.speed || 1.0,
+                  provider,
+                  apiKey: 'dummy',
+                  baseUrl: provider === 'kokoro' || provider === 'openai' ? 'http://172.22.0.1:8880/v1' : undefined,
+                  model: mergedSettings?.model || 'kokoro-v1',
+                },
+                request.signal,
+                {
+                  ttsCacheMaxSizeBytes: 1000000000,
+                  ttsCacheTtlMs: 86400000,
+                  ttsUpstreamMaxRetries: 3,
+                  ttsUpstreamTimeoutMs: 120000,
+                }
+              );
+              
+              const outName = encodeChapterFileName(chap.index, chap.title, chap.format as any);
+              await putAudiobookObject(book.id, userId, outName, Buffer.from(audioBuffer), chap.format === 'mp3' ? 'audio/mpeg' : 'audio/mp4');
+              
               rebuildCount++;
             } catch (err) {
               console.error(`Failed to rebuild chapter ${chap.index} for book ${book.id}:`, err);
@@ -139,8 +170,9 @@ export async function POST(request: NextRequest) {
       }
     }
     console.log(`Finished batch rebuild. Rebuilt ${rebuildCount} chapters.`);
+    })();
 
-    return NextResponse.json({ success: true, message: `Batch rebuild finished. Rebuilt ${rebuildCount} chapters.` });
+    return NextResponse.json({ success: true, message: `Background batch rebuild started for ${booksToProcess.length} book(s).` });
   } catch (err: any) {
     console.error('Batch regenerate failed:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
