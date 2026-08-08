@@ -162,12 +162,12 @@ export async function POST(request: NextRequest) {
                 {
                   text,
                   format: chap.format as any,
-                  voice: mergedSettings?.voice || 'am_michael',
-                  speed: mergedSettings?.speed || 1.0,
+                  voice: voice,
+                  speed: speed,
                   provider,
                   apiKey: 'dummy',
                   baseUrl: provider === 'kokoro' || provider === 'openai' ? 'http://172.22.0.1:8880/v1' : undefined,
-                  model: mergedSettings?.model || 'kokoro-v1',
+                  model: model,
                 },
                 request.signal,
                 {
