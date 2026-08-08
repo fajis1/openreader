@@ -11,6 +11,16 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-08 — Fixed Batch Regenerate API Endpoint and Phonetic Rules
+
+- **Batch Regenerate Fix (`src/app/api/audiobooks/batch-regenerate/route.ts`):**
+  - Fixed an issue where clicking "Re-Record All Modified chunks" did not spawn any Kokoro TTS generation. The background fetch request was using the external `host` header which timed out inside the Docker container's isolated network. Hardcoded `baseUrl` to `http://127.0.0.1:${process.env.PORT || 3003}` so the Next.js backend correctly routes the `POST /api/audiobook/chapter` request to its own loopback interface.
+  - Removed the `(async () => {})()` Immediately Invoked Function Expression (IIFE) that was intended to run the rebuild in the background. Next.js 14 App Router actively terminates orphaned background promises as soon as the API response is returned, which was silently killing the rebuild process. The endpoint now explicitly `await`s the chapter rebuild loop synchronously, keeping the connection open until all audio chunks are successfully rebuilt.
+  - Also patched a small bug where the `txtFiles` filtering failed to parse numerical prefixes for modified files.
+
+- **Phonetics Update (`src/lib/server/default_smart_audio_profiles.json`):**
+  - Updated the "Biblical Scholarship" profile to explicitly drop silent letters (e.g. `p` in `πνεῦμα` [pneuma] -> `[neuma]`) per user specifications so Kokoro doesn't mispronounce them.
+
 ### 2026-08-07 — Fixed Smart Audio API Endpoint Settings Parsing and NATS Routing
 
 - **Smart Audio Payload & NATS Bug Fix:**

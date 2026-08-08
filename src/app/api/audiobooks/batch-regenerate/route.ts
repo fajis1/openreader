@@ -53,10 +53,11 @@ export async function POST(request: NextRequest) {
 
           let modifiedCount = 0;
           for (const txt of txtFiles) {
-             const decoded = decodeChapterFileName(txt.fileName);
-             if (!decoded) continue;
+             const match = /^(\d{1,6})__/.exec(txt.fileName);
+             if (!match) continue;
+             const index = parseInt(match[1], 10) - 1;
              
-             const correspondingAudio = audioFileMap.get(decoded.index);
+             const correspondingAudio = audioFileMap.get(index);
              if (!correspondingAudio || txt.lastModified > correspondingAudio.lastModified) {
                 modifiedCount++;
              }
@@ -71,79 +72,75 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, needsRegeneration: results });
     }
 
-    const host = request.headers.get('host');
-    const protocol = request.nextUrl.protocol || 'http:';
-    const baseUrl = `${protocol}//${host}`;
+    const baseUrl = `http://127.0.0.1:${process.env.PORT || 3003}`;
     const cookieHeader = request.headers.get('cookie') || '';
     
-    // Background execution
-    (async () => {
-      let rebuildCount = 0;
-      
-      for (const book of booksToProcess) {
-        try {
-          const objects = await listAudiobookObjects(book.id, userId, null);
-          const txtFiles = objects.filter(o => o.fileName.endsWith('.txt') && !o.fileName.includes('__changelog'));
-          const audioFiles = objects.filter(o => o.fileName.endsWith('.mp3') || o.fileName.endsWith('.m4b'));
-          
-          const audioFileMap = new Map<number, AudiobookBlobObject>(audioFiles.map(a => {
-            const decoded = decodeChapterFileName(a.fileName);
-            return [decoded?.index ?? -1, a];
-          }));
+    let rebuildCount = 0;
 
-          const chaptersToRebuild = [];
+    for (const book of booksToProcess) {
+      try {
+        const objects = await listAudiobookObjects(book.id, userId, null);
+        const txtFiles = objects.filter(o => o.fileName.endsWith('.txt') && !o.fileName.includes('__changelog'));
+        const audioFiles = objects.filter(o => o.fileName.endsWith('.mp3') || o.fileName.endsWith('.m4b'));
+        
+        const audioFileMap = new Map<number, AudiobookBlobObject>(audioFiles.map(a => {
+          const decoded = decodeChapterFileName(a.fileName);
+          return [decoded?.index ?? -1, a];
+        }));
 
-          for (const txt of txtFiles) {
-             const decoded = decodeChapterFileName(txt.fileName);
-             if (!decoded) continue;
-             
-             const correspondingAudio = audioFileMap.get(decoded.index);
-             // If audio doesn't exist OR txt is newer than audio
-             if (!correspondingAudio || txt.lastModified > correspondingAudio.lastModified) {
-                chaptersToRebuild.push({
-                   index: decoded.index,
-                   title: decoded.title,
-                   format: correspondingAudio ? (correspondingAudio.fileName.endsWith('.m4b') ? 'm4b' : 'mp3') : 'mp3',
-                   txtFileName: txt.fileName
-                });
-             }
-          }
+        const chaptersToRebuild = [];
 
-          // Rebuild sequentially to not overload TTS/memory
-          for (const chap of chaptersToRebuild) {
-             try {
-                const buf = await getAudiobookObjectBuffer(book.id, userId, chap.txtFileName, null);
-                const text = buf.toString('utf-8');
-                
-                await fetch(`${baseUrl}/api/audiobook/chapter`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Cookie': cookieHeader
-                  },
-                  body: JSON.stringify({
-                    bookId: book.id,
-                    documentId: book.id,
-                    chapterIndex: chap.index,
-                    chapterTitle: chap.title,
-                    text,
-                    useSmartAudio: false,
-                    format: chap.format
-                  })
-                });
-                rebuildCount++;
-             } catch (err) {
-                console.error(`Failed to rebuild chapter ${chap.index} for book ${book.id}:`, err);
-             }
-          }
-        } catch (e) {
-           console.error(`Failed to list/rebuild objects for book ${book.id}:`, e);
+        for (const txt of txtFiles) {
+            const match = /^(\d{1,6})__/.exec(txt.fileName);
+            if (!match) continue;
+            const index = parseInt(match[1], 10) - 1;
+            
+            const correspondingAudio = audioFileMap.get(index);
+            // If audio doesn't exist OR txt is newer than audio
+            if (!correspondingAudio || txt.lastModified > correspondingAudio.lastModified) {
+              chaptersToRebuild.push({
+                  index: index,
+                  title: `Chapter ${index + 1}`,
+                  format: correspondingAudio ? (correspondingAudio.fileName.endsWith('.m4b') ? 'm4b' : 'mp3') : 'mp3',
+                  txtFileName: txt.fileName
+              });
+            }
         }
-      }
-      console.log(`Finished background batch rebuild. Rebuilt ${rebuildCount} chapters.`);
-    })().catch(console.error);
 
-    return NextResponse.json({ success: true, message: 'Background rebuild started for modified chunks.' });
+        // Rebuild sequentially to not overload TTS/memory
+        for (const chap of chaptersToRebuild) {
+            try {
+              const buf = await getAudiobookObjectBuffer(book.id, userId, chap.txtFileName, null);
+              const text = buf.toString('utf-8');
+              
+              await fetch(`${baseUrl}/api/audiobook/chapter`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Cookie': cookieHeader
+                },
+                body: JSON.stringify({
+                  bookId: book.id,
+                  documentId: book.id,
+                  chapterIndex: chap.index,
+                  chapterTitle: chap.title,
+                  text,
+                  useSmartAudio: false,
+                  format: chap.format
+                })
+              });
+              rebuildCount++;
+            } catch (err) {
+              console.error(`Failed to rebuild chapter ${chap.index} for book ${book.id}:`, err);
+            }
+        }
+      } catch (e) {
+          console.error(`Failed to list/rebuild objects for book ${book.id}:`, e);
+      }
+    }
+    console.log(`Finished batch rebuild. Rebuilt ${rebuildCount} chapters.`);
+
+    return NextResponse.json({ success: true, message: `Batch rebuild finished. Rebuilt ${rebuildCount} chapters.` });
   } catch (err: any) {
     console.error('Batch regenerate failed:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
