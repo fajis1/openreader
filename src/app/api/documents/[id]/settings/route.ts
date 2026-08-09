@@ -140,25 +140,65 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       });
     }
 
-    // smartAudioLexicon is server-managed scan state. Do not accept it from the
-    // client, and preserve the database's current value inside the upsert so a
-    // scan completing between the SELECT and UPDATE cannot be overwritten.
+    // Scan-derived lexicon, character-cast state, and review flags are
+    // server-managed. Do not accept them from this generic client settings
+    // route, and preserve them atomically so a server update completing between
+    // the SELECT and UPDATE cannot be overwritten.
     const clientManagedIncoming = { ...incoming };
     delete clientManagedIncoming.smartAudioLexicon;
+    delete clientManagedIncoming.smartAudioCharacters;
+    delete clientManagedIncoming.smartAudioReviewFlags;
     const updatedAt = nowTimestampMs();
     const incomingJson = JSON.stringify(clientManagedIncoming);
     const payload = serializeForDb(clientManagedIncoming as unknown as Record<string, unknown>);
-    const mergedDataJson = process.env.POSTGRES_URL
+    const previousSettings = parseStored(existing?.dataJson);
+    const pdfNarrationPolicyChanged = Boolean(existing)
+      && JSON.stringify([...(previousSettings.pdf?.skipBlockKinds || [])].sort())
+        !== JSON.stringify([...(clientManagedIncoming.pdf?.skipBlockKinds || [])].sort());
+    const postgresCharacters = pdfNarrationPolicyChanged
       ? sql`case
-          when ${documentSettings.dataJson} ? 'smartAudioLexicon'
-          then jsonb_set(${incomingJson}::jsonb, '{smartAudioLexicon}', ${documentSettings.dataJson}->'smartAudioLexicon', true)
-          else ${incomingJson}::jsonb
+          when jsonb_typeof(${documentSettings.dataJson}->'smartAudioCharacters') = 'object'
+          then jsonb_set(${documentSettings.dataJson}->'smartAudioCharacters', '{needsRescan}', 'true'::jsonb, true)
+          else 'null'::jsonb
         end`
-      : sql`case
-          when json_type(${documentSettings.dataJson}, '$.smartAudioLexicon') is not null
-          then json_set(json(${incomingJson}), '$.smartAudioLexicon', json_extract(${documentSettings.dataJson}, '$.smartAudioLexicon'))
-          else json(${incomingJson})
-        end`;
+      : sql`coalesce(${documentSettings.dataJson}->'smartAudioCharacters', 'null'::jsonb)`;
+    const sqliteCharacters = pdfNarrationPolicyChanged
+      ? sql`case
+          when json_type(${documentSettings.dataJson}, '$.smartAudioCharacters') = 'object'
+          then json_set(json_extract(${documentSettings.dataJson}, '$.smartAudioCharacters'), '$.needsRescan', json('true'))
+          else null
+        end`
+      : sql`json_extract(${documentSettings.dataJson}, '$.smartAudioCharacters')`;
+    const mergedDataJson = process.env.POSTGRES_URL
+      ? sql`jsonb_set(
+          jsonb_set(
+            jsonb_set(
+              ${incomingJson}::jsonb,
+              '{smartAudioLexicon}',
+              coalesce(${documentSettings.dataJson}->'smartAudioLexicon', 'null'::jsonb),
+              true
+            ),
+            '{smartAudioCharacters}',
+            ${postgresCharacters},
+            true
+          ),
+          '{smartAudioReviewFlags}',
+          coalesce(${documentSettings.dataJson}->'smartAudioReviewFlags', 'null'::jsonb),
+          true
+        )`
+      : sql`json_set(
+          json_set(
+            json_set(
+              json(${incomingJson}),
+              '$.smartAudioLexicon',
+              json_extract(${documentSettings.dataJson}, '$.smartAudioLexicon')
+            ),
+            '$.smartAudioCharacters',
+            ${sqliteCharacters}
+          ),
+          '$.smartAudioReviewFlags',
+          json_extract(${documentSettings.dataJson}, '$.smartAudioReviewFlags')
+        )`;
 
     const savedRows = await db
       .insert(documentSettings)

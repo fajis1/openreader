@@ -18,7 +18,6 @@ import { putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
 import { encodeChapterFileName } from '@/lib/server/audiobooks/chapters';
 import { createOrReuseCurrentPdfParseOperation } from '@/lib/server/pdf-parse/operation';
 import { extractPdfToc, computeTocBoundaries } from '@/lib/server/pdf-parse/toc';
-import JSZip from 'jszip';
 import type { ParsedPdfDocument } from '@/types/parsed-pdf';
 import { serverLogger } from '@/lib/server/logger';
 import { INTERNAL_WORKER_SECRET } from '@/lib/server/internal-secret';
@@ -29,11 +28,13 @@ import {
 import { GEMINI_RATE_LIMIT_PAUSE_MESSAGE } from '@/lib/shared/audiobook-job-status';
 import { resolveCleanupAiModel } from '@/lib/shared/smart-audio-models';
 import {
-  extractEpubChapterHeading,
   isAudiobookEndMatterHeading,
-  removePdfTableOfContents,
   truncateAudiobookEndMatter,
 } from '@/lib/shared/audiobook-end-matter';
+import {
+  extractAudiobookTextFromEpub,
+  stripAudiobookHtml,
+} from '@/lib/server/audiobooks/document-source';
 import {
   batchAudiobookText,
   cleanupBatchTargetForVersion,
@@ -54,6 +55,24 @@ import {
   recordLearnedGlobalPronunciation,
 } from '@/lib/server/tts/global-pronunciation-library';
 import { mergeGlobalDefinitions, readGlobalDefinitions } from '@/lib/server/smart-audio/global-definition-library';
+import { preparePdfAudiobookBlocks } from '@/lib/shared/pdf-audiobook-blocks';
+import { mergeDocumentSettings } from '@/lib/shared/document-settings';
+import { DEFAULT_DOCUMENT_SETTINGS } from '@/types/document-settings';
+import {
+  buildSmartAudioCleanupPrompt,
+  isScholarLikeSmartAudioMode,
+  resolveSmartAudioWorkerResult,
+  stripSmartAudioInputMarkers,
+  validateSmartAudioOutput,
+} from '@/lib/shared/smart-audio-cleanup';
+import {
+  buildMultiVoiceCast,
+  getCharacterMapReadiness,
+  MULTI_VOICE_WORKER_MODE,
+  resolveMultiVoiceWorkerResult,
+  type MultiVoiceCastMember,
+  WAITING_FOR_VOICES_STATUS,
+} from '@/lib/shared/multi-voice';
 
 const SMART_AUDIO_NATS_SUBJECT = 'audiobooks.gemini.clean';
 // Scholar and bibliography-catcher both use the scholar Python worker,
@@ -61,7 +80,7 @@ const SMART_AUDIO_NATS_SUBJECT = 'audiobooks.gemini.clean';
 const SCHOLAR_NATS_SUBJECT = 'audiobooks.scholar.clean';
 
 function isScholarLikeMode(mode: string | undefined): boolean {
-  return mode === 'scholar' || mode === 'bibliography-catcher';
+  return isScholarLikeSmartAudioMode(mode);
 }
 
 async function recordLearnedGlobalPronunciations(
@@ -144,67 +163,6 @@ async function readGlobalPronunciationDefaults(): Promise<Record<string, string>
   } catch {
     return {};
   }
-}
-
-function stripHtmlTags(html: string): string {
-  return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-             .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-             .replace(/<[^>]+>/g, ' ')
-             .replace(/\s+/g, ' ')
-             .trim();
-}
-
-async function extractTextFromEpub(buffer: Buffer): Promise<{ title: string; text: string }[]> {
-  const zip = await JSZip.loadAsync(buffer);
-  const containerXml = await zip.file('META-INF/container.xml')?.async('string');
-  if (!containerXml) throw new Error('Missing container.xml');
-  
-  const opfPathMatch = containerXml.match(/full-path="([^"]+)"/);
-  if (!opfPathMatch) throw new Error('Missing OPF path');
-  const opfPath = opfPathMatch[1];
-  
-  const opfContent = await zip.file(opfPath)?.async('string');
-  if (!opfContent) throw new Error('Missing OPF file');
-  
-  const basePath = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : '';
-  
-  const manifest: Record<string, string> = {};
-  for (const match of opfContent.matchAll(/<item\s+([^>]+)>/gi)) {
-    const attrs = match[1];
-    const idMatch = attrs.match(/id="([^"]+)"/i);
-    const hrefMatch = attrs.match(/href="([^"]+)"/i);
-    if (idMatch && hrefMatch) {
-      manifest[idMatch[1]] = hrefMatch[1];
-    }
-  }
-  
-  const spine: string[] = [];
-  for (const match of opfContent.matchAll(/<itemref\s+([^>]+)>/gi)) {
-    const idrefMatch = match[1].match(/idref="([^"]+)"/i);
-    if (idrefMatch) {
-      spine.push(idrefMatch[1]);
-    }
-  }
-  
-  const chapters: { title: string; text: string }[] = [];
-  for (let i = 0; i < spine.length; i++) {
-    const idref = spine[i];
-    const href = manifest[idref];
-    if (!href) continue;
-    const file = zip.file(basePath + href);
-    if (!file) continue;
-    
-    const htmlContent = await file.async('string');
-    const text = stripHtmlTags(htmlContent);
-    const extractedTitle = extractEpubChapterHeading(htmlContent);
-    if (text.trim().length > 0) {
-      chapters.push({
-        title: extractedTitle || `Chapter ${chapters.length + 1}`,
-        text: text,
-      });
-    }
-  }
-  return chapters;
 }
 
 const globalWorkerState = globalThis as unknown as { __worker_booted?: boolean };
@@ -313,8 +271,26 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       testNamespace,
     );
 
-    let chapters: { index: number; title: string; text: string }[] = [];
+    let chapters: { index: number; title: string; text: string; cleanupText?: string }[] = [];
     let tocSectionsSkipped = 0;
+
+    const documentSettingsRows = await db
+      .select({ dataJson: documentSettings.dataJson })
+      .from(documentSettings)
+      .where(and(eq(documentSettings.documentId, doc.id), eq(documentSettings.userId, userId)))
+      .limit(1);
+    let rawDocumentSettings: unknown = documentSettingsRows[0]?.dataJson || {};
+    if (typeof rawDocumentSettings === 'string') {
+      try {
+        rawDocumentSettings = JSON.parse(rawDocumentSettings);
+      } catch {
+        rawDocumentSettings = {};
+      }
+    }
+    const resolvedDocumentSettings = mergeDocumentSettings(
+      DEFAULT_DOCUMENT_SETTINGS,
+      rawDocumentSettings,
+    );
 
     const useSmartAudio = Boolean(jobSettings.useSmartAudio);
     const profilesDocument = useSmartAudio
@@ -323,7 +299,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     let selectedProfile = profilesDocument
       ? findSmartAudioProfileById(profilesDocument, String(jobSettings.smartAudioProfileId || ''))
       : null;
-    const isBibliographyCatcher = selectedProfile?.workerMode === 'bibliography-catcher';
+    if (useSmartAudio && !selectedProfile) {
+      throw new Error('The selected Smart Audio profile could not be loaded.');
+    }
     // Scholar and bibliography-catcher both get layout engine structural tags so
     // Gemini can understand PDF structure. Previously only bib-catcher had this.
     const useLayoutTags = isScholarLikeMode(selectedProfile?.workerMode);
@@ -408,16 +386,21 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       serverLogger.info({ event: 'audiobook.toc.boundaries', startPage: boundaries.startPage, endPage: boundaries.endPage }, 'Computed TOC boundaries for PDF');
       console.log(`\n==========================================\n  TOC BOUNDARY CALCULATED\n  Start Page (Gemini hint before this): ${boundaries.startPage}\n  End Page (Gemini hint after this): ${boundaries.endPage}\n==========================================\n`);
 
-      const pdfBlocks = parsedPdf.pages
-        .flatMap((page) => page.blocks.map((block) => ({
-          ...block,
-          pageNumber: page.pageNumber,
-        })));
-      const tocFiltered = usesCurrentBatching
-        ? removePdfTableOfContents(pdfBlocks, parsedPdf.pages.length)
-        : { blocks: pdfBlocks, skipped: false };
-      const allBlocks = tocFiltered.blocks;
-      if (tocFiltered.skipped) {
+      const preparedPdfBlocks = preparePdfAudiobookBlocks({
+        parsed: parsedPdf,
+        settings: resolvedDocumentSettings,
+        cleanupBatchVersion: jobSettings.cleanupBatchVersion,
+      });
+      const allBlocks = preparedPdfBlocks.blocks;
+      if (preparedPdfBlocks.skippedBlockCount > 0) {
+        serverLogger.info({
+          event: 'audiobook.queue.pdf_blocks.skipped',
+          bookId,
+          count: preparedPdfBlocks.skippedBlockCount,
+          kinds: resolvedDocumentSettings.pdf?.skipBlockKinds || [],
+        }, 'Removed configured PDF block kinds before chapter batching.');
+      }
+      if (preparedPdfBlocks.tocSkipped) {
         tocSectionsSkipped += 1;
         serverLogger.info({
           event: 'audiobook.queue.front_matter.skipped',
@@ -502,12 +485,12 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
     } else if (doc.type === 'epub') {
       const buffer = await getDocumentBlob(doc.id, testNamespace);
-      const epubChapters = await extractTextFromEpub(buffer);
+      const epubChapters = await extractAudiobookTextFromEpub(buffer);
       chapters = epubChapters.map((c, i) => ({ index: i, title: c.title, text: c.text }));
     } else if (doc.type === 'txt' || doc.type === 'html') {
       const buffer = await getDocumentBlob(doc.id, testNamespace);
       let text = buffer.toString('utf-8');
-      if (doc.type === 'html') text = stripHtmlTags(text);
+      if (doc.type === 'html') text = stripAudiobookHtml(text);
       chapters = [{ index: 0, title: 'Document', text }];
     } else {
       throw new Error(`Unsupported document type: ${doc.type}`);
@@ -521,6 +504,15 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         truncateAudiobookEndMatter(chapters),
         cleanupTargetCharacters,
       );
+    }
+    if (useLayoutTags) {
+      chapters = chapters
+        .map((chapter) => ({
+          ...chapter,
+          cleanupText: chapter.text,
+          text: stripSmartAudioInputMarkers(chapter.text),
+        }))
+        .filter((chapter) => Boolean(chapter.text));
     }
     if (chapters.length === 0) throw new Error('No audiobook content found before end matter');
     const format = (settings.format as 'mp3' | 'm4b') || 'm4b';
@@ -668,43 +660,21 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       }, 'Built the Scholar pronunciation and definition lexicon before cleanup.');
     }
 
-    let multiVoiceCharacters: any[] = [];
-    if (selectedProfile?.workerMode === 'multi-voice') {
-      const docSettingsRows = await db.select().from(documentSettings).where(and(eq(documentSettings.documentId, doc.id), eq(documentSettings.userId, userId)));
-      const dataJson = typeof docSettingsRows[0]?.dataJson === 'string' ? JSON.parse(docSettingsRows[0].dataJson) : (docSettingsRows[0]?.dataJson || {});
-      const charMap = dataJson.smartAudioCharacters;
-      
-      let needsVoices = true;
-      if (charMap?.status === 'complete' && charMap.entries) {
-        const primaryChars = Object.values(charMap.entries).filter((c: any) => !c.aliasFor);
-        const unassigned = primaryChars.filter((c: any) => !c.voiceId);
-        if (primaryChars.length > 0 && unassigned.length === 0) {
-          needsVoices = false;
-          // Build character list with aliases combined
-          multiVoiceCharacters = primaryChars.map((primary: any) => {
-             const aliases = Object.values(charMap.entries)
-               .filter((c: any) => c.aliasFor === primary.name)
-               .map((c: any) => c.name);
-             return {
-                name: aliases.length > 0 ? `${primary.name} (Aliases: ${aliases.join(', ')})` : primary.name,
-                voiceId: primary.voiceId,
-             };
-          });
-        }
-      }
-
-      if (needsVoices) {
+    let multiVoiceCharacters: MultiVoiceCastMember[] = [];
+    if (selectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE) {
+      const readiness = getCharacterMapReadiness(resolvedDocumentSettings.smartAudioCharacters);
+      if (!readiness.ready || readiness.map?.profileId !== selectedProfile.id) {
         serverLogger.info({ event: 'audiobook.queue.multivoice.waiting_for_voices', bookId }, 'Job is paused waiting for user to map voices in UI');
         await db.update(audiobookJobs)
           .set({
-            status: 'queued',
-            error: 'waiting_for_voices',
-            createdAt: Date.now(),
+            status: WAITING_FOR_VOICES_STATUS,
+            error: 'Review and assign the LitRPG character voices to continue.',
             updatedAt: Date.now(),
           })
           .where(eq(audiobookJobs.id, job.id));
         return;
       }
+      multiVoiceCharacters = buildMultiVoiceCast(readiness.map);
     }
 
     serverLogger.info({
@@ -712,7 +682,13 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       jobId: job.id,
       bookId,
       worker_mode: selectedProfile?.workerMode || 'standard',
-      nats_subject: useSmartAudio ? (isScholarLikeMode(selectedProfile?.workerMode) ? SCHOLAR_NATS_SUBJECT : SMART_AUDIO_NATS_SUBJECT) : null,
+      nats_subject: useSmartAudio
+        ? selectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
+          ? 'audiobooks.multivoice.assign'
+          : isScholarLikeMode(selectedProfile?.workerMode)
+            ? SCHOLAR_NATS_SUBJECT
+            : SMART_AUDIO_NATS_SUBJECT
+        : null,
       definition_pass_ran: definitionPassRan,
       definitions_found: Object.values(bookLexicon?.entries || {})
         .filter((entry) => Boolean(entry.definition)).length,
@@ -732,6 +708,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       } catch (e) {
         serverLogger.warn({ event: 'audiobook.queue.smart_audio.error', error: e }, 'Failed to connect to NATS, smart audio will fail');
       }
+    }
+    if (useSmartAudio && (!nc || !sc)) {
+      throw new Error('Smart Audio was enabled, but the cleanup worker connection could not be established.');
     }
 
     let continuityState = "Beginning of book.";
@@ -778,7 +757,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             ...(currentSelectedProfile?.pronunciations || {}),
           };
           const enrichedChapterText = enrichTextFromBookLexicon(
-            chapter.text,
+            chapter.cleanupText ?? chapter.text,
             bookLexicon,
             {
               // scholarIncludeDefinitions defaults to true when absent to preserve existing Scholar behavior
@@ -795,7 +774,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           let payload: string;
           let natsSubject: string;
 
-          if (currentSelectedProfile?.workerMode === 'multi-voice') {
+          if (currentSelectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE) {
             payload = JSON.stringify({
               backup_api_key: backupGeminiApiKey,
               user_id: userId,
@@ -814,7 +793,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               user_id: userId,
               api_key: geminiApiKey,
               ai_model: resolveCleanupAiModel(currentSelectedProfile),
-              prompt: currentSelectedProfile?.customTtsPrompt || "You are an expert audiobook preparation assistant...",
+              prompt: buildSmartAudioCleanupPrompt(currentSelectedProfile?.customTtsPrompt),
               pronunciation_prompt: buildKokoroPronunciationInstructions(currentSelectedProfile),
               raw_text: enrichedChapterText,
               pronunciations: applicablePronunciations,
@@ -843,15 +822,25 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             return;
           }
 
-          if (workerResult.status === "success" && (workerResult.cleaned_text || workerResult.tagged_text)) {
-            processedTextForTts = workerResult.tagged_text || workerResult.cleaned_text;
-            if (workerResult.continuity_state) {
-              continuityState = workerResult.continuity_state;
+          if (workerResult.status === "success") {
+            const multiVoiceResult = currentSelectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
+              ? resolveMultiVoiceWorkerResult(workerResult, multiVoiceCharacters)
+              : null;
+            const resolvedWorkerResult = multiVoiceResult
+              ? { outcome: 'cleaned' as const, text: multiVoiceResult.taggedText }
+              : resolveSmartAudioWorkerResult(workerResult);
+            processedTextForTts = resolvedWorkerResult.text;
+            if (multiVoiceResult?.continuityState) {
+              continuityState = multiVoiceResult.continuityState;
+            } else if (typeof workerResult.continuity_state === 'string' && workerResult.continuity_state.trim()) {
+              continuityState = workerResult.continuity_state.trim();
             }
-            if (workerResult.chapter_title) {
-              chapter.title = workerResult.chapter_title;
+            const resolvedChapterTitle = multiVoiceResult?.chapterTitle
+              || (typeof workerResult.chapter_title === 'string' ? workerResult.chapter_title.trim() : '');
+            if (resolvedChapterTitle) {
+              chapter.title = resolvedChapterTitle;
               await db.update(audiobookChapters)
-                .set({ title: workerResult.chapter_title })
+                .set({ title: resolvedChapterTitle })
                 .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.chapterIndex, chapter.index)));
             }
             serverLogger.info({
@@ -862,7 +851,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               model: resolveCleanupAiModel(currentSelectedProfile),
               pass: 'cleanup',
               worker_mode: currentSelectedProfile?.workerMode || 'standard',
-              nats_subject: SMART_AUDIO_NATS_SUBJECT,
+              nats_subject: natsSubject,
               definition_pass_ran: false,
               definitions_found: Object.values(bookLexicon?.entries || {})
                 .filter((entry) => Boolean(entry.definition)).length,
@@ -900,8 +889,8 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               const changelogName = `${String(chapter.index + 1).padStart(4, '0')}__changelog.txt`;
               await putAudiobookObject(bookId, userId, changelogName, Buffer.from(workerResult.changelog, 'utf8'), 'text/plain; charset=utf-8', testNamespace).catch(() => {});
             }
-          } else if (workerResult.status === "error") {
-            throw new Error(`Python worker returned error: ${workerResult.message}`);
+          } else {
+            throw new Error(`Python worker returned error: ${workerResult.message || workerResult.status || 'unknown response'}`);
           }
         } catch (e) {
           serverLogger.error({ event: 'audiobook.queue.smart_audio.failed', error: e }, 'Smart audio processing failed. Aborting generation.');
@@ -943,15 +932,18 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       
       // ABORT END-MATTER: If Gemini confirmed this was end-matter and omitted it!
       const cleanedTrimmed = processedTextForTts.trim();
-      if ((!cleanedTrimmed || cleanedTrimmed === '[OMITTED]' || cleanedTrimmed === '[OMIT]') && chapter.text.includes('end-matter (e.g. bibliography')) {
+      const cleanupSource = chapter.cleanupText ?? chapter.text;
+      if (!cleanedTrimmed && cleanupSource.includes('end-matter (e.g. bibliography')) {
           serverLogger.info({ event: 'audiobook.queue.smart_audio.end_matter_confirmed', bookId }, 'Gemini confirmed end-matter and omitted it. Halting generation for the rest of the book!');
           break; // Stop generating the rest of the book!
       }
       
       // If the text is empty but it wasn't end-matter (e.g. just a blank page or copyright), we skip TTS but continue to next chapter
-      if (!cleanedTrimmed || cleanedTrimmed === '[OMITTED]' || cleanedTrimmed === '[OMIT]') {
+      if (!cleanedTrimmed) {
           continue;
       }
+
+      processedTextForTts = validateSmartAudioOutput(processedTextForTts);
 
       const ttsBuffer = await generateSegmentedAudiobookTtsBuffer({
         text: processedTextForTts,

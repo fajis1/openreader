@@ -82,6 +82,11 @@ export const BASE_BOOKS = [
 ];
 export const PRESET_PROMPTS = [
   {
+    name: "LitRPG Audio Drama",
+    workerMode: "multi-voice" as const,
+    content: `You are an expert LitRPG audiobook director. Preserve every narratable sentence and its order while assigning narration and dialogue only to the user-reviewed character cast. Use the saved pronunciation library for fantasy names and game terminology. Do not invent speakers, voices, dialogue, stage directions, XML, or internal control markers. Return structured speaker segments for server validation.`,
+  },
+  {
     name: "Standard Audiobook Cleaner",
     workerMode: "standard" as const,
     content: `You are an expert audiobook preparation assistant. Your task is to clean and format the following text to make it sound incredibly natural and well-paced for a Text-to-Speech engine.

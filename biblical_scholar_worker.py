@@ -81,7 +81,7 @@ async def process_message(msg):
         
         dict_string = json.dumps(pronunciations, indent=2, ensure_ascii=False)
         dynamic_constraints = f"CRITICAL CONTINUITY RULE: Use these exact phonetic spellings:\n{dict_string}\n\n"
-        title_instruction = "CHAPTER TITLE GENERATION: You MUST summarize the provided text into a unique 3 to 5 word descriptive title based on its actual contents. DO NOT just copy the existing chapter title (e.g. 'Foreword' or 'Chapter 1'). At the very end of your response, after the cleaned text, you MUST add exactly one blank line and then output the title wrapped in tags exactly like this: [CHAPTER_TITLE: Three Word Summary]. Do not include the chapter number or 'continued'.\n\n"
+        title_instruction = "CHAPTER TITLE GENERATION: For narratable text, you MUST summarize the provided text into a unique 3 to 5 word descriptive title based on its actual contents. DO NOT just copy the existing chapter title (e.g. 'Foreword' or 'Chapter 1'). At the very end of your response, after the cleaned text, you MUST add exactly one blank line and then output the title wrapped in tags exactly like this: [CHAPTER_TITLE: Three Word Summary]. Do not include the chapter number or 'continued'. If the correct result is [OMIT], return only [OMIT] and do not add a chapter title.\n\n"
         
         full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\n{title_instruction}Text to clean:\n{enriched_text}"
         final_text = ""
@@ -119,9 +119,9 @@ async def process_message(msg):
                         contents=full_prompt
                     )
                     
-                    final_text = ""
-                    if response.text:
-                        final_text = response.text.strip()
+                    if not response.text or not response.text.strip():
+                        raise RuntimeError("Gemini returned no text; expected cleaned text or [OMIT]")
+                    final_text = response.text.strip()
                     
                     if api_state["current_delay"] > 0:
                         api_state["current_delay"] = api_state["current_delay"] // 2
@@ -159,6 +159,11 @@ async def process_message(msg):
             chapter_title = title_match.group(1).strip()
             final_text = final_text[:title_match.start()].strip()
 
+        outcome = "omitted" if final_text.upper() in {"[OMIT]", "[OMITTED]"} else "cleaned"
+        if outcome == "omitted":
+            final_text = ""
+            chapter_title = ""
+
         learned_words = extract_learned_words(final_text, pronunciations)
         if learned_words:
             print(f"  -> [LEARNED] Discovered {len(learned_words)} new phonetic overrides!")
@@ -178,6 +183,7 @@ async def process_message(msg):
 
         result = {
             "status": "success",
+            "outcome": outcome,
             "cleaned_text": final_text,
             "new_pronunciations": learned_words,
             "changelog": changelog,

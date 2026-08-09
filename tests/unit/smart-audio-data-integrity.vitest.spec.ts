@@ -181,8 +181,44 @@ describe('Smart Audio data-integrity guards', () => {
   test('gives direct 12K cleanup requests the full worker timeout', () => {
     const route = source('src/app/api/audiobook/chapter/route.ts');
     expect(route).toContain(
-      'nc.request(SMART_AUDIO_NATS_SUBJECT, sc.encode(payload), { timeout: 120000 })',
+      'nc.request(targetSubject, sc.encode(payload), { timeout: 120000 })',
     );
+  });
+
+  test('applies document PDF exclusions in the background worker before batching', () => {
+    const worker = source('src/lib/server/audiobooks/worker.ts');
+    expect(worker).toContain('mergeDocumentSettings(');
+    expect(worker).toContain('preparePdfAudiobookBlocks({');
+    expect(worker.indexOf('preparePdfAudiobookBlocks({')).toBeLessThan(
+      worker.indexOf('batchAudiobookText('),
+    );
+  });
+
+  test('fails closed instead of sending raw text when direct cleanup fails', () => {
+    const route = source('src/app/api/audiobook/chapter/route.ts');
+    const worker = source('src/lib/server/audiobooks/worker.ts');
+    expect(route).toContain('resolveSmartAudioWorkerResult(workerResult)');
+    expect(route).toContain('Refusing to synthesize uncleaned text.');
+    expect(route).not.toContain('NATS failed. Falling back to raw text.');
+    expect(route).toContain('processedTextForTts = validateSmartAudioOutput(processedTextForTts)');
+    expect(worker).toContain('processedTextForTts = validateSmartAudioOutput(processedTextForTts)');
+  });
+
+  test('keeps private PDF markers out of the saved original text', () => {
+    const worker = source('src/lib/server/audiobooks/worker.ts');
+    expect(worker).toContain('cleanupText: chapter.text');
+    expect(worker).toContain('text: stripSmartAudioInputMarkers(chapter.text)');
+    expect(worker).toContain('chapter.cleanupText ?? chapter.text');
+    expect(worker).toContain("Buffer.from(chapter.text, 'utf8')");
+  });
+
+  test('requires Python workers to report cleaned or omitted explicitly', () => {
+    for (const workerPath of ['audiobook_worker.py', 'biblical_scholar_worker.py']) {
+      const worker = source(workerPath);
+      expect(worker).toContain('raise RuntimeError("Gemini returned no text; expected cleaned text or [OMIT]")');
+      expect(worker).toContain('"outcome": outcome');
+      expect(worker).toContain('outcome = "omitted"');
+    }
   });
 
   test('uses the source document identity for direct Scholar lexicon lookup', () => {

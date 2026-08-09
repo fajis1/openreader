@@ -11,6 +11,46 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-09 — Semantic cleanup of the shared pronunciation release
+
+- Re-audited the Git-tracked dictionary beyond structural validation. The release now has 2,584 words/9,767 choices/2,225 definitions; 957 fingerprinted tombstones retire damaged Greek/Hebrew OCR keys, IPA-as-word records, ambiguous English homographs, and other malformed historical entries without silently deleting locally modified conflicts.
+- Corrected reviewed complete-word defaults, including Greek/Latin `pneuma` with silent initial `p`, full `υἱοθεσία`, and dropped-prefix/middle/ending cases. Removed `πνεν͂ -> /pnuːm/`, `υἱοθεσ -> /θɛs/`, reversed Hebrew, suffix-only Greek, and phoneme-by-phoneme stutter defaults. No database was modified.
+- Strengthened the shared policy and repeatable cleaner to reject silent-`p` violations, partial Greek vowel coverage, malformed Greek/Hebrew key structure, and words spelled as separate phoneme tokens. Added release assertions for the reported values and tombstones.
+- Verified `pnpm dict:clean:check` is idempotent, targeted ESLint passes, `git diff --check` passes, the bundled release parser reports no issues, and 41 focused pronunciation/release/data-integrity tests pass. A local Perseus Morpheus lexical cross-check supported removal decisions; non-lexicon proper names and recognizable complete variants were not automatically deleted.
+- Follow-up: after deploy/restart, review the administrator Dictionary Update prompt. Unchanged retired shared values can be removed safely; locally changed conflicts remain unselected and require an explicit decision.
+
+### 2026-08-09 — First-class LitRPG Audio Drama casting and review
+
+- Completed the previously disconnected multi-voice prototype: added a visible LitRPG Audio Drama profile/mode, canonical PDF/EPUB/TXT/HTML character scanning, reviewed cast persistence, casting gates in single/batch/Jobs flows, and automatic queue resume. PDF scans use the same `skipBlockKinds`/TOC preparation as generation; changing PDF narration filters now retains voice choices but forces a rescan.
+- Moved structured cast extraction and speaker assignment into the shipped `audiobook_worker.py`, sharing its per-key Gemini locks/cooldowns. The old standalone worker now refuses to start. Server validation rejects unknown speakers, changed/unsupported voices, leaked control markers, HTML/XML, malformed tags, or untagged text before Kokoro TTS.
+- Improved the casting and desktop review UIs with aliases, add/remove/rename, voice previews, recoverable malformed markup, unsaved-edit protection, and persistent mobile timestamp flags that can be resolved on desktop. Cast and review state is protected from stale generic document-settings writes.
+- Verified the optimized production build, Python compilation, targeted ESLint, `git diff --check`, 19 focused multi-voice/settings/TTS tests, and 46 adjacent audiobook/Smart Audio tests. The broader audiobook selection is 145/146 after updating two moved/new-mode assertions; the sole remaining failure is the pre-existing `smart-audio-profile-secrets` source-metadata assertion. Full TypeScript reports only existing untracked scratch/temp-file diagnostics, with no changed-file diagnostics.
+- Follow-up: deploy/restart the Node and Python worker together, create or select a LitRPG Audio Drama Smart Audio profile with a configured Gemini key and Kokoro TTS model, then smoke-test one fresh PDF through cast scan, voice review, generation, mobile flagging, and desktop regeneration.
+
+### 2026-08-09 — Shared pronunciation release cleanup and safe propagation
+
+- Deterministically cleaned the Git-tracked global pronunciation release: reduced it from 3,540 words/13,919 choices to 3,339 words/13,142 choices, removed 201 malformed word entries and 15 unsafe choices, repaired nine trusted entries, and removed 117 unusable definitions. Added an idempotent `dict:clean`/`dict:clean:check` workflow and made future database-to-Git exports run the same cleanup automatically.
+- Added 202 fingerprinted pronunciation/definition tombstones and replaced the release updater so it compares complete choice arrays, imports all shared choices, offers unchanged retired entries as safe preselected removals, and leaves locally modified deletion conflicts unselected. Admins update the instance-global library transactionally; non-admin users can adopt updates into or remove retired values from their active profile without overwriting unrelated personal entries.
+- Expanded the shared Kokoro policy to reject phrase keys, IPA-as-key records, mixed-script OCR fragments, consonant fragments, repeated/stutter pronunciations, and spelled-letter garbage before new scan/refine results can re-enter the library. Corrected the fallback `Aetherians` pronunciation and removed its malformed phrase fallback.
+- Included the release JSON files and maintenance scripts in the production image, added Next.js output tracing for the three release files, and made startup dictionary seeding fail visibly instead of silently continuing after an import error.
+- Verified the production build, targeted ESLint, `git diff --check`, release idempotence, bundle tracing, and 52 focused tests. The full unit suite passed 657/658; the isolated remaining failure is the pre-existing `smart-audio-profile-secrets` assertion that write-only source-profile metadata is removed, outside this change's files.
+- Follow-up: after deployment, sign in as an administrator and review the Dictionary Update prompt; unchanged malformed records are preselected for removal, while any locally edited value requires an explicit decision. Do not bulk-select deletion conflicts without reviewing their local values.
+
+### 2026-08-09 — Pronunciation-library repair
+
+- Backed up the workspace SQLite database to `docstore/backups/pronunciation-cleanup-before-2026-08-09.sqlite3.db`, then transactionally cleaned `docstore/sqlite3.db` without changing application source.
+- Removed 124 malformed global words, 355 contaminated profile entries across stored preference copies, and 87 document-lexicon OCR fragments. Normalized 1,086 profile values for Kokoro compatibility, corrected `Aetherians` and `Limes`, preserved the intended `Eather` sound, repaired four trusted global defaults, and repaired two document entries. Ambiguous batch-mismatched pronunciations were deleted rather than guessed.
+- Verified both databases with SQLite `integrity_check`; a second cleanup dry run reported zero changes. Independent audits found zero remaining malformed keys, repeated-token defaults, incompatible stress/pharyngeal values, or unresolved known batch mismatches in the cleaned scopes. The focused pronunciation/lexicon suite passed all 51 tests.
+- Follow-up: this repair affected only the workspace database. If a deployed Ripeaver instance uses a separate database, back it up and run an equivalent audited repair there before relying on these data changes.
+
+### 2026-08-09 — PP-DocLayout audiobook pipeline hardening
+
+- Unified foreground and queued PDF preparation around one block filter. The background worker now loads each document's `pdf.skipBlockKinds` before chapter batching, so the default headers, footers, footnotes, and vision footnotes are removed before Gemini or TTS.
+- Added mandatory runtime cleanup rules after saved profile prompts, explicit `cleaned`/`omitted` Python worker outcomes, fail-closed Smart Audio errors, and a final validation gate that rejects leaked layout, system-hint, chapter-title, or misplaced omission markers before storage/TTS.
+- Kept Scholar-only layout metadata in `cleanupText` while saving marker-free source text as `__original.txt`; aligned bibliography-catcher with Scholar lexicon preflight, definitions, and NATS routing. Direct explicit omissions now remove stale chapter/combined audio instead of falling back to raw text.
+- Verified 77 focused unit tests, Python compilation for both cleanup workers, and `git diff --check`. Full TypeScript reports only pre-existing untracked scratch/temp-file diagnostics; targeted ESLint reports only existing legacy violations in the two large route/worker files, with no findings in the new helpers or tests.
+- Follow-up: deploy/restart the Node and Python workers together, then smoke-test a new PP-DocLayout PDF containing headers and both footnote kinds; confirm no internal marker appears in Review text or generated audio.
+
 ### 2026-08-09 — Audiobook Pipeline WIP Checkpoint
 
 - Checkpointed the current audiobook work before PP-DocLayout pipeline hardening: M4B chapter compatibility, Gemini queue backoff, empty-response handling, force re-recording, provider-aware batch regeneration, download feedback, pronunciation cleanup controls, and updated Smart Audio prompts.

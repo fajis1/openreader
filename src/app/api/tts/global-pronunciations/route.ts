@@ -22,14 +22,13 @@ import {
 
 const DEFAULT_SEED_PRONUNCIATIONS: Record<string, string[]> = {
   "Eather": ["/iːθər/"],
-  "Yin Lime": ["/jɪn laɪm/"],
   "Eatheral": ["/iːθərəl/"],
   "Aetherian": ["/iːθərɪən/"],
   "stumbled": ["/stʌmbəld/"],
   "bottomed-out": ["/bɒtəmd aʊt/"],
   "launched": ["/lɔːntʃt/"],
   "face-planted": ["/feɪs plæntəd/"],
-  "Aetherians": ["/iːθərɪən/"],
+  "Aetherians": ["/iːθərɪənz/"],
   "Avinian": ["/əvɪniən/"],
   "qŏdāšîm": ["/koʊdɑʃim/"],
   "qādôš": ["/kɑdoʊʃ/"],

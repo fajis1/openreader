@@ -110,11 +110,15 @@ describe('audiobook end-matter filtering', () => {
   });
 
   test('the EPUB worker retains real headings for end-matter detection', () => {
-    const source = fs.readFileSync(
+    const worker = fs.readFileSync(
       path.join(process.cwd(), 'src/lib/server/audiobooks/worker.ts'),
       'utf8',
     );
-    expect(source).toContain('extractEpubChapterHeading(htmlContent)');
-    expect(source).toContain('title: extractedTitle ||');
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'src/lib/server/audiobooks/document-source.ts'),
+      'utf8',
+    );
+    expect(worker).toContain('extractAudiobookTextFromEpub');
+    expect(source).toContain('extractEpubChapterHeading(html) ||');
   });
 });

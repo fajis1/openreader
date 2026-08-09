@@ -2,7 +2,7 @@ import { NextResponse, NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { eq, and, asc, lt, inArray } from 'drizzle-orm';
 import { db } from '@/db';
-import { audiobookChapters, audiobookJobs, documents } from '@/db/schema';
+import { audiobookChapters, audiobookJobs, documents, documentSettings } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { serverLogger, errorToLog } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
@@ -14,6 +14,14 @@ import {
 import { readBookLexicon } from '@/lib/server/smart-audio/book-lexicon';
 import { isKokoroCompatiblePronunciation } from '@/lib/shared/kokoro-pronunciation-policy';
 import { queuedAudiobookBatchVersion } from '@/lib/shared/audiobook-batching';
+import { mergeDocumentSettings } from '@/lib/shared/document-settings';
+import {
+  getCharacterMapReadiness,
+  MULTI_VOICE_WORKER_MODE,
+  WAITING_FOR_VOICES_STATUS,
+} from '@/lib/shared/multi-voice';
+import { isKokoroModel } from '@/lib/shared/kokoro';
+import { DEFAULT_DOCUMENT_SETTINGS } from '@/types/document-settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,6 +70,7 @@ export async function POST(req: NextRequest) {
       j.status === 'queued' || 
       j.status === 'running' || 
       j.status === 'waiting_for_pdf' || 
+      j.status === WAITING_FOR_VOICES_STATUS ||
       j.status === 'paused'
     );
 
@@ -95,6 +104,34 @@ export async function POST(req: NextRequest) {
             code: 'SCHOLAR_SCAN_REQUIRED',
             error: 'This book has not completed a pronunciation and definition scan.',
             message: 'Review the book pronunciations before generating. If you continue, OpenReader will scan unresolved foreign terms with the pronunciation model and adopt Gemini’s recommended defaults.',
+          }, { status: 409 });
+        }
+      }
+      if (profile?.workerMode === MULTI_VOICE_WORKER_MODE) {
+        if (!isKokoroModel(typeof settingsRecord.ttsModel === 'string' ? settingsRecord.ttsModel : '')) {
+          return NextResponse.json({
+            code: 'MULTI_VOICE_KOKORO_REQUIRED',
+            error: 'LitRPG Audio Drama currently requires a Kokoro TTS model.',
+          }, { status: 409 });
+        }
+        const settingRows = await db.select({ dataJson: documentSettings.dataJson })
+          .from(documentSettings)
+          .where(and(
+            eq(documentSettings.documentId, documentId),
+            eq(documentSettings.userId, userId),
+          ))
+          .limit(1);
+        const storedSettings = mergeDocumentSettings(
+          DEFAULT_DOCUMENT_SETTINGS,
+          parseJobSettings(settingRows[0]?.dataJson),
+        );
+        const readiness = getCharacterMapReadiness(storedSettings.smartAudioCharacters);
+        if (!readiness.ready || readiness.map?.profileId !== profile.id) {
+          return NextResponse.json({
+            code: 'CHARACTER_CAST_REQUIRED',
+            error: 'Review and assign the LitRPG character voices before generation.',
+            hasCharacterScan: Boolean(readiness.map),
+            unassigned: readiness.unassigned,
           }, { status: 409 });
         }
       }

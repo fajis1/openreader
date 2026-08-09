@@ -36,6 +36,15 @@ const EMPTY_PROFILE = (): SmartAudioProfile => ({
 
 const WORKER_MODES = [
   {
+    id: 'multi-voice' as const,
+    icon: '🎭',
+    label: 'LitRPG Audio Drama',
+    badge: 'Reviewed character voices',
+    description: 'Scans the book for speaking characters, pauses for you to review the cast and preview Kokoro voices, then assigns validated narrator and dialogue segments for every chapter.',
+    features: ['Review cast before generation', 'Character aliases and voice previews', 'Validated speaker assignment', 'Chapter-by-chapter Audio Drama studio', 'Fantasy pronunciation library support'],
+    presetName: 'LitRPG Audio Drama',
+  },
+  {
     id: 'standard' as const,
     icon: '⚡',
     label: 'Standard AI Cleaner',
@@ -750,7 +759,7 @@ export function SmartAudioSettings() {
   // When the user clicks a worker mode card, always switch to the matching
   // preset for that engine. This ensures clicking a card is always a clean
   // one-click reset to the correct prompt template.
-  const handleWorkerModeChange = useCallback((mode: 'standard' | 'scholar') => {
+  const handleWorkerModeChange = useCallback((mode: 'standard' | 'scholar' | 'multi-voice') => {
     setWorkerMode(mode);
     const targetMode = WORKER_MODES.find((m) => m.id === mode);
     const matchingPreset = PRESET_PROMPTS.find((p) => p.name === targetMode?.presetName);

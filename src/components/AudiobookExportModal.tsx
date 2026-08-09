@@ -11,9 +11,11 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { useTTS } from '@/contexts/TTSContext';
 import { VoicesControlBase } from '@/components/player/VoicesControlBase';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
+import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharacterModal';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import { getTtsLanguageCompatibilityWarnings, resolveTtsLanguage } from '@/lib/shared/language';
 import { isGeminiRateLimitPause } from '@/lib/shared/audiobook-job-status';
+import { WAITING_FOR_VOICES_STATUS } from '@/lib/shared/multi-voice';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, MenuRoot, MenuTransition, MenuTrigger, RangeInput, Select } from '@/components/ui';
 import { 
@@ -81,6 +83,8 @@ export function AudiobookExportModal({
   const [showRegenerateHint, setShowRegenerateHint] = useState(false);
   const [showBackgroundWarning, setShowBackgroundWarning] = useState(false);
   const [showScholarScanWarning, setShowScholarScanWarning] = useState(false);
+  const [showCharacterCasting, setShowCharacterCasting] = useState(false);
+  const [castingJobId, setCastingJobId] = useState<string | null>(null);
   const [pendingScholarRegeneration, setPendingScholarRegeneration] = useState<TTSAudiobookChapter | null>(null);
   const [pendingCloseAction, setPendingCloseAction] = useState<'close_modal' | 'navigate' | null>(null);
 
@@ -207,12 +211,24 @@ export function AudiobookExportModal({
       if (qRes.ok) {
         const qData = await qRes.json();
         const activeJob = qData.jobs?.find((j: {
+          id: string;
           documentId: string;
           status: string;
           progress?: number;
           error?: string | null;
-        }) => j.documentId === documentId && (j.status === 'queued' || j.status === 'running' || j.status === 'waiting_for_pdf'));
+        }) => j.documentId === documentId && (
+          j.status === 'queued'
+          || j.status === 'running'
+          || j.status === 'waiting_for_pdf'
+          || j.status === WAITING_FOR_VOICES_STATUS
+        ));
         if (activeJob) {
+          if (activeJob.status === WAITING_FOR_VOICES_STATUS) {
+            setCastingJobId(activeJob.id);
+            setShowCharacterCasting(true);
+            setIsGenerating(false);
+            setCurrentChapter('Waiting for character voice review…');
+          } else {
           serverIsGenerating = true;
           setIsGenerating(true);
           if (activeJob.progress !== undefined) setProgress(activeJob.progress);
@@ -221,6 +237,7 @@ export function AudiobookExportModal({
           } else if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
           else if (activeJob.status === 'waiting_for_pdf') setCurrentChapter('Waiting for PDF parsing...');
           else setCurrentChapter('Generating on server...');
+          }
         }
       }
     } catch {
@@ -335,6 +352,12 @@ export function AudiobookExportModal({
         setShowScholarScanWarning(true);
         return;
       }
+      if (res.status === 409 && responseBody?.code === 'CHARACTER_CAST_REQUIRED') {
+        setIsGenerating(false);
+        setCastingJobId(null);
+        setShowCharacterCasting(true);
+        return;
+      }
       if (!res.ok) throw new Error(responseBody?.error || 'Failed to queue audiobook on server');
       
       // Start polling
@@ -382,6 +405,7 @@ export function AudiobookExportModal({
     if (
       autoGenerate
       && !scholarWarningHandledRef.current
+      && !showCharacterCasting
       && !isGenerating
       && !isLoadingExisting
       && effectiveSettings
@@ -408,7 +432,7 @@ export function AudiobookExportModal({
       }, 500);
       return () => clearTimeout(timeout);
     }
-  }, [autoGenerate, isGenerating, isLoadingExisting, effectiveSettings, bookId, handleStartGeneration]);
+  }, [autoGenerate, isGenerating, isLoadingExisting, effectiveSettings, bookId, handleStartGeneration, showCharacterCasting]);
 
   const handleCancel = useCallback(() => {
     if (abortControllerRef.current) {
@@ -1231,6 +1255,25 @@ export function AudiobookExportModal({
         cancelText=""
         isDangerous={false}
       />
+      {showCharacterCasting && selectedSmartAudioProfileId && (
+        <MultiVoiceCharacterModal
+          documentId={documentId}
+          profileId={selectedSmartAudioProfileId}
+          jobId={castingJobId || undefined}
+          isOpen={showCharacterCasting}
+          onClose={() => setShowCharacterCasting(false)}
+          onComplete={async () => {
+            const resumedExistingJob = Boolean(castingJobId);
+            setCastingJobId(null);
+            setShowCharacterCasting(false);
+            if (resumedExistingJob) {
+              await fetchExistingChapters();
+            } else {
+              await handleStartGeneration();
+            }
+          }}
+        />
+      )}
     </>
   );
 }

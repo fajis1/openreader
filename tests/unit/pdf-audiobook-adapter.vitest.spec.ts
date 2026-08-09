@@ -3,8 +3,40 @@ import { createPdfAudiobookSourceAdapter } from '../../src/lib/client/audiobooks
 import type { ParsedPdfDocument } from '../../src/types/parsed-pdf';
 import type { DocumentSettings } from '../../src/types/document-settings';
 import { CURRENT_AUDIOBOOK_BATCH_VERSION } from '../../src/lib/shared/audiobook-batching';
+import { preparePdfAudiobookBlocks } from '../../src/lib/shared/pdf-audiobook-blocks';
 
 describe('pdf audiobook adapter', () => {
+  test('uses the shared default filter before batching', () => {
+    const block = (id: string, kind: 'text' | 'header' | 'footer' | 'footnote' | 'vision_footnote') => ({
+      id,
+      kind,
+      text: id,
+      fragments: [{ page: 1, bbox: [0, 0, 100, 20] as [number, number, number, number], text: id, readingOrder: 0 }],
+    });
+    const parsed: ParsedPdfDocument = {
+      schemaVersion: 1,
+      documentId: 'doc-default-filter',
+      parserVersion: 'test',
+      parsedAt: 1,
+      pages: [{
+        pageNumber: 1,
+        width: 100,
+        height: 100,
+        blocks: [
+          block('body', 'text'),
+          block('header', 'header'),
+          block('footer', 'footer'),
+          block('footnote', 'footnote'),
+          block('vision-footnote', 'vision_footnote'),
+        ],
+      }],
+    };
+
+    const result = preparePdfAudiobookBlocks({ parsed });
+    expect(result.blocks.map((entry) => entry.text)).toEqual(['body']);
+    expect(result.skippedBlockCount).toBe(4);
+  });
+
   test('builds chapters from paragraph titles and filters skipped kinds', async () => {
     const parsed: ParsedPdfDocument = {
       schemaVersion: 1,

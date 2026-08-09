@@ -79,10 +79,15 @@ COPY --from=app-builder /app/public ./public
 # Copy the entrypoint and migration/runtime helper files it invokes directly.
 COPY --from=app-builder /app/scripts/openreader-entrypoint.mjs ./scripts/openreader-entrypoint.mjs
 COPY --from=app-builder /app/scripts/migrate-fs-v2.mjs ./scripts/migrate-fs-v2.mjs
+COPY --from=app-builder /app/scripts/sync-dict-to-git.mjs ./scripts/sync-dict-to-git.mjs
+COPY --from=app-builder /app/scripts/clean-git-pronunciation-library.mjs ./scripts/clean-git-pronunciation-library.mjs
 COPY --from=app-builder /app/drizzle ./drizzle
 COPY --from=app-builder /app/drizzle.config.pg.ts ./drizzle.config.pg.ts
 COPY --from=app-builder /app/drizzle.config.sqlite.ts ./drizzle.config.sqlite.ts
 COPY --from=app-builder /app/src/db ./src/db
+COPY --from=app-builder /app/src/lib/server/default_global_pronunciations.json ./src/lib/server/default_global_pronunciations.json
+COPY --from=app-builder /app/src/lib/server/default_global_definitions.json ./src/lib/server/default_global_definitions.json
+COPY --from=app-builder /app/src/lib/server/default_global_pronunciation_tombstones.json ./src/lib/server/default_global_pronunciation_tombstones.json
 
 # Merge in the dependency subset needed by the entrypoint migration scripts.
 COPY --from=app-builder /opt/entrypoint-migration-tools/node_modules /tmp/runtime-tools-node_modules
@@ -120,7 +125,7 @@ COPY --from=app-builder /app/biblical_scholar_worker.py ./biblical_scholar_worke
 COPY --from=app-builder /app/gemini_rate_limiter.py ./gemini_rate_limiter.py
 COPY --from=app-builder /app/scan_pdf_foreign_words.py ./scan_pdf_foreign_words.py
 RUN python3 -m venv .venv && \
-    .venv/bin/pip install --no-cache-dir nats-py google-genai pypdf nltk
+    .venv/bin/pip install --no-cache-dir nats-py google-genai pydantic pypdf nltk
 
 # Match the app's historical container port now that standalone server.js
 # is started directly instead of `next start -p 3003`.

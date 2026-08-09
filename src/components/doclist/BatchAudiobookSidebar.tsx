@@ -6,6 +6,7 @@ import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useConfig } from '@/contexts/ConfigContext';
 import { VoicesControlBase } from '@/components/player/VoicesControlBase';
+import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharacterModal';
 import { Button, Select, Card } from '@/components/ui';
 import { getVoices } from '@/lib/client/api/audiobooks';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
@@ -134,6 +135,8 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
   const [queueError, setQueueError] = useState<string | null>(null);
   const [queuedCount, setQueuedCount] = useState(0);
   const [showScholarScanWarning, setShowScholarScanWarning] = useState(false);
+  const [pendingCharacterDoc, setPendingCharacterDoc] = useState<DocumentListDocument | null>(null);
+  const [pendingBatchScholarConfirm, setPendingBatchScholarConfirm] = useState(false);
 
   const handleStartBatch = async (confirmScholarAutoScan = false) => {
     if (selectedDocs.length === 0) return;
@@ -170,6 +173,11 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
             setShowScholarScanWarning(true);
             return;
           }
+          if (preflight.status === 409 && preflightBody?.code === 'CHARACTER_CAST_REQUIRED') {
+            setPendingBatchScholarConfirm(confirmScholarAutoScan);
+            setPendingCharacterDoc(doc);
+            return;
+          }
           if (!preflight.ok) {
             throw new Error(preflightBody?.error || `Failed to check ${doc.name}`);
           }
@@ -187,6 +195,12 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
         if (res.status === 409 && responseBody?.code === 'SCHOLAR_SCAN_REQUIRED') {
           setQueuedCount(count);
           setShowScholarScanWarning(true);
+          return;
+        }
+        if (res.status === 409 && responseBody?.code === 'CHARACTER_CAST_REQUIRED') {
+          setQueuedCount(count);
+          setPendingBatchScholarConfirm(confirmScholarAutoScan);
+          setPendingCharacterDoc(doc);
           return;
         }
         if (!res.ok) {
@@ -425,6 +439,18 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
         cancelText="Review First"
         isDangerous={false}
       />
+      {pendingCharacterDoc && selectedSmartAudioProfileId && (
+        <MultiVoiceCharacterModal
+          documentId={pendingCharacterDoc.id}
+          profileId={selectedSmartAudioProfileId}
+          isOpen={true}
+          onClose={() => setPendingCharacterDoc(null)}
+          onComplete={async () => {
+            setPendingCharacterDoc(null);
+            await handleStartBatch(pendingBatchScholarConfirm);
+          }}
+        />
+      )}
     </ReaderSidebarShell>
   );
 }

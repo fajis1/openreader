@@ -10,6 +10,7 @@ import {
   type ServerTTSRequest,
   type TtsUpstreamRuntimeSettings,
 } from '@/lib/server/tts/generate';
+import { parseVoiceTaggedText } from '@/lib/shared/multi-voice';
 
 async function concatenateMp3Segments(
   segments: readonly Buffer[],
@@ -98,41 +99,15 @@ export async function generateSegmentedAudiobookTtsBuffer(
 ): Promise<Buffer> {
   const audioSegments: Buffer[] = [];
   
-  // Regex to match <voice name="...">...</voice>
-  const voiceTagRegex = /<voice\s+name="([^"]+)">([\s\S]*?)<\/voice>/gi;
-  
-  // If the text contains voice tags, we parse them. Otherwise, we treat the whole text as one segment.
-  const parsedChunks: { text: string; voice: string }[] = [];
-  let lastIndex = 0;
-  
-  let match;
-  while ((match = voiceTagRegex.exec(request.text)) !== null) {
-    // Add any untagged text before this match using the default voice
-    const beforeText = request.text.substring(lastIndex, match.index).trim();
-    if (beforeText) {
-      parsedChunks.push({ text: beforeText, voice: request.voice });
-    }
-    
-    // Add the tagged text
-    const assignedVoice = match[1].trim() || request.voice;
-    const innerText = match[2].trim();
-    if (innerText) {
-      parsedChunks.push({ text: innerText, voice: assignedVoice });
-    }
-    
-    lastIndex = voiceTagRegex.lastIndex;
-  }
-  
-  // Add any remaining untagged text
-  const afterText = request.text.substring(lastIndex).trim();
-  if (afterText) {
-    parsedChunks.push({ text: afterText, voice: request.voice });
-  }
-
-  // If no tags were found at all, just push the original text
-  if (parsedChunks.length === 0) {
-    parsedChunks.push({ text: request.text, voice: request.voice });
-  }
+  // Tagged chapters are fail-closed: every character must use a known Kokoro
+  // voice and no text may sit outside a voice segment. Ordinary single-voice
+  // chapters continue to use the request's configured default voice.
+  const parsedChunks: { text: string; voice: string }[] = /<\/?voice\b/iu.test(request.text)
+    ? parseVoiceTaggedText(request.text).map((segment) => ({
+      text: segment.text,
+      voice: segment.voiceId,
+    }))
+    : [{ text: request.text, voice: request.voice }];
 
   // Now, for each chunk, we still need to run it through splitAudiobookTextForTts
   // to ensure no chunk exceeds the TTS engine's character limits (e.g. 4000 chars)

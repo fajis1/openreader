@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { spawnSync } from 'node:child_process';
 
 const PRONUNC_FILE = 'src/lib/server/default_global_pronunciations.json';
 const DEFS_FILE = 'src/lib/server/default_global_definitions.json';
@@ -70,6 +71,15 @@ function exportToGit() {
   if (defsRow) {
     fs.writeFileSync(DEFS_FILE, defsRow.value_json);
     console.log(`Exported global_definitions to ${DEFS_FILE}`);
+  }
+
+  const cleanup = spawnSync(process.execPath, [
+    'scripts/clean-git-pronunciation-library.mjs',
+    '--apply',
+  ], { stdio: 'inherit' });
+  if (cleanup.error) throw cleanup.error;
+  if (cleanup.status !== 0) {
+    throw new Error(`Dictionary cleanup exited with status ${cleanup.status}.`);
   }
 }
 

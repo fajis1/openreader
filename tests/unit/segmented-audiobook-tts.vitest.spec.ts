@@ -42,4 +42,34 @@ describe('segmented audiobook TTS generation', () => {
     expect(combined.length).toBeGreaterThan(0);
     expect(combined.subarray(0, 3).toString('ascii')).toBe('ID3');
   });
+
+  test('uses each reviewed voice for valid tagged segments', async () => {
+    await generateSegmentedAudiobookTtsBuffer({
+      text: '<voice name="af_heart">Narration.</voice>\n<voice name="am_adam">Dialogue.</voice>',
+      voice: 'fallback',
+      speed: 1,
+      provider: 'test',
+      apiKey: 'test-placeholder',
+    });
+
+    expect(generateTTSBuffer.mock.calls.map(([request]) => request.voice)).toEqual(['af_heart', 'am_adam']);
+  });
+
+  test('rejects unknown voices and untagged text instead of speaking it with the fallback voice', async () => {
+    await expect(generateSegmentedAudiobookTtsBuffer({
+      text: '<voice name="invented_voice">Dialogue.</voice>',
+      voice: 'fallback',
+      speed: 1,
+      provider: 'test',
+      apiKey: 'test-placeholder',
+    })).rejects.toThrow(/unsupported voice/i);
+    await expect(generateSegmentedAudiobookTtsBuffer({
+      text: 'Leaked narration. <voice name="af_heart">Tagged narration.</voice>',
+      voice: 'fallback',
+      speed: 1,
+      provider: 'test',
+      apiKey: 'test-placeholder',
+    })).rejects.toThrow(/outside a voice segment/i);
+    expect(generateTTSBuffer).not.toHaveBeenCalled();
+  });
 });

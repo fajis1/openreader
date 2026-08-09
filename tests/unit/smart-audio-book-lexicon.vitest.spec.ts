@@ -453,7 +453,7 @@ describe('Smart Audio book lexicon', () => {
     expect(result.entries).toEqual(lexicon.entries);
   });
 
-  test('only the English-definitions default profile uses Scholar mode', () => {
+  test('keeps Scholar mode exclusive while allowing the separate Audio Drama mode', () => {
     const defaults = JSON.parse(fs.readFileSync(
       path.join(process.cwd(), 'src/lib/server/default_smart_audio_profiles.json'),
       'utf8',
@@ -461,8 +461,10 @@ describe('Smart Audio book lexicon', () => {
     const scholars = defaults.profiles.filter((profile) => profile.workerMode === 'scholar');
     expect(scholars).toHaveLength(1);
     expect(scholars[0]?.name).toMatch(/English Definitions/i);
+    expect(defaults.profiles.filter((profile) => profile.workerMode === 'multi-voice'))
+      .toEqual([expect.objectContaining({ name: 'LitRPG Audio Drama' })]);
     expect(defaults.profiles
-      .filter((profile) => profile.workerMode !== 'scholar' && profile.workerMode !== 'bibliography-catcher')
+      .filter((profile) => !['scholar', 'bibliography-catcher', 'multi-voice'].includes(profile.workerMode || ''))
       .every((profile) => profile.workerMode === 'standard'))
       .toBe(true);
   });

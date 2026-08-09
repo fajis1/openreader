@@ -1,4 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  KOKORO_CHARACTER_VOICES,
+  parseVoiceTaggedText,
+} from '@/lib/shared/multi-voice';
+import type { SmartAudioCharacterMap, SmartAudioReviewFlag } from '@/types/document-settings';
 
 interface Segment {
   id: string;
@@ -25,12 +30,17 @@ export function MultiVoiceReviewStudio({
   onRebuildAllModified,
   isRebuildingAll,
 }: MultiVoiceReviewStudioProps) {
-  // Hardcoded Kokoro Voices
-  const voices = ['af_heart', 'af_alloy', 'af_aoede', 'af_bella', 'af_jessica', 'af_kore', 'af_nicole', 'af_nova', 'af_river', 'af_sarah', 'af_sky', 'am_adam', 'am_echo', 'am_eric', 'am_fenrir', 'am_liam', 'am_michael', 'am_onyx', 'am_puck', 'am_santa'];
-
   const [segments, setSegments] = useState<Segment[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [cursorPos, setCursorPos] = useState<{ id: string, start: number } | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [playingSegmentId, setPlayingSegmentId] = useState<string | null>(null);
+  const [voiceCharacters, setVoiceCharacters] = useState<Record<string, string[]>>({});
+  const [reviewFlags, setReviewFlags] = useState<SmartAudioReviewFlag[]>([]);
+  const [reviewFlagError, setReviewFlagError] = useState<string | null>(null);
+  const [studioError, setStudioError] = useState<string | null>(null);
+  const [initialParseWarning, setInitialParseWarning] = useState<string | null>(null);
+  const previewAudioUrl = useRef<string | null>(null);
   
   // Dictionary Modal State
   const [showDictModal, setShowDictModal] = useState(false);
@@ -40,43 +50,78 @@ export function MultiVoiceReviewStudio({
   const [isSuggesting, setIsSuggesting] = useState(false);
 
   useEffect(() => {
-    // Parse the XML <voice> tags from the initial text
-    const parsedSegments: Segment[] = [];
-    const voiceTagRegex = /<voice\s+name="([^"]+)">([\s\S]*?)<\/voice>/gi;
-    
-    let match;
-    let lastIndex = 0;
-    while ((match = voiceTagRegex.exec(initialText)) !== null) {
-      // If there is any untagged text before this match, treat it as narrator
-      const beforeText = initialText.substring(lastIndex, match.index).trim();
-      if (beforeText) {
-        parsedSegments.push({ id: Math.random().toString(), voice: 'alloy', text: beforeText });
-      }
-      
-      parsedSegments.push({
+    try {
+      const parsed = parseVoiceTaggedText(initialText);
+      setSegments(parsed.map((segment) => ({
         id: Math.random().toString(),
-        voice: match[1].trim(),
-        text: match[2].trim()
-      });
-      lastIndex = voiceTagRegex.lastIndex;
+        voice: segment.voiceId,
+        text: segment.text,
+      })));
+      setInitialParseWarning(null);
+    } catch {
+      const recoverableText = initialText.replace(/<\/?voice\b[^>]*>/giu, '').trim();
+      setSegments(recoverableText ? [{
+        id: Math.random().toString(),
+        voice: KOKORO_CHARACTER_VOICES[0],
+        text: recoverableText,
+      }] : []);
+      setInitialParseWarning('The saved speaker markup was malformed. Its tags were removed so you can safely rebuild this chapter.');
     }
-    
-    // Remaining text
-    const afterText = initialText.substring(lastIndex).trim();
-    if (afterText) {
-      parsedSegments.push({ id: Math.random().toString(), voice: 'alloy', text: afterText });
-    }
-
-    // If no tags, just one big segment
-    if (parsedSegments.length === 0 && initialText.trim()) {
-      parsedSegments.push({ id: Math.random().toString(), voice: 'alloy', text: initialText });
-    }
-
-    setSegments(parsedSegments);
+    setStudioError(null);
+    setIsDirty(false);
   }, [initialText]);
+
+  useEffect(() => () => {
+    if (previewAudioUrl.current) URL.revokeObjectURL(previewAudioUrl.current);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(`/api/documents/${encodeURIComponent(bookId)}/settings`, { cache: 'no-store' })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((body) => {
+        if (cancelled) return;
+        const map = body?.settings?.smartAudioCharacters as SmartAudioCharacterMap | undefined;
+        if (!map?.entries) return;
+        const labels: Record<string, string[]> = {};
+        for (const entry of Object.values(map.entries)) {
+          const primary = entry.aliasFor ? map.entries[entry.aliasFor] : entry;
+          if (!primary?.voiceId) continue;
+          labels[primary.voiceId] = Array.from(new Set([...(labels[primary.voiceId] || []), entry.name]));
+        }
+        setVoiceCharacters(labels);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [bookId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setReviewFlagError(null);
+    void fetch(`/api/audiobook/review-flags?documentId=${encodeURIComponent(bookId)}&chapterIndex=${chapterIndex}`, {
+      cache: 'no-store',
+    }).then(async (response) => {
+      const body = await response.json().catch(() => ({})) as { flags?: SmartAudioReviewFlag[]; error?: string };
+      if (!response.ok) throw new Error(body.error || 'Failed to load review flags.');
+      if (!cancelled) setReviewFlags(Array.isArray(body.flags) ? body.flags : []);
+    }).catch((error) => {
+      if (!cancelled) setReviewFlagError(error instanceof Error ? error.message : 'Failed to load review flags.');
+    });
+    return () => { cancelled = true; };
+  }, [bookId, chapterIndex]);
+
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirty) return;
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [isDirty]);
 
   const updateSegment = (id: string, updates: Partial<Segment>) => {
     setSegments(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+    setIsDirty(true);
   };
 
   const handleSplitSegment = (id: string) => {
@@ -104,6 +149,7 @@ export function MultiVoiceReviewStudio({
       
       return newSegments;
     });
+    setIsDirty(true);
     setCursorPos(null);
   };
 
@@ -125,10 +171,82 @@ export function MultiVoiceReviewStudio({
     
     // Update cursor pos to after the inserted text
     setCursorPos(prev => prev ? { ...prev, start: prev.start + textToInsert.length } : null);
+    setIsDirty(true);
+  };
+
+  const removeSegment = (id: string) => {
+    setSegments((current) => current.filter((segment) => segment.id !== id));
+    setIsDirty(true);
+  };
+
+  const mergeWithNext = (id: string) => {
+    setSegments((current) => {
+      const index = current.findIndex((segment) => segment.id === id);
+      if (index < 0 || index >= current.length - 1) return current;
+      const next = [...current];
+      next[index] = { ...next[index], text: `${next[index].text}\n\n${next[index + 1].text}`.trim() };
+      next.splice(index + 1, 1);
+      return next;
+    });
+    setIsDirty(true);
+  };
+
+  const previewSegment = async (segment: Segment) => {
+    setPlayingSegmentId(segment.id);
+    try {
+      const response = await fetch('/api/tts/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: segment.text.slice(0, 500), voice: segment.voice }),
+      });
+      if (!response.ok) throw new Error('Preview failed');
+      if (previewAudioUrl.current) URL.revokeObjectURL(previewAudioUrl.current);
+      const url = URL.createObjectURL(await response.blob());
+      previewAudioUrl.current = url;
+      const audio = new Audio(url);
+      const finish = () => {
+        URL.revokeObjectURL(url);
+        if (previewAudioUrl.current === url) previewAudioUrl.current = null;
+        setPlayingSegmentId(null);
+      };
+      audio.onended = finish;
+      audio.onerror = finish;
+      await audio.play();
+    } catch (error) {
+      setStudioError(error instanceof Error ? error.message : 'Voice preview failed.');
+      setPlayingSegmentId(null);
+    }
+  };
+
+  const requestClose = () => {
+    if (isDirty && !window.confirm('Discard unsaved character voice edits?')) return;
+    onClose();
+  };
+
+  const resolveReviewFlag = async (flagId: string) => {
+    setReviewFlagError(null);
+    try {
+      const response = await fetch('/api/audiobook/review-flags', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: bookId, flagId }),
+      });
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(body.error || 'Failed to resolve the review flag.');
+      setReviewFlags((current) => current.filter((flag) => flag.id !== flagId));
+    } catch (error) {
+      setReviewFlagError(error instanceof Error ? error.message : 'Failed to resolve the review flag.');
+    }
+  };
+
+  const formatFlagTime = (timestampMs: number) => {
+    const seconds = Math.floor(timestampMs / 1_000);
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   };
 
   const handleSave = async () => {
     setIsSaving(true);
+    setStudioError(null);
     try {
       // Reconstruct the XML text
       const newXml = segments
@@ -137,6 +255,9 @@ export function MultiVoiceReviewStudio({
         .join('\n\n');
         
       await onSaveAndRegenerate(newXml);
+      setIsDirty(false);
+    } catch (error) {
+      setStudioError(error instanceof Error ? error.message : 'Failed to regenerate the chapter.');
     } finally {
       setIsSaving(false);
     }
@@ -201,7 +322,7 @@ export function MultiVoiceReviewStudio({
         </div>
         <div className="flex items-center gap-4">
           <button 
-            onClick={onClose}
+            onClick={requestClose}
             className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white transition-colors"
           >
             Exit Studio
@@ -223,14 +344,37 @@ export function MultiVoiceReviewStudio({
             </button>
           )}
           <button 
-            onClick={handleSave}
-            disabled={isSaving || isRebuildingAll}
+            onClick={() => void handleSave()}
+            disabled={isSaving || isRebuildingAll || !segments.some((segment) => segment.text.trim())}
             className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-full shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2"
           >
             {isSaving ? 'Regenerating...' : '💾 Save & Regenerate Audio'}
           </button>
         </div>
       </div>
+
+      {(reviewFlags.length > 0 || reviewFlagError) && (
+        <div className="border-b border-zinc-800 bg-amber-950/40 px-6 py-3 text-sm text-amber-100">
+          {reviewFlagError && <p className="mb-2 text-red-300">{reviewFlagError}</p>}
+          {reviewFlags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">🚩 Mobile review flags:</span>
+              {reviewFlags.map((flag) => (
+                <span key={flag.id} className="inline-flex items-center gap-2 rounded-full border border-amber-700/60 bg-zinc-900 px-3 py-1">
+                  <span>{formatFlagTime(flag.timestampMs)}</span>
+                  <button type="button" onClick={() => void resolveReviewFlag(flag.id)} className="text-xs text-amber-300 hover:text-white">Mark resolved</button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(initialParseWarning || studioError) && (
+        <div className="border-b border-zinc-800 bg-red-950/40 px-6 py-3 text-sm text-red-200">
+          {initialParseWarning || studioError}
+        </div>
+      )}
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto bg-zinc-950 p-6 sm:p-10">
@@ -250,10 +394,17 @@ export function MultiVoiceReviewStudio({
                   onChange={e => updateSegment(segment.id, { voice: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 text-sm rounded-xl p-2.5 text-indigo-300 focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-inner font-medium"
                 >
-                  {voices?.map(v => (
-                    <option key={v} value={v}>{v}</option>
+                  {KOKORO_CHARACTER_VOICES.map(v => (
+                    <option key={v} value={v}>{voiceCharacters[v]?.length ? `${voiceCharacters[v].join(', ')} — ${v}` : v}</option>
                   ))}
                 </select>
+                <button type="button" onClick={() => void previewSegment(segment)} disabled={playingSegmentId === segment.id} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-indigo-300 disabled:opacity-50">
+                  {playingSegmentId === segment.id ? 'Playing…' : '▶ Preview'}
+                </button>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => mergeWithNext(segment.id)} disabled={index === segments.length - 1} className="text-[10px] text-zinc-500 hover:text-white disabled:opacity-30">Merge next</button>
+                  <button type="button" onClick={() => removeSegment(segment.id)} className="text-[10px] text-red-400 hover:text-red-300">Delete</button>
+                </div>
                 <div className="text-[10px] text-zinc-600 font-medium px-1">
                   Segment #{index + 1}
                 </div>
@@ -301,6 +452,16 @@ export function MultiVoiceReviewStudio({
               </div>
             </div>
           ))}
+          <button
+            type="button"
+            onClick={() => {
+              setSegments((current) => [...current, { id: Math.random().toString(), voice: KOKORO_CHARACTER_VOICES[0], text: '' }]);
+              setIsDirty(true);
+            }}
+            className="w-full rounded-xl border border-dashed border-zinc-700 p-3 text-sm text-zinc-400 hover:border-indigo-500 hover:text-indigo-300"
+          >
+            + Add Speaker Segment
+          </button>
         </div>
       </div>
       

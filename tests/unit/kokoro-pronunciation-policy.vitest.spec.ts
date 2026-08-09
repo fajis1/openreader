@@ -7,6 +7,7 @@ import {
   filterKokoroCompatiblePronunciationRecord,
   getKokoroPronunciationCompatibilityErrors,
   getKokoroPronunciationQualityWarnings,
+  getKokoroPronunciationWordWarnings,
   KOKORO_COMPATIBILITY_POLICY,
   isKokoroSafePronunciation,
   resolvePronunciationGuidance,
@@ -67,8 +68,66 @@ describe('Kokoro pronunciation policy', () => {
     expect(isKokoroSafePronunciation('υἱοὶ', '/hyjoɪ/')).toBe(false);
     expect(isKokoroSafePronunciation('θν', '/TH, N/')).toBe(false);
     expect(isKokoroSafePronunciation('κτλ', '/K, T, L/')).toBe(true);
+    expect(getKokoroPronunciationQualityWarnings('Φαραω', '/f ɑ r ɑ oʊ/')).toContain(
+      'Spells a word as separate phoneme tokens and may sound stuttery.',
+    );
+    expect(isKokoroSafePronunciation('Φαραω', '/fɑrɑoʊ/')).toBe(true);
     expect(isKokoroSafePronunciation('NASA', '/NA, SA/')).toBe(false);
     expect(isKokoroSafePronunciation('NASA', '/N, A, S, A/')).toBe(true);
+  });
+
+  test('rejects malformed dictionary keys and stuttery OCR pronunciations', () => {
+    expect(getKokoroPronunciationWordWarnings('/loʊɡɒs/')).toContain(
+      'Dictionary word looks like IPA or slash-delimited markup.',
+    );
+    expect(getKokoroPronunciationWordWarnings('Yin Lime')).toContain(
+      'Dictionary word must be one reusable term, not a phrase.',
+    );
+    expect(getKokoroPronunciationWordWarnings('πáντων')).toContain(
+      'Dictionary word mixes Latin, Greek, or Hebrew scripts.',
+    );
+    expect(getKokoroPronunciationWordWarnings('τρρσσ')).toContain(
+      'Dictionary word looks like a stray Greek consonant fragment.',
+    );
+    expect(getKokoroPronunciationWordWarnings('υἱοθεσ')).toContain(
+      'Dictionary word ends with nonfinal Greek sigma and looks OCR-damaged.',
+    );
+    expect(getKokoroPronunciationWordWarnings('םלוע')).toContain(
+      'Dictionary word starts with a Hebrew final-form letter and looks reversed or OCR-damaged.',
+    );
+    expect(getKokoroPronunciationWordWarnings('neɪp')).toContain(
+      'Dictionary word looks like bare IPA rather than source text.',
+    );
+    expect(getKokoroPronunciationWordWarnings('π')).toContain(
+      'Dictionary word is a single stray Greek consonant.',
+    );
+    expect(isKokoroSafePronunciation('λόγος', '/lɒ lɒ ɡɒs/')).toBe(false);
+    expect(isKokoroSafePronunciation('ωνδ', '/O, N, D/')).toBe(false);
+    expect(isKokoroSafePronunciation('κτλ', '/K, T, L/')).toBe(true);
+    expect(getKokoroPronunciationQualityWarnings('υἱοθεσία', '/θɛs/')).toContain(
+      'Pronunciation covers only part of the Greek source word.',
+    );
+    expect(getKokoroPronunciationQualityWarnings('ἀναιρεῖσθαι', '/naɪreɪsθaɪ/')).toContain(
+      'Pronunciation covers only part of the Greek source word.',
+    );
+    expect(getKokoroPronunciationQualityWarnings('κατασκηνόω', '/kɑtɑskeɪnoʊ/')).toContain(
+      'Pronunciation covers only part of the Greek source word.',
+    );
+    expect(isKokoroSafePronunciation('τύχηι', '/tukeɪ/')).toBe(true);
+    expect(isKokoroSafePronunciation('Ιουδαίων', '/juːdɑɪoʊn/')).toBe(true);
+    expect(getKokoroPronunciationQualityWarnings('πνεῦμα', '/pnjumɑ/')).toContain(
+      'Pronounces a silent initial p before n.',
+    );
+    expect(isKokoroSafePronunciation('πνεῦμα', '/njumɑ/')).toBe(true);
+    expect(isKokoroSafePronunciation('pneuma', '/pnjumɑ/')).toBe(false);
+    expect(isKokoroSafePronunciation('pneuma', '/njumɑ/')).toBe(true);
+    expect(filterKokoroCompatiblePronunciationRecord({
+      'λόγος': '/loʊɡɒs/',
+      'Yin Lime': '/jɪn laɪm/',
+      'πáντων': '/pɑntoʊn/',
+      'ωνδ': '/O, N, D/',
+      'πνεῦμα': '/pnjumɑ/',
+    })).toEqual({ 'λόγος': '/loʊɡɒs/' });
   });
 
   test('all Gemini pronunciation paths consume the centralized instructions', () => {

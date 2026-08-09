@@ -54,6 +54,31 @@ describe('document settings language', () => {
     }, null)).toEqual(incoming);
   });
 
+  test('preserves and normalizes server-managed character casts and mobile review flags', () => {
+    const existing = mergeDocumentSettings(DEFAULT_DOCUMENT_SETTINGS, {
+      smartAudioCharacters: {
+        schemaVersion: 1,
+        status: 'complete',
+        scannedAt: 123,
+        profileId: 'litrpg',
+        entries: {
+          Narrator: { name: 'Narrator', description: '', sampleText: '', voiceId: 'af_heart' },
+        },
+      },
+      smartAudioReviewFlags: [
+        { id: 'flag-1', chapterIndex: 2, timestampMs: 12_345.4, createdAt: 456 },
+        { id: '', chapterIndex: -1, timestampMs: -1, createdAt: 0 },
+      ],
+    });
+    const incoming = mergeDocumentSettings(DEFAULT_DOCUMENT_SETTINGS, { language: 'fr' });
+    const preserved = preserveServerManagedDocumentSettings(incoming, existing);
+
+    expect(preserved.smartAudioCharacters?.profileId).toBe('litrpg');
+    expect(preserved.smartAudioReviewFlags).toEqual([
+      { id: 'flag-1', chapterIndex: 2, timestampMs: 12_345, createdAt: 456 },
+    ]);
+  });
+
   test('document settings PUT preserves the latest lexicon atomically in the database', () => {
     const route = fs.readFileSync(
       path.join(process.cwd(), 'src/app/api/documents/[id]/settings/route.ts'),
@@ -61,6 +86,11 @@ describe('document settings language', () => {
     );
     expect(route).toContain("${documentSettings.dataJson}->'smartAudioLexicon'");
     expect(route).toContain("json_extract(${documentSettings.dataJson}, '$.smartAudioLexicon')");
+    expect(route).toContain("${documentSettings.dataJson}->'smartAudioCharacters'");
+    expect(route).toContain("${documentSettings.dataJson}->'smartAudioReviewFlags'");
+    expect(route).toContain("json_extract(${documentSettings.dataJson}, '$.smartAudioReviewFlags')");
+    expect(route).toContain("'{needsRescan}', 'true'::jsonb");
+    expect(route).toContain("'$.needsRescan', json('true')");
     expect(route).toContain('.returning({ dataJson: documentSettings.dataJson })');
   });
 });

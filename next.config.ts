@@ -63,6 +63,11 @@ const nextConfig: NextConfig = {
     '/api/tts/segments/ensure': [
       './node_modules/ffmpeg-static/ffmpeg',
     ],
+    '/api/tts/dictionary-updates': [
+      './src/lib/server/default_global_pronunciations.json',
+      './src/lib/server/default_global_definitions.json',
+      './src/lib/server/default_global_pronunciation_tombstones.json',
+    ],
     '/api/documents/blob/preview/ensure': [
       // pdf.js runtime assets are resolved through filesystem paths at runtime,
       // so trace them explicitly for Vercel/standalone serverless bundles.

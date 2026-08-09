@@ -514,10 +514,14 @@ async function main() {
     }
 
     // Seed global pronunciation and definitions from git JSON files if the database is empty
-    spawnSync('node', ['scripts/sync-dict-to-git.mjs', '--import-defaults'], {
+    const dictionarySeed = spawnSync('node', ['scripts/sync-dict-to-git.mjs', '--import-defaults'], {
       env: runtimeEnv,
       stdio: 'inherit',
     });
+    if (dictionarySeed.error) throw dictionarySeed.error;
+    if (dictionarySeed.status !== 0) {
+      throw new Error(`Global dictionary seeding exited with status ${dictionarySeed.status}.`);
+    }
 
 
     const embeddedWorkerPort = Number.parseInt(withDefault(runtimeEnv.EMBEDDED_COMPUTE_WORKER_PORT, '8081'), 10);

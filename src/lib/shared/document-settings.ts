@@ -3,9 +3,12 @@ import {
   type DocumentSettings,
   type SmartAudioBookLexicon,
   type SmartAudioBookLexiconEntry,
+  type SmartAudioCharacterMap,
+  type SmartAudioReviewFlag,
 } from '@/types/document-settings';
 import { PARSED_PDF_BLOCK_KINDS, type ParsedPdfBlockKind } from '@/types/parsed-pdf';
 import { normalizeLanguageTag } from '@/lib/shared/language';
+import { normalizeSmartAudioCharacterMap } from '@/lib/shared/multi-voice';
 
 function normalizeSkipKinds(value: unknown): ParsedPdfBlockKind[] {
   if (!Array.isArray(value)) return [...(DEFAULT_DOCUMENT_SETTINGS.pdf?.skipBlockKinds ?? [])];
@@ -64,6 +67,33 @@ function normalizeLexicon(value: unknown): SmartAudioBookLexicon | undefined {
   };
 }
 
+export function normalizeSmartAudioReviewFlags(value: unknown): SmartAudioReviewFlag[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const flags: SmartAudioReviewFlag[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const record = raw as Record<string, unknown>;
+    const id = typeof record.id === 'string' ? record.id.trim().slice(0, 128) : '';
+    const chapterIndex = Number(record.chapterIndex);
+    const timestampMs = Number(record.timestampMs);
+    const createdAt = Number(record.createdAt);
+    if (!id || seen.has(id) || !Number.isInteger(chapterIndex) || chapterIndex < 0) continue;
+    if (!Number.isFinite(timestampMs) || timestampMs < 0 || !Number.isFinite(createdAt) || createdAt <= 0) continue;
+    seen.add(id);
+    flags.push({
+      id,
+      chapterIndex,
+      timestampMs: Math.round(timestampMs),
+      createdAt: Math.round(createdAt),
+      ...(typeof record.resolvedAt === 'number' && Number.isFinite(record.resolvedAt) && record.resolvedAt > 0
+        ? { resolvedAt: Math.round(record.resolvedAt) }
+        : {}),
+    });
+  }
+  return flags.slice(-1_000);
+}
+
 export function mergeDocumentSettings(
   defaults: DocumentSettings = DEFAULT_DOCUMENT_SETTINGS,
   stored: unknown,
@@ -84,8 +114,18 @@ export function mergeDocumentSettings(
     : normalizeLanguageTag(rawLanguage, defaults.language || 'en');
   const pdf = rec.pdf;
   const smartAudioLexicon = normalizeLexicon(rec.smartAudioLexicon);
+  const smartAudioCharacters: SmartAudioCharacterMap | undefined = normalizeSmartAudioCharacterMap(
+    rec.smartAudioCharacters,
+  ) || undefined;
+  const smartAudioReviewFlags = normalizeSmartAudioReviewFlags(rec.smartAudioReviewFlags);
   if (!pdf || typeof pdf !== 'object') {
-    return { ...base, language, ...(smartAudioLexicon ? { smartAudioLexicon } : {}) };
+    return {
+      ...base,
+      language,
+      ...(smartAudioLexicon ? { smartAudioLexicon } : {}),
+      ...(smartAudioCharacters ? { smartAudioCharacters } : {}),
+      ...(smartAudioReviewFlags.length > 0 ? { smartAudioReviewFlags } : {}),
+    };
   }
   const pdfRec = pdf as Record<string, unknown>;
 
@@ -96,6 +136,8 @@ export function mergeDocumentSettings(
       skipBlockKinds: normalizeSkipKinds(pdfRec.skipBlockKinds),
     },
     ...(smartAudioLexicon ? { smartAudioLexicon } : {}),
+    ...(smartAudioCharacters ? { smartAudioCharacters } : {}),
+    ...(smartAudioReviewFlags.length > 0 ? { smartAudioReviewFlags } : {}),
   };
 }
 
@@ -105,10 +147,18 @@ export function preserveServerManagedDocumentSettings(
 ): DocumentSettings {
   const clientManagedIncoming = { ...incoming };
   delete clientManagedIncoming.smartAudioLexicon;
+  delete clientManagedIncoming.smartAudioCharacters;
+  delete clientManagedIncoming.smartAudioReviewFlags;
   return {
     ...clientManagedIncoming,
     ...(existing?.smartAudioLexicon
       ? { smartAudioLexicon: existing.smartAudioLexicon }
+      : {}),
+    ...(existing?.smartAudioCharacters
+      ? { smartAudioCharacters: existing.smartAudioCharacters }
+      : {}),
+    ...(existing?.smartAudioReviewFlags
+      ? { smartAudioReviewFlags: existing.smartAudioReviewFlags }
       : {}),
   };
 }

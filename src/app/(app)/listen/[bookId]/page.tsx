@@ -764,13 +764,14 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                 }),
               });
               if (!res.ok) throw new Error("Failed to regenerate audio");
-              alert("Successfully rebuilt background audiobook chapter!");
+              toast.success("Successfully rebuilt background audiobook chapter!");
+              setShowMultiVoiceStudio(false);
             } catch (err) {
               console.error(err);
-              alert("Error regenerating audio.");
+              toast.error("Error regenerating audio.");
+              throw err;
             } finally {
               setIsRegenerating(false);
-              setShowMultiVoiceStudio(false);
             }
           }}
         />
@@ -784,8 +785,19 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           chapterTitle={currentChapter.title}
           audioUrl={`/api/audiobook/chapter?bookId=${bookId}&chapterIndex=${currentChapterIndex}`}
           onFlagError={async (timeMs) => {
-            console.log("Flagged error for mobile review at ms:", timeMs);
-            // Future: Post this to a DB table to render in Desktop Studio
+            const response = await fetch('/api/audiobook/review-flags', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                documentId: bookId,
+                chapterIndex: currentChapterIndex,
+                timestampMs: timeMs,
+              }),
+            });
+            if (!response.ok) {
+              const body = await response.json().catch(() => ({})) as { error?: string };
+              throw new Error(body.error || 'Failed to save review flag.');
+            }
           }}
           onNextChapter={() => setCurrentChapterIndex(i => Math.min(chapters.length - 1, i + 1))}
           onPrevChapter={() => setCurrentChapterIndex(i => Math.max(0, i - 1))}

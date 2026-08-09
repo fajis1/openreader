@@ -1,187 +1,377 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+import { eq, sql } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
+
 import { db } from '@/db';
 import { adminSettings } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth/auth';
-import { readSmartAudioProfilesDocument, writeSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
-import fs from 'fs/promises';
-import path from 'path';
-import crypto from 'crypto';
+import {
+  readSmartAudioProfilesDocument,
+  writeSmartAudioProfilesDocument,
+} from '@/lib/server/smart-audio-profiles';
+import {
+  previewGlobalDefinitionImport,
+} from '@/lib/server/smart-audio/global-definition-library';
+import { errorResponse } from '@/lib/server/errors/next-response';
+import { serverLogger } from '@/lib/server/logger';
+import {
+  previewGlobalPronunciationImport,
+} from '@/lib/server/tts/global-pronunciation-library';
+import {
+  applyDictionaryReleaseToGlobal,
+  applyDictionaryReleaseToProfile,
+  buildDictionaryReleaseUpdates,
+  parseDictionaryReleaseTombstones,
+  type DictionaryReleaseUpdate,
+} from '@/lib/server/tts/dictionary-release';
 
 export const dynamic = 'force-dynamic';
 
-const PRONUNC_FILE = path.join(process.cwd(), 'src/lib/server/default_global_pronunciations.json');
-const DEFS_FILE = path.join(process.cwd(), 'src/lib/server/default_global_definitions.json');
+const PRONUNCIATION_FILE = path.join(process.cwd(), 'src/lib/server/default_global_pronunciations.json');
+const DEFINITION_FILE = path.join(process.cwd(), 'src/lib/server/default_global_definitions.json');
+const TOMBSTONE_FILE = path.join(process.cwd(), 'src/lib/server/default_global_pronunciation_tombstones.json');
 
-async function safeReadFile(filepath: string) {
+type Database = typeof db;
+
+async function safeReadFile(filePath: string, fallback = '{}'): Promise<string> {
   try {
-    return await fs.readFile(filepath, 'utf8');
-  } catch (e) {
-    return '{}';
+    return await fs.readFile(filePath, 'utf8');
+  } catch {
+    return fallback;
   }
 }
 
-function computeHash(content1: string, content2: string) {
-  return crypto.createHash('sha256').update(content1).update(content2).digest('hex');
+async function readDictionaryRelease() {
+  const [pronunciationRaw, definitionRaw, tombstoneRaw] = await Promise.all([
+    safeReadFile(PRONUNCIATION_FILE),
+    safeReadFile(DEFINITION_FILE),
+    safeReadFile(TOMBSTONE_FILE, '{"version":1,"generatedAt":null,"entries":{}}'),
+  ]);
+  const pronunciationSource: unknown = JSON.parse(pronunciationRaw || '{}');
+  const definitionSource: unknown = JSON.parse(definitionRaw || '{}');
+  const tombstoneSource: unknown = JSON.parse(tombstoneRaw || '{}');
+  const pronunciationPreview = previewGlobalPronunciationImport(pronunciationSource);
+  const definitionPreview = previewGlobalDefinitionImport(definitionSource);
+  const sourceWordCount = pronunciationSource && typeof pronunciationSource === 'object'
+    && !Array.isArray(pronunciationSource)
+    ? Object.keys(pronunciationSource).length
+    : 0;
+  const sourceDefinitionCount = definitionSource && typeof definitionSource === 'object'
+    && !Array.isArray(definitionSource)
+    ? Object.keys(definitionSource).length
+    : 0;
+  if (
+    pronunciationPreview.issues.length > 0
+    || pronunciationPreview.validWords !== sourceWordCount
+    || definitionPreview.issues.length > 0
+    || definitionPreview.validDefinitions !== sourceDefinitionCount
+  ) {
+    throw new Error('The bundled dictionary release failed validation.');
+  }
+  const tombstones = parseDictionaryReleaseTombstones(tombstoneSource);
+  const hash = crypto.createHash('sha256')
+    .update(pronunciationRaw)
+    .update(definitionRaw)
+    .update(tombstoneRaw)
+    .digest('hex');
+  return {
+    hash,
+    pronunciations: pronunciationPreview.library,
+    definitions: definitionPreview.definitions,
+    tombstones,
+  };
+}
+
+function parseSetting(value: unknown): unknown {
+  if (typeof value !== 'string') return value || {};
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+function selectedWordSet(value: unknown): Set<string> {
+  if (!Array.isArray(value)) return new Set();
+  return new Set(value
+    .filter((word): word is string => typeof word === 'string')
+    .map((word) => word.trim())
+    .filter(Boolean)
+    .slice(0, 10_000));
+}
+
+function availableWords(
+  updates: DictionaryReleaseUpdate[],
+  type: DictionaryReleaseUpdate['type'],
+): Set<string> {
+  return new Set(updates.filter((update) => update.type === type).map((update) => update.word));
+}
+
+function intersect(selected: ReadonlySet<string>, available: ReadonlySet<string>): Set<string> {
+  return new Set([...selected].filter((word) => available.has(word)));
+}
+
+function upsertSetting(database: Database, key: string, value: unknown) {
+  return database.insert(adminSettings).values({
+    key,
+    valueJson: JSON.stringify(value),
+    source: key === 'resolved_dictionary_hash' ? 'system' : 'admin',
+  }).onConflictDoUpdate({
+    target: adminSettings.key,
+    set: { valueJson: JSON.stringify(value) },
+  });
+}
+
+async function saveResolvedHashForAdmin(hash: string): Promise<void> {
+  if (process.env.POSTGRES_URL) {
+    await upsertSetting(db, 'resolved_dictionary_hash', hash);
+  } else {
+    upsertSetting(db, 'resolved_dictionary_hash', hash).run();
+  }
+}
+
+async function applyAdminRelease(input: {
+  release: Awaited<ReturnType<typeof readDictionaryRelease>>;
+  selectedPronunciationWords: Set<string>;
+  selectedDefinitionWords: Set<string>;
+  selectedPronunciationRemovals: Set<string>;
+  selectedDefinitionRemovals: Set<string>;
+  dismissAll: boolean;
+}): Promise<void> {
+  const applyLatest = (pronunciationValue: unknown, definitionValue: unknown) => {
+    const currentPronunciations = parseSetting(pronunciationValue);
+    const currentDefinitions = parseSetting(definitionValue);
+    const updates = buildDictionaryReleaseUpdates({
+      gitPronunciations: input.release.pronunciations,
+      gitDefinitions: input.release.definitions,
+      tombstones: input.release.tombstones,
+      globalPronunciations: currentPronunciations,
+      globalDefinitions: currentDefinitions,
+      isAdmin: true,
+    });
+    return applyDictionaryReleaseToGlobal({
+      currentPronunciations,
+      currentDefinitions,
+      gitPronunciations: input.release.pronunciations,
+      gitDefinitions: input.release.definitions,
+      tombstones: input.release.tombstones,
+      selectedPronunciationWords: intersect(
+        input.selectedPronunciationWords,
+        availableWords(updates, 'pronunciation'),
+      ),
+      selectedDefinitionWords: intersect(
+        input.selectedDefinitionWords,
+        availableWords(updates, 'definition'),
+      ),
+      selectedPronunciationRemovals: intersect(
+        input.selectedPronunciationRemovals,
+        availableWords(updates, 'pronunciation-removal'),
+      ),
+      selectedDefinitionRemovals: intersect(
+        input.selectedDefinitionRemovals,
+        availableWords(updates, 'definition-removal'),
+      ),
+    });
+  };
+
+  if (process.env.POSTGRES_URL) {
+    await db.transaction(async (tx: Database) => {
+      await tx.execute(sql`
+        select pg_advisory_xact_lock(
+          hashtextextended('openreader:dictionary-release', 0)
+        )
+      `);
+      const pronunciationRows = await tx.select({ valueJson: adminSettings.valueJson })
+        .from(adminSettings)
+        .where(eq(adminSettings.key, 'global_pronunciations'))
+        .limit(1);
+      const definitionRows = await tx.select({ valueJson: adminSettings.valueJson })
+        .from(adminSettings)
+        .where(eq(adminSettings.key, 'global_definitions'))
+        .limit(1);
+      if (!input.dismissAll) {
+        const applied = applyLatest(
+          pronunciationRows[0]?.valueJson,
+          definitionRows[0]?.valueJson,
+        );
+        await upsertSetting(tx, 'global_pronunciations', applied.pronunciations);
+        await upsertSetting(tx, 'global_definitions', applied.definitions);
+      }
+      await upsertSetting(tx, 'resolved_dictionary_hash', input.release.hash);
+    });
+    return;
+  }
+
+  db.transaction((tx: Database) => {
+    const pronunciationRows = tx.select({ valueJson: adminSettings.valueJson })
+      .from(adminSettings)
+      .where(eq(adminSettings.key, 'global_pronunciations'))
+      .limit(1)
+      .all();
+    const definitionRows = tx.select({ valueJson: adminSettings.valueJson })
+      .from(adminSettings)
+      .where(eq(adminSettings.key, 'global_definitions'))
+      .limit(1)
+      .all();
+    if (!input.dismissAll) {
+      const applied = applyLatest(
+        pronunciationRows[0]?.valueJson,
+        definitionRows[0]?.valueJson,
+      );
+      upsertSetting(tx, 'global_pronunciations', applied.pronunciations).run();
+      upsertSetting(tx, 'global_definitions', applied.definitions).run();
+    }
+    upsertSetting(tx, 'resolved_dictionary_hash', input.release.hash).run();
+  });
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const ctx = await requireAuthContext(request);
-    if (ctx instanceof Response) return ctx;
-    
-    const isAdmin = ctx.user?.isAdmin === true;
-    const userId = ctx.userId;
+    const context = await requireAuthContext(request);
+    if (context instanceof Response) return context;
 
-    const [gitPronuncRaw, gitDefsRaw] = await Promise.all([
-      safeReadFile(PRONUNC_FILE),
-      safeReadFile(DEFS_FILE)
-    ]);
-    
-    const gitHash = computeHash(gitPronuncRaw, gitDefsRaw);
+    const release = await readDictionaryRelease();
+    const isAdmin = context.user?.isAdmin === true;
+    const profilesDocument = await readSmartAudioProfilesDocument(context.userId);
+    const activeProfile = profilesDocument.profiles.find(
+      (profile) => profile.id === profilesDocument.selectedProfileId,
+    ) || profilesDocument.profiles[0];
+    const pronunciationRows = await db.select({ valueJson: adminSettings.valueJson })
+      .from(adminSettings)
+      .where(eq(adminSettings.key, 'global_pronunciations'))
+      .limit(1);
+    const definitionRows = await db.select({ valueJson: adminSettings.valueJson })
+      .from(adminSettings)
+      .where(eq(adminSettings.key, 'global_definitions'))
+      .limit(1);
 
-    // Read Global DB
-    const globalRows = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_pronunciations')).limit(1);
-    let globalDict: Record<string, any> = {};
-    if (globalRows.length > 0 && globalRows[0].valueJson) {
-      globalDict = typeof globalRows[0].valueJson === 'string' ? JSON.parse(globalRows[0].valueJson) : globalRows[0].valueJson;
-    }
-
-    const defsRows = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_definitions')).limit(1);
-    let globalDefs: Record<string, any> = {};
-    if (defsRows.length > 0 && defsRows[0].valueJson) {
-      globalDefs = typeof defsRows[0].valueJson === 'string' ? JSON.parse(defsRows[0].valueJson) : defsRows[0].valueJson;
-    }
-
-    // Read User Profiles
-    const profilesDoc = await readSmartAudioProfilesDocument(userId);
-    const activeProfile = profilesDoc.profiles.find(p => p.id === profilesDoc.selectedProfileId) || profilesDoc.profiles[0];
-    
-    // Check if we should prompt
     if (isAdmin) {
-      const hashRow = await db.select().from(adminSettings).where(eq(adminSettings.key, 'resolved_dictionary_hash')).limit(1);
-      const lastHash = hashRow.length > 0 ? (typeof hashRow[0].valueJson === 'string' ? JSON.parse(hashRow[0].valueJson) : hashRow[0].valueJson) : null;
-      if (lastHash === gitHash) {
+      const hashRows = await db.select({ valueJson: adminSettings.valueJson })
+        .from(adminSettings)
+        .where(eq(adminSettings.key, 'resolved_dictionary_hash'))
+        .limit(1);
+      if (parseSetting(hashRows[0]?.valueJson) === release.hash) {
         return NextResponse.json({ hasUpdates: false });
       }
-    } else {
-      const lastHash = activeProfile?.resolvedDictionaryHash || null;
-      if (lastHash === gitHash) {
-        return NextResponse.json({ hasUpdates: false });
-      }
+    } else if (activeProfile?.resolvedDictionaryHash === release.hash) {
+      return NextResponse.json({ hasUpdates: false });
     }
 
-    const gitPronunc = JSON.parse(gitPronuncRaw || '{}');
-    const gitDefs = JSON.parse(gitDefsRaw || '{}');
-
-    const updates: any[] = [];
-
-    // Compare Git Pronunciations vs Global DB
-    for (const [word, gitVals] of Object.entries(gitPronunc)) {
-      const gitPhonetic = Array.isArray(gitVals) ? gitVals[0]?.phonetic || (gitVals[0] as any) : (typeof gitVals === 'string' ? gitVals : '');
-      const localVals = globalDict[word];
-      const localPhonetic = localVals ? (Array.isArray(localVals) ? localVals[0]?.phonetic || localVals[0] : (typeof localVals === 'string' ? localVals : '')) : null;
-      
-      if (!localPhonetic) {
-        updates.push({ word, type: 'pronunciation', status: 'new', git: gitPhonetic, local: null });
-      } else if (localPhonetic !== gitPhonetic) {
-        updates.push({ word, type: 'pronunciation', status: 'conflict', git: gitPhonetic, local: localPhonetic });
-      }
-    }
-
-    // Compare Git Definitions vs Global DB
-    for (const [word, gitDef] of Object.entries(gitDefs)) {
-      const localDef = globalDefs[word];
-      if (!localDef) {
-        updates.push({ word, type: 'definition', status: 'new', git: gitDef, local: null });
-      } else if (localDef !== gitDef) {
-        updates.push({ word, type: 'definition', status: 'conflict', git: gitDef, local: localDef });
-      }
-    }
-
+    const updates = buildDictionaryReleaseUpdates({
+      gitPronunciations: release.pronunciations,
+      gitDefinitions: release.definitions,
+      tombstones: release.tombstones,
+      globalPronunciations: parseSetting(pronunciationRows[0]?.valueJson),
+      globalDefinitions: parseSetting(definitionRows[0]?.valueJson),
+      activeProfile,
+      isAdmin,
+    });
     if (updates.length === 0) {
-      // If there are no diffs, we can auto-resolve for this user since the DB is already up to date with Git.
       if (isAdmin) {
-        await db.insert(adminSettings).values({ key: 'resolved_dictionary_hash', valueJson: JSON.stringify(gitHash), source: 'system' })
-          .onConflictDoUpdate({ target: adminSettings.key, set: { valueJson: JSON.stringify(gitHash) } });
+        await saveResolvedHashForAdmin(release.hash);
       } else if (activeProfile) {
-        activeProfile.resolvedDictionaryHash = gitHash;
-        await writeSmartAudioProfilesDocument(userId, profilesDoc);
+        activeProfile.resolvedDictionaryHash = release.hash;
+        await writeSmartAudioProfilesDocument(context.userId, profilesDocument);
       }
       return NextResponse.json({ hasUpdates: false });
     }
 
-    return NextResponse.json({ 
-      hasUpdates: true, 
-      hash: gitHash, 
-      isAdmin, 
-      updates 
+    return NextResponse.json({
+      hasUpdates: true,
+      hash: release.hash,
+      isAdmin,
+      updates,
     });
-
-  } catch (err: any) {
-    console.error('Dictionary update diff failed:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    return errorResponse(error, {
+      logger: serverLogger,
+      event: 'tts.dictionary_release.compare.failed',
+      msg: 'Failed to compare bundled dictionary release',
+      apiErrorMessage: 'Failed to compare dictionary updates.',
+    });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const ctx = await requireAuthContext(request);
-    if (ctx instanceof Response) return ctx;
-    
-    const isAdmin = ctx.user?.isAdmin === true;
-    const userId = ctx.userId;
-
-    const { selectedPronunciations, selectedDefinitions, hash, dismissAll } = await request.json();
-
-    if (isAdmin) {
-      // Admin: Update global dictionaries and save global hash
-      if (!dismissAll && (Object.keys(selectedPronunciations || {}).length > 0 || Object.keys(selectedDefinitions || {}).length > 0)) {
-        const pRows = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_pronunciations')).limit(1);
-        let globalDict = pRows.length > 0 && pRows[0].valueJson ? (typeof pRows[0].valueJson === 'string' ? JSON.parse(pRows[0].valueJson) : pRows[0].valueJson) : {};
-        
-        const dRows = await db.select().from(adminSettings).where(eq(adminSettings.key, 'global_definitions')).limit(1);
-        let globalDefs = dRows.length > 0 && dRows[0].valueJson ? (typeof dRows[0].valueJson === 'string' ? JSON.parse(dRows[0].valueJson) : dRows[0].valueJson) : {};
-
-        for (const [word, phonetic] of Object.entries(selectedPronunciations || {})) {
-           globalDict[word] = [{ phonetic, usageCount: 0 }];
-        }
-        for (const [word, def] of Object.entries(selectedDefinitions || {})) {
-           globalDefs[word] = def;
-        }
-
-        await db.insert(adminSettings).values({ key: 'global_pronunciations', valueJson: JSON.stringify(globalDict), source: 'admin' })
-          .onConflictDoUpdate({ target: adminSettings.key, set: { valueJson: JSON.stringify(globalDict) } });
-        
-        await db.insert(adminSettings).values({ key: 'global_definitions', valueJson: JSON.stringify(globalDefs), source: 'admin' })
-          .onConflictDoUpdate({ target: adminSettings.key, set: { valueJson: JSON.stringify(globalDefs) } });
-      }
-
-      await db.insert(adminSettings).values({ key: 'resolved_dictionary_hash', valueJson: JSON.stringify(hash), source: 'system' })
-          .onConflictDoUpdate({ target: adminSettings.key, set: { valueJson: JSON.stringify(hash) } });
-
-    } else {
-      // User: Update personal smart audio profile and save user hash
-      const profilesDoc = await readSmartAudioProfilesDocument(userId);
-      const activeProfile = profilesDoc.profiles.find(p => p.id === profilesDoc.selectedProfileId) || profilesDoc.profiles[0];
-
-      if (activeProfile) {
-        if (!activeProfile.pronunciations) activeProfile.pronunciations = {};
-        
-        if (!dismissAll) {
-          for (const [word, phonetic] of Object.entries(selectedPronunciations || {})) {
-            activeProfile.pronunciations[word] = phonetic as string;
-          }
-        }
-        
-        activeProfile.resolvedDictionaryHash = hash;
-        await writeSmartAudioProfilesDocument(userId, profilesDoc);
-      }
+    const context = await requireAuthContext(request);
+    if (context instanceof Response) return context;
+    const body = await request.json() as Record<string, unknown>;
+    const release = await readDictionaryRelease();
+    if (body.hash !== release.hash) {
+      return NextResponse.json(
+        { error: 'The bundled dictionary changed. Review the latest update before applying it.' },
+        { status: 409 },
+      );
     }
 
+    const selectedPronunciationWords = selectedWordSet(body.selectedPronunciationWords);
+    const selectedDefinitionWords = selectedWordSet(body.selectedDefinitionWords);
+    const selectedPronunciationRemovals = selectedWordSet(body.selectedPronunciationRemovals);
+    const selectedDefinitionRemovals = selectedWordSet(body.selectedDefinitionRemovals);
+    const dismissAll = body.dismissAll === true;
+    const isAdmin = context.user?.isAdmin === true;
+
+    if (isAdmin) {
+      await applyAdminRelease({
+        release,
+        selectedPronunciationWords,
+        selectedDefinitionWords,
+        selectedPronunciationRemovals,
+        selectedDefinitionRemovals,
+        dismissAll,
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    const profilesDocument = await readSmartAudioProfilesDocument(context.userId);
+    const profileIndex = profilesDocument.profiles.findIndex(
+      (profile) => profile.id === profilesDocument.selectedProfileId,
+    );
+    const resolvedIndex = profileIndex >= 0 ? profileIndex : 0;
+    const activeProfile = profilesDocument.profiles[resolvedIndex];
+    if (activeProfile) {
+      const pronunciationRows = await db.select({ valueJson: adminSettings.valueJson })
+        .from(adminSettings)
+        .where(eq(adminSettings.key, 'global_pronunciations'))
+        .limit(1);
+      const definitionRows = await db.select({ valueJson: adminSettings.valueJson })
+        .from(adminSettings)
+        .where(eq(adminSettings.key, 'global_definitions'))
+        .limit(1);
+      const updates = buildDictionaryReleaseUpdates({
+        gitPronunciations: release.pronunciations,
+        gitDefinitions: release.definitions,
+        tombstones: release.tombstones,
+        globalPronunciations: parseSetting(pronunciationRows[0]?.valueJson),
+        globalDefinitions: parseSetting(definitionRows[0]?.valueJson),
+        activeProfile,
+        isAdmin: false,
+      });
+      profilesDocument.profiles[resolvedIndex] = applyDictionaryReleaseToProfile({
+        profile: activeProfile,
+        gitPronunciations: release.pronunciations,
+        tombstones: release.tombstones,
+        selectedPronunciationWords: dismissAll
+          ? new Set()
+          : intersect(selectedPronunciationWords, availableWords(updates, 'pronunciation')),
+        selectedPronunciationRemovals: dismissAll
+          ? new Set()
+          : intersect(selectedPronunciationRemovals, availableWords(updates, 'pronunciation-removal')),
+        resolvedDictionaryHash: release.hash,
+      });
+      await writeSmartAudioProfilesDocument(context.userId, profilesDocument);
+    }
     return NextResponse.json({ success: true });
-  } catch (err: any) {
-    console.error('Dictionary update apply failed:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (error) {
+    return errorResponse(error, {
+      logger: serverLogger,
+      event: 'tts.dictionary_release.apply.failed',
+      msg: 'Failed to apply bundled dictionary release',
+      apiErrorMessage: 'Failed to apply dictionary updates.',
+    });
   }
 }

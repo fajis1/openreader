@@ -33,7 +33,18 @@ export interface SmartAudioCharacterMap {
   schemaVersion: 1;
   status: 'partial' | 'complete';
   scannedAt: number;
+  profileId?: string;
+  sourceFingerprint?: string;
+  needsRescan?: boolean;
   entries: Record<string, SmartAudioCharacterEntry>;
+}
+
+export interface SmartAudioReviewFlag {
+  id: string;
+  chapterIndex: number;
+  timestampMs: number;
+  createdAt: number;
+  resolvedAt?: number | null;
 }
 
 export interface DocumentSettings {
@@ -44,6 +55,7 @@ export interface DocumentSettings {
   };
   smartAudioLexicon?: SmartAudioBookLexicon;
   smartAudioCharacters?: SmartAudioCharacterMap;
+  smartAudioReviewFlags?: SmartAudioReviewFlag[];
 }
 
 export const DEFAULT_DOCUMENT_SETTINGS: DocumentSettings = {

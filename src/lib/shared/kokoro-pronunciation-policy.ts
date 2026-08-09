@@ -1,6 +1,6 @@
 import type { SmartAudioProfile } from '@/types/client';
 
-export const KOKORO_PRONUNCIATION_POLICY_VERSION = 3;
+export const KOKORO_PRONUNCIATION_POLICY_VERSION = 5;
 
 export const KOKORO_COMPATIBILITY_POLICY = `KOKORO PRONUNCIATION COMPATIBILITY POLICY (REQUIRED, VERSION ${KOKORO_PRONUNCIATION_POLICY_VERSION}):
 - Use English-compatible IPA intended for Kokoro.
@@ -10,6 +10,9 @@ export const KOKORO_COMPATIBILITY_POLICY = `KOKORO PRONUNCIATION COMPATIBILITY P
 - Do not use true pharyngeal fricatives such as "ħ" or "ʕ"; approximate them with English-compatible "/k/" or "/x/" sounds.
 - NEVER place /y/ directly beside /j/ or repeat /j/; choose one appropriate glide so Kokoro does not speak separate letter names.
 - For initialisms, use single capital letters separated by commas and spaces, such as "K, T, L"; NEVER group capitals as "TH, N".
+- Return one reusable dictionary term at a time. Never use an IPA string, a phrase containing spaces, a mixed-script OCR token, or a stray consonant fragment as the dictionary word.
+- Never return a stuttered pronunciation with an adjacent repeated token. Spell source letters individually only for a real initialism, never as a fallback for unreadable OCR.
+- Pronounce the complete source word, not only a suffix or other surviving OCR fragment. For a word beginning Greek πν or Latin pn, the initial p is silent and must not appear in the pronunciation.
 - Preserve Kokoro markup exactly as "[Original Text](/IPA/)" when markup is requested.
 - When returning pronunciation choices as JSON, return each pronunciation as a slash-delimited IPA string and no explanatory prose.
 These compatibility requirements cannot be removed by profile-specific guidance.`;
@@ -65,13 +68,134 @@ export function isKokoroCompatiblePronunciation(pronunciation: unknown): pronunc
   return getKokoroPronunciationCompatibilityErrors(pronunciation).length === 0;
 }
 
+function scriptsIn(value: string): number {
+  return [
+    /\p{Script=Latin}/u.test(value),
+    /\p{Script=Greek}/u.test(value),
+    /\p{Script=Hebrew}/u.test(value),
+  ].filter(Boolean).length;
+}
+
+function greekConsonantFragment(value: string): boolean {
+  const normalized = value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const letters = [...normalized].filter((character) => /\p{L}/u.test(character));
+  return /\p{Script=Greek}/u.test(value)
+    && normalized !== 'κτλ'
+    && letters.length >= 2
+    && !/[αεηιουω]/u.test(normalized);
+}
+
+function greekVowelNuclei(value: string): number {
+  const letters = [...value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()]
+    .filter((character) => /\p{Script=Greek}/u.test(character));
+  let count = 0;
+  for (let index = 0; index < letters.length; index += 1) {
+    if (
+      index === 0
+      && ['ι', 'υ'].includes(letters[index])
+      && 'αεηιουω'.includes(letters[index + 1] || '')
+    ) continue;
+    if (!'αεηιουω'.includes(letters[index])) continue;
+    const pair = `${letters[index]}${letters[index + 1] || ''}`;
+    if (['αι', 'ει', 'οι', 'ου', 'αυ', 'ευ', 'ηυ', 'υι', 'ηι', 'ωι'].includes(pair)) index += 1;
+    count += 1;
+  }
+  return count;
+}
+
+function ipaVowelNuclei(value: string): number {
+  const characters = [...value.trim().replace(/^\/|\/$/g, '').toLowerCase()];
+  const isVowel = (character: string) => /[aeiouyɑɒɔəɛɜɞɪʊæʌɨɐøœɯɤɵɚɝ]/u.test(character);
+  const diphthongs = new Set(['aɪ', 'aʊ', 'eɪ', 'ɔɪ', 'oʊ', 'əʊ', 'ɛɪ', 'ɑɪ', 'ɑʊ']);
+  let count = 0;
+  for (let index = 0; index < characters.length; index += 1) {
+    if (!isVowel(characters[index])) continue;
+    if (diphthongs.has(`${characters[index]}${characters[index + 1] || ''}`)) index += 1;
+    if (characters[index + 1] === 'ː') index += 1;
+    count += 1;
+  }
+  return count;
+}
+
+export function getKokoroPronunciationWordWarnings(word: unknown): string[] {
+  if (typeof word !== 'string') return ['Dictionary word must be text.'];
+  const trimmed = word.trim();
+  if (!trimmed) return ['Dictionary word cannot be blank.'];
+
+  const warnings: string[] = [];
+  if (trimmed.includes('/')) warnings.push('Dictionary word looks like IPA or slash-delimited markup.');
+  if (/\s/u.test(trimmed)) warnings.push('Dictionary word must be one reusable term, not a phrase.');
+  if (/[\[\]{}()<>\d]/u.test(trimmed)) warnings.push('Dictionary word contains markup or digits.');
+  if (/^[-–—]|[-–—]$/u.test(trimmed)) warnings.push('Dictionary word is truncated at a dash.');
+  if (/[_\\]/u.test(trimmed)) warnings.push('Dictionary word contains a markup or separator character.');
+  if (/[ɐ-ʯː]/u.test(trimmed)) warnings.push('Dictionary word looks like bare IPA rather than source text.');
+  if (scriptsIn(trimmed) > 1) warnings.push('Dictionary word mixes Latin, Greek, or Hebrew scripts.');
+  if ([...trimmed].some((character) => (
+    /\p{L}/u.test(character)
+    && !/[\p{Script=Latin}\p{Script=Greek}\p{Script=Hebrew}]/u.test(character)
+  ))) warnings.push('Dictionary word contains an unsupported or mixed writing system.');
+  if (/\p{Script=Greek}/u.test(trimmed) && /σ$/u.test(trimmed)) {
+    warnings.push('Dictionary word ends with nonfinal Greek sigma and looks OCR-damaged.');
+  }
+  if (/\p{Script=Greek}/u.test(trimmed) && /ς.+/u.test(trimmed)) {
+    warnings.push('Dictionary word contains final Greek sigma before the end of the word.');
+  }
+  if (/\p{Script=Hebrew}/u.test(trimmed) && /^[ךםןףץ]/u.test(trimmed)) {
+    warnings.push('Dictionary word starts with a Hebrew final-form letter and looks reversed or OCR-damaged.');
+  }
+  if (/\p{Script=Hebrew}/u.test(trimmed) && /[כמנפצ]$/u.test(trimmed)) {
+    warnings.push('Dictionary word ends with a nonfinal Hebrew letter form and looks OCR-damaged.');
+  }
+  if (greekConsonantFragment(trimmed)) warnings.push('Dictionary word looks like a stray Greek consonant fragment.');
+
+  const isForeign = /[\p{Script=Greek}\p{Script=Hebrew}]/u.test(trimmed);
+  const letters = [...trimmed.normalize('NFD').replace(/\p{M}/gu, '')]
+    .filter((character) => /\p{L}/u.test(character))
+    .map((character) => character.toLowerCase());
+  if (isForeign && letters.length >= 2 && new Set(letters).size === 1) {
+    warnings.push('Dictionary word is a repeated-letter OCR fragment.');
+  }
+  if (/\p{Script=Greek}/u.test(trimmed) && letters.length === 1 && !/[αεηιουω]/u.test(letters[0])) {
+    warnings.push('Dictionary word is a single stray Greek consonant.');
+  }
+  return [...new Set(warnings)];
+}
+
+const LETTER_NAME_TOKENS = new Set([
+  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+  'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+  'eɪ', 'biː', 'siː', 'diː', 'iː', 'ɛf', 'dʒiː', 'eɪtʃ', 'aɪ',
+  'dʒeɪ', 'keɪ', 'ɛl', 'ɛm', 'ɛn', 'oʊ', 'piː', 'kjuː', 'ɑːr',
+  'ɛs', 'tiː', 'juː', 'viː', 'dʌbəljuː', 'ɛks', 'waɪ', 'ziː',
+]);
+
+function pronunciationTokens(pronunciation: string): string[] {
+  return pronunciation.trim().replace(/^\/|\/$/g, '')
+    .split(/[\s,;_-]+/u)
+    .filter(Boolean)
+    .map((token) => token.toLowerCase());
+}
+
 export function getKokoroPronunciationQualityWarnings(
-  _word: string,
+  word: string,
   pronunciation: unknown,
 ): string[] {
-  const warnings = [...getKokoroPronunciationCompatibilityErrors(pronunciation)];
+  const warnings = [
+    ...getKokoroPronunciationWordWarnings(word),
+    ...getKokoroPronunciationCompatibilityErrors(pronunciation),
+  ];
   if (typeof pronunciation !== 'string') return warnings;
   const inner = pronunciation.trim().replace(/^\/|\/$/g, '');
+  const normalizedWord = word.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  if ((normalizedWord.startsWith('πν') || normalizedWord.startsWith('pn')) && /^p/iu.test(inner)) {
+    warnings.push('Pronounces a silent initial p before n.');
+  }
+  if (
+    /\p{Script=Greek}/u.test(word)
+    && greekVowelNuclei(word) - ipaVowelNuclei(pronunciation) >= 1
+  ) {
+    warnings.push('Pronunciation covers only part of the Greek source word.');
+  }
   if (/[yj]{2,}/iu.test(inner)) {
     warnings.push('Suspicious adjacent /y/ and /j/ phonemes may be spoken as separate letter names.');
   }
@@ -83,6 +207,26 @@ export function getKokoroPronunciationQualityWarnings(
   }
   if (/[A-Z]{2,}/u.test(inner)) {
     warnings.push('Contains grouped capital letters; initialism letters must be separated.');
+  }
+  const tokens = pronunciationTokens(pronunciation);
+  if (tokens.some((token, index) => index > 0 && token === tokens[index - 1])) {
+    warnings.push('Contains an adjacent repeated pronunciation token that may sound stuttered.');
+  }
+  if (
+    /[\p{Script=Greek}\p{Script=Hebrew}]/u.test(word)
+    && word.normalize('NFC').toLowerCase() !== 'κτλ'
+    && tokens.length >= 3
+    && tokens.every((token) => LETTER_NAME_TOKENS.has(token))
+  ) {
+    warnings.push('Spells an apparent OCR fragment as letter names instead of pronouncing a word.');
+  }
+  if (
+    /[\p{Script=Greek}\p{Script=Hebrew}]/u.test(word)
+    && word.normalize('NFC').toLowerCase() !== 'κτλ'
+    && tokens.length >= 4
+    && tokens.every((token) => [...token.replace(/[ːˑ]/gu, '')].length <= 2)
+  ) {
+    warnings.push('Spells a word as separate phoneme tokens and may sound stuttery.');
   }
   return [...new Set(warnings)];
 }
@@ -99,13 +243,7 @@ export function filterKokoroCompatiblePronunciationRecord(value: unknown): Recor
   const result: Record<string, string> = {};
   for (const [word, pronunciation] of Object.entries(value)) {
     const trimmedWord = word.trim();
-    if (trimmedWord && isKokoroCompatiblePronunciation(pronunciation)) {
-      if (/[\[\]{}()<>\d]/.test(trimmedWord)) continue;
-      
-      const hasLatin = /[A-Za-z]/.test(trimmedWord);
-      const hasForeign = /[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF]/.test(trimmedWord);
-      if (hasLatin && hasForeign) continue;
-
+    if (trimmedWord && isKokoroSafePronunciation(trimmedWord, pronunciation)) {
       result[trimmedWord] = (pronunciation as string).trim();
     }
   }

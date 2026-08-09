@@ -13,6 +13,8 @@ describe('dictionary definition policy', () => {
       'Fragment or inflected form',
       'fragment or inflected form.',
       'An OCR fragment',
+      'adoption fragment',
+      'proper name fragment',
       'Inflected form',
     ]) {
       expect(shouldOmitDictionaryDefinition(placeholder)).toBe(true);

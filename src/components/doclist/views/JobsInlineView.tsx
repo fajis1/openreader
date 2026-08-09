@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharacterModal';
+import { WAITING_FOR_VOICES_STATUS } from '@/lib/shared/multi-voice';
 
 interface Job {
   id: string;
@@ -12,6 +14,19 @@ interface Job {
   progress?: number;
   error?: string;
   documentTitle?: string;
+  settingsJson?: unknown;
+  globalQueuePosition?: number;
+}
+
+function jobProfileId(job: Job): string {
+  let settings = job.settingsJson;
+  if (typeof settings === 'string') {
+    try { settings = JSON.parse(settings); } catch { return ''; }
+  }
+  return settings && typeof settings === 'object'
+    && typeof (settings as { smartAudioProfileId?: unknown }).smartAudioProfileId === 'string'
+    ? (settings as { smartAudioProfileId: string }).smartAudioProfileId
+    : '';
 }
 
 export function JobsInlineView() {
@@ -31,9 +46,14 @@ export function JobsInlineView() {
     } catch {}
   };
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [activeGlobalJob, setActiveGlobalJob] = useState<any>(null);
+  const [activeGlobalJob, setActiveGlobalJob] = useState<{
+    startedAt?: number;
+    updatedAt?: number;
+    progress?: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now());
+  const [castingJob, setCastingJob] = useState<Job | null>(null);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -83,6 +103,7 @@ export function JobsInlineView() {
   }, []);
 
   return (
+    <>
     <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-8">
       <div className="max-w-4xl mx-auto space-y-6">
         <h1 className="text-2xl font-semibold">Background Audiobooks Queue</h1>
@@ -97,13 +118,16 @@ export function JobsInlineView() {
           <div className="space-y-4">
             {jobs.map((job) => {
               const isQueued = job.status === 'queued' || job.status === 'waiting_for_pdf';
-              const globalPosition = (job as any).globalQueuePosition;
+              const isWaitingForVoices = job.status === WAITING_FOR_VOICES_STATUS
+                || (job.status === 'queued' && job.error === 'waiting_for_voices');
+              const globalPosition = job.globalQueuePosition;
               
               let queueEtaStr = '';
-              if (isQueued && globalPosition && activeGlobalJob && typeof activeGlobalJob.progress === 'number' && activeGlobalJob.progress > 0) {
-                const activeRemainingMs = getRemainingMs(now, activeGlobalJob.startedAt, activeGlobalJob.updatedAt || activeGlobalJob.startedAt, activeGlobalJob.progress);
+              if (isQueued && globalPosition && activeGlobalJob && typeof activeGlobalJob.startedAt === 'number' && typeof activeGlobalJob.progress === 'number' && activeGlobalJob.progress > 0) {
+                const activeStartedAt = activeGlobalJob.startedAt;
+                const activeRemainingMs = getRemainingMs(now, activeStartedAt, activeGlobalJob.updatedAt || activeStartedAt, activeGlobalJob.progress);
                 if (activeRemainingMs >= 0) {
-                  const activeTotalMs = activeRemainingMs + (now - activeGlobalJob.startedAt);
+                  const activeTotalMs = activeRemainingMs + (now - activeStartedAt);
                   const myWaitMs = activeRemainingMs + (activeTotalMs * (globalPosition - 1));
                   queueEtaStr = formatMs(myWaitMs);
                 }
@@ -143,14 +167,20 @@ export function JobsInlineView() {
                   </div>
                   <div className="text-right text-xs text-soft">
                     Created: {new Date(job.createdAt).toLocaleString()}
-                    {job.error && <p className="text-danger mt-1">Error: {job.error}</p>}
+                    {job.error && !isWaitingForVoices && <p className="text-danger mt-1">Error: {job.error}</p>}
+                    {isWaitingForVoices && <p className="mt-1 text-warning">Character casting review is required before generation can continue.</p>}
                     <div className="mt-2 flex gap-2 justify-end">
-                      {['queued', 'running', 'paused'].includes(job.status) && (
+                      {isWaitingForVoices && jobProfileId(job) && (
+                        <button onClick={() => setCastingJob(job)} className="text-accent font-semibold hover:underline bg-surface-sunken border border-accent px-2 py-1 rounded">
+                          Review Character Voices
+                        </button>
+                      )}
+                      {!isWaitingForVoices && ['queued', 'running', 'paused'].includes(job.status) && (
                         <a href={`/listen/${job.documentId}`} className="text-accent font-semibold hover:underline bg-surface-sunken border border-accent px-2 py-1 rounded">
                           Review Progress
                         </a>
                       )}
-                      {['queued', 'running', 'waiting_for_pdf'].includes(job.status) && (
+                      {!isWaitingForVoices && ['queued', 'running', 'waiting_for_pdf'].includes(job.status) && (
                         <button onClick={() => { onTogglePauseJob(job.id, 'pause'); fetchJobs(); }} className="text-warning font-semibold hover:underline bg-surface-sunken border border-warning px-2 py-1 rounded">
                           Pause
                         </button>
@@ -177,5 +207,19 @@ export function JobsInlineView() {
         )}
       </div>
     </div>
+    {castingJob && jobProfileId(castingJob) && (
+      <MultiVoiceCharacterModal
+        documentId={castingJob.documentId}
+        profileId={jobProfileId(castingJob)}
+        jobId={castingJob.id}
+        isOpen={true}
+        onClose={() => setCastingJob(null)}
+        onComplete={async () => {
+          setCastingJob(null);
+          await fetchJobs();
+        }}
+      />
+    )}
+    </>
   );
 }

@@ -226,4 +226,7 @@ async def main():
             await nc.close()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    raise SystemExit(
+        "Multi-voice handlers now run inside audiobook_worker.py so they share one "
+        "per-key Gemini rate limiter. Start audiobook_worker.py instead."
+    )

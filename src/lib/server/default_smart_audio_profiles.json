@@ -787,6 +787,17 @@
       "workerMode": "scholar"
     },
     {
+      "id": "profile-litrpg-audio-drama",
+      "name": "LitRPG Audio Drama",
+      "aiModel": "gemini-3.1-flash-lite",
+      "pronunciationAiModel": "gemini-3.6-flash",
+      "workerMode": "multi-voice",
+      "customTtsPrompt": "You are an expert LitRPG audiobook director. Preserve every narratable sentence and its order while assigning narration and dialogue only to the user-reviewed character cast. Use the saved pronunciation library for fantasy names and game terminology. Do not invent speakers, voices, dialogue, stage directions, XML, or internal control markers. Return structured speaker segments for server validation.",
+      "abbreviations": {},
+      "pronunciations": {},
+      "books": {}
+    },
+    {
       "id": "profile-bibliography-catcher",
       "name": "Bibliography Catcher (Test)",
       "aiModel": "gemini-3.1-flash-lite",

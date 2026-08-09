@@ -2,6 +2,7 @@ const UNUSABLE_DEFINITION_PATTERNS = [
   /^fragment(?:ary)?\s+(?:or|\/)\s+(?:an?\s+)?inflected\s+form[.!]?$/iu,
   /^(?:an?\s+)?(?:ocr|word|text|unidentified)\s+fragment[.!]?$/iu,
   /^(?:an?\s+)?inflected\s+form(?:\s+or\s+(?:an?\s+)?(?:ocr\s+)?fragment(?:ary)?)?[.!]?$/iu,
+  /\S+\s+fragment[.!]?$/iu,
 ];
 
 export function getDictionaryDefinitionQualityWarnings(value: unknown): string[] {
