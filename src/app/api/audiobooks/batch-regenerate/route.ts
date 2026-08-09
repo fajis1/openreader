@@ -12,6 +12,8 @@ import { decodeChapterFileName, encodeChapterFileName } from '@/lib/server/audio
 import { generateSegmentedAudiobookTtsBuffer } from '@/lib/server/audiobooks/segmented-tts';
 import { coerceAudiobookGenerationSettings } from '@/lib/server/audiobooks/settings';
 import { AudiobookBlobObject, putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
+import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
+import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +25,7 @@ export async function POST(request: NextRequest) {
     const userId = ctx.userId;
     if (!userId) return new Response("Unauthorized", { status: 401 });
     const body = await request.json().catch(() => ({}));
-    const { bookId, bookIds, dryRun } = body;
+    const { bookId, bookIds, dryRun, forceAll } = body;
 
     let booksToProcess: { id: string, name?: string | null }[] = [];
     if (bookIds && Array.isArray(bookIds) && bookIds.length > 0) {
@@ -60,7 +62,7 @@ export async function POST(request: NextRequest) {
              const index = parseInt(match[1], 10) - 1;
              
              const correspondingAudio = audioFileMap.get(index);
-             if (!correspondingAudio || txt.lastModified > correspondingAudio.lastModified) {
+             if (forceAll || !correspondingAudio || txt.lastModified > correspondingAudio.lastModified) {
                 modifiedCount++;
              }
           }
@@ -101,8 +103,8 @@ export async function POST(request: NextRequest) {
             const index = parseInt(match[1], 10) - 1;
             
             const correspondingAudio = audioFileMap.get(index);
-            // If audio doesn't exist OR txt is newer than audio
-            if (!correspondingAudio || txt.lastModified > correspondingAudio.lastModified) {
+            // If forceAll is true, or audio doesn't exist, or txt is newer than audio
+            if (forceAll || !correspondingAudio || txt.lastModified > correspondingAudio.lastModified) {
               chaptersToRebuild.push({
                   index: index,
                   title: `Chapter ${index + 1}`,
@@ -140,7 +142,7 @@ export async function POST(request: NextRequest) {
               let provider = 'openai';
               let voice = 'am_michael';
               let speed = 1.0;
-              let model = 'kokoro-v1';
+              let model: string | undefined = undefined;
               try {
                 const parsedSettings = JSON.parse(
                   (await getAudiobookObjectBuffer(book.id, userId, 'audiobook.meta.json', null)).toString('utf8')
@@ -149,14 +151,29 @@ export async function POST(request: NextRequest) {
                   fallbackProviderRef: 'openai',
                 });
                 if (existingResult.settings) {
-                  provider = existingResult.settings.provider || provider;
+                  provider = existingResult.settings.providerRef || provider;
                   voice = existingResult.settings.voice || voice;
-                  speed = existingResult.settings.speed || speed;
-                  model = existingResult.settings.model || model;
+                  speed = existingResult.settings.nativeSpeed || speed;
+                  model = existingResult.settings.ttsModel || model;
                 }
               } catch (e) {
                 console.error(`Could not parse settings for ${book.id}, using defaults`, e);
               }
+
+              const runtimeConfig = await getResolvedRuntimeConfig();
+              const requestCreds = await resolveTtsCredentials({
+                providerHeader: provider,
+                apiKeyHeader: null,
+                baseUrlHeader: null,
+                fallbackProvider: runtimeConfig.defaultTtsProvider,
+                restrictUserApiKeys: runtimeConfig.restrictUserApiKeys,
+              });
+
+              if ('error' in requestCreds) {
+                 throw new Error(`Failed to resolve TTS credentials: ${requestCreds.error}`);
+              }
+
+              const resolvedModel = model || requestCreds.adminRecord?.defaultModel || 'tts-1';
               
               const audioBuffer = await generateSegmentedAudiobookTtsBuffer(
                 {
@@ -164,12 +181,12 @@ export async function POST(request: NextRequest) {
                   format: chap.format as any,
                   voice: voice,
                   speed: speed,
-                  provider,
-                  apiKey: 'dummy',
-                  baseUrl: provider === 'kokoro' || provider === 'openai' ? 'http://172.22.0.1:8880/v1' : undefined,
-                  model: model,
+                  provider: requestCreds.provider,
+                  apiKey: requestCreds.apiKey,
+                  baseUrl: requestCreds.baseUrl,
+                  model: resolvedModel,
                 },
-                request.signal,
+                undefined,
                 {
                   ttsCacheMaxSizeBytes: 1000000000,
                   ttsCacheTtlMs: 86400000,
@@ -179,7 +196,7 @@ export async function POST(request: NextRequest) {
               );
               
               const outName = encodeChapterFileName(chap.index, chap.title, chap.format as any);
-              await putAudiobookObject(book.id, userId, outName, Buffer.from(audioBuffer), chap.format === 'mp3' ? 'audio/mpeg' : 'audio/mp4');
+              await putAudiobookObject(book.id, userId, outName, Buffer.from(audioBuffer), chap.format === 'mp3' ? 'audio/mpeg' : 'audio/mp4', null);
               
               rebuildCount++;
               localRebuildCount++;

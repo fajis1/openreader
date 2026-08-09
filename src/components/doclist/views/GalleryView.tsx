@@ -165,6 +165,7 @@ export function GalleryView({
   const { setVisibleOrder } = useDocumentSelection();
   const railRef = useRef<HTMLDivElement | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
+  const [isDownloadingAudiobook, setIsDownloadingAudiobook] = useState(false);
   const activeDoc = useMemo(() => documents[activeIdx], [documents, activeIdx]);
   const openHref = activeDoc ? `/${activeDoc.type}/${encodeURIComponent(activeDoc.id)}` : null;
 
@@ -271,16 +272,27 @@ export function GalleryView({
                       </MenuRoot>
                       </div>
                     )}
-                    <ButtonLink
-                      href={`/api/audiobook?bookId=${encodeURIComponent(activeDoc.id)}&format=m4b`}
-                      download
-                      prefetch={false}
+                    <Button
+                      onClick={async () => {
+                        if (isDownloadingAudiobook) return;
+                        setIsDownloadingAudiobook(true);
+                        const url = `/api/audiobook?bookId=${encodeURIComponent(activeDoc.id)}&format=m4b`;
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = '';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        setIsDownloadingAudiobook(false);
+                      }}
                       variant="primary"
                       size="sm"
                       className="flex-1 whitespace-nowrap"
+                      disabled={isDownloadingAudiobook}
                     >
-                      Download M4B
-                    </ButtonLink>
+                      {isDownloadingAudiobook ? 'Preparing...' : 'Download M4B'}
+                    </Button>
                   </>
                 )}
                 <ButtonLink href={openHref || '/app'} prefetch={false} variant={activeHasAudiobook ? 'secondary' : 'primary'} size="sm" className="flex-1">

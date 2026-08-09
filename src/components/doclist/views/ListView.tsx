@@ -1,14 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
 import type {
   DocumentListDocument,
   SortBy,
   SortDirection,
 } from '@/types/documents';
-import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
+import { PDFIcon, EPUBIcon, FileIcon, ClockIcon } from '@/components/icons/Icons';
 import { formatDocumentSize } from '@/components/doclist/formatSize';
 import { IconButton, MenuRoot, MenuTrigger, MenuTransition, MenuItemsSurface, MenuActionItem } from '@/components/ui';
 import { useDocumentSelection } from '../dnd/DocumentSelectionContext';
@@ -99,6 +99,7 @@ function DocRow({
   const isInFolder = Boolean(doc.folderId);
   const href = isAudiobookView ? `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b` : `/${doc.type}/${encodeURIComponent(doc.id)}`;
   const didDragRef = useRef(false);
+  const [isDownloadingAudiobook, setIsDownloadingAudiobook] = useState(false);
 
   const { data: audiobooksData } = useSWR('/api/audiobooks', async (url) => {
     try {
@@ -242,18 +243,34 @@ function DocRow({
               </MenuRoot>
               </div>
             )}
-            <a
-              href={`/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`}
-              download
-              onClick={(e) => e.stopPropagation()}
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (isDownloadingAudiobook) return;
+                setIsDownloadingAudiobook(true);
+                const url = `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`;
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = '';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                setIsDownloadingAudiobook(false);
+              }}
               className="flex items-center justify-center w-7 h-7 text-accent hover:bg-accent-wash transition-colors rounded-sm"
               aria-label={`Download M4B Audiobook for ${doc.name}`}
               title="Download Audiobook"
+              disabled={isDownloadingAudiobook}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-            </a>
+              {isDownloadingAudiobook ? (
+                <ClockIcon className="w-4 h-4 animate-spin" />
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              )}
+            </button>
           </>
         )}
         {!isAudiobookView && (

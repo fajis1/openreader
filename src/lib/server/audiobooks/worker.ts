@@ -5,7 +5,7 @@ import {
   readSmartAudioProfilesDocument,
   writeSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
-import { eq, and, asc, lt, inArray, sql } from 'drizzle-orm';
+import { eq, and, asc, lt, inArray, sql, or } from 'drizzle-orm';
 import { db } from '@/db';
 import { audiobookJobs, documents, audiobooks, audiobookChapters, adminSettings, documentSettings } from '@/db/schema';
 import { readCurrentParsedPdfArtifact } from '@/lib/server/pdf-parse/artifact';
@@ -232,9 +232,21 @@ export async function processAudiobookQueue() {
 
   const MAX_CONCURRENT_JOBS = 3;
 
+  const RATE_LIMIT_BACKOFF_MS = 10 * 60 * 1000;
+  const backoffThreshold = Date.now() - RATE_LIMIT_BACKOFF_MS;
+
   const rows = await db.select()
     .from(audiobookJobs)
-    .where(inArray(audiobookJobs.status, ['queued', 'waiting_for_pdf']))
+    .where(
+      and(
+        inArray(audiobookJobs.status, ['queued', 'waiting_for_pdf']),
+        or(
+          sql`${audiobookJobs.error} IS NULL`,
+          sql`${audiobookJobs.error} != ${GEMINI_RATE_LIMIT_PAUSE_MESSAGE}`,
+          lt(audiobookJobs.updatedAt, backoffThreshold)
+        )
+      )
+    )
     .orderBy(asc(audiobookJobs.createdAt))
     .limit(MAX_CONCURRENT_JOBS);
   
@@ -925,7 +937,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             return;
           }
           
-          throw new Error('Smart audio processing failed after auto-retry (Python worker unreachable). Job aborted so it can be requeued later.');
+          throw new Error(`Smart audio processing failed after auto-retry. Error: ${(e as any).message || e}. Job aborted so it can be requeued later.`);
         }
       }
       

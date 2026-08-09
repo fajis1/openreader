@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useDrag, useDrop, type DragSourceMonitor } from 'react-dnd';
-import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
+import { PDFIcon, EPUBIcon, FileIcon, ClockIcon } from '@/components/icons/Icons';
 import type { DocumentListDocument, IconSize } from '@/types/documents';
 import { DocumentPreview } from '@/components/doclist/DocumentPreview';
 import { IconButton, MenuRoot, MenuTrigger, MenuTransition, MenuItemsSurface, MenuActionItem } from '@/components/ui';
@@ -77,6 +77,7 @@ export function DocumentTile({
 }: DocumentTileProps) {
   const href = isAudiobookView ? `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b` : `/${doc.type}/${encodeURIComponent(doc.id)}`;
   const selection = useDocumentSelection();
+  const [isDownloadingAudiobook, setIsDownloadingAudiobook] = useState(false);
 
   const { data: audiobooksData } = useSWR('/api/audiobooks', async (url) => {
     try {
@@ -259,18 +260,34 @@ export function DocumentTile({
               </MenuRoot>
               </div>
             )}
-            <a
-              href={`/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`}
-              download
-              onClick={(e) => e.stopPropagation()}
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (isDownloadingAudiobook) return;
+                setIsDownloadingAudiobook(true);
+                const url = `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`;
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = '';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                setIsDownloadingAudiobook(false);
+              }}
               className={`${TRASH_BTN_CLASSES[iconSize]} flex items-center justify-center text-accent hover:bg-accent-wash transition-colors`}
               aria-label={`Download M4B Audiobook for ${doc.name}`}
               title="Download Audiobook"
+              disabled={isDownloadingAudiobook}
             >
-              <svg className={TRASH_ICON_CLASSES[iconSize]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-            </a>
+              {isDownloadingAudiobook ? (
+                <ClockIcon className={`${TRASH_ICON_CLASSES[iconSize]} animate-spin`} />
+              ) : (
+                <svg className={TRASH_ICON_CLASSES[iconSize]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              )}
+            </button>
           </>
         )}
         {!isAudiobookView && (

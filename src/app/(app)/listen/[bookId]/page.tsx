@@ -271,6 +271,30 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     }
   };
 
+  const handleForceRebuildAll = async () => {
+    if (!window.confirm("Are you sure you want to re-record every single chunk? This will replace all existing audio for this book!")) {
+      return;
+    }
+    setIsRebuildingAll(true);
+    try {
+      const startRes = await fetch('/api/audiobooks/batch-regenerate', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ bookId: bookId, forceAll: true })
+      });
+      if (startRes.ok) {
+         toast.success('Background force rebuild started for all chunks!');
+      } else {
+         const err = await startRes.json().catch(() => ({}));
+         toast.error(err.error || 'Failed to start force rebuild');
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Error starting force rebuild');
+    } finally {
+      setIsRebuildingAll(false);
+    }
+  };
+
   const handleFixAllAbbreviations = async () => {
     setIsFixingAll(true);
     try {
@@ -361,6 +385,14 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
               title="Re-record MP3s for any chunk where the text was modified"
             >
               {isRebuildingAll ? "Scanning..." : "Re-Record All Modified chunks"}
+            </button>
+            <button
+              onClick={handleForceRebuildAll}
+              disabled={isRebuildingAll || chapters.length === 0}
+              className="px-3 py-1.5 bg-rose-600/10 hover:bg-rose-600/20 text-rose-500 rounded font-medium text-xs disabled:opacity-50 transition-colors"
+              title="Force re-record every single chunk (useful if you changed voices)"
+            >
+              Force Re-Record All
             </button>
           </div>
           <div className="flex gap-1 ml-auto md:ml-2">

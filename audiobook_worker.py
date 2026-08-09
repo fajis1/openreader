@@ -135,10 +135,9 @@ async def process_message(msg):
                         contents=full_prompt
                     )
                     
-                    if not response.text:
-                        raise ValueError(f"Gemini returned an empty response or blocked it. Safety ratings: {response.candidates[0].safety_ratings if response.candidates else 'Unknown'}")
-                        
-                    final_text = response.text.strip()
+                    final_text = ""
+                    if response.text:
+                        final_text = response.text.strip()
                     
                     # 2. SUCCESS! Step the delay back down gracefully
                     if api_state["current_delay"] > 0:

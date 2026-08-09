@@ -385,8 +385,24 @@ export function BookPronunciationInspectorModal({
       setPendingRebuildBooks(null);
     }
   };
+  const handleCleanPhrases = async () => {
+    if (!confirm('This will remove all multi-word phrases (entries containing spaces) from your global dictionary and profiles. Continue?')) return;
+    try {
+      const res = await fetch('/api/tts/clean-phrases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId: selectedBookId || undefined })
+      });
+      if (!res.ok) throw new Error('Failed to clean phrases');
+      const data = await res.json();
+      toast.success(`Removed ${data.removedCount} phrases from the dictionary!`);
+      // Update local state to remove spaced words immediately
+      setWords(prev => prev.filter(w => !w.word.includes(' ')));
+    } catch (e: any) {
+      toast.error(e.message || 'Error cleaning phrases');
+    }
+  };
 
-  if (!isOpen) return null;
 
   const isSimilar = (a: string, b: string) => {
     if (!a || !b) return false;
@@ -431,6 +447,8 @@ export function BookPronunciationInspectorModal({
       return matched;
     });
   }, [words, searchQuery, useFuzzySearch]);
+
+  if (!isOpen) return null;
 
   const maxRender = 100;
   const renderedWords = filteredWords.slice(0, maxRender);
@@ -520,7 +538,14 @@ export function BookPronunciationInspectorModal({
             />
             Fuzzy Match (find similar)
           </label>
-          <div className="flex-1 text-right">
+          <div className="flex-1 text-right flex gap-2 justify-end">
+            <button
+              onClick={handleCleanPhrases}
+              className="px-3 py-1.5 bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200 border border-red-300 dark:border-red-800 rounded text-sm font-semibold hover:bg-red-200 dark:hover:bg-red-900/50"
+              title="Remove all multi-word phrases from the global library and your profiles"
+            >
+              Clean Phrases 🧹
+            </button>
             <button
               onClick={handleRebuildModified}
               disabled={!!rebuildStatus}

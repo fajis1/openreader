@@ -11,6 +11,26 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-09 — Audiobook Pipeline WIP Checkpoint
+
+- Checkpointed the current audiobook work before PP-DocLayout pipeline hardening: M4B chapter compatibility, Gemini queue backoff, empty-response handling, force re-recording, provider-aware batch regeneration, download feedback, pronunciation cleanup controls, and updated Smart Audio prompts.
+- Added the missing authenticated Clean Phrases API route required by the pronunciation inspector and corrected its authentication integration.
+- Verified 33 focused audiobook/Smart Audio tests, Python worker compilation, default-profile JSON parsing, and `git diff --check`. The broader data-integrity selection had 51/52 passing; its remaining assertion expects the former hardcoded Standard NATS subject instead of the current Scholar-aware `targetSubject`. Full TypeScript remains blocked by excluded root diagnostics and temporary API routes.
+- Follow-up: implement shared PP-DocLayout block filtering, an explicit Smart Audio omission contract, mandatory output validation, and foreground/background Scholar parity before treating layout-tag cleanup as complete.
+
+### 2026-08-08 — M4B Chapters, Rate Limit Backoff, and Layout Tags
+
+- **M4B Chapter Compatibility Fix (`src/app/api/audiobook/route.ts`):**
+  - Removed the `+disable_chpl` flag from FFmpeg's `-movflags` when combining audiobooks. This flag previously prevented the encoder from writing standard Nero chapters (the `chpl` atom) into the final M4B container, which caused many non-Apple audiobook players (like Smart Audiobook Player, VLC, and Android apps) to see the file as a single long track without chapters.
+
+- **Gemini Rate Limit Backoff (`src/lib/server/audiobooks/worker.ts`):**
+  - Addressed system-wide Gemini API `429 Too Many Requests` errors during background pronunciation and definition scans.
+  - Implemented a 10-minute backoff (`RATE_LIMIT_BACKOFF_MS = 10 * 60 * 1000`) for any background job paused due to Gemini rate limits. The queue manager will now ignore these jobs for 10 minutes instead of instantly re-queueing them and creating an infinite request loop.
+
+- **Layout Engine Tag Cleanup (`src/lib/server/default_smart_audio_profiles.json`):**
+  - Added an aggressive rule (Rule 13) instructing Gemini to forcefully delete lingering layout engine tags (e.g., `[LAYOUT_ENGINE_TAG: FOOTNOTE]`, `[LAYOUT_ENGINE_TAG: NUMBER]`) from the text, as these tags were erroneously being read aloud by Kokoro TTS.
+  - Wrote a temporary Node.js backend script (`src/app/api/temp-s3/route.ts`) to manually parse and scrub the active document's text files for these tags and fix the immediate issue on chunks 4, 6, and 10 without needing to burn LLM tokens.
+
 ### 2026-08-08 — Fixed Batch Regenerate API Endpoint and Phonetic Rules
 
 - **Batch Regenerate Fix (`src/app/api/audiobooks/batch-regenerate/route.ts`):**
@@ -775,3 +795,8 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 * **Changed:** Updated `BookPronunciationInspectorModal.tsx` in Next.js to properly parse and display the 5 newly generated Kokoro IPA pronunciation options returned by Gemini instead of blindly refetching data from the server.
 * **Verified:** The bug was traced from `fetchPronunciations` wiping the local state over `data.newChoices`. The fix updates local state appropriately when new choices are successfully returned from `/api/tts/refine-pronunciations`.
 * **Follow-up:** None.
+
+## 2026-08-08
+- Fixed TTS batch generation script failing to resolve external Kokoro base URLs
+- Fixed TTS batch generation script falling back to an invalid Kokoro model name (kokoro-v1)
+- Verified that 'Force Re-Record All' properly runs the generation queue against the user's custom Kokoro provider
