@@ -102,12 +102,18 @@ export async function GET(request: NextRequest) {
     );
 
     const chapterRows = await db
-      .select({ chapterIndex: audiobookChapters.chapterIndex, duration: audiobookChapters.duration })
+      .select({
+        chapterIndex: audiobookChapters.chapterIndex,
+        duration: audiobookChapters.duration,
+        title: audiobookChapters.title,
+      })
       .from(audiobookChapters)
       .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, storageUserId)));
     const durationByIndex = new Map<number, number>();
+    const titleByIndex = new Map<number, string>();
     for (const row of chapterRows) {
       durationByIndex.set(row.chapterIndex, Number(row.duration ?? 0));
+      if (row.title.trim()) titleByIndex.set(row.chapterIndex, row.title.trim());
     }
 
     const chapters: TTSAudiobookChapter[] = chapterObjects.map((chapter) => {
@@ -117,7 +123,7 @@ export async function GET(request: NextRequest) {
       
       return {
         index: chapter.index,
-        title: chapter.title,
+        title: titleByIndex.get(chapter.index) ?? chapter.title,
         duration: durationByIndex.get(chapter.index),
         status: 'completed',
         bookId,

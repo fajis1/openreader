@@ -11,6 +11,12 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-10 — Display final Smart Audio titles for cleanup batches
+
+- Fixed audiobook status responses to prefer each chapter's database title over the inherited pre-Gemini title encoded in its existing blob filename. The current scholarly audiobook already has 33 distinct final titles in the database, so the listening UI can show them without regenerating audio.
+- Future background generation now encodes the audio filename only after Smart Audio returns its final chapter title, keeping blob discovery and database metadata consistent.
+- Verified 38 focused Smart Audio/batching tests, targeted status-route/test ESLint, and `git diff --check`. Full worker-file ESLint remains blocked by its existing unrelated console, `require`, `any`, and `prefer-const` findings.
+
 ### 2026-08-10 — Preserve PP-DocLayout evidence for deterministic end-matter removal
 
 - Detect confirmed PDF end matter from the original PP-DocLayout blocks before configured kinds such as `header` are removed, then exclude the confirmed tail before chapter batching, Smart Audio, and TTS.

@@ -739,8 +739,6 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
       if (!chapter.text.trim()) continue;
 
-      const chapterFileName = encodeChapterFileName(chapter.index, chapter.title, format);
-      
       // CRASH RECOVERY: Check if chapter already exists in DB
       const existing = await db.select().from(audiobookChapters).where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, userId), eq(audiobookChapters.chapterIndex, chapter.index)));
       if (existing.length > 0) {
@@ -968,6 +966,11 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       }
 
       processedTextForTts = validateSmartAudioOutput(processedTextForTts);
+
+      // Smart Audio may replace the inherited layout heading with a concise
+      // title for this cleanup batch. Encode the file only after that title is
+      // known so blob discovery and the chapter database agree.
+      const chapterFileName = encodeChapterFileName(chapter.index, chapter.title, format);
 
       const ttsBuffer = await generateSegmentedAudiobookTtsBuffer({
         text: processedTextForTts,
