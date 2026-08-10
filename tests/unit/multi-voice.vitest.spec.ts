@@ -145,6 +145,18 @@ describe('LitRPG speaker output validation', () => {
     expect(() => resolveMultiVoiceWorkerResult(result({ speaker: 'Arin', text: '<em>No.</em>' }), cast)).toThrow(/markup/i);
   });
 
+  test('reconciles known pronunciations inside each voice segment', () => {
+    const resolved = resolveMultiVoiceWorkerResult({
+      status: 'success',
+      segments: [
+        { speaker: 'Narrator', text: 'He spoke [ὑμῖν](/hjuːmis/).' },
+      ],
+    }, cast, {
+      authoritativePronunciations: { 'ὑμῖν': '/hjumin/' },
+    });
+    expect(resolved.segments[0].text).toBe('He spoke [ὑμῖν](/hjumin/).');
+  });
+
   test('rejects unknown voices, malformed tags, and untagged gaps before TTS', () => {
     expect(() => parseVoiceTaggedText('<voice name="made_up">Hello.</voice>')).toThrow(/unsupported voice/i);
     expect(() => parseVoiceTaggedText('Outside <voice name="af_heart">Inside.</voice>')).toThrow(/outside a voice segment/i);

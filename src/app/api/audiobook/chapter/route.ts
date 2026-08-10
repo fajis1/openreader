@@ -71,6 +71,7 @@ import {
   FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
   isScholarLikeSmartAudioMode,
   resolveSmartAudioWorkerResult,
+  selectUnknownSmartAudioPronunciations,
   validateSmartAudioOutput,
 } from '@/lib/shared/smart-audio-cleanup';
 import { mergeDocumentSettings } from '@/lib/shared/document-settings';
@@ -843,7 +844,8 @@ export async function POST(request: NextRequest) {
               pronunciationOverrides: finalPronunciations,
             },
           );
-          finalPronunciations = selectPronunciationsForText(enrichedText, finalPronunciations);
+          const authoritativePronunciations = finalPronunciations;
+          finalPronunciations = selectPronunciationsForText(enrichedText, authoritativePronunciations);
 
           const payload = JSON.stringify(selectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
             ? {
@@ -884,11 +886,15 @@ export async function POST(request: NextRequest) {
 
           if (workerResult.status === "success") {
             const multiVoiceResult = selectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
-              ? resolveMultiVoiceWorkerResult(workerResult, multiVoiceCast)
+              ? resolveMultiVoiceWorkerResult(workerResult, multiVoiceCast, {
+                authoritativePronunciations,
+              })
               : null;
             const resolvedWorkerResult = multiVoiceResult
               ? { outcome: 'cleaned' as const, text: multiVoiceResult.taggedText }
-              : resolveSmartAudioWorkerResult(workerResult);
+              : resolveSmartAudioWorkerResult(workerResult, {
+                authoritativePronunciations,
+              });
             processedTextForTts = resolvedWorkerResult.text;
             smartAudioOmitted = resolvedWorkerResult.outcome === 'omitted';
             serverLogger.info(
@@ -925,7 +931,10 @@ export async function POST(request: NextRequest) {
             }
 
             // Sync new learned pronunciations back to the profile
-            const newPronuns = filterKokoroCompatiblePronunciationRecord(workerResult.new_pronunciations);
+            const newPronuns = selectUnknownSmartAudioPronunciations(
+              filterKokoroCompatiblePronunciationRecord(workerResult.new_pronunciations),
+              authoritativePronunciations,
+            );
             if (Object.keys(newPronuns).length > 0 && selectedProfile) {
               const updatedProfiles = profilesDocument.profiles.map((p) => {
                 if (p.id === selectedProfile.id) {

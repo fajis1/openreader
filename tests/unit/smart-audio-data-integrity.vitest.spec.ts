@@ -210,7 +210,7 @@ describe('Smart Audio data-integrity guards', () => {
   test('fails closed instead of sending raw text when direct cleanup fails', () => {
     const route = source('src/app/api/audiobook/chapter/route.ts');
     const worker = source('src/lib/server/audiobooks/worker.ts');
-    expect(route).toContain('resolveSmartAudioWorkerResult(workerResult)');
+    expect(route).toContain('resolveSmartAudioWorkerResult(workerResult, {');
     expect(route).toContain('Refusing to synthesize uncleaned text.');
     expect(route).not.toContain('NATS failed. Falling back to raw text.');
     expect(route).toContain('processedTextForTts = validateSmartAudioOutput(processedTextForTts)');
@@ -240,6 +240,17 @@ describe('Smart Audio data-integrity guards', () => {
     expect(route).toContain('const sourceDocumentId = data.documentId || bookId;');
     expect(route).toContain('readBookLexicon(storageUserId, sourceDocumentId)');
     expect(pipeline).toContain('documentId: sourceDocumentId');
+  });
+
+  test('reconciles known pronunciations and only learns unknown words in both generation paths', () => {
+    for (const path of [
+      'src/lib/server/audiobooks/worker.ts',
+      'src/app/api/audiobook/chapter/route.ts',
+    ]) {
+      const implementation = source(path);
+      expect(implementation).toContain('authoritativePronunciations');
+      expect(implementation).toContain('selectUnknownSmartAudioPronunciations(');
+    }
   });
 
   test('offers an explicit Scholar auto-scan when regenerating a chapter', () => {

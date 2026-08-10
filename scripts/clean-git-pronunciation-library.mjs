@@ -378,6 +378,31 @@ const TRUSTED_PRONUNCIATION_REPAIRS = new Map(Object.entries({
   'בני': '/bneɪ/',
 }));
 
+// Greek capitalization commonly changes at sentence boundaries without
+// changing the lexical word. These reviewed groups must share one default.
+// Do not generalize this to every case pair: capitalization can distinguish a
+// proper name (for example Δία, Zeus) from a lowercase lexical form.
+const REVIEWED_CASE_EQUIVALENT_DEFAULTS = new Map(Object.entries({
+  'ποιεῖσθαι': '/pɔɪeɪsθaɪ/',
+  'τίθεσθαι': '/tɪθɛsθaɪ/',
+  'οὗτος': '/huːtɒs/',
+  'θεοῦ': '/θɛu/',
+  'κύριος': '/kurioʊs/',
+  'είσποιεῖν': '/eɪspɔɪeɪn/',
+  'γνήσιος': '/ɡneɪsioʊs/',
+  'πάντας': '/pɑntɑs/',
+  'μητρός': '/meɪtrɒs/',
+  'υψιστος': '/hypsiːstɒs/',
+  'θεος': '/θɛoʊs/',
+  'έκποιεῖν': '/ɛkpɔɪeɪn/',
+  'διαθήκαι': '/diɑθeɪkaɪ/',
+  'διαθηκη': '/diɑθeɪkeɪ/',
+}));
+
+// Reviewed as potentially case-sensitive lexical distinctions; exact spelling
+// remains authoritative and case-fold fallback intentionally stays disabled.
+const REVIEWED_CASE_DISTINCT_GROUPS = new Set(['δία', 'δια']);
+
 const RETIRED_HEBREW_OCR_KEYS = new Set([
   'סת', 'הוהי', 'תמודב', 'רס', 'ןמא', 'נימ', 'יכלב', 'תש', 'לע', 'יל', 'םע',
   'ואתח', 'משתב', 'אולא', 'שרי', 'לדה', 'אבר', 'ויתח', 'משאב', 'ירבד', 'רביאתמ',
@@ -716,6 +741,54 @@ for (const [word, rawChoices] of Object.entries(originalLibrary)) {
   if (JSON.stringify(choices) !== JSON.stringify(cleanedLibrary[word])) {
     repaired.push({ word, reason: 'removed-or-normalized-unsafe-choices' });
   }
+}
+
+const caseGroups = new Map();
+for (const word of Object.keys(cleanedLibrary)) {
+  if (!/\p{Script=Greek}/u.test(word)) continue;
+  const folded = word.normalize('NFC').toLocaleLowerCase();
+  const words = caseGroups.get(folded) || [];
+  words.push(word);
+  caseGroups.set(folded, words);
+}
+
+for (const [folded, words] of caseGroups) {
+  if (words.length < 2) continue;
+  const reviewedDefault = REVIEWED_CASE_EQUIVALENT_DEFAULTS.get(folded);
+  if (!reviewedDefault) continue;
+
+  const allChoices = words.flatMap((word) => cleanedLibrary[word] || []);
+  const byPhonetic = new Map();
+  for (const choice of allChoices) {
+    const phonetic = choicePhonetic(choice);
+    if (phonetic && !byPhonetic.has(phonetic)) byPhonetic.set(phonetic, choice);
+  }
+  const template = byPhonetic.get(reviewedDefault) || allChoices[0] || {};
+  const synchronized = [
+    withPhonetic(template, reviewedDefault),
+    ...[...byPhonetic.entries()]
+      .filter(([phonetic]) => phonetic !== reviewedDefault)
+      .map(([, choice]) => choice),
+  ].slice(0, 5);
+
+  for (const word of words) {
+    if (JSON.stringify(cleanedLibrary[word]) !== JSON.stringify(synchronized)) {
+      repaired.push({ word, reason: 'reviewed-case-equivalent-pronunciations' });
+    }
+    cleanedLibrary[word] = synchronized.map((choice) => ({ ...choice }));
+  }
+}
+
+const unreviewedCaseConflicts = [];
+for (const [folded, words] of caseGroups) {
+  if (words.length < 2 || REVIEWED_CASE_DISTINCT_GROUPS.has(folded)) continue;
+  const defaults = new Set(words.map((word) => choicePhonetic(cleanedLibrary[word]?.[0])));
+  if (defaults.size > 1) unreviewedCaseConflicts.push({ folded, words: [...words] });
+}
+if (unreviewedCaseConflicts.length > 0) {
+  throw new Error(
+    `Unreviewed case-equivalent pronunciation conflicts: ${JSON.stringify(unreviewedCaseConflicts)}`,
+  );
 }
 
 for (const [word, definition] of Object.entries(originalDefinitions)) {

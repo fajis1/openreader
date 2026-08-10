@@ -11,6 +11,20 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-10 — Internally consistent case-equivalent dictionary entries
+
+- Audited all 2,584 Git-tracked pronunciation words for NFC and case-folded default conflicts. There were no conflicting NFC-equivalent keys; 16 Greek case groups had different defaults.
+- Synchronized the default and safe alternative list for 14 reviewed groups where capitalization does not change the lexical word, including `θεοῦ/Θεοῦ`, `ποιεῖσθαι/Ποιεῖσθαι`, and `διαθήκαι/Διαθήκαι`. Kept `Δία/δία` and `Δια/δια` as explicit reviewed case-sensitive exceptions because capitalization may distinguish a proper name or lexical use.
+- Strengthened the repeatable Git cleaner to fail on every future unreviewed Greek case conflict, while preserving explicitly reviewed semantic distinctions. The release remains at 2,584 words and now has 9,782 choices because equivalent variants share the same reviewed alternatives.
+- Verified an idempotent `pnpm dict:clean:check`, 76 focused dictionary/Smart Audio/pronunciation/multi-voice tests, targeted ESLint, and `git diff --check`. Follow-up: import the new shared dictionary release on each instance; unchanged local values can adopt it automatically, while locally modified conflicts remain reviewable by design.
+
+### 2026-08-10 — Authoritative post-Gemini pronunciation reconciliation
+
+- Added deterministic reconciliation before final Smart Audio validation, storage, and Kokoro: when Gemini tags a single visible word already present in the merged global/profile dictionary, only the IPA is replaced with the existing dictionary value. Visible text, untagged text, and unknown words are unchanged; safely aligned phrase tags are still split first.
+- Applied the same behavior to queued generation, direct chapter regeneration, and LitRPG voice segments. Canonically equivalent Unicode and unambiguous case variants match, while conflicting normalized/case-folded dictionary keys fail conservatively without selecting an arbitrary value.
+- Prevented Gemini's `new_pronunciations` response from overwriting or re-learning any already-known dictionary word. The existing structural and inflection validators still run after reconciliation and continue to fail closed for unknown bad output.
+- Verified 64 focused Smart Audio, pronunciation-policy, timeout, data-integrity, and multi-voice tests; targeted ESLint and `git diff --check` pass. Follow-up: restart/deploy the application code before resuming the stopped audiobook, then regenerate the failed chapter and confirm `ὑμῖν` uses `/hjumin/` in the saved review text and Kokoro request.
+
 ### 2026-08-10 — Final Smart Audio pronunciation/OCR gate and chapter-8 verification
 
 - Extended the server-appended cleanup contract so Gemini reconstructs contextually clear missing, split, duplicated, and visually confused OCR characters, then repeated a concise final pronunciation check immediately before the source text in Standard, Scholar, bibliography, and LitRPG multi-voice requests. The final check contains concrete phrase, OCR, inflection, and rough-breathing negative examples.

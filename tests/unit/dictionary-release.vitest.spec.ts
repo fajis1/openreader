@@ -66,7 +66,7 @@ describe('bundled dictionary releases', () => {
     const parsedTombstones = parseDictionaryReleaseTombstones(rawTombstones);
     expect(pronunciationPreview.issues).toEqual([]);
     expect(pronunciationPreview.validWords).toBe(2_584);
-    expect(pronunciationPreview.validChoices).toBe(9_767);
+    expect(pronunciationPreview.validChoices).toBe(9_782);
     expect(definitionPreview.issues).toEqual([]);
     expect(definitionPreview.validDefinitions).toBe(2_225);
     expect(Object.keys(parsedTombstones.entries)).toHaveLength(957);
@@ -77,6 +77,22 @@ describe('bundled dictionary releases', () => {
     expect(pronunciations.κτλ[0].phonetic).toBe('/K, T, L/');
     expect(pronunciations['πνεῦμα'][0].phonetic).toBe('/njumɑ/');
     expect(pronunciations['υἱοθεσία'][0].phonetic).toBe('/hwioʊθɛsiɑ/');
+
+    const greekCaseGroups = new Map<string, string[]>();
+    for (const word of Object.keys(pronunciations)) {
+      if (!/\p{Script=Greek}/u.test(word)) continue;
+      const folded = word.normalize('NFC').toLocaleLowerCase();
+      greekCaseGroups.set(folded, [...(greekCaseGroups.get(folded) || []), word]);
+    }
+    const conflictingDefaults = [...greekCaseGroups.entries()]
+      .filter(([, words]) => words.length > 1)
+      .filter(([, words]) => new Set(words.map((word) => pronunciations[word][0].phonetic)).size > 1)
+      .map(([folded]) => folded)
+      .sort();
+    expect(conflictingDefaults).toEqual(['δία', 'δια']);
+    expect(pronunciations['θεοῦ']).toEqual(pronunciations['Θεοῦ']);
+    expect(pronunciations['ποιεῖσθαι']).toEqual(pronunciations['Ποιεῖσθαι']);
+    expect(pronunciations['διαθήκαι']).toEqual(pronunciations['Διαθήκαι']);
   });
 
   test('validates tombstone fingerprints before accepting deletion instructions', () => {

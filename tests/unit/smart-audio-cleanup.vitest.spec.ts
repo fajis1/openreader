@@ -4,7 +4,9 @@ import {
   FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
   isScholarLikeSmartAudioMode,
   normalizeSmartAudioPronunciationTags,
+  reconcileSmartAudioPronunciations,
   resolveSmartAudioWorkerResult,
+  selectUnknownSmartAudioPronunciations,
   stripSmartAudioInputMarkers,
 } from '../../src/lib/shared/smart-audio-cleanup';
 
@@ -141,6 +143,43 @@ describe('Smart Audio cleanup contract', () => {
     expect(normalizeSmartAudioPronunciationTags('[υἱοῦσθαι](/huioʊsθaɪ/)')).toBe(
       '[υἱοῦσθαι](/huioʊsθaɪ/)',
     );
+  });
+
+  test('makes a known dictionary pronunciation authoritative before validation', () => {
+    expect(resolveSmartAudioWorkerResult({
+      status: 'success',
+      outcome: 'cleaned',
+      cleaned_text: '[ὑμῖν](/hjuːmis/)',
+    }, {
+      authoritativePronunciations: { 'ὑμῖν': '/hjumin/' },
+    })).toEqual({ outcome: 'cleaned', text: '[ὑμῖν](/hjumin/)' });
+  });
+
+  test('reconciles split phrase tags and canonically equivalent Unicode without changing visible text', () => {
+    const decomposed = 'ὑμῖν';
+    const source = `[${decomposed} λόγος](/wrong wrong/)`;
+    expect(reconcileSmartAudioPronunciations(source, {
+      'ὑμῖν': '/hjumin/',
+      'λόγος': '/loɡos/',
+    })).toBe(`[${decomposed}](/hjumin/) [λόγος](/loɡos/)`);
+  });
+
+  test('uses only an unambiguous case-folded match and leaves unknown words unchanged', () => {
+    expect(reconcileSmartAudioPronunciations(
+      '[LOGOS](/first/) [Other](/untouched/)',
+      { Logos: '/loɡos/' },
+    )).toBe('[LOGOS](/loɡos/) [Other](/untouched/)');
+    expect(reconcileSmartAudioPronunciations(
+      '[WORD](/gemini/)',
+      { Word: '/one/', word: '/two/' },
+    )).toBe('[WORD](/gemini/)');
+  });
+
+  test('does not relearn known words but keeps compatible unknown discoveries', () => {
+    expect(selectUnknownSmartAudioPronunciations(
+      { 'ὑμῖν': '/wrong/', Logos: '/new/', novel: '/nɑvəl/' },
+      { 'ὑμῖν': '/hjumin/', logos: '/loɡos/' },
+    )).toEqual({ novel: '/nɑvəl/' });
   });
 
   test('treats Scholar and bibliography-catcher as the same structural mode', () => {

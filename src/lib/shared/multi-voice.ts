@@ -1,4 +1,5 @@
 import {
+  reconcileSmartAudioPronunciations,
   SmartAudioOutputValidationError,
   validateSmartAudioOutput,
 } from '@/lib/shared/smart-audio-cleanup';
@@ -225,14 +226,16 @@ export function mergeExtractedCharacters(input: {
   };
 }
 
-function safeSegmentText(value: unknown): string {
+function safeSegmentText(value: unknown, authoritativePronunciations?: Record<string, string>): string {
   if (typeof value !== 'string') return '';
   const text = value.trim();
   if (!text) return '';
   if (/<[^>]+>/u.test(text) || PRIVATE_MULTI_VOICE_MARKER.test(text)) {
     throw new SmartAudioOutputValidationError('Multi-voice output contained markup or private control markers.');
   }
-  return validateSmartAudioOutput(text);
+  return validateSmartAudioOutput(authoritativePronunciations
+    ? reconcileSmartAudioPronunciations(text, authoritativePronunciations)
+    : text);
 }
 
 export function renderVoiceSegments(segments: readonly MultiVoiceSegment[]): string {
@@ -244,6 +247,7 @@ export function renderVoiceSegments(segments: readonly MultiVoiceSegment[]): str
 export function resolveMultiVoiceWorkerResult(
   value: unknown,
   cast: readonly MultiVoiceCastMember[],
+  options: { authoritativePronunciations?: Record<string, string> } = {},
 ): ResolvedMultiVoiceWorkerResult {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new SmartAudioOutputValidationError('Multi-voice worker returned an invalid response.');
@@ -283,7 +287,7 @@ export function resolveMultiVoiceWorkerResult(
     if (suppliedVoice && suppliedVoice !== member.voiceId) {
       throw new SmartAudioOutputValidationError(`Multi-voice worker changed the assigned voice for ${speaker}.`);
     }
-    const text = safeSegmentText(segment.text);
+    const text = safeSegmentText(segment.text, options.authoritativePronunciations);
     if (!text) continue;
     segments.push({ speaker, voiceId: member.voiceId, text });
   }

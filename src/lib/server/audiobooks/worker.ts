@@ -64,6 +64,7 @@ import {
   FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
   isScholarLikeSmartAudioMode,
   resolveSmartAudioWorkerResult,
+  selectUnknownSmartAudioPronunciations,
   stripSmartAudioInputMarkers,
   validateSmartAudioOutput,
 } from '@/lib/shared/smart-audio-cleanup';
@@ -830,11 +831,15 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
           if (workerResult.status === "success") {
             const multiVoiceResult = currentSelectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
-              ? resolveMultiVoiceWorkerResult(workerResult, multiVoiceCharacters)
+              ? resolveMultiVoiceWorkerResult(workerResult, multiVoiceCharacters, {
+                authoritativePronunciations: currentPronunciations,
+              })
               : null;
             const resolvedWorkerResult = multiVoiceResult
               ? { outcome: 'cleaned' as const, text: multiVoiceResult.taggedText }
-              : resolveSmartAudioWorkerResult(workerResult);
+              : resolveSmartAudioWorkerResult(workerResult, {
+                authoritativePronunciations: currentPronunciations,
+              });
             processedTextForTts = resolvedWorkerResult.text;
             if (multiVoiceResult?.continuityState) {
               continuityState = multiVoiceResult.continuityState;
@@ -866,7 +871,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             }, 'Recorded Gemini cleanup token usage.');
             
             // Save newly discovered pronunciations back to the profile AND the global registry!
-            const compatibleNewPronunciations = filterKokoroCompatiblePronunciationRecord(workerResult.new_pronunciations);
+            const compatibleNewPronunciations = selectUnknownSmartAudioPronunciations(
+              filterKokoroCompatiblePronunciationRecord(workerResult.new_pronunciations),
+              currentPronunciations,
+            );
             if (Object.keys(compatibleNewPronunciations).length > 0 && currentSelectedProfile) {
               try {
                 // Must read fresh just in case it was updated during generation

@@ -45,6 +45,42 @@ const INTERNAL_LAYOUT_ELEMENT = /<\/?openreader-layout\b[^>]*>/gimu;
 const INTERNAL_OUTPUT_MARKER = /\[\s*(?:LAYOUT_ENGINE_TAG|SYSTEM HINT|CHAPTER_TITLE)\s*:|\[\s*OMIT(?:TED)?\s*\]|<\/?openreader-layout\b/iu;
 const KOKORO_PRONUNCIATION_TAG = /\[([^\]\r\n]+)\]\(\/([^/\r\n]+)\/\)/gu;
 
+type PronunciationLookup = {
+  exact: Map<string, string | null>;
+  folded: Map<string, string | null>;
+};
+
+function buildPronunciationLookup(pronunciations: Record<string, string>): PronunciationLookup {
+  const exact = new Map<string, string | null>();
+  const folded = new Map<string, string | null>();
+  for (const [rawWord, rawPronunciation] of Object.entries(pronunciations)) {
+    const word = rawWord.trim().normalize('NFC');
+    const pronunciation = typeof rawPronunciation === 'string' ? rawPronunciation.trim() : '';
+    if (!word || /\s/u.test(word) || !/^\/[^/\r\n]+\/$/u.test(pronunciation)) continue;
+    const previousExact = exact.get(word);
+    if (previousExact === undefined) exact.set(word, pronunciation);
+    else if (previousExact !== pronunciation) exact.set(word, null);
+    const foldedWord = word.toLocaleLowerCase();
+    const previous = folded.get(foldedWord);
+    if (previous === undefined) folded.set(foldedWord, pronunciation);
+    else if (previous !== pronunciation) folded.set(foldedWord, null);
+  }
+  return { exact, folded };
+}
+
+function lookupPronunciation(word: string, lookup: PronunciationLookup): string | null {
+  const normalizedWord = word.normalize('NFC');
+  return lookup.exact.get(normalizedWord)
+    ?? lookup.folded.get(normalizedWord.toLocaleLowerCase())
+    ?? null;
+}
+
+function hasPronunciationWord(word: string, lookup: PronunciationLookup): boolean {
+  const normalizedWord = word.normalize('NFC');
+  return lookup.exact.has(normalizedWord)
+    || lookup.folded.has(normalizedWord.toLocaleLowerCase());
+}
+
 function scriptCount(value: string): number {
   return [
     /\p{Script=Latin}/u.test(value),
@@ -82,7 +118,10 @@ function assertGreekInflectionEnding(word: string, ipa: string): void {
   }
 }
 
-export function normalizeSmartAudioPronunciationTags(text: string): string {
+function rewriteSmartAudioPronunciationTags(
+  text: string,
+  pronunciationLookup?: PronunciationLookup,
+): string {
   return text.replace(KOKORO_PRONUNCIATION_TAG, (_tag, rawTerm: string, rawIpa: string) => {
     const term = rawTerm.trim();
     const ipa = rawIpa.trim();
@@ -95,14 +134,47 @@ export function normalizeSmartAudioPronunciationTags(text: string): string {
       );
     }
 
+    const resolvedIpaWords = termWords.map((word, index) => {
+      const authoritative = pronunciationLookup
+        ? lookupPronunciation(word, pronunciationLookup)
+        : null;
+      return authoritative ? authoritative.slice(1, -1) : ipaWords[index];
+    });
+
     for (const [index, word] of termWords.entries()) {
       assertSingleScriptWord(word);
-      assertGreekInflectionEnding(word, ipaWords[index]);
+      assertGreekInflectionEnding(word, resolvedIpaWords[index]);
     }
     return termWords
-      .map((word, index) => `[${word}](/${ipaWords[index]}/)`)
+      .map((word, index) => `[${word}](/${resolvedIpaWords[index]}/)`)
       .join(' ');
   });
+}
+
+export function normalizeSmartAudioPronunciationTags(text: string): string {
+  return rewriteSmartAudioPronunciationTags(text);
+}
+
+/**
+ * Makes an existing dictionary entry authoritative without changing Gemini's
+ * visible text or creating pronunciation tags for words Gemini did not tag.
+ */
+export function reconcileSmartAudioPronunciations(
+  text: string,
+  pronunciations: Record<string, string>,
+): string {
+  return rewriteSmartAudioPronunciationTags(text, buildPronunciationLookup(pronunciations));
+}
+
+/** Prevents Gemini from re-learning a conflicting value for a known word. */
+export function selectUnknownSmartAudioPronunciations(
+  learned: Record<string, string>,
+  authoritative: Record<string, string>,
+): Record<string, string> {
+  const lookup = buildPronunciationLookup(authoritative);
+  return Object.fromEntries(
+    Object.entries(learned).filter(([word]) => !hasPronunciationWord(word, lookup)),
+  );
 }
 
 export function stripSmartAudioInputMarkers(text: string): string {
@@ -143,7 +215,10 @@ export type ResolvedSmartAudioWorkerResult =
 
 export function resolveSmartAudioWorkerResult(
   value: unknown,
-  options: { allowTaggedText?: boolean } = {},
+  options: {
+    allowTaggedText?: boolean;
+    authoritativePronunciations?: Record<string, string>;
+  } = {},
 ): ResolvedSmartAudioWorkerResult {
   if (!value || typeof value !== 'object') {
     throw new SmartAudioOutputValidationError('Smart Audio worker returned an invalid response.');
@@ -182,6 +257,8 @@ export function resolveSmartAudioWorkerResult(
 
   return {
     outcome: 'cleaned',
-    text: validateSmartAudioOutput(normalizedCandidate),
+    text: validateSmartAudioOutput(options.authoritativePronunciations
+      ? reconcileSmartAudioPronunciations(normalizedCandidate, options.authoritativePronunciations)
+      : normalizedCandidate),
   };
 }
