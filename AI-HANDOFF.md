@@ -11,6 +11,20 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-10 — Final Smart Audio pronunciation/OCR gate and chapter-8 verification
+
+- Extended the server-appended cleanup contract so Gemini reconstructs contextually clear missing, split, duplicated, and visually confused OCR characters, then repeated a concise final pronunciation check immediately before the source text in Standard, Scholar, bibliography, and LitRPG multi-voice requests. The final check contains concrete phrase, OCR, inflection, and rough-breathing negative examples.
+- Added deterministic post-Gemini normalization and validation before storage/TTS: safely aligned phrase tags are split into one tag per word; unalignable phrases, mixed-script tagged words, Greek final-sigma/final-nu mismatches, and dropped rough-breathing `h` in `υἱ-` words fail closed.
+- Restarted OpenReader and both Python workers, then repeatedly regenerated only chapter 8 under an automatic pause guard. The gate caught and rejected a real `θετὸν -> /θɛtɒs/` inflection mismatch before storage. The final chapter-8 `__text.txt` has 80 balanced tags and zero phrase, mixed-script, inflection-ending, dropped-`h`, known OCR-fragment, replacement-character, or control-marker findings; `vio[θεσ]` was reconstructed and the checked forms include `υἱοῦν -> /huioʊn/`, `θετὸν -> /θɛtɒn/`, and `υἱοθεσία -> /huioʊθɛsiɑ/`. The audiobook remains paused.
+- Corrected the active Scholar profile and instance-global values for `υἱός`, `υἱὸς`, `υἱοῦν`, and `υἱοῦσθαι` to the reviewed `hui-` convention. Live SQLite backups were written under `docstore/backups/`, and each replaced chapter-8 artifact set was size-verified under `audiobook_regeneration_backups/`.
+- Verified 47 focused cleanup/data-integrity/timeout/multi-voice tests, Python compilation, targeted ESLint, and `git diff --check`. Follow-up: consider staging newly learned pronunciations for review instead of immediately promoting every structurally valid value to the profile/global library, because structural validation cannot prove every IPA is semantically correct.
+
+### 2026-08-09 — Mode-aware Smart Audio NATS timeout
+
+- Replaced the duplicated fixed 120-second Gemini/NATS request deadline with a shared resolver: Scholar, bibliography-catcher, and LitRPG multi-voice cleanup now default to 300 seconds, while standard cleanup remains at 120 seconds. `SMART_AUDIO_NATS_TIMEOUT_MS` can override the deadline and is bounded from 30 seconds to 15 minutes.
+- Applied the same timeout policy to background generation and direct chapter regeneration, and documented the optional environment setting in `.env.example`.
+- Verified 26 focused timeout/data-integrity tests, targeted ESLint, and `git diff --check`. Follow-up: restart or allow dev hot reload, then resume the paused audiobook and confirm slow scholarly batches can exceed two minutes without an NATS timeout.
+
 ### 2026-08-09 — Semantic cleanup of the shared pronunciation release
 
 - Re-audited the Git-tracked dictionary beyond structural validation. The release now has 2,584 words/9,767 choices/2,225 definitions; 957 fingerprinted tombstones retire damaged Greek/Hebrew OCR keys, IPA-as-word records, ambiguous English homographs, and other malformed historical entries without silently deleting locally modified conflicts.

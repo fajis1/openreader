@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import {
   buildSmartAudioCleanupPrompt,
+  FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
   isScholarLikeSmartAudioMode,
+  normalizeSmartAudioPronunciationTags,
   resolveSmartAudioWorkerResult,
   stripSmartAudioInputMarkers,
 } from '../../src/lib/shared/smart-audio-cleanup';
@@ -17,6 +19,31 @@ describe('Smart Audio cleanup contract', () => {
     expect(prompt).toContain('return exactly [OMIT]');
     expect(prompt.lastIndexOf('return exactly [OMIT]')).toBeGreaterThan(
       prompt.indexOf('return an empty string'),
+    );
+    expect(prompt).toContain('Reconstruct OCR-damaged words when context');
+    expect(prompt).toContain('Always output the reconstructed complete word');
+    expect(prompt).toContain('Pronunciation markup may wrap exactly one corrected lexical word');
+    expect(prompt).toContain('never wrap a phrase, clause, or multiple space-separated words');
+    expect(prompt).toContain('Repair contextually clear mixed-script OCR');
+    expect(prompt).toContain('Never preserve mixed-script corruption inside a pronunciation tag');
+    expect(prompt).toContain('Never evade that rule by wrapping an entire quotation');
+    expect(prompt.lastIndexOf('Pronunciation markup may wrap exactly one corrected lexical word')).toBeGreaterThan(
+      prompt.indexOf('Old profile rule'),
+    );
+    expect(FINAL_SMART_AUDIO_PRONUNCIATION_CHECK).toContain(
+      "INVALID: [καθ' υἱοθεσίαν δὲ](/kɑθ huioʊθɛsiɑn dɛ/)",
+    );
+    expect(FINAL_SMART_AUDIO_PRONUNCIATION_CHECK).toContain(
+      'VALID: [τὴν](/teɪn/) [θέσιν](/θɛsɪn/)',
+    );
+    expect(FINAL_SMART_AUDIO_PRONUNCIATION_CHECK).toContain(
+      'INVALID: [υἱός](/huɪɒn/)',
+    );
+    expect(FINAL_SMART_AUDIO_PRONUNCIATION_CHECK).toContain(
+      'INVALID: [θετὸν](/θɛtɒs/)',
+    );
+    expect(FINAL_SMART_AUDIO_PRONUNCIATION_CHECK).toContain(
+      'INVALID: [υἱοῦσθαι](/juoʊsθaɪ/)',
     );
   });
 
@@ -75,6 +102,45 @@ describe('Smart Audio cleanup contract', () => {
         cleaned_text: cleanedText,
       })).toThrow('internal control marker');
     }
+  });
+
+  test('splits safely aligned phrase pronunciations into individual word tags', () => {
+    expect(normalizeSmartAudioPronunciationTags(
+      "[καθ' υἱοθεσίαν δὲ](/kɑθ huioʊθɛsiɑn dɛ/)",
+    )).toBe("[καθ'](/kɑθ/) [υἱοθεσίαν](/huioʊθɛsiɑn/) [δὲ](/dɛ/)");
+    expect(normalizeSmartAudioPronunciationTags(
+      '[καὶ τὸ ἄγιον βάπτισμα](/kaɪ toʊ ɑɡioʊn bɑptɪsmɑ/)',
+    )).toBe('[καὶ](/kaɪ/) [τὸ](/toʊ/) [ἄγιον](/ɑɡioʊn/) [βάπτισμα](/bɑptɪsmɑ/)');
+  });
+
+  test('rejects unalignable phrases and mixed-script OCR before TTS', () => {
+    expect(() => normalizeSmartAudioPronunciationTags(
+      '[τὴν θέσιν](/teɪn/)',
+    )).toThrow('cannot be aligned safely');
+    expect(() => normalizeSmartAudioPronunciationTags(
+      '[ἄγiov](/ɑɡioʊn/)',
+    )).toThrow('mixed-script OCR text');
+  });
+
+  test('rejects obvious Greek inflection-ending mismatches', () => {
+    expect(() => normalizeSmartAudioPronunciationTags('[υἱός](/huɪɒn/)')).toThrow(
+      'does not match the visible Greek inflection ending',
+    );
+    expect(() => normalizeSmartAudioPronunciationTags('[υἱόν](/huioʊs/)')).toThrow(
+      'does not match the visible Greek inflection ending',
+    );
+    expect(normalizeSmartAudioPronunciationTags('[υἱός](/huioʊs/) [υἱόν](/huioʊn/)')).toBe(
+      '[υἱός](/huioʊs/) [υἱόν](/huioʊn/)',
+    );
+  });
+
+  test('rejects a dropped rough-breathing h from Greek υἱ- words', () => {
+    expect(() => normalizeSmartAudioPronunciationTags('[υἱοῦσθαι](/juoʊsθaɪ/)')).toThrow(
+      'drops the rough-breathing h',
+    );
+    expect(normalizeSmartAudioPronunciationTags('[υἱοῦσθαι](/huioʊsθaɪ/)')).toBe(
+      '[υἱοῦσθαι](/huioʊsθaɪ/)',
+    );
   });
 
   test('treats Scholar and bibliography-catcher as the same structural mode', () => {

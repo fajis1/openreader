@@ -178,11 +178,24 @@ describe('Smart Audio data-integrity guards', () => {
     expect(route).toContain('Do not mix Erasmian, historical, modern, or reconstructed systems');
   });
 
-  test('gives direct 12K cleanup requests the full worker timeout', () => {
+  test('gives direct 12K cleanup requests the mode-aware worker timeout', () => {
     const route = source('src/app/api/audiobook/chapter/route.ts');
     expect(route).toContain(
-      'nc.request(targetSubject, sc.encode(payload), { timeout: 120000 })',
+      'timeout: resolveSmartAudioNatsTimeoutMs(selectedProfile?.workerMode)',
     );
+  });
+
+  test('places final pronunciation checks after dynamic guidance and before source text', () => {
+    for (const workerPath of ['audiobook_worker.py', 'biblical_scholar_worker.py']) {
+      const worker = source(workerPath);
+      expect(worker).toContain('final_cleanup_rules = data.get("final_cleanup_rules", "")');
+      expect(worker).toContain('{title_instruction}{final_cleanup_rules}\\n\\nText to clean:');
+    }
+
+    const backgroundWorker = source('src/lib/server/audiobooks/worker.ts');
+    const directRoute = source('src/app/api/audiobook/chapter/route.ts');
+    expect(backgroundWorker).toContain('final_cleanup_rules: FINAL_SMART_AUDIO_PRONUNCIATION_CHECK');
+    expect(directRoute).toContain('final_cleanup_rules: FINAL_SMART_AUDIO_PRONUNCIATION_CHECK');
   });
 
   test('applies document PDF exclusions in the background worker before batching', () => {

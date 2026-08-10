@@ -30,6 +30,7 @@ import { isS3Configured } from '@/lib/server/storage/s3';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 import { getFFmpegPath } from '@/lib/server/audiobooks/ffmpeg-bin';
 import { generateSegmentedAudiobookTtsBuffer } from '@/lib/server/audiobooks/segmented-tts';
+import { resolveSmartAudioNatsTimeoutMs } from '@/lib/server/audiobooks/smart-audio-timeout';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { resolveEffectiveTtsInstructions } from '@/lib/server/admin/tts-instructions';
 import { getUpstreamRetryAfterSeconds, getUpstreamStatus } from '@/lib/server/tts/upstream-response';
@@ -67,6 +68,7 @@ import { readGlobalDefinitions } from '@/lib/server/smart-audio/global-definitio
 import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
 import {
   buildSmartAudioCleanupPrompt,
+  FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
   isScholarLikeSmartAudioMode,
   resolveSmartAudioWorkerResult,
   validateSmartAudioOutput,
@@ -853,6 +855,7 @@ export async function POST(request: NextRequest) {
               characters: multiVoiceCast,
               continuity_state: 'Beginning of selected chapter.',
               pronunciation_prompt: buildKokoroPronunciationInstructions(selectedProfile),
+              final_cleanup_rules: FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
               pronunciations: finalPronunciations,
             }
             : {
@@ -860,6 +863,7 @@ export async function POST(request: NextRequest) {
               api_key: geminiApiKey,
               ai_model: resolveCleanupAiModel(selectedProfile),
               prompt: buildSmartAudioCleanupPrompt(selectedProfile?.customTtsPrompt),
+              final_cleanup_rules: FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
               pronunciation_prompt: buildKokoroPronunciationInstructions(selectedProfile),
               raw_text: enrichedText,
               pronunciations: finalPronunciations,
@@ -873,7 +877,9 @@ export async function POST(request: NextRequest) {
             : isScholarLikeMode
               ? SCHOLAR_NATS_SUBJECT
               : SMART_AUDIO_NATS_SUBJECT;
-          const msg = await nc.request(targetSubject, sc.encode(payload), { timeout: 120000 });
+          const msg = await nc.request(targetSubject, sc.encode(payload), {
+            timeout: resolveSmartAudioNatsTimeoutMs(selectedProfile?.workerMode),
+          });
           const workerResult = JSON.parse(sc.decode(msg.data));
 
           if (workerResult.status === "success") {

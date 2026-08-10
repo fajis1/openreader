@@ -47,6 +47,7 @@ async def process_message(msg):
     backup_api_key = data.get("backup_api_key")
     prompt = data.get("prompt")
     pronunciation_prompt = data.get("pronunciation_prompt", "")
+    final_cleanup_rules = data.get("final_cleanup_rules", "")
     raw_text = data.get("raw_text")
     
     text_length = len(raw_text) if raw_text else 0
@@ -83,7 +84,7 @@ async def process_message(msg):
         dynamic_constraints = f"CRITICAL CONTINUITY RULE: Use these exact phonetic spellings:\n{dict_string}\n\n"
         title_instruction = "CHAPTER TITLE GENERATION: For narratable text, you MUST summarize the provided text into a unique 3 to 5 word descriptive title based on its actual contents. DO NOT just copy the existing chapter title (e.g. 'Foreword' or 'Chapter 1'). At the very end of your response, after the cleaned text, you MUST add exactly one blank line and then output the title wrapped in tags exactly like this: [CHAPTER_TITLE: Three Word Summary]. Do not include the chapter number or 'continued'. If the correct result is [OMIT], return only [OMIT] and do not add a chapter title.\n\n"
         
-        full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\n{title_instruction}Text to clean:\n{enriched_text}"
+        full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\n{title_instruction}{final_cleanup_rules}\n\nText to clean:\n{enriched_text}"
         final_text = ""
         
         api_state = API_STATES.setdefault(api_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})

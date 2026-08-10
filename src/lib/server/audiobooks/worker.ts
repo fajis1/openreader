@@ -50,6 +50,7 @@ import {
 } from '@/lib/server/smart-audio/book-lexicon';
 import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
 import { generateSegmentedAudiobookTtsBuffer } from '@/lib/server/audiobooks/segmented-tts';
+import { resolveSmartAudioNatsTimeoutMs } from '@/lib/server/audiobooks/smart-audio-timeout';
 import {
   normalizeGlobalPronunciationLibrary,
   recordLearnedGlobalPronunciation,
@@ -60,6 +61,7 @@ import { mergeDocumentSettings } from '@/lib/shared/document-settings';
 import { DEFAULT_DOCUMENT_SETTINGS } from '@/types/document-settings';
 import {
   buildSmartAudioCleanupPrompt,
+  FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
   isScholarLikeSmartAudioMode,
   resolveSmartAudioWorkerResult,
   stripSmartAudioInputMarkers,
@@ -784,7 +786,8 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               characters: multiVoiceCharacters,
               continuity_state: continuityState,
               pronunciations: applicablePronunciations,
-              pronunciation_prompt: buildKokoroPronunciationInstructions(currentSelectedProfile)
+              pronunciation_prompt: buildKokoroPronunciationInstructions(currentSelectedProfile),
+              final_cleanup_rules: FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
             });
             natsSubject = 'audiobooks.multivoice.assign';
           } else {
@@ -794,6 +797,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               api_key: geminiApiKey,
               ai_model: resolveCleanupAiModel(currentSelectedProfile),
               prompt: buildSmartAudioCleanupPrompt(currentSelectedProfile?.customTtsPrompt),
+              final_cleanup_rules: FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
               pronunciation_prompt: buildKokoroPronunciationInstructions(currentSelectedProfile),
               raw_text: enrichedChapterText,
               pronunciations: applicablePronunciations,
@@ -805,7 +809,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               : SMART_AUDIO_NATS_SUBJECT;
           }
 
-          const msg = await nc.request(natsSubject, sc.encode(payload), { timeout: 120000 });
+          const msg = await nc.request(natsSubject, sc.encode(payload), {
+            timeout: resolveSmartAudioNatsTimeoutMs(currentSelectedProfile?.workerMode),
+          });
           const workerResult = JSON.parse(sc.decode(msg.data));
 
           if (workerResult.status === "rate_limit") {
