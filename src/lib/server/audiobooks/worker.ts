@@ -411,6 +411,16 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           section: 'table_of_contents',
         }, 'Removed the PDF table of contents before Smart Audio and TTS processing.');
       }
+      if (preparedPdfBlocks.endMatterSkipped) {
+        serverLogger.info({
+          event: 'audiobook.queue.end_matter.omitted',
+          bookId,
+          reason: 'confirmed_pdf_end_matter',
+          heading: preparedPdfBlocks.endMatterStartHeading,
+          startPage: preparedPdfBlocks.endMatterStartPage,
+          count: preparedPdfBlocks.endMatterSkippedBlockCount,
+        }, 'Removed PP-DocLayout-confirmed PDF end matter before chapter batching.');
+      }
       const chapterBoundaryKinds = new Set(['paragraph_title', 'doc_title']);
       
       let currentTitle = 'Introduction';

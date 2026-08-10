@@ -6,7 +6,6 @@ import { Providers } from '@/app/providers';
 import { ConfigProvider } from '@/contexts/ConfigContext';
 import { AppMain, AppShell } from '@/components/layout';
 import { getAuthBaseUrl, isAnonymousAuthSessionsEnabled, isGithubAuthEnabled, isGoogleAuthEnabled } from '@/lib/server/auth/config';
-import { DictionaryUpdateModal } from '@/components/DictionaryUpdateModal';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,7 +67,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           },
         }}
       />
-      <DictionaryUpdateModal />
     </Providers>
   );
 }

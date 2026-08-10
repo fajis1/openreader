@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import ClaimDataModal, { type ClaimableCounts } from '@/components/auth/ClaimDataModal';
 import { DexieMigrationModal } from '@/components/documents/DexieMigrationModal';
 import { PrivacyModal } from '@/components/PrivacyModal';
+import { DictionaryUpdateModal } from '@/components/DictionaryUpdateModal';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useRuntimeConfig } from '@/contexts/RuntimeConfigContext';
 import { getAllEpubDocuments, getAllHtmlDocuments, getAllPdfDocuments, getAppConfig, setFirstVisit } from '@/lib/client/dexie';
@@ -113,6 +114,7 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
   const isAnonymous = Boolean(user?.isAnonymous);
 
   const [activeBlockingModal, setActiveBlockingModal] = useState<'privacy' | 'claim' | 'migration' | null>(null);
+  const [hasResolvedBlockingFlow, setHasResolvedBlockingFlow] = useState(false);
   const [claimableCounts, setClaimableCounts] = useState<ClaimableCounts>(EMPTY_CLAIM_COUNTS);
   const [migrationCounts, setMigrationCounts] = useState<{ localCount: number; missingCount: number }>({
     localCount: 0,
@@ -171,6 +173,7 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
       migrationRequired: migrationState.shouldPrompt,
       changelogPending: pendingChangelogOpenRef.current,
     });
+    setHasResolvedBlockingFlow(true);
 
     if (nextStep === 'privacy') {
       setActiveBlockingModal('privacy');
@@ -210,21 +213,25 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
     if (userId) {
       claimDismissedUsersRef.current.add(userId);
     }
+    setHasResolvedBlockingFlow(false);
     setActiveBlockingModal(null);
     void runFlow();
   }, [runFlow, userId]);
 
   const handleMigrationComplete = useCallback(() => {
+    setHasResolvedBlockingFlow(false);
     setActiveBlockingModal(null);
     void runFlow();
   }, [runFlow]);
 
   const handlePrivacyAccepted = useCallback(() => {
+    setHasResolvedBlockingFlow(false);
     setActiveBlockingModal(null);
     void runFlow();
   }, [runFlow]);
 
   useEffect(() => {
+    setHasResolvedBlockingFlow(false);
     void runFlow();
   }, [isAnonymous, runFlow, userId]);
 
@@ -279,6 +286,7 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
         missingCount={migrationCounts.missingCount}
         onComplete={handleMigrationComplete}
       />
+      {hasResolvedBlockingFlow && activeBlockingModal === null ? <DictionaryUpdateModal /> : null}
     </OnboardingFlowContext.Provider>
   );
 }

@@ -11,6 +11,24 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-10 — Preserve PP-DocLayout evidence for deterministic end-matter removal
+
+- Detect confirmed PDF end matter from the original PP-DocLayout blocks before configured kinds such as `header` are removed, then exclude the confirmed tail before chapter batching, Smart Audio, and TTS.
+- Backtrack a confirmed `Bibliography`/reference heading to a nearby `Primary Sources` lead only when the intervening blocks are reference-like; unconfirmed narrative sections remain intact. Added structured worker logging with the heading, page, omitted block count, and `confirmed_pdf_end_matter` reason.
+- Verified 6 focused PDF adapter tests, targeted ESLint, `git diff --check`, and the saved failed book artifact: its chapter map now ends at 33 chapters and no bibliography batch exists at index 33. Repository-wide TypeScript remains blocked only by existing untracked diagnostic scripts/routes.
+
+### 2026-08-10 — Privacy/dictionary modal interaction fix
+
+- Fixed the privacy dialog appearing visually above the dictionary update dialog while the later-mounted dictionary dialog retained pointer/focus ownership. Dictionary update checking now mounts inside the onboarding coordinator only after privacy, claim-data, and Dexie migration blockers have fully resolved.
+- Added a resolved-flow guard to prevent the dictionary dialog from flashing open during initial onboarding checks or between consecutive blocking steps.
+- Verified 14 focused onboarding/dictionary-release tests, targeted ESLint, and `git diff --check`.
+
+### 2026-08-10 — Dictionary update bulk-selection controls
+
+- Added `Select Safe`, confirmation-gated `Select All`, and `Clear All` controls to the shared/personal dictionary update dialog, with live counts for safe, total, and selected updates.
+- `Select All` explicitly warns when it includes conflicting or locally modified values that may replace reviewed local pronunciations or definitions; the existing safe preselection behavior is unchanged.
+- Verified the 7 dictionary-release tests, targeted ESLint, and `git diff --check`.
+
 ### 2026-08-10 — Internally consistent case-equivalent dictionary entries
 
 - Audited all 2,584 Git-tracked pronunciation words for NFC and case-folded default conflicts. There were no conflicting NFC-equivalent keys; 16 Greek case groups had different defaults.

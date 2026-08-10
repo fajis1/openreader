@@ -204,6 +204,14 @@ describe('bundled dictionary releases', () => {
       path.join(process.cwd(), 'src/components/DictionaryUpdateModal.tsx'),
       'utf8',
     );
+    const onboarding = fs.readFileSync(
+      path.join(process.cwd(), 'src/contexts/OnboardingFlowContext.tsx'),
+      'utf8',
+    );
+    const appLayout = fs.readFileSync(
+      path.join(process.cwd(), 'src/app/(app)/layout.tsx'),
+      'utf8',
+    );
     const dockerfile = fs.readFileSync(path.join(process.cwd(), 'Dockerfile'), 'utf8');
     const nextConfig = fs.readFileSync(path.join(process.cwd(), 'next.config.ts'), 'utf8');
     const syncScript = fs.readFileSync(
@@ -225,6 +233,15 @@ describe('bundled dictionary releases', () => {
     expect(modal).toContain('selectedPronunciationRemovals');
     expect(modal).toContain('Locally modified; kept by default');
     expect(modal).toContain('gitChoices');
+    expect(modal).toContain('Select Safe (');
+    expect(modal).toContain('Select All (');
+    expect(modal).toContain('Clear All');
+    expect(modal).toContain('window.confirm(');
+    expect(modal).toContain('may replace reviewed local pronunciations or definitions');
+    expect(onboarding).toContain(
+      'hasResolvedBlockingFlow && activeBlockingModal === null ? <DictionaryUpdateModal /> : null',
+    );
+    expect(appLayout).not.toContain('<DictionaryUpdateModal');
     expect(dockerfile).toContain('scripts/sync-dict-to-git.mjs');
     expect(dockerfile).toContain('default_global_pronunciation_tombstones.json');
     expect(nextConfig).toContain("'/api/tts/dictionary-updates'");

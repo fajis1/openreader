@@ -217,4 +217,110 @@ describe('pdf audiobook adapter', () => {
     expect(current?.[0]?.title).toBe('Chapter One');
     expect(current?.[0]?.text).toContain('A short real chapter begins.');
   });
+
+  test('removes confirmed PP-DocLayout bibliography blocks before header filtering', () => {
+    const makeBlock = (
+      id: string,
+      kind: 'text' | 'header' | 'paragraph_title' | 'reference' | 'reference_content' | 'number',
+      text: string,
+      page: number,
+    ) => ({
+      id,
+      kind,
+      text,
+      fragments: [{ page, bbox: [0, 0, 100, 20] as [number, number, number, number], text, readingOrder: 0 }],
+    });
+    const parsed: ParsedPdfDocument = {
+      schemaVersion: 1,
+      documentId: 'doc-bibliography',
+      parserVersion: 'test',
+      parsedAt: 1,
+      pages: Array.from({ length: 10 }, (_, index) => {
+        const page = index + 1;
+        const blocks = page === 8
+          ? [
+              makeBlock('primary', 'paragraph_title', 'Primary Sources', page),
+              makeBlock('primary-entry', 'reference_content', 'Aristotle. Politics.', page),
+            ]
+          : page === 9
+            ? [
+                makeBlock('page-number', 'number', '272', page),
+                makeBlock('bibliography-header', 'header', 'Bibliography', page),
+                makeBlock('reference', 'reference', 'Augustine. De civitate Dei.', page),
+              ]
+            : page === 10
+              ? [
+                  makeBlock('subheading', 'paragraph_title', 'Greco-Roman Texts', page),
+                  makeBlock('misclassified-entry', 'text', 'Epictetus. Dissertationes.', page),
+                ]
+              : [makeBlock(`body-${page}`, 'text', `Narrative page ${page}.`, page)];
+        return { pageNumber: page, width: 100, height: 100, blocks };
+      }),
+    };
+
+    const result = preparePdfAudiobookBlocks({
+      parsed,
+      settings: { schemaVersion: 1, pdf: { skipBlockKinds: ['header'] } },
+      cleanupBatchVersion: CURRENT_AUDIOBOOK_BATCH_VERSION,
+    });
+
+    expect(result.endMatterSkipped).toBe(true);
+    expect(result.endMatterStartHeading).toBe('Primary Sources');
+    expect(result.endMatterStartPage).toBe(8);
+    expect(result.endMatterSkippedBlockCount).toBe(7);
+    expect(result.blocks.map((block) => block.text)).toEqual([
+      'Narrative page 1.',
+      'Narrative page 2.',
+      'Narrative page 3.',
+      'Narrative page 4.',
+      'Narrative page 5.',
+      'Narrative page 6.',
+      'Narrative page 7.',
+    ]);
+  });
+
+  test('preserves an unconfirmed Primary Sources narrative section', () => {
+    const parsed: ParsedPdfDocument = {
+      schemaVersion: 1,
+      documentId: 'doc-primary-sources-narrative',
+      parserVersion: 'test',
+      parsedAt: 1,
+      pages: Array.from({ length: 10 }, (_, index) => {
+        const page = index + 1;
+        return {
+          pageNumber: page,
+          width: 100,
+          height: 100,
+          blocks: page === 8
+            ? [
+                {
+                  id: 'primary-heading',
+                  kind: 'paragraph_title' as const,
+                  text: 'Primary Sources',
+                  fragments: [{ page, bbox: [0, 0, 100, 20] as [number, number, number, number], text: 'Primary Sources', readingOrder: 0 }],
+                },
+                {
+                  id: 'primary-prose',
+                  kind: 'text' as const,
+                  text: 'This chapter now compares the primary sources in their historical context.',
+                  fragments: [{ page, bbox: [0, 20, 100, 40] as [number, number, number, number], text: 'This chapter now compares the primary sources in their historical context.', readingOrder: 1 }],
+                },
+              ]
+            : [],
+        };
+      }),
+    };
+
+    const result = preparePdfAudiobookBlocks({
+      parsed,
+      settings: { schemaVersion: 1, pdf: { skipBlockKinds: ['header'] } },
+      cleanupBatchVersion: CURRENT_AUDIOBOOK_BATCH_VERSION,
+    });
+
+    expect(result.endMatterSkipped).toBe(false);
+    expect(result.blocks.map((block) => block.text)).toEqual([
+      'Primary Sources',
+      'This chapter now compares the primary sources in their historical context.',
+    ]);
+  });
 });

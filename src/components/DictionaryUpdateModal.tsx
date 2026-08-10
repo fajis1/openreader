@@ -95,6 +95,24 @@ export function DictionaryUpdateModal() {
     }
   };
 
+  const safeUpdateIds = data
+    ? data.updates.filter((update) => update.safeToApply).map(updateId)
+    : [];
+  const allUpdateIds = data ? data.updates.map(updateId) : [];
+
+  const selectSafeUpdates = () => setSelectedUpdates(new Set(safeUpdateIds));
+  const selectAllUpdates = () => {
+    if (!data) return;
+    const unsafeCount = data.updates.length - safeUpdateIds.length;
+    if (
+      unsafeCount > 0
+      && !window.confirm(
+        `Select all ${data.updates.length} updates? This includes ${unsafeCount} conflicting or locally modified ${unsafeCount === 1 ? 'value' : 'values'} and may replace reviewed local pronunciations or definitions.`,
+      )
+    ) return;
+    setSelectedUpdates(new Set(allUpdateIds));
+  };
+
   if (!data) return null;
 
   return (
@@ -108,6 +126,36 @@ export function DictionaryUpdateModal() {
             ? 'New entries and unchanged malformed entries are selected. Conflicting or locally modified values remain unselected unless you explicitly choose them.'
             : 'You can add new shared defaults to this profile and remove personal entries that exactly match retired malformed values. Modified personal entries remain unselected.'}
         </p>
+
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <button
+            type="button"
+            onClick={selectSafeUpdates}
+            disabled={isSaving || safeUpdateIds.length === 0}
+            className="rounded border border-line bg-surface px-3 py-1.5 text-foreground hover:bg-accent-wash disabled:opacity-50"
+          >
+            Select Safe ({safeUpdateIds.length})
+          </button>
+          <button
+            type="button"
+            onClick={selectAllUpdates}
+            disabled={isSaving || allUpdateIds.length === 0 || selectedUpdates.size === allUpdateIds.length}
+            className="rounded border border-warning bg-warning-wash px-3 py-1.5 text-warning hover:opacity-80 disabled:opacity-50"
+          >
+            Select All ({allUpdateIds.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedUpdates(new Set())}
+            disabled={isSaving || selectedUpdates.size === 0}
+            className="rounded border border-line bg-surface px-3 py-1.5 text-soft hover:bg-accent-wash hover:text-foreground disabled:opacity-50"
+          >
+            Clear All
+          </button>
+          <span className="ml-auto text-xs text-soft">
+            {selectedUpdates.size} selected
+          </span>
+        </div>
 
         <div className="flex-1 overflow-auto rounded border border-line">
           <table className="w-full text-left text-sm">
