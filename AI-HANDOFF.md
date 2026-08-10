@@ -11,6 +11,14 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 ## Handoff Log
 
+### 2026-08-10 — Current scholarly audiobook forensic findings and operating state
+
+- Audited book `f9ecaad51104fc8aee56afc098fcb37c0aeb8481d764d798dd344d44eb18b9b8` against its saved PP-DocLayout artifact. Before bibliography page 288, PP-DocLayout extracted 714,916 characters: 372,106 as body `text` and 335,009 as `footnote`. The current roughly six-hour audiobook intentionally excludes those footnotes; the previous roughly twelve-hour result included much of them because the background path had not deterministically applied `skipBlockKinds` before Gemini.
+- Reviewed all 1,142 pre-bibliography `footnote` blocks: average model confidence was 97.08%, none began in the upper body area, and the only geometric overlap was a genuine continued note. No evidence was found that body prose was broadly mislabeled as footnotes. A few genuine notes are instead mislabeled as `text`; Gemini remains responsible for omitting those occasional survivors.
+- Inspected every remaining page after the final narrative batch. Pages 288–354 are bibliography/reference material, 356–360 are the subject index, 362–370 are biblical/ancient-source indexes, and 372–373 are the series index. There is no later narrative chapter to resume after cleanup batch 33.
+- The chapter database contains 33 rows and 33 distinct Gemini-generated titles. Existing audio blob filenames still encode inherited headings, and a previously combined M4B collapsed adjacent repeated headings into about eight markers. Commits `59a3eec` and `5d4a22c` make status/listening responses prefer database titles, name future blobs after final Smart Audio titles, and invalidate/rebuild combined audio using titles in its cache signature.
+- Follow-up: restart OpenReader if server hot reload has not applied the routes, refresh the listening UI, and request the full audiobook again. This should rebuild the combined M4B with 33 database-title chapter markers without regenerating speech. Previously downloaded combined files remain stale and must be replaced.
+
 ### 2026-08-10 — Display final Smart Audio titles for cleanup batches
 
 - Fixed audiobook status responses to prefer each chapter's database title over the inherited pre-Gemini title encoded in its existing blob filename. The current scholarly audiobook already has 33 distinct final titles in the database, so the listening UI can show them without regenerating audio.
