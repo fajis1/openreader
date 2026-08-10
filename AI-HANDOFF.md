@@ -15,7 +15,8 @@ Shared tracked context for Gemini/Antigravity (`agy`) and Codex.
 
 - Fixed audiobook status responses to prefer each chapter's database title over the inherited pre-Gemini title encoded in its existing blob filename. The current scholarly audiobook already has 33 distinct final titles in the database, so the listening UI can show them without regenerating audio.
 - Future background generation now encodes the audio filename only after Smart Audio returns its final chapter title, keeping blob discovery and database metadata consistent.
-- Verified 38 focused Smart Audio/batching tests, targeted status-route/test ESLint, and `git diff --check`. Full worker-file ESLint remains blocked by its existing unrelated console, `require`, `any`, and `prefer-const` findings.
+- Combined MP3/M4B generation now overlays database titles before writing chapter markers and includes titles in its cache signature, invalidating stale combined files that collapsed adjacent chunks under inherited headings.
+- Verified 38 focused Smart Audio/batching tests, targeted status-route/test ESLint, and `git diff --check`. Full worker-file ESLint remains blocked by its existing unrelated console, `require`, `any`, and `prefer-const` findings; the combined-audiobook route retains two pre-existing debug-console findings.
 
 ### 2026-08-10 — Preserve PP-DocLayout evidence for deterministic end-matter removal
 

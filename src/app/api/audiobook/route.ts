@@ -197,11 +197,30 @@ export async function GET(request: NextRequest) {
 
     const objects = await listAudiobookObjects(bookId, storageUserId, testNamespace);
     const objectNames = objects.map((item) => item.fileName);
-    const chapters = listChapterObjects(objectNames);
+    let chapters = listChapterObjects(objectNames);
     if (chapters.length === 0) {
       console.log('DEBUG 404: No chapters found', { bookId, storageUserId, testNamespace, objectNames, objectsLength: objects.length });
       return NextResponse.json({ error: 'No chapters found' }, { status: 404 });
     }
+
+    const chapterRows = await db
+      .select({
+        chapterIndex: audiobookChapters.chapterIndex,
+        duration: audiobookChapters.duration,
+        title: audiobookChapters.title,
+      })
+      .from(audiobookChapters)
+      .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, storageUserId)));
+    const durationByIndex = new Map<number, number>();
+    const titleByIndex = new Map<number, string>();
+    for (const row of chapterRows) {
+      durationByIndex.set(row.chapterIndex, Number(row.duration ?? 0));
+      if (row.title.trim()) titleByIndex.set(row.chapterIndex, row.title.trim());
+    }
+    chapters = chapters.map((chapter) => ({
+      ...chapter,
+      title: titleByIndex.get(chapter.index) ?? chapter.title,
+    }));
 
     const chapterFormats = new Set(chapters.map((chapter) => chapter.format));
     if (chapterFormats.size > 1) {
@@ -211,7 +230,11 @@ export async function GET(request: NextRequest) {
     const format: TTSAudiobookFormat = requestedFormat ?? chapters[0].format;
     const completeName = `complete.${format}`;
     const manifestName = `${completeName}.manifest.json`;
-    const signature = chapters.map((chapter) => ({ index: chapter.index, fileName: chapter.fileName }));
+    const signature = chapters.map((chapter) => ({
+      index: chapter.index,
+      fileName: chapter.fileName,
+      title: chapter.title,
+    }));
 
     const rawTitle = existingBookRows[0].title || 'audiobook';
     const safeTitle = rawTitle.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
@@ -236,15 +259,6 @@ export async function GET(request: NextRequest) {
 
       await deleteAudiobookObject(bookId, storageUserId, completeName, testNamespace).catch(() => {});
       await deleteAudiobookObject(bookId, storageUserId, manifestName, testNamespace).catch(() => {});
-    }
-
-    const chapterRows = await db
-      .select({ chapterIndex: audiobookChapters.chapterIndex, duration: audiobookChapters.duration })
-      .from(audiobookChapters)
-      .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, storageUserId)));
-    const durationByIndex = new Map<number, number>();
-    for (const row of chapterRows) {
-      durationByIndex.set(row.chapterIndex, Number(row.duration ?? 0));
     }
 
     workDir = await mkdtemp(join(tmpdir(), 'openreader-audiobook-combine-'));
@@ -486,10 +500,29 @@ export async function POST(request: NextRequest) {
 
     const objects = await listAudiobookObjects(bookId, storageUserId, testNamespace);
     const objectNames = objects.map((item) => item.fileName);
-    const chapters = listChapterObjects(objectNames);
+    let chapters = listChapterObjects(objectNames);
     if (chapters.length === 0) {
       return NextResponse.json({ error: 'No chapters found' }, { status: 404 });
     }
+
+    const chapterRows = await db
+      .select({
+        chapterIndex: audiobookChapters.chapterIndex,
+        duration: audiobookChapters.duration,
+        title: audiobookChapters.title,
+      })
+      .from(audiobookChapters)
+      .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, storageUserId)));
+    const durationByIndex = new Map<number, number>();
+    const titleByIndex = new Map<number, string>();
+    for (const row of chapterRows) {
+      durationByIndex.set(row.chapterIndex, Number(row.duration ?? 0));
+      if (row.title.trim()) titleByIndex.set(row.chapterIndex, row.title.trim());
+    }
+    chapters = chapters.map((chapter) => ({
+      ...chapter,
+      title: titleByIndex.get(chapter.index) ?? chapter.title,
+    }));
 
     const chapterFormats = new Set(chapters.map((chapter) => chapter.format));
     if (chapterFormats.size > 1) {
@@ -499,7 +532,11 @@ export async function POST(request: NextRequest) {
     const format: TTSAudiobookFormat = requestedFormat ?? chapters[0].format;
     const completeName = `complete.${format}`;
     const manifestName = `${completeName}.manifest.json`;
-    const signature = chapters.map((chapter) => ({ index: chapter.index, fileName: chapter.fileName }));
+    const signature = chapters.map((chapter) => ({
+      index: chapter.index,
+      fileName: chapter.fileName,
+      title: chapter.title,
+    }));
 
     if (objectNames.includes(completeName) && objectNames.includes(manifestName)) {
       try {
@@ -513,15 +550,6 @@ export async function POST(request: NextRequest) {
 
       await deleteAudiobookObject(bookId, storageUserId, completeName, testNamespace).catch(() => {});
       await deleteAudiobookObject(bookId, storageUserId, manifestName, testNamespace).catch(() => {});
-    }
-
-    const chapterRows = await db
-      .select({ chapterIndex: audiobookChapters.chapterIndex, duration: audiobookChapters.duration })
-      .from(audiobookChapters)
-      .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, storageUserId)));
-    const durationByIndex = new Map<number, number>();
-    for (const row of chapterRows) {
-      durationByIndex.set(row.chapterIndex, Number(row.duration ?? 0));
     }
 
     workDir = await mkdtemp(join(tmpdir(), 'openreader-audiobook-combine-'));

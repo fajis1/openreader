@@ -10,6 +10,7 @@ const source = (relativePath: string) => fs.readFileSync(
 describe('Smart Audio data-integrity guards', () => {
   test('shows and persists the final Smart Audio title instead of the inherited blob title', () => {
     const statusRoute = source('src/app/api/audiobook/status/route.ts');
+    const combineRoute = source('src/app/api/audiobook/route.ts');
     const worker = source('src/lib/server/audiobooks/worker.ts');
     expect(statusRoute).toContain('titleByIndex.get(chapter.index) ?? chapter.title');
     expect(statusRoute.indexOf('title: audiobookChapters.title')).toBeLessThan(
@@ -18,6 +19,8 @@ describe('Smart Audio data-integrity guards', () => {
     expect(worker.indexOf('const resolvedChapterTitle')).toBeLessThan(
       worker.indexOf('const chapterFileName = encodeChapterFileName'),
     );
+    expect(combineRoute.match(/title: titleByIndex\.get\(chapter\.index\) \?\? chapter\.title/g)).toHaveLength(2);
+    expect(combineRoute.match(/title: chapter\.title,/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
   test('does not promote personal scan overrides into the global library', () => {
