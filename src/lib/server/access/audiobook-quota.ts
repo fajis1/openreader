@@ -1,7 +1,7 @@
 import { and, count, eq, gte } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '@/db';
-import { adminSettings, audiobookJobs } from '@/db/schema';
+import { adminSettings, audiobookJobs, userJobEvents } from '@/db/schema';
 import { getRuntimeConfig } from '@/lib/server/admin/settings';
 
 export type AudiobookCreditLedger = {
@@ -24,6 +24,7 @@ export type AudiobookCreditLedger = {
 };
 
 const CREDIT_PREFIX = 'audiobook_extra_credits:';
+export const MONTHLY_AUDIOBOOK_USAGE_ACTION = 'audiobook_full_generation';
 
 function creditKey(userId: string): string {
   return `${CREDIT_PREFIX}${userId}`;
@@ -120,15 +121,113 @@ function startOfUtcMonthMs(now = new Date()): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0);
 }
 
+function isFullGenerationJob(settingsJson: unknown): boolean {
+  let value = settingsJson;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return true;
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return true;
+  const settings = value as Record<string, unknown>;
+  return settings.batchRegenerate !== true && settings.monthlyQuotaCharge !== false;
+}
+
+async function backfillMonthlyUsageEvents(userId: string, monthStart: number): Promise<void> {
+  const jobs = await db.select({
+    id: audiobookJobs.id,
+    settingsJson: audiobookJobs.settingsJson,
+    createdAt: audiobookJobs.createdAt,
+  }).from(audiobookJobs).where(and(
+    eq(audiobookJobs.userId, userId),
+    gte(audiobookJobs.createdAt, monthStart),
+  ));
+  const events = jobs
+    .filter((job: { id: string; settingsJson: unknown; createdAt: number | null }) => (
+      isFullGenerationJob(job.settingsJson)
+    ))
+    .map((job: { id: string; settingsJson: unknown; createdAt: number | null }) => ({
+      userId,
+      action: MONTHLY_AUDIOBOOK_USAGE_ACTION,
+      opId: job.id,
+      createdAt: Number(job.createdAt ?? Date.now()),
+    }));
+  if (events.length === 0) return;
+  await db.insert(userJobEvents)
+    .values(events)
+    .onConflictDoNothing({
+      target: [userJobEvents.userId, userJobEvents.action, userJobEvents.opId],
+    });
+}
+
+async function countMonthlyUsage(userId: string, monthStart: number): Promise<number> {
+  // Backfill jobs created before the durable usage ledger was introduced.
+  // The ledger is not deleted when an audiobook or queue row is reset.
+  await backfillMonthlyUsageEvents(userId, monthStart);
+  const rows = await db.select({ value: count() }).from(userJobEvents).where(and(
+    eq(userJobEvents.userId, userId),
+    eq(userJobEvents.action, MONTHLY_AUDIOBOOK_USAGE_ACTION),
+    gte(userJobEvents.createdAt, monthStart),
+  ));
+  return Number(rows[0]?.value ?? 0);
+}
+
+export function calculateMonthlyAudiobookAllowance(input: {
+  used: number;
+  freeLimit: number;
+  paidCreditsAvailable: number;
+}) {
+  const used = Math.max(0, Math.floor(input.used));
+  const freeLimit = Math.max(0, Math.floor(input.freeLimit));
+  const paidCreditsAvailable = Math.max(0, Math.floor(input.paidCreditsAvailable));
+  const freeUsed = Math.min(used, freeLimit);
+  const freeRemaining = Math.max(0, freeLimit - used);
+  const totalRemaining = freeRemaining + paidCreditsAvailable;
+  return {
+    used,
+    freeLimit,
+    freeUsed,
+    freeRemaining,
+    paidCreditsAvailable,
+    supportCreditsRemaining: paidCreditsAvailable,
+    totalRemaining,
+    limit: used + totalRemaining,
+    allowed: totalRemaining > 0,
+    shouldConsumeCredit: freeRemaining === 0 && paidCreditsAvailable > 0,
+  };
+}
+
+export async function recordMonthlyAudiobookUsage(input: {
+  userId: string;
+  jobId: string;
+  createdAt?: number;
+}): Promise<void> {
+  await db.insert(userJobEvents).values({
+    userId: input.userId,
+    action: MONTHLY_AUDIOBOOK_USAGE_ACTION,
+    opId: input.jobId,
+    createdAt: input.createdAt ?? Date.now(),
+  }).onConflictDoNothing({
+    target: [userJobEvents.userId, userJobEvents.action, userJobEvents.opId],
+  });
+}
+
 export async function checkMonthlyAudiobookQuota(input: {
   userId: string;
   isAdmin?: boolean;
 }): Promise<{
   allowed: boolean;
+  unlimited: boolean;
   limit: number;
   used: number;
   freeLimit: number;
+  freeUsed: number;
+  freeRemaining: number;
   paidCreditsAvailable: number;
+  supportCreditsRemaining: number;
+  totalRemaining: number;
   shouldConsumeCredit: boolean;
   resetTimeMs: number;
   supportServerUrl: string;
@@ -138,7 +237,6 @@ export async function checkMonthlyAudiobookQuota(input: {
   const runtime = await getRuntimeConfig();
   const freeLimit = runtime.monthlyAudiobookLimit;
   const ledger = await readLedger(input.userId);
-  const limit = freeLimit + ledger.available;
   const monthStart = startOfUtcMonthMs();
   const reset = new Date();
   reset.setUTCMonth(reset.getUTCMonth() + 1, 1);
@@ -147,10 +245,15 @@ export async function checkMonthlyAudiobookQuota(input: {
   if (input.isAdmin) {
     return {
       allowed: true,
-      limit,
+      unlimited: true,
+      limit: freeLimit + ledger.available,
       used: 0,
       freeLimit,
+      freeUsed: 0,
+      freeRemaining: freeLimit,
       paidCreditsAvailable: ledger.available,
+      supportCreditsRemaining: ledger.available,
+      totalRemaining: freeLimit + ledger.available,
       shouldConsumeCredit: false,
       resetTimeMs: reset.getTime(),
       supportServerUrl: runtime.supportServerUrl,
@@ -159,18 +262,14 @@ export async function checkMonthlyAudiobookQuota(input: {
     };
   }
 
-  const rows = await db.select({ value: count() }).from(audiobookJobs).where(and(
-    eq(audiobookJobs.userId, input.userId),
-    gte(audiobookJobs.createdAt, monthStart),
-  ));
-  const used = Number(rows[0]?.value ?? 0);
-  return {
-    allowed: used < limit,
-    limit,
-    used,
+  const allowance = calculateMonthlyAudiobookAllowance({
+    used: await countMonthlyUsage(input.userId, monthStart),
     freeLimit,
     paidCreditsAvailable: ledger.available,
-    shouldConsumeCredit: used >= freeLimit,
+  });
+  return {
+    ...allowance,
+    unlimited: false,
     resetTimeMs: reset.getTime(),
     supportServerUrl: runtime.supportServerUrl,
     supportMinimumUsd: runtime.supportMinimumUsd,

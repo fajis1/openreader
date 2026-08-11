@@ -7,7 +7,11 @@ import { requireAuthContext } from '@/lib/server/auth/auth';
 import { serverLogger, errorToLog } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { runTaskNow } from '@/lib/server/tasks/engine';
-import { checkMonthlyAudiobookQuota, consumeAudiobookCredit } from '@/lib/server/access/audiobook-quota';
+import {
+  checkMonthlyAudiobookQuota,
+  consumeAudiobookCredit,
+  recordMonthlyAudiobookUsage,
+} from '@/lib/server/access/audiobook-quota';
 import {
   findSmartAudioProfileById,
   readSmartAudioProfilesDocument,
@@ -144,11 +148,27 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const quota = await checkMonthlyAudiobookQuota({
-      userId,
-      isAdmin: Boolean((ctxOrRes.user as unknown as { isAdmin?: boolean | null })?.isAdmin),
-    });
-    if (!quota.allowed) {
+    const existingChapter = await db.select({ id: audiobookChapters.id })
+      .from(audiobookChapters)
+      .where(and(
+        eq(audiobookChapters.userId, userId),
+        eq(audiobookChapters.bookId, documentId),
+      ))
+      .limit(1);
+    const hasPriorFullGenerationJob = existingJobs.some((job: typeof audiobookJobs.$inferSelect) => (
+      parseJobSettings(job.settingsJson).batchRegenerate !== true
+    ));
+    // Missing-chapter repairs and retries of an existing audiobook are included
+    // with the original generation. A reset removes both chapters and queue
+    // rows, so recording a new full generation after a reset uses a new slot.
+    const shouldChargeMonthlyQuota = existingChapter.length === 0 && !hasPriorFullGenerationJob;
+    const quota = shouldChargeMonthlyQuota
+      ? await checkMonthlyAudiobookQuota({
+          userId,
+          isAdmin: Boolean((ctxOrRes.user as unknown as { isAdmin?: boolean | null })?.isAdmin),
+        })
+      : null;
+    if (quota && !quota.allowed) {
       return NextResponse.json({
         type: 'https://openreader.app/problems/monthly-audiobook-quota-exceeded',
         code: 'MONTHLY_AUDIOBOOK_QUOTA_EXCEEDED',
@@ -173,13 +193,6 @@ export async function POST(req: NextRequest) {
 
     const jobId = randomUUID();
     const testNamespace = req.headers.get('x-openreader-test-namespace');
-    const existingChapter = await db.select({ id: audiobookChapters.id })
-      .from(audiobookChapters)
-      .where(and(
-        eq(audiobookChapters.userId, userId),
-        eq(audiobookChapters.bookId, documentId),
-      ))
-      .limit(1);
     const previousJob = [...existingJobs]
       .sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0))[0];
     const previousSettings = parseJobSettings(previousJob?.settingsJson);
@@ -192,6 +205,7 @@ export async function POST(req: NextRequest) {
     const settingsJson: Record<string, unknown> = {
       ...resolvedSettingsRecord,
       cleanupBatchVersion,
+      monthlyQuotaCharge: shouldChargeMonthlyQuota,
       ...(confirmScholarAutoScan ? { scholarAutoScan: true } : {}),
     };
     if (testNamespace) {
@@ -206,8 +220,11 @@ export async function POST(req: NextRequest) {
       progress: 0,
       settingsJson,
     });
-    if (quota.shouldConsumeCredit) {
+    if (quota?.shouldConsumeCredit) {
       await consumeAudiobookCredit({ userId, jobId });
+    }
+    if (shouldChargeMonthlyQuota) {
+      await recordMonthlyAudiobookUsage({ userId, jobId });
     }
 
     runTaskNow('process-audiobook-queue').catch((err) => serverLogger.error({ event: 'audiobook.queue.wake.error', error: errorToLog(err) }, 'Failed to wake queue'));

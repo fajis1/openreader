@@ -3,9 +3,10 @@ import { db } from '@/db';
 import { userJobEvents } from '@/db/schema';
 import type { TaskResult } from '../types';
 
-// Retention far exceeds the largest rate-limit window, so pruning never removes
-// an event that could still affect an in-window count.
-const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+// Retention exceeds both the largest rolling rate-limit window and a complete
+// UTC billing month, so monthly audiobook usage remains durable after the
+// related audiobook or queue row is deleted.
+const RETENTION_MS = 62 * 24 * 60 * 60 * 1000;
 
 function rowsAffected(result: unknown): number {
   if (result && typeof result === 'object') {

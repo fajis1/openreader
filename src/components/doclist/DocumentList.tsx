@@ -33,6 +33,7 @@ import {
 } from './dnd/DocumentSelectionContext';
 import { documentIdentityKey, type DocumentDragItem } from './dnd/dndTypes';
 import { FinderWindow, useIsNarrow } from './window/FinderWindow';
+import { AudiobookQuotaCard } from './window/AudiobookQuotaCard';
 import { FinderToolbar } from './window/FinderToolbar';
 import { FinderSidebar } from './window/FinderSidebar';
 import { FinderStatusBar } from './window/FinderStatusBar';
@@ -761,6 +762,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
           )}
           bottomSlot={(
             <div className="flex flex-col gap-2">
+              <AudiobookQuotaCard />
               {sidebarUploadState && (
                 <SidebarUploadLoader
                   totalFiles={sidebarUploadState.totalFiles}

@@ -10,7 +10,11 @@ import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharact
 import { Button, Select, Card } from '@/components/ui';
 import { getVoices } from '@/lib/client/api/audiobooks';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
-import { formatMonthlyAudiobookQuotaMessage, isMonthlyAudiobookQuotaProblem } from '@/lib/shared/audiobook-quota';
+import {
+  AUDIOBOOK_QUOTA_UPDATED_EVENT,
+  formatMonthlyAudiobookQuotaMessage,
+  isMonthlyAudiobookQuotaProblem,
+} from '@/lib/shared/audiobook-quota';
 import type { TTSAudiobookFormat } from '@/types/tts';
 import type { DocumentListDocument } from '@/types/documents';
 import type { SmartAudioProfile } from '@/types/client';
@@ -210,6 +214,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
           }
           throw new Error(responseBody?.error || `Failed to queue ${doc.name}`);
         }
+        window.dispatchEvent(new Event(AUDIOBOOK_QUOTA_UPDATED_EVENT));
         count++;
       }
       setQueuedCount(count);

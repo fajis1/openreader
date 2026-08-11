@@ -6,6 +6,22 @@ export type MonthlyAudiobookQuotaProblem = {
   supportExtraAudiobooks?: unknown;
 };
 
+export const AUDIOBOOK_QUOTA_UPDATED_EVENT = 'openreader:audiobook-quota-updated';
+
+export type AudiobookQuotaSnapshot = {
+  unlimited: boolean;
+  used: number;
+  freeLimit: number;
+  freeUsed: number;
+  freeRemaining: number;
+  supportCreditsRemaining: number;
+  totalRemaining: number;
+  resetTimeMs: number;
+  supportServerUrl: string | null;
+  supportMinimumUsd: number;
+  supportExtraAudiobooks: number;
+};
+
 export function isMonthlyAudiobookQuotaProblem(value: unknown): value is MonthlyAudiobookQuotaProblem {
   return Boolean(
     value

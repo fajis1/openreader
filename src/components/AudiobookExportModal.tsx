@@ -15,7 +15,11 @@ import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharact
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import { getTtsLanguageCompatibilityWarnings, resolveTtsLanguage } from '@/lib/shared/language';
 import { isGeminiRateLimitPause } from '@/lib/shared/audiobook-job-status';
-import { formatMonthlyAudiobookQuotaMessage, isMonthlyAudiobookQuotaProblem } from '@/lib/shared/audiobook-quota';
+import {
+  AUDIOBOOK_QUOTA_UPDATED_EVENT,
+  formatMonthlyAudiobookQuotaMessage,
+  isMonthlyAudiobookQuotaProblem,
+} from '@/lib/shared/audiobook-quota';
 import { WAITING_FOR_VOICES_STATUS } from '@/lib/shared/multi-voice';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, MenuRoot, MenuTransition, MenuTrigger, RangeInput, Select } from '@/components/ui';
@@ -365,6 +369,7 @@ export function AudiobookExportModal({
         return;
       }
       if (!res.ok) throw new Error(responseBody?.error || 'Failed to queue audiobook on server');
+      window.dispatchEvent(new Event(AUDIOBOOK_QUOTA_UPDATED_EVENT));
       
       // Start polling
       await fetchExistingChapters();
