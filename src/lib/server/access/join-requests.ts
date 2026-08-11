@@ -142,10 +142,9 @@ export async function createJoinRequest(input: {
 
   serverLogger.info({
     event: 'join_request.created',
+    requestId: request.id,
     email,
-    approveUrl,
-    denyUrl,
-  }, 'Join request created; approve/deny URLs generated');
+  }, 'Join request created');
   await notifyAdminsOfJoinRequest({ request, approveUrl, denyUrl });
 
   return { request, approveUrl, denyUrl };
@@ -162,10 +161,9 @@ async function notifyAdminsOfJoinRequest(input: {
   if (!apiKey || !to || !from) {
     serverLogger.info({
       event: 'join_request.notification.skipped',
+      requestId: input.request.id,
       reason: 'missing_email_configuration',
       email: input.request.email,
-      approveUrl: input.approveUrl,
-      denyUrl: input.denyUrl,
     }, 'Join request email not sent; configure RESEND_API_KEY, JOIN_REQUEST_FROM_EMAIL, and JOIN_REQUEST_ADMIN_EMAIL to receive approval links by email.');
     return;
   }
@@ -197,15 +195,19 @@ async function notifyAdminsOfJoinRequest(input: {
       }),
     });
     if (!response.ok) {
-      throw new Error(`Resend returned HTTP ${response.status}`);
+      serverLogger.warn({
+        event: 'join_request.notification.failed',
+        requestId: input.request.id,
+        email: input.request.email,
+        reason: `resend_http_${response.status}`,
+      }, 'Failed to send join request notification email.');
     }
-  } catch (error) {
+  } catch {
     serverLogger.warn({
       event: 'join_request.notification.failed',
+      requestId: input.request.id,
       email: input.request.email,
-      approveUrl: input.approveUrl,
-      denyUrl: input.denyUrl,
-      error,
+      reason: 'resend_request_failed',
     }, 'Failed to send join request notification email.');
   }
 }
