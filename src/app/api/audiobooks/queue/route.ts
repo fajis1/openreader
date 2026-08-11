@@ -7,6 +7,7 @@ import { requireAuthContext } from '@/lib/server/auth/auth';
 import { serverLogger, errorToLog } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { runTaskNow } from '@/lib/server/tasks/engine';
+import { checkMonthlyAudiobookQuota, consumeAudiobookCredit } from '@/lib/server/access/audiobook-quota';
 import {
   findSmartAudioProfileById,
   readSmartAudioProfilesDocument,
@@ -142,6 +143,27 @@ export async function POST(req: NextRequest) {
         smartAudioProfileId: resolvedSmartAudioProfileId,
       });
     }
+
+    const quota = await checkMonthlyAudiobookQuota({
+      userId,
+      isAdmin: Boolean((ctxOrRes.user as unknown as { isAdmin?: boolean | null })?.isAdmin),
+    });
+    if (!quota.allowed) {
+      return NextResponse.json({
+        type: 'https://openreader.app/problems/monthly-audiobook-quota-exceeded',
+        code: 'MONTHLY_AUDIOBOOK_QUOTA_EXCEEDED',
+        error: 'Monthly audiobook limit reached.',
+        limit: quota.limit,
+        used: quota.used,
+        freeLimit: quota.freeLimit,
+        paidCreditsAvailable: quota.paidCreditsAvailable,
+        resetTimeMs: quota.resetTimeMs,
+        supportServerUrl: quota.supportServerUrl || null,
+        supportMinimumUsd: quota.supportMinimumUsd,
+        supportExtraAudiobooks: quota.supportExtraAudiobooks,
+      }, { status: 429 });
+    }
+
     const resolvedSettingsRecord: Record<string, unknown> = {
       ...settingsRecord,
       ...(resolvedSmartAudioProfileId
@@ -184,6 +206,9 @@ export async function POST(req: NextRequest) {
       progress: 0,
       settingsJson,
     });
+    if (quota.shouldConsumeCredit) {
+      await consumeAudiobookCredit({ userId, jobId });
+    }
 
     runTaskNow('process-audiobook-queue').catch((err) => serverLogger.error({ event: 'audiobook.queue.wake.error', error: errorToLog(err) }, 'Failed to wake queue'));
     return NextResponse.json({ jobId });

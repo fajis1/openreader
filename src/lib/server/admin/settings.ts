@@ -108,6 +108,13 @@ export const RUNTIME_CONFIG_SCHEMA = {
   // Can also be set via the ALLOWED_EMAILS env var (comma-separated).
   // The effective list is the union of the DB list and the env var list.
   allowedEmails: stringArrayValue([]),
+  // Join requests let an invite-only instance collect a short access request
+  // before adding approved addresses to allowedEmails.
+  enableJoinRequests: booleanFlag(true),
+  monthlyAudiobookLimit: positiveIntValue(2),
+  supportMinimumUsd: positiveIntValue(10),
+  supportExtraAudiobooks: positiveIntValue(5),
+  supportServerUrl: stringValue(''),
 } as const satisfies Record<string, RuntimeConfigKeyDef<unknown>>;
 
 export type RuntimeConfigKey = keyof typeof RUNTIME_CONFIG_SCHEMA;

@@ -31,6 +31,11 @@ export interface RuntimeConfig {
   ttsUpstreamMaxRetries: number;
   ttsUpstreamTimeoutMs: number;
   computeAvailable: boolean;
+  enableJoinRequests: boolean;
+  monthlyAudiobookLimit: number;
+  supportMinimumUsd: number;
+  supportExtraAudiobooks: number;
+  supportServerUrl: string;
 }
 
 const RUNTIME_DEFAULTS: RuntimeConfig = {
@@ -53,6 +58,11 @@ const RUNTIME_DEFAULTS: RuntimeConfig = {
   ttsUpstreamMaxRetries: 2,
   ttsUpstreamTimeoutMs: 285_000,
   computeAvailable: true,
+  enableJoinRequests: true,
+  monthlyAudiobookLimit: 2,
+  supportMinimumUsd: 10,
+  supportExtraAudiobooks: 5,
+  supportServerUrl: '',
 };
 
 declare global {

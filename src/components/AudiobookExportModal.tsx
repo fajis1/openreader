@@ -15,6 +15,7 @@ import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharact
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import { getTtsLanguageCompatibilityWarnings, resolveTtsLanguage } from '@/lib/shared/language';
 import { isGeminiRateLimitPause } from '@/lib/shared/audiobook-job-status';
+import { formatMonthlyAudiobookQuotaMessage, isMonthlyAudiobookQuotaProblem } from '@/lib/shared/audiobook-quota';
 import { WAITING_FOR_VOICES_STATUS } from '@/lib/shared/multi-voice';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, MenuRoot, MenuTransition, MenuTrigger, RangeInput, Select } from '@/components/ui';
@@ -356,6 +357,11 @@ export function AudiobookExportModal({
         setIsGenerating(false);
         setCastingJobId(null);
         setShowCharacterCasting(true);
+        return;
+      }
+      if (res.status === 429 && isMonthlyAudiobookQuotaProblem(responseBody)) {
+        setIsGenerating(false);
+        setErrorMessage(formatMonthlyAudiobookQuotaMessage(responseBody));
         return;
       }
       if (!res.ok) throw new Error(responseBody?.error || 'Failed to queue audiobook on server');
@@ -928,11 +934,11 @@ export function AudiobookExportModal({
                                           selectedSmartAudioProfile?.workerMode === 'scholar' ||
                                           selectedSmartAudioProfile?.workerMode === 'bibliography-catcher'
                                         ) && (
-                                          <div className="rounded-lg border border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/40 p-3">
+                                          <div className="rounded-lg border border-accent bg-accent-wash p-3">
                                             <label className="flex items-center justify-between cursor-pointer">
                                               <div className="space-y-0.5 pr-4">
-                                                <span className="text-sm font-medium text-blue-900 dark:text-blue-100">Inject English Definitions</span>
-                                                <p className="text-xs text-blue-700 dark:text-blue-300">When enabled, cached contextual English definitions are inserted inline next to foreign-language terms before the Gemini cleanup pass. Disable to get IPA pronunciation markup only.</p>
+                                                <span className="text-sm font-medium text-foreground">Inject English Definitions</span>
+                                                <p className="text-xs text-soft">When enabled, cached contextual English definitions are inserted inline next to foreign-language terms before the Gemini cleanup pass. Disable to get IPA pronunciation markup only.</p>
                                               </div>
                                               <div className="relative inline-flex items-center shrink-0">
                                                 <input
@@ -942,7 +948,7 @@ export function AudiobookExportModal({
                                                   onChange={(e) => setUseScholarDefinitions(e.target.checked)}
                                                   disabled={settingsLocked}
                                                 />
-                                                <div className="h-6 w-11 rounded-full bg-blue-200 dark:bg-blue-900 border border-blue-300 dark:border-blue-700 peer-checked:bg-red-500 peer-checked:border-red-500 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-full peer-disabled:opacity-50"></div>
+                                                <div className="h-6 w-11 rounded-full bg-surface-sunken border border-line peer-checked:bg-danger peer-checked:border-danger after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-full peer-disabled:opacity-50"></div>
                                               </div>
                                             </label>
                                           </div>

@@ -10,6 +10,7 @@ import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharact
 import { Button, Select, Card } from '@/components/ui';
 import { getVoices } from '@/lib/client/api/audiobooks';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
+import { formatMonthlyAudiobookQuotaMessage, isMonthlyAudiobookQuotaProblem } from '@/lib/shared/audiobook-quota';
 import type { TTSAudiobookFormat } from '@/types/tts';
 import type { DocumentListDocument } from '@/types/documents';
 import type { SmartAudioProfile } from '@/types/client';
@@ -204,6 +205,9 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
           return;
         }
         if (!res.ok) {
+          if (res.status === 429 && isMonthlyAudiobookQuotaProblem(responseBody)) {
+            throw new Error(formatMonthlyAudiobookQuotaMessage(responseBody));
+          }
           throw new Error(responseBody?.error || `Failed to queue ${doc.name}`);
         }
         count++;
@@ -213,7 +217,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
       router.refresh();
     } catch (e) {
       console.error(e);
-      setQueueError('Failed to enqueue some audiobooks. Please try again.');
+      setQueueError(e instanceof Error ? e.message : 'Failed to enqueue some audiobooks. Please try again.');
     } finally {
       setIsQueueing(false);
     }
@@ -362,11 +366,11 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
           selectedSmartAudioProfile?.workerMode === 'scholar' ||
           selectedSmartAudioProfile?.workerMode === 'bibliography-catcher'
         ) && (
-          <div className="rounded-lg border border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/40 p-3">
+          <div className="rounded-lg border border-accent bg-accent-wash p-3">
             <label className="flex items-center justify-between cursor-pointer">
               <div className="space-y-0.5 pr-4">
-                <span className="text-sm font-medium text-blue-900 dark:text-blue-100">Inject English Definitions</span>
-                <p className="text-xs text-blue-700 dark:text-blue-300">
+                <span className="text-sm font-medium text-foreground">Inject English Definitions</span>
+                <p className="text-xs text-soft">
                   Insert cached contextual English definitions inline next to isolated foreign-language terms before the Gemini cleanup pass. Disable to get IPA pronunciation markup only.
                 </p>
               </div>
@@ -377,7 +381,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
                   checked={useScholarDefinitions}
                   onChange={(e) => setUseScholarDefinitions(e.target.checked)}
                 />
-                <div className="h-6 w-11 rounded-full bg-blue-200 dark:bg-blue-900 border border-blue-300 dark:border-blue-700 peer-checked:bg-red-500 peer-checked:border-red-500 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-full" />
+                <div className="h-6 w-11 rounded-full bg-surface-sunken border border-line peer-checked:bg-danger peer-checked:border-danger after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-full" />
               </div>
             </label>
           </div>

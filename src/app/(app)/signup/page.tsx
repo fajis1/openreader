@@ -21,12 +21,20 @@ export default function SignUpPage() {
   const [loading, setLoading] = useState(false);
   const [loadingGithub, setLoadingGithub] = useState(false);
   const [loadingGoogle, setLoadingGoogle] = useState(false);
+  const [joinName, setJoinName] = useState('');
+  const [joinEmail, setJoinEmail] = useState('');
+  const [joinUse, setJoinUse] = useState('');
+  const [joinHeardAbout, setJoinHeardAbout] = useState('');
+  const [joinLoading, setJoinLoading] = useState(false);
+  const [joinSubmitted, setJoinSubmitted] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { baseUrl, githubAuthEnabled, googleAuthEnabled } = useAuthConfig();
   const enableUserSignups = useFeatureFlag('enableUserSignups');
+  const enableJoinRequests = useFeatureFlag('enableJoinRequests');
   const { refresh: refreshRateLimit } = useAuthRateLimit();
 
-  const isAnyLoading = loading || loadingGithub || loadingGoogle;
+  const isAnyLoading = loading || loadingGithub || loadingGoogle || joinLoading;
 
   const validateEmail = (email: string): boolean => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -132,14 +140,115 @@ export default function SignUpPage() {
     }
   };
 
+  const handleJoinRequest = async () => {
+    setJoinError(null);
+    if (!joinEmail.trim() || !validateEmail(joinEmail)) {
+      setJoinError('Please enter a valid email address.');
+      return;
+    }
+    if (joinUse.trim().length < 10) {
+      setJoinError('Please add a short note about what you plan to use OpenReader for.');
+      return;
+    }
+    if (joinHeardAbout.trim().length < 2) {
+      setJoinError('Please tell us how you heard about OpenReader.');
+      return;
+    }
+    setJoinLoading(true);
+    try {
+      const response = await fetch('/api/join-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: joinEmail.trim(),
+          name: joinName.trim(),
+          intendedUse: joinUse.trim(),
+          heardAbout: joinHeardAbout.trim(),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof data.error === 'string' ? data.error : 'Unable to submit join request.');
+      }
+      setJoinSubmitted(true);
+      toast.success('Request submitted.');
+    } catch (err) {
+      setJoinError(err instanceof Error ? err.message : 'Unable to submit join request.');
+    } finally {
+      setJoinLoading(false);
+    }
+  };
+
   if (!enableUserSignups) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-background">
         <Surface elevation="3" className="w-full max-w-md p-6">
-          <h1 className="text-xl font-semibold text-foreground">Sign-ups unavailable</h1>
+          <h1 className="text-xl font-semibold text-foreground">Request access</h1>
           <p className="text-sm text-soft mt-1">
-            New account sign-ups are currently disabled by the site administrator.
+            OpenReader is currently invite-only. Tell us how you plan to use it and we will review your request.
           </p>
+          {enableJoinRequests && (
+            <div className="mt-6 space-y-4">
+              {joinSubmitted ? (
+                <div className="p-3 bg-accent-wash border border-accent rounded-lg">
+                  <p className="text-sm text-accent">
+                    Request submitted. If approved, you can return here and sign in with Google using the same email.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {joinError && (
+                    <div className="p-3 bg-danger-wash border border-danger rounded-lg">
+                      <p className="text-sm text-danger">{joinError}</p>
+                    </div>
+                  )}
+                  <Field label="Name">
+                    <Input
+                      value={joinName}
+                      onChange={(e) => setJoinName(e.target.value)}
+                      placeholder="Optional"
+                      controlSize="lg"
+                    />
+                  </Field>
+                  <Field label="Gmail / Google account email">
+                    <Input
+                      type="email"
+                      value={joinEmail}
+                      onChange={(e) => setJoinEmail(e.target.value)}
+                      placeholder="me@gmail.com"
+                      controlSize="lg"
+                    />
+                  </Field>
+                  <Field label="What do you plan to use OpenReader for?">
+                    <textarea
+                      value={joinUse}
+                      onChange={(e) => setJoinUse(e.target.value)}
+                      className="w-full min-h-24 rounded-xl border border-line bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
+                      placeholder="Example: listening to theological books while commuting..."
+                    />
+                  </Field>
+                  <Field label="How did you hear about it?">
+                    <Input
+                      value={joinHeardAbout}
+                      onChange={(e) => setJoinHeardAbout(e.target.value)}
+                      placeholder="Friend, church, school, search, etc."
+                      controlSize="lg"
+                    />
+                  </Field>
+                  <Button
+                    type="button"
+                    disabled={isAnyLoading}
+                    onClick={handleJoinRequest}
+                    variant="primary"
+                    size="md"
+                    className="w-full"
+                  >
+                    {joinLoading ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Submit request'}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
           <div className="mt-6 pt-4 border-t border-line-soft text-center">
             <p className="text-xs text-soft">
               Already have an account?{' '}
