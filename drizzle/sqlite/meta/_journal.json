@@ -120,6 +120,20 @@
       "when": 1785108895376,
       "tag": "0016_military_adam_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1786466943559,
+      "tag": "0017_first_riptide",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1786474402419,
+      "tag": "0018_silky_maelstrom",
+      "breakpoints": true
     }
   ]
 }

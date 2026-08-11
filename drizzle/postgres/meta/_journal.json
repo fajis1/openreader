@@ -106,6 +106,20 @@
       "when": 1785108896701,
       "tag": "0014_tan_the_watchers",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786466944116,
+      "tag": "0015_kind_shaman",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786474402110,
+      "tag": "0016_clumsy_jocasta",
+      "breakpoints": true
     }
   ]
 }

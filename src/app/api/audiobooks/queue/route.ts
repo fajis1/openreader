@@ -12,6 +12,7 @@ import {
   consumeAudiobookCredit,
   recordMonthlyAudiobookUsage,
 } from '@/lib/server/access/audiobook-quota';
+import { getPayPalReadiness } from '@/lib/server/paypal/config';
 import {
   findSmartAudioProfileById,
   readSmartAudioProfilesDocument,
@@ -19,6 +20,7 @@ import {
 import { readBookLexicon } from '@/lib/server/smart-audio/book-lexicon';
 import { isKokoroCompatiblePronunciation } from '@/lib/shared/kokoro-pronunciation-policy';
 import { queuedAudiobookBatchVersion } from '@/lib/shared/audiobook-batching';
+import { AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS } from '@/lib/shared/audiobook-job-status';
 import { mergeDocumentSettings } from '@/lib/shared/document-settings';
 import {
   getCharacterMapReadiness,
@@ -74,6 +76,7 @@ export async function POST(req: NextRequest) {
     const activeJob = existingJobs.find((j: typeof audiobookJobs.$inferSelect) =>
       j.status === 'queued' || 
       j.status === 'running' || 
+      j.status === AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS ||
       j.status === 'waiting_for_pdf' || 
       j.status === WAITING_FOR_VOICES_STATUS ||
       j.status === 'paused'
@@ -169,6 +172,7 @@ export async function POST(req: NextRequest) {
         })
       : null;
     if (quota && !quota.allowed) {
+      const paypal = getPayPalReadiness();
       return NextResponse.json({
         type: 'https://openreader.app/problems/monthly-audiobook-quota-exceeded',
         code: 'MONTHLY_AUDIOBOOK_QUOTA_EXCEEDED',
@@ -181,6 +185,7 @@ export async function POST(req: NextRequest) {
         supportServerUrl: quota.supportServerUrl || null,
         supportMinimumUsd: quota.supportMinimumUsd,
         supportExtraAudiobooks: quota.supportExtraAudiobooks,
+        paypalEnabled: paypal.enabled && !ctxOrRes.user?.isAnonymous,
       }, { status: 429 });
     }
 
@@ -289,7 +294,7 @@ export async function GET(req: NextRequest) {
     const runningJobs = await db
       .select({ startedAt: audiobookJobs.startedAt, updatedAt: audiobookJobs.updatedAt, progress: audiobookJobs.progress })
       .from(audiobookJobs)
-      .where(eq(audiobookJobs.status, 'running'))
+      .where(inArray(audiobookJobs.status, ['running', AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS]))
       .limit(1);
 
     for (const job of userJobs) {

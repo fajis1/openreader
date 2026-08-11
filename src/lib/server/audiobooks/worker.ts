@@ -25,7 +25,10 @@ import {
   buildKokoroPronunciationInstructions,
   filterKokoroCompatiblePronunciationRecord,
 } from '@/lib/shared/kokoro-pronunciation-policy';
-import { GEMINI_RATE_LIMIT_PAUSE_MESSAGE } from '@/lib/shared/audiobook-job-status';
+import {
+  AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS,
+  GEMINI_RATE_LIMIT_PAUSE_MESSAGE,
+} from '@/lib/shared/audiobook-job-status';
 import { resolveCleanupAiModel } from '@/lib/shared/smart-audio-models';
 import {
   isAudiobookEndMatterHeading,
@@ -170,10 +173,68 @@ async function readGlobalPronunciationDefaults(): Promise<Record<string, string>
 
 const globalWorkerState = globalThis as unknown as { __worker_booted?: boolean };
 
+class AudiobookJobStoppedError extends Error {
+  constructor() {
+    super('Audiobook job is no longer owned by this worker.');
+    this.name = 'AudiobookJobStoppedError';
+  }
+}
+
+async function acknowledgeAudiobookPause(jobId: string): Promise<boolean> {
+  const rows = await db.update(audiobookJobs)
+    .set({ status: 'paused', updatedAt: Date.now() })
+    .where(and(
+      eq(audiobookJobs.id, jobId),
+      eq(audiobookJobs.status, AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS),
+    ))
+    .returning({ id: audiobookJobs.id });
+  if (rows.length > 0) {
+    serverLogger.info({ event: 'audiobook.queue.admin_paused', jobId }, 'Worker acknowledged an administrator pause request.');
+  }
+  return rows.length > 0;
+}
+
+async function updateAudiobookJobIfStatus(
+  jobId: string,
+  expectedStatus: string,
+  values: Partial<typeof audiobookJobs.$inferInsert>,
+): Promise<boolean> {
+  const rows = await db.update(audiobookJobs)
+    .set(values)
+    .where(and(eq(audiobookJobs.id, jobId), eq(audiobookJobs.status, expectedStatus)))
+    .returning({ id: audiobookJobs.id });
+  if (rows.length > 0) return true;
+  await acknowledgeAudiobookPause(jobId);
+  return false;
+}
+
+async function updateClaimedAudiobookJob(
+  jobId: string,
+  expectedStatus: string,
+  values: Partial<typeof audiobookJobs.$inferInsert>,
+): Promise<void> {
+  if (!await updateAudiobookJobIfStatus(jobId, expectedStatus, values)) {
+    throw new AudiobookJobStoppedError();
+  }
+}
+
+async function workerStillOwnsAudiobookJob(jobId: string): Promise<boolean> {
+  const rows = await db.select({ status: audiobookJobs.status })
+    .from(audiobookJobs)
+    .where(eq(audiobookJobs.id, jobId))
+    .limit(1);
+  if (rows[0]?.status === 'running') return true;
+  await acknowledgeAudiobookPause(jobId);
+  return false;
+}
+
 export async function processAudiobookQueue() {
   if (!globalWorkerState.__worker_booted) {
     globalWorkerState.__worker_booted = true;
     serverLogger.info({ event: 'audiobook.queue.boot' }, 'Worker booted. Resetting any orphaned running jobs to queued.');
+    await db.update(audiobookJobs)
+      .set({ status: 'paused', updatedAt: Date.now() })
+      .where(eq(audiobookJobs.status, AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS));
     await db.update(audiobookJobs)
       .set({ status: 'queued', progress: 0 })
       .where(eq(audiobookJobs.status, 'running'));
@@ -226,15 +287,20 @@ export async function processAudiobookQueue() {
 
 async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect) {
   const updateProgress = async (progress: number) => {
-    await db.update(audiobookJobs).set({ progress, updatedAt: Date.now() }).where(eq(audiobookJobs.id, job.id));
+    await updateClaimedAudiobookJob(job.id, 'running', { progress, updatedAt: Date.now() });
   };
 
   const markError = async (err: string) => {
-    await db.update(audiobookJobs).set({ status: 'error', error: err, completedAt: Date.now() }).where(eq(audiobookJobs.id, job.id));
+    await updateAudiobookJobIfStatus(job.id, 'running', {
+      status: 'error',
+      error: err,
+      completedAt: Date.now(),
+    });
   };
 
   try {
     serverLogger.info({ event: 'audiobook.queue.start', jobId: job.id, documentId: job.documentId }, `Starting background audiobook generation job ${job.id}`);
+    if (!await workerStillOwnsAudiobookJob(job.id)) return;
     const docRows = await db.select().from(documents).where(eq(documents.id, job.documentId));
     if (docRows.length === 0) throw new Error('Document not found');
     const doc = docRows[0];
@@ -317,7 +383,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         if (opState.status === 'failed') {
           throw new Error(opState.error?.message || 'PDF layout operation failed');
         }
-        await db.update(audiobookJobs).set({ status: 'waiting_for_pdf' }).where(eq(audiobookJobs.id, job.id));
+        await updateClaimedAudiobookJob(job.id, 'running', { status: 'waiting_for_pdf' });
         
         // Wait up to 15 seconds for the PDF artifact (e.g. for compute-core to finish parsing it in the background)
         let found = false;
@@ -326,7 +392,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           artifact = await readCurrentParsedPdfArtifact({ documentId: doc.id, namespace: testNamespace });
           if (artifact) {
             found = true;
-            await db.update(audiobookJobs).set({ status: 'running' }).where(eq(audiobookJobs.id, job.id));
+            await updateClaimedAudiobookJob(job.id, 'waiting_for_pdf', { status: 'running' });
             break;
           }
         }
@@ -607,14 +673,12 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (/\bHTTP (429|503)\b/.test(message)) {
-          await db.update(audiobookJobs)
-            .set({
-              status: 'queued',
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-              error: GEMINI_RATE_LIMIT_PAUSE_MESSAGE,
-            })
-            .where(eq(audiobookJobs.id, job.id));
+          await updateClaimedAudiobookJob(job.id, 'running', {
+            status: 'queued',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            error: GEMINI_RATE_LIMIT_PAUSE_MESSAGE,
+          });
           serverLogger.warn({
             event: 'audiobook.queue.scholar_lexicon.rate_limit',
             bookId,
@@ -678,13 +742,11 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       const readiness = getCharacterMapReadiness(resolvedDocumentSettings.smartAudioCharacters);
       if (!readiness.ready || readiness.map?.profileId !== selectedProfile.id) {
         serverLogger.info({ event: 'audiobook.queue.multivoice.waiting_for_voices', bookId }, 'Job is paused waiting for user to map voices in UI');
-        await db.update(audiobookJobs)
-          .set({
-            status: WAITING_FOR_VOICES_STATUS,
-            error: 'Review and assign the LitRPG character voices to continue.',
-            updatedAt: Date.now(),
-          })
-          .where(eq(audiobookJobs.id, job.id));
+        await updateClaimedAudiobookJob(job.id, 'running', {
+          status: WAITING_FOR_VOICES_STATUS,
+          error: 'Review and assign the LitRPG character voices to continue.',
+          updatedAt: Date.now(),
+        });
         return;
       }
       multiVoiceCharacters = buildMultiVoiceCast(readiness.map);
@@ -730,9 +792,8 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
     for (const chapter of chapters) {
       // ABORT CHECK: If user cancelled/deleted the job from the UI, abort processing
-      const currentJobCheck = await db.select({ id: audiobookJobs.id, status: audiobookJobs.status }).from(audiobookJobs).where(eq(audiobookJobs.id, job.id));
-      if (currentJobCheck.length === 0 || currentJobCheck[0].status !== 'running') {
-        serverLogger.info({ event: 'audiobook.queue.aborted', jobId: job.id }, 'Job was cancelled or deleted by user. Aborting worker loop.');
+      if (!await workerStillOwnsAudiobookJob(job.id)) {
+        serverLogger.info({ event: 'audiobook.queue.aborted', jobId: job.id }, 'Job was paused, cancelled, or deleted. Aborting worker loop.');
         if (nc) await nc.close();
         return;
       }
@@ -821,19 +882,18 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           const msg = await nc.request(natsSubject, sc.encode(payload), {
             timeout: resolveSmartAudioNatsTimeoutMs(currentSelectedProfile?.workerMode),
           });
+          if (!await workerStillOwnsAudiobookJob(job.id)) throw new AudiobookJobStoppedError();
           const workerResult = JSON.parse(sc.decode(msg.data));
 
           if (workerResult.status === "rate_limit") {
             serverLogger.warn({ event: 'audiobook.queue.smart_audio.rate_limit', bookId }, 'Python worker reported rate limit. Moving job to back of queue.');
             if (nc) await nc.close();
-            await db.update(audiobookJobs)
-              .set({
-                status: 'queued',
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-                error: GEMINI_RATE_LIMIT_PAUSE_MESSAGE,
-              })
-              .where(eq(audiobookJobs.id, job.id));
+            await updateClaimedAudiobookJob(job.id, 'running', {
+              status: 'queued',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              error: GEMINI_RATE_LIMIT_PAUSE_MESSAGE,
+            });
             return;
           }
 
@@ -915,6 +975,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             throw new Error(`Python worker returned error: ${workerResult.message || workerResult.status || 'unknown response'}`);
           }
         } catch (e) {
+          if (e instanceof AudiobookJobStoppedError) throw e;
           serverLogger.error({ event: 'audiobook.queue.smart_audio.failed', error: e }, 'Smart audio processing failed. Aborting generation.');
           require('fs').appendFileSync('/home/cisco/openreader/audiobook_err.txt', String((e as any).stack || e) + '\n');
           if (nc) await nc.close();
@@ -926,11 +987,11 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             jobSettingsParsed.smartAudioRetries = retries + 1;
             serverLogger.info({ event: 'audiobook.queue.smart_audio.retry_scheduled' }, 'Scheduling auto-retry in 5 minutes...');
             
-            await db.update(audiobookJobs).set({ 
+            await updateClaimedAudiobookJob(job.id, 'running', {
               settingsJson: JSON.stringify(jobSettingsParsed), 
               status: 'error', 
               error: 'Smart audio failed to connect. Will automatically retry in 5 minutes...' 
-            }).where(eq(audiobookJobs.id, job.id));
+            });
             
             setTimeout(async () => {
               try {
@@ -982,6 +1043,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         baseUrl: creds.baseUrl,
         testNamespace: testNamespace,
       });
+      if (!await workerStillOwnsAudiobookJob(job.id)) throw new AudiobookJobStoppedError();
 
       const contentType = format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';
       totalBytes += ttsBuffer.length;
@@ -1037,7 +1099,11 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
     if (nc) await nc.close();
 
-    await db.update(audiobookJobs).set({ status: 'completed', completedAt: Date.now(), progress: 100 }).where(eq(audiobookJobs.id, job.id));
+    await updateClaimedAudiobookJob(job.id, 'running', {
+      status: 'completed',
+      completedAt: Date.now(),
+      progress: 100,
+    });
     await db.update(audiobooks).set({ totalBytes }).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, userId)));
     serverLogger.info({ event: 'audiobook.queue.complete', jobId: job.id, documentId: job.documentId }, `Successfully completed audiobook job ${job.id}`);
 
@@ -1051,12 +1117,16 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     });
 
   } catch (err: unknown) {
+    if (err instanceof AudiobookJobStoppedError) {
+      serverLogger.info({ event: 'audiobook.queue.stopped', jobId: job.id }, 'Worker stopped after the job changed state.');
+      return;
+    }
     const errorMsg = err instanceof Error ? err.message : String(err);
     
     // Auto-requeue transient connectivity crashes (like server reloads or NATS timeouts)
     if (errorMsg.includes('terminated') || errorMsg.includes('fetch failed') || errorMsg.includes('timeout')) {
       serverLogger.warn({ event: 'audiobook.queue.process.requeue', error: errorMsg }, 'Transient error detected, moving job to back of queue.');
-      await db.update(audiobookJobs).set({ status: 'queued', createdAt: Date.now() }).where(eq(audiobookJobs.id, job.id));
+      await updateAudiobookJobIfStatus(job.id, 'running', { status: 'queued', createdAt: Date.now() });
       return;
     }
     

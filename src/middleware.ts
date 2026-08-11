@@ -28,10 +28,19 @@ const PUBLIC_PATH_PREFIXES = [
   '/signup',
   '/privacy',
 ];
+const PUBLIC_EXACT_PATHS = new Set([
+  // PayPal calls the webhook without a Reader session. The return endpoint is
+  // also public at middleware level so it can redirect an expired session to
+  // sign-in; capture still requires the matching authenticated account.
+  '/api/support/paypal/webhook',
+  '/api/support/paypal/return',
+]);
 
 function isPublicPath(pathname: string): boolean {
   // Root landing page
   if (pathname === '/') return true;
+
+  if (PUBLIC_EXACT_PATHS.has(pathname)) return true;
 
   return PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
@@ -61,14 +70,17 @@ function getCountryCodeFromHeaders(request: NextRequest): string | null {
 }
 
 export function middleware(request: NextRequest) {
-  if (isRichardrDevProductionInstance()) {
+  const { pathname } = request.nextUrl;
+  const isVerifiedProviderCallback = pathname === '/api/support/paypal/webhook';
+
+  // PayPal delivery servers are not end users and may not carry a US country
+  // header. Let the webhook reach its cryptographic signature verification.
+  if (isRichardrDevProductionInstance() && !isVerifiedProviderCallback) {
     const countryCode = getCountryCodeFromHeaders(request);
     const isUnitedStatesRequest = countryCode === US_COUNTRY_CODE;
 
     // Strict region gate for the official production instance.
     if (!isUnitedStatesRequest) {
-      const { pathname } = request.nextUrl;
-
       if (pathname.startsWith('/api/')) {
         return NextResponse.json(
           { error: 'OpenReader is only available in the United States.' },
@@ -87,8 +99,6 @@ export function middleware(request: NextRequest) {
   }
 
   getRequiredAuthEnv();
-
-  const { pathname } = request.nextUrl;
 
   // Fast-path redirect for signed-in users hitting the public landing page.
   // This avoids extra server work in the landing page render path.

@@ -24,3 +24,6 @@ export const scheduledTasks = usePostgres ? postgresSchema.scheduledTasks : sqli
 export const documentBlobLeases = usePostgres ? postgresSchema.documentBlobLeases : sqliteSchema.documentBlobLeases;
 export const userApiKeys = usePostgres ? postgresSchema.userApiKeys : sqliteSchema.userApiKeys;
 export const systemLogs = usePostgres ? postgresSchema.systemLogs : sqliteSchema.systemLogs;
+export const supportPayments = usePostgres ? postgresSchema.supportPayments : sqliteSchema.supportPayments;
+export const supportAuditEvents = usePostgres ? postgresSchema.supportAuditEvents : sqliteSchema.supportAuditEvents;
+export const paypalWebhookEvents = usePostgres ? postgresSchema.paypalWebhookEvents : sqliteSchema.paypalWebhookEvents;

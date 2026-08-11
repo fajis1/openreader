@@ -5,7 +5,8 @@ import { DocumentList } from '@/components/doclist/DocumentList';
 import { SettingsModal, SettingsTrigger } from '@/components/SettingsModal';
 import { UserMenu } from '@/components/auth/UserMenu';
 import { SmartAudioSettings } from '@/components/SmartAudioSettings';
-import { SidebarNavItem } from '@/components/ui';
+import { SidebarNavItem, SidebarNavLink } from '@/components/ui';
+import { useAuthSession } from '@/hooks/useAuthSession';
 
 const Brand = () => (
   <div className="flex items-center gap-2 min-w-0">
@@ -20,6 +21,10 @@ const Brand = () => (
 export function HomeContent() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [smartAiOpen, setSmartAiOpen] = useState(false);
+  const { data: session } = useAuthSession();
+  const isAdmin = Boolean(
+    (session?.user as unknown as { isAdmin?: boolean } | undefined)?.isAdmin,
+  );
 
   useEffect(() => {
     const handleOpen = () => setSmartAiOpen(true);
@@ -45,6 +50,20 @@ export function HomeContent() {
         }
         label="Smart AI Profiles"
       />
+      {isAdmin && (
+        <SidebarNavLink
+          href="/admin"
+          compact
+          aria-label="Support Console"
+          icon={(
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+              <path d="M9 12h6M12 9v6" />
+            </svg>
+          )}
+          label="Support Console"
+        />
+      )}
       <UserMenu variant="sidebar" />
     </div>
   );

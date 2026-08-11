@@ -4,6 +4,7 @@ export type MonthlyAudiobookQuotaProblem = {
   supportServerUrl?: unknown;
   supportMinimumUsd?: unknown;
   supportExtraAudiobooks?: unknown;
+  paypalEnabled?: unknown;
 };
 
 export const AUDIOBOOK_QUOTA_UPDATED_EVENT = 'openreader:audiobook-quota-updated';
@@ -20,6 +21,7 @@ export type AudiobookQuotaSnapshot = {
   supportServerUrl: string | null;
   supportMinimumUsd: number;
   supportExtraAudiobooks: number;
+  paypalEnabled: boolean;
 };
 
 export function isMonthlyAudiobookQuotaProblem(value: unknown): value is MonthlyAudiobookQuotaProblem {
@@ -35,5 +37,6 @@ export function formatMonthlyAudiobookQuotaMessage(problem: MonthlyAudiobookQuot
   const extraBooks = Number(problem.supportExtraAudiobooks ?? 5);
   const supportUrl = typeof problem.supportServerUrl === 'string' ? problem.supportServerUrl.trim() : '';
   const base = `You’ve used your ${freeLimit} free audiobook${freeLimit === 1 ? '' : 's'} this month. To help cover server and AI costs, support the server with a minimum $${minimumUsd}; that covers ${extraBooks} extra audiobook${extraBooks === 1 ? '' : 's'}.`;
+  if (problem.paypalEnabled === true) return `${base} Use the PayPal button in the monthly allowance card to add credits.`;
   return supportUrl ? `${base} Support link: ${supportUrl}` : base;
 }

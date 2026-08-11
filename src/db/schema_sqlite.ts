@@ -320,3 +320,61 @@ export const systemLogs = sqliteTable('system_logs', {
   details: text('details'), // JSON string or stack trace
   createdAt: integer('created_at').notNull().default(SQLITE_NOW_MS),
 });
+
+export const supportPayments = sqliteTable('support_payments', {
+  id: text('id').primaryKey(),
+  // Deliberately not a foreign key: financial/audit records must survive an
+  // account deletion even though they contain no payer name, email, or address.
+  userId: text('user_id').notNull(),
+  environment: text('environment').notNull(),
+  paypalOrderId: text('paypal_order_id').unique(),
+  paypalCaptureId: text('paypal_capture_id').unique(),
+  status: text('status').notNull().default('creating'),
+  amountCents: integer('amount_cents').notNull(),
+  currency: text('currency').notNull().default('USD'),
+  credits: integer('credits').notNull(),
+  creditsGranted: integer('credits_granted').notNull().default(0),
+  creditsRevoked: integer('credits_revoked').notNull().default(0),
+  reversalShortfall: integer('reversal_shortfall').notNull().default(0),
+  failureCode: text('failure_code'),
+  createdAt: integer('created_at').notNull().default(SQLITE_NOW_MS),
+  updatedAt: integer('updated_at').notNull().default(SQLITE_NOW_MS),
+  completedAt: integer('completed_at'),
+  reversedAt: integer('reversed_at'),
+}, (table) => [
+  index('idx_support_payments_user_created').on(table.userId, table.createdAt),
+  index('idx_support_payments_status_updated').on(table.status, table.updatedAt),
+]);
+
+export const supportAuditEvents = sqliteTable('support_audit_events', {
+  id: text('id').primaryKey(),
+  // Deliberately not foreign keys so support history survives account deletion.
+  adminUserId: text('admin_user_id').notNull(),
+  targetUserId: text('target_user_id'),
+  action: text('action').notNull(),
+  resourceId: text('resource_id'),
+  amount: integer('amount'),
+  note: text('note'),
+  createdAt: integer('created_at').notNull().default(SQLITE_NOW_MS),
+}, (table) => [
+  index('idx_support_audit_created').on(table.createdAt),
+  index('idx_support_audit_target_created').on(table.targetUserId, table.createdAt),
+]);
+
+export const paypalWebhookEvents = sqliteTable('paypal_webhook_events', {
+  id: text('id').primaryKey(),
+  eventType: text('event_type').notNull(),
+  paymentId: text('payment_id'),
+  resourceId: text('resource_id'),
+  captureId: text('capture_id'),
+  orderId: text('order_id'),
+  customId: text('custom_id'),
+  amountCents: integer('amount_cents'),
+  currency: text('currency'),
+  status: text('status').notNull().default('received'),
+  createdAt: integer('created_at').notNull().default(SQLITE_NOW_MS),
+  processedAt: integer('processed_at'),
+}, (table) => [
+  index('idx_paypal_webhook_events_payment').on(table.paymentId, table.createdAt),
+  index('idx_paypal_webhook_events_capture_status').on(table.captureId, table.status),
+]);

@@ -14,7 +14,10 @@ import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharacterModal';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import { getTtsLanguageCompatibilityWarnings, resolveTtsLanguage } from '@/lib/shared/language';
-import { isGeminiRateLimitPause } from '@/lib/shared/audiobook-job-status';
+import {
+  AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS,
+  isGeminiRateLimitPause,
+} from '@/lib/shared/audiobook-job-status';
 import {
   AUDIOBOOK_QUOTA_UPDATED_EVENT,
   formatMonthlyAudiobookQuotaMessage,
@@ -224,6 +227,7 @@ export function AudiobookExportModal({
         }) => j.documentId === documentId && (
           j.status === 'queued'
           || j.status === 'running'
+          || j.status === AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS
           || j.status === 'waiting_for_pdf'
           || j.status === WAITING_FOR_VOICES_STATUS
         ));
@@ -240,6 +244,7 @@ export function AudiobookExportModal({
           if (activeJob.status === 'queued' && isGeminiRateLimitPause(activeJob.error)) {
             setCurrentChapter(activeJob.error);
           } else if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
+          else if (activeJob.status === AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS) setCurrentChapter('Pause requested. Waiting for the current step to finish...');
           else if (activeJob.status === 'waiting_for_pdf') setCurrentChapter('Waiting for PDF parsing...');
           else setCurrentChapter('Generating on server...');
           }

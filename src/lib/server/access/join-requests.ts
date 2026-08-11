@@ -22,6 +22,8 @@ export type JoinRequest = {
   tokenHash: string;
 };
 
+export type JoinRequestSummary = Omit<JoinRequest, 'tokenHash'>;
+
 const JOIN_REQUEST_PREFIX = 'join_request:';
 const RESEND_API_URL = 'https://api.resend.com/emails';
 
@@ -83,6 +85,21 @@ function parseJoinRequest(value: unknown): JoinRequest | null {
     decidedAt: typeof rec.decidedAt === 'number' ? rec.decidedAt : null,
     decisionNote: typeof rec.decisionNote === 'string' && rec.decisionNote.trim() ? rec.decisionNote : null,
     tokenHash: rec.tokenHash,
+  };
+}
+
+function toJoinRequestSummary(request: JoinRequest): JoinRequestSummary {
+  return {
+    id: request.id,
+    email: request.email,
+    name: request.name,
+    intendedUse: request.intendedUse,
+    heardAbout: request.heardAbout,
+    status: request.status,
+    createdAt: request.createdAt,
+    updatedAt: request.updatedAt,
+    decidedAt: request.decidedAt,
+    decisionNote: request.decisionNote,
   };
 }
 
@@ -223,20 +240,58 @@ export async function decideJoinRequest(input: {
   const match = requests.find((request): request is JoinRequest => Boolean(request && request.tokenHash === tokenHash));
   if (!match) return null;
 
+  return applyJoinRequestDecision(match, input.decision);
+}
+
+async function applyJoinRequestDecision(
+  request: JoinRequest,
+  decision: 'approve' | 'deny',
+  decisionNote?: string | null,
+): Promise<JoinRequest> {
+  const safeNote = safeText(decisionNote, 500) || null;
+
   const now = Date.now();
   const next: JoinRequest = {
-    ...match,
-    status: input.decision === 'approve' ? 'approved' : 'denied',
+    ...request,
+    status: decision === 'approve' ? 'approved' : 'denied',
     updatedAt: now,
     decidedAt: now,
+    decisionNote: safeNote,
   };
   await writeJoinRequest(next);
 
-  if (input.decision === 'approve') {
+  if (decision === 'approve') {
     const runtime = await getRuntimeConfig();
     const allowedEmails = Array.from(new Set([...runtime.allowedEmails, next.email])).sort();
     await setRuntimeConfigKey('allowedEmails', allowedEmails);
   }
 
   return next;
+}
+
+export async function listJoinRequests(): Promise<JoinRequestSummary[]> {
+  const rows = await db.select({ valueJson: adminSettings.valueJson })
+    .from(adminSettings)
+    .where(like(adminSettings.key, `${JOIN_REQUEST_PREFIX}%`));
+  return (rows as Array<{ valueJson: unknown }>)
+    .map((row) => parseJoinRequest(row.valueJson))
+    .filter((request): request is JoinRequest => Boolean(request))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .map(toJoinRequestSummary);
+}
+
+export async function decideJoinRequestById(input: {
+  requestId: string;
+  decision: 'approve' | 'deny';
+  decisionNote?: string | null;
+}): Promise<JoinRequestSummary | null> {
+  const rows = await db.select({ valueJson: adminSettings.valueJson })
+    .from(adminSettings)
+    .where(like(adminSettings.key, `${JOIN_REQUEST_PREFIX}%`));
+  const match = (rows as Array<{ valueJson: unknown }>)
+    .map((row) => parseJoinRequest(row.valueJson))
+    .find((request): request is JoinRequest => Boolean(request && request.id === input.requestId));
+  if (!match) return null;
+  const next = await applyJoinRequestDecision(match, input.decision, input.decisionNote);
+  return toJoinRequestSummary(next);
 }

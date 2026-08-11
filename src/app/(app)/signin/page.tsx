@@ -11,14 +11,39 @@ import { GithubIcon } from '@/components/icons/Icons';
 import { LoadingSpinner } from '@/components/Spinner';
 import { Button, Checkbox, Field, InlineButton, Input, Surface } from '@/components/ui';
 
-function SessionExpiredLoader({ setSessionExpired, setErrorFromUrl }: { setSessionExpired: (v: boolean) => void, setErrorFromUrl: (v: string | null) => void }) {
+function safeCallbackURL(value: string | null): string {
+  if (!value || value.length > 500) return '/app';
+  try {
+    const url = new URL(value, 'https://reader.invalid');
+    const orderId = url.searchParams.get('token')?.trim() || '';
+    if (
+      url.origin !== 'https://reader.invalid'
+      || url.pathname !== '/api/support/paypal/return'
+      || !/^[A-Za-z0-9_-]{1,200}$/.test(orderId)
+    ) return '/app';
+    return `/api/support/paypal/return?token=${encodeURIComponent(orderId)}`;
+  } catch {
+    return '/app';
+  }
+}
+
+function SessionExpiredLoader({
+  setSessionExpired,
+  setErrorFromUrl,
+  setCallbackURL,
+}: {
+  setSessionExpired: (v: boolean) => void;
+  setErrorFromUrl: (v: string | null) => void;
+  setCallbackURL: (v: string) => void;
+}) {
   const searchParams = useSearchParams();
   useEffect(() => {
     const reason = searchParams.get('reason');
     setSessionExpired(reason === 'expired');
     const err = searchParams.get('error');
     if (err) setErrorFromUrl(err);
-  }, [searchParams, setSessionExpired, setErrorFromUrl]);
+    setCallbackURL(safeCallbackURL(searchParams.get('callbackURL')));
+  }, [searchParams, setSessionExpired, setErrorFromUrl, setCallbackURL]);
   return null;
 }
 
@@ -32,6 +57,7 @@ function SignInContent() {
   const [rememberMe, setRememberMe] = useState(true);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [callbackURL, setCallbackURL] = useState('/app');
   const { baseUrl, allowAnonymousAuthSessions, githubAuthEnabled, googleAuthEnabled } = useAuthConfig();
   const enableUserSignups = useFeatureFlag('enableUserSignups');
   const { refresh: refreshRateLimit } = useAuthRateLimit();
@@ -76,7 +102,7 @@ function SignInContent() {
         // Immediately refresh rate-limit status so the banner clears without a full reload.
         // This is especially important when an anonymous user upgrades to an account.
         await refreshRateLimit();
-        window.location.href = '/app';
+        window.location.href = callbackURL;
       }
     } catch (err) {
       console.error('Sign in error:', err);
@@ -91,7 +117,7 @@ function SignInContent() {
       const client = getAuthClient(baseUrl);
       await client.signIn.social({
         provider: 'github',
-        callbackURL: '/app'
+        callbackURL,
       });
     } catch (err) {
       console.error('Github sign in error:', err);
@@ -105,7 +131,7 @@ function SignInContent() {
       const client = getAuthClient(baseUrl);
       await client.signIn.social({
         provider: 'google',
-        callbackURL: '/app'
+        callbackURL,
       });
     } catch (err) {
       console.error('Google sign in error:', err);
@@ -131,7 +157,11 @@ function SignInContent() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
       <Suspense fallback={null}>
-        <SessionExpiredLoader setSessionExpired={setSessionExpired} setErrorFromUrl={setError} />
+        <SessionExpiredLoader
+          setSessionExpired={setSessionExpired}
+          setErrorFromUrl={setError}
+          setCallbackURL={setCallbackURL}
+        />
       </Suspense>
 
         <Surface elevation="3" className="w-full max-w-md p-6">

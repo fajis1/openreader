@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharacterModal';
+import { AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS } from '@/lib/shared/audiobook-job-status';
 import { WAITING_FOR_VOICES_STATUS } from '@/lib/shared/multi-voice';
 
 interface Job {
@@ -118,6 +119,7 @@ export function JobsInlineView() {
           <div className="space-y-4">
             {jobs.map((job) => {
               const isQueued = job.status === 'queued' || job.status === 'waiting_for_pdf';
+              const isPauseRequested = job.status === AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS;
               const isWaitingForVoices = job.status === WAITING_FOR_VOICES_STATUS
                 || (job.status === 'queued' && job.error === 'waiting_for_voices');
               const globalPosition = job.globalQueuePosition;
@@ -148,14 +150,14 @@ export function JobsInlineView() {
                             (~{queueEtaStr} remaining before processing)
                           </span>
                         ) : null}
-                        {job.status === 'running' && job.startedAt && typeof job.progress === 'number' ? (
+                        {(job.status === 'running' || isPauseRequested) && job.startedAt && typeof job.progress === 'number' ? (
                           <span className="ml-3 text-faint">
                             ({Math.round(job.progress || 0)}% done &bull; ~{formatMs(getRemainingMs(now, job.startedAt, job.updatedAt || job.startedAt, job.progress))} remaining)
                           </span>
                         ) : null}
                       </div>
                       
-                      {job.status === 'running' && (
+                      {(job.status === 'running' || isPauseRequested) && (
                         <div className="w-full max-w-sm h-1.5 bg-surface-sunken rounded-full overflow-hidden mt-1 border border-line">
                           <div 
                             className="h-full bg-accent" 
@@ -168,6 +170,7 @@ export function JobsInlineView() {
                   <div className="text-right text-xs text-soft">
                     Created: {new Date(job.createdAt).toLocaleString()}
                     {job.error && !isWaitingForVoices && <p className="text-danger mt-1">Error: {job.error}</p>}
+                    {isPauseRequested && <p className="mt-1 text-warning">Pause requested. The worker will stop after its current step.</p>}
                     {isWaitingForVoices && <p className="mt-1 text-warning">Character casting review is required before generation can continue.</p>}
                     <div className="mt-2 flex gap-2 justify-end">
                       {isWaitingForVoices && jobProfileId(job) && (
@@ -175,7 +178,7 @@ export function JobsInlineView() {
                           Review Character Voices
                         </button>
                       )}
-                      {!isWaitingForVoices && ['queued', 'running', 'paused'].includes(job.status) && (
+                      {!isWaitingForVoices && ['queued', 'running', AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS, 'paused'].includes(job.status) && (
                         <a href={`/listen/${job.documentId}`} className="text-accent font-semibold hover:underline bg-surface-sunken border border-accent px-2 py-1 rounded">
                           Review Progress
                         </a>

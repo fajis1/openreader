@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { requireAdminContext } from '@/lib/server/auth/admin';
-import { grantAudiobookCredits } from '@/lib/server/access/audiobook-quota';
+import { grantSupportCredits } from '@/lib/server/admin/support';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
 import * as authSchemaSqlite from '@/db/schema_auth_sqlite';
 import * as authSchemaPostgres from '@/db/schema_auth_postgres';
@@ -36,10 +36,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'User not found. Provide an existing userId or account email.' }, { status: 404 });
     }
     const credits = Math.floor(Number(body?.credits ?? 5));
-    const ledger = await grantAudiobookCredits({
-      userId,
+    const ledger = await grantSupportCredits({
+      adminUserId: ctx.user.id,
+      targetUserId: userId,
       credits,
       note: typeof body?.note === 'string' ? body.note : null,
+      idempotencyKey: typeof body?.idempotencyKey === 'string' ? body.idempotencyKey : undefined,
     });
     return NextResponse.json({
       ok: true,

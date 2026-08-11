@@ -1094,6 +1094,18 @@ export function SettingsModal({
                       {/* Admin Section */}
                       {activeSection === 'admin' && isAdmin && (
                         <div className="space-y-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface-sunken p-3">
+                            <div>
+                              <p className="text-sm font-medium text-foreground">User support and audiobook troubleshooting</p>
+                              <p className="text-xs text-soft">Open the full-screen console for users, quotas, jobs, requests, and logs.</p>
+                            </div>
+                            <Link
+                              href="/admin"
+                              className="inline-flex h-7 items-center rounded-md bg-accent px-2.5 text-xs font-medium text-background hover:bg-secondary-accent"
+                            >
+                              Open Support Console
+                            </Link>
+                          </div>
                           <SegmentedControl
                             value={adminSubTab}
                             options={[

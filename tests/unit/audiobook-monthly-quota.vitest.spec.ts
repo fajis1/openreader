@@ -1,7 +1,10 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { describe, expect, test } from 'vitest';
-import { calculateMonthlyAudiobookAllowance } from '../../src/lib/server/access/audiobook-quota';
+import {
+  calculateAudiobookCreditGrantAllocation,
+  calculateMonthlyAudiobookAllowance,
+} from '../../src/lib/server/access/audiobook-quota';
 
 function source(relativePath: string): string {
   return readFileSync(resolve(process.cwd(), relativePath), 'utf8');
@@ -48,6 +51,26 @@ describe('monthly audiobook allowance', () => {
       freeRemaining: 0,
       supportCreditsRemaining: 0,
       totalRemaining: 0,
+    });
+  });
+
+  test('settles reversal debt before making new support credits available', () => {
+    expect(calculateAudiobookCreditGrantAllocation({
+      credits: 5,
+      outstandingDebt: 2,
+    })).toEqual({
+      debtOffset: 2,
+      availableCredits: 3,
+      outstandingDebt: 0,
+    });
+
+    expect(calculateAudiobookCreditGrantAllocation({
+      credits: 5,
+      outstandingDebt: 8,
+    })).toEqual({
+      debtOffset: 5,
+      availableCredits: 0,
+      outstandingDebt: 3,
     });
   });
 

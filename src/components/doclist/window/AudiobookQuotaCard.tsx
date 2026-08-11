@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import {
   AUDIOBOOK_QUOTA_UPDATED_EVENT,
@@ -18,6 +18,9 @@ function pluralBooks(value: number): string {
 }
 
 export function AudiobookQuotaCard() {
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
   const { data, error, isLoading, mutate } = useSWR<AudiobookQuotaSnapshot>(
     '/api/audiobooks/quota',
     fetchQuota,
@@ -28,6 +31,22 @@ export function AudiobookQuotaCard() {
     const refresh = () => { void mutate(); };
     window.addEventListener(AUDIOBOOK_QUOTA_UPDATED_EVENT, refresh);
     return () => window.removeEventListener(AUDIOBOOK_QUOTA_UPDATED_EVENT, refresh);
+  }, [mutate]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const status = url.searchParams.get('paypal');
+    const messages: Record<string, string> = {
+      success: 'Payment received. Your support credits are ready.',
+      pending: 'PayPal is still confirming the payment. Credits will appear automatically.',
+      cancelled: 'PayPal checkout was cancelled; no charge was made.',
+      error: 'PayPal could not confirm the payment. No credits were added; please try again or contact support.',
+    };
+    if (!status || !messages[status]) return;
+    setPaymentNotice(messages[status]);
+    url.searchParams.delete('paypal');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    if (status === 'success' || status === 'pending') void mutate();
   }, [mutate]);
 
   if (error) return null;
@@ -65,6 +84,43 @@ export function AudiobookQuotaCard() {
     day: 'numeric',
     timeZone: 'UTC',
   }).format(new Date(data.resetTimeMs));
+
+  const startPayPalCheckout = async () => {
+    setCheckoutLoading(true);
+    setCheckoutError(null);
+    try {
+      const response = await fetch('/api/support/paypal/orders', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amountUsd: data.supportMinimumUsd,
+          credits: data.supportExtraAudiobooks,
+        }),
+      });
+      const result = await response.json().catch(() => ({})) as {
+        approvalUrl?: string;
+        error?: string;
+        code?: string;
+      };
+      if (!response.ok || !result.approvalUrl) {
+        if (result.code === 'support_package_changed') void mutate();
+        throw new Error(result.error || 'Unable to start PayPal checkout.');
+      }
+      const approvalUrl = new URL(result.approvalUrl);
+      if (
+        approvalUrl.protocol !== 'https:'
+        || !(approvalUrl.hostname === 'paypal.com' || approvalUrl.hostname.endsWith('.paypal.com'))
+      ) {
+        throw new Error('PayPal returned an invalid checkout address.');
+      }
+      window.location.assign(approvalUrl.toString());
+    } catch (checkoutFailure) {
+      setCheckoutError(checkoutFailure instanceof Error
+        ? checkoutFailure.message
+        : 'Unable to start PayPal checkout.');
+      setCheckoutLoading(false);
+    }
+  };
 
   return (
     <section
@@ -108,6 +164,28 @@ export function AudiobookQuotaCard() {
         Chapter repairs and retries are included.
       </p>
 
+      {paymentNotice ? (
+        <p className="mt-1.5 rounded border border-accent-line bg-accent-wash px-1.5 py-1 text-[10px] text-foreground" role="status">
+          {paymentNotice}
+        </p>
+      ) : null}
+      {checkoutError ? (
+        <p className="mt-1.5 text-[10px] text-danger" role="alert">{checkoutError}</p>
+      ) : null}
+
+      {data.paypalEnabled ? (
+        <button
+          type="button"
+          onClick={startPayPalCheckout}
+          disabled={checkoutLoading}
+          className="mt-1.5 inline-flex w-full items-center justify-center rounded-md bg-accent px-2 py-1.5 text-[10px] font-semibold text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+        >
+          {checkoutLoading
+            ? 'Opening PayPal…'
+            : `Support $${data.supportMinimumUsd} · add ${data.supportExtraAudiobooks} books`}
+        </button>
+      ) : null}
+
       {data.supportServerUrl && (
         <a
           href={data.supportServerUrl}
@@ -115,7 +193,9 @@ export function AudiobookQuotaCard() {
           rel="noopener noreferrer"
           className="mt-1.5 inline-flex text-[10px] font-medium text-accent hover:underline"
         >
-          Support ${data.supportMinimumUsd} for {data.supportExtraAudiobooks} more →
+          {data.paypalEnabled
+            ? 'Other support options →'
+            : `Support $${data.supportMinimumUsd} for ${data.supportExtraAudiobooks} more →`}
         </a>
       )}
     </section>
