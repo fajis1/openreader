@@ -1,4 +1,4 @@
-import { and, eq, inArray, not } from 'drizzle-orm';
+import { eq, inArray, not } from 'drizzle-orm';
 import { describe, expect, test } from 'vitest';
 
 import { db } from '../../src/db';
@@ -251,6 +251,11 @@ describe('runtime config JSON seeding', () => {
       changelogFeedUrl: 'https://example.com/changelog/manifest.json',
       enableUserSignups: false,
       allowedEmails: [],
+      enableJoinRequests: true,
+      monthlyAudiobookLimit: 2,
+      supportMinimumUsd: 10,
+      supportExtraAudiobooks: 5,
+      supportServerUrl: 'https://example.com/support',
       restrictUserApiKeys: false,
       enableTtsProvidersTab: false,
       enableAudiobookExport: false,

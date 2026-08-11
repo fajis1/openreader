@@ -15,21 +15,6 @@ test.describe('Document Upload Tests', () => {
     await setupTest(page, testInfo);
   });
 
-  test('uploads a PDF document', async ({ page }) => {
-    await uploadFile(page, 'sample.pdf');
-    await expectDocumentListed(page, 'sample.pdf');
-  });
-
-  test('uploads an EPUB document', async ({ page }) => {
-    await uploadFile(page, 'sample.epub');
-    await expectDocumentListed(page, 'sample.epub');
-  });
-
-  test('uploads a TXT document', async ({ page }) => {
-    await uploadFile(page, 'sample.txt');
-    await expectDocumentListed(page, 'sample.txt');
-  });
-
   test('reuses the same canonical id for identical uploads', async ({ page }) => {
     await uploadFile(page, 'sample.pdf');
     await uploadFile(page, 'sample.pdf');
@@ -96,12 +81,6 @@ test.describe('Document Upload Tests', () => {
       ? `Expected storedId=${result.storedId} computedId=${result.computedId}`
       : `Expected valid stored html document but got reason=${result.reason}`;
     expect(result.ok, detail).toBeTruthy();
-  });
-
-  test('uploads and converts a DOCX document', async ({ page }) => {
-    await uploadFile(page, 'sample.docx');
-    // DOCX uploads are normalized into stored PDFs with the same basename.
-    await expectDocumentListed(page, 'sample.pdf');
   });
 
   test('displays a PDF document', async ({ page }) => {

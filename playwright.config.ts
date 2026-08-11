@@ -22,11 +22,14 @@ export default defineConfig({
   tsconfig: './tsconfig.json',
   timeout: 30 * 1000,
   outputDir: './tests/results',
-  globalTeardown: './tests/global-teardown.ts',
+  // GitHub runners discard their SQLite database and embedded object store.
+  // Avoid importing the storage-backed teardown there; it can keep the test
+  // process alive after the browser assertions have already finished.
+  globalTeardown: process.env.CI ? undefined : './tests/global-teardown.ts',
   // fullyParallel: false,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: process.env.CI ? 1 : 0,
   // PDF parsing is handled by one embedded compute worker. Keeping CI browser
   // concurrency bounded prevents its queue from exhausting per-test timeouts.
   workers: process.env.CI ? 2 : undefined,
@@ -47,10 +50,16 @@ export default defineConfig({
     // Disable auth rate limiting for tests to support parallel workers creating sessions.
     // ENABLE_TEST_NAMESPACE opts the production build into honoring the
     // x-openreader-test-namespace header (ignored on real prod deployments).
-    command: `export BETTER_AUTH_URL=http://127.0.0.1:3005 API_KEY=test API_BASE=http://127.0.0.1:3005 BASE_URL=http://127.0.0.1:3005 USE_ANONYMOUS_AUTH_SESSIONS=true S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test S3_REGION=us-east-1 COMPUTE_WORKER_TOKEN=local-compute-token PORT=3005 S3_ENDPOINT=http://127.0.0.1:8335 EMBEDDED_NATS_PORT=4224 NATS_URL=nats://127.0.0.1:4224 EMBEDDED_NATS_MONITOR_PORT=8224 EMBEDDED_COMPUTE_WORKER_PORT=8083 WEED_MINI_DIR=docstore/test-seaweedfs EMBEDDED_NATS_STORE_DIR=docstore/test-nats SQLITE_DB_PATH="${playwrightSqliteDbPath}" DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true && mkdir -p docstore .next/standalone/.next/static .next/standalone/public && cp -R .next/static/. .next/standalone/.next/static/ && cp -R public/. .next/standalone/public/ && node scripts/openreader-entrypoint.mjs -- node .next/standalone/server.js`,
+    // `exec` replaces Playwright's shell wrapper so its shutdown signal reaches
+    // the entrypoint, which then stops Next.js and every embedded test service.
+    command: `export BETTER_AUTH_URL=http://127.0.0.1:3005 API_KEY=test API_BASE=http://127.0.0.1:3005 BASE_URL=http://127.0.0.1:3005 USE_ANONYMOUS_AUTH_SESSIONS=true S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test S3_REGION=us-east-1 COMPUTE_WORKER_TOKEN=local-compute-token PORT=3005 S3_ENDPOINT=http://127.0.0.1:8335 EMBEDDED_NATS_PORT=4224 NATS_URL=nats://127.0.0.1:4224 EMBEDDED_NATS_MONITOR_PORT=8224 EMBEDDED_COMPUTE_WORKER_PORT=8083 WEED_MINI_DIR=docstore/test-seaweedfs EMBEDDED_NATS_STORE_DIR=docstore/test-nats SQLITE_DB_PATH="${playwrightSqliteDbPath}" DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true && mkdir -p docstore .next/standalone/.next/static .next/standalone/public && cp -R .next/static/. .next/standalone/.next/static/ && cp -R public/. .next/standalone/public/ && exec node scripts/openreader-entrypoint.mjs -- node .next/standalone/server.js`,
     url: 'http://127.0.0.1:3005',
     reuseExistingServer: !process.env.CI,
     timeout: 600 * 1000,
+    // Playwright defaults to SIGKILL, which bypasses the entrypoint cleanup and
+    // leaves its detached Next.js child alive. Allow the entrypoint to stop its
+    // embedded services and app process before Playwright escalates.
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
     stdout: 'pipe',
     stderr: 'pipe',
   },
@@ -68,6 +77,11 @@ export default defineConfig({
 
     {
       name: 'firefox',
+      testMatch: [
+        '**/accessibility.spec.ts',
+        '**/landing-routing.spec.ts',
+        '**/navigation.spec.ts',
+      ],
       use: {
         ...devices['Desktop Firefox'],
         userAgent: `${devices['Desktop Firefox'].userAgent} OpenReader-Playwright/firefox`,
@@ -77,6 +91,11 @@ export default defineConfig({
 
     {
       name: 'webkit',
+      testMatch: [
+        '**/accessibility.spec.ts',
+        '**/landing-routing.spec.ts',
+        '**/navigation.spec.ts',
+      ],
       use: {
         ...devices['Desktop Safari'],
         userAgent: `${devices['Desktop Safari'].userAgent} OpenReader-Playwright/webkit`,

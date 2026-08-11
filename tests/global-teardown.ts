@@ -69,6 +69,11 @@ function parseAudiobookScopeFromKey(
 }
 
 export default async function globalTeardown(): Promise<void> {
+  // GitHub-hosted CI uses an ephemeral SQLite database and embedded object store.
+  // Let runner/process teardown discard them instead of spending minutes deleting
+  // every namespaced object after the test result is already known.
+  if (process.env.CI) return;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const authSchema: any = process.env.POSTGRES_URL ? authSchemaPostgres : authSchemaSqlite;
   const testSessions = await db

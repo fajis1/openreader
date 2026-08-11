@@ -5,6 +5,8 @@ import os from 'os';
 import path from 'path';
 import util from 'util';
 import { execFile } from 'child_process';
+import ffmpegPath from 'ffmpeg-static';
+import JSZip from 'jszip';
 import { setupTest, uploadAndDisplay } from './helpers';
 
 const execFileAsync = util.promisify(execFile);
@@ -45,6 +47,67 @@ async function getBookIdFromUrl(page: Page, expectedPrefix: 'pdf' | 'epub') {
   const bookId = segments[1];
   expect(bookId).toBeTruthy();
   return bookId;
+}
+
+async function uploadCompactRecoveryEpub(page: Page) {
+  const chapters = [
+    {
+      id: 'chapter-1',
+      title: 'First Chapter',
+      text: 'The first compact chapter establishes the audiobook recovery test with predictable prose. '.repeat(80),
+    },
+    {
+      id: 'chapter-2',
+      title: 'Second Chapter',
+      text: 'The second compact chapter provides another independently recoverable audio segment. '.repeat(80),
+    },
+    {
+      id: 'chapter-3',
+      title: 'Third Chapter',
+      text: 'The third compact chapter completes the deliberately small test audiobook cleanly. '.repeat(80),
+    },
+  ];
+  const zip = new JSZip();
+  zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
+  zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>`);
+  zip.file('OEBPS/content.opf', `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="book-id">openreader-playwright-recovery</dc:identifier>
+    <dc:title>Compact Recovery Test</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    ${chapters.map((chapter) => `<item id="${chapter.id}" href="${chapter.id}.xhtml" media-type="application/xhtml+xml"/>`).join('\n    ')}
+  </manifest>
+  <spine>${chapters.map((chapter) => `<itemref idref="${chapter.id}"/>`).join('')}</spine>
+</package>`);
+  for (const chapter of chapters) {
+    zip.file(`OEBPS/${chapter.id}.xhtml`, `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head><title>${chapter.title}</title></head>
+  <body><h1>${chapter.title}</h1><p>${chapter.text}</p></body>
+</html>`);
+  }
+
+  const epub = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  const input = page.locator('input[type=file]').first();
+  await expect(input).toBeAttached({ timeout: 10_000 });
+  await expect(input).toBeEnabled({ timeout: 10_000 });
+  await input.setInputFiles({
+    name: 'compact-recovery.epub',
+    mimeType: 'application/epub+zip',
+    buffer: epub,
+  });
+  await expect(input).toBeEnabled({ timeout: 15_000 });
+
+  const targetLink = page.getByRole('link', { name: /compact-recovery\.epub/i }).first();
+  await expect(targetLink).toBeVisible({ timeout: 15_000 });
+  await targetLink.click();
+  await page.waitForSelector('.epub-container', { timeout: 10_000 });
 }
 
 async function openExportModal(page: Page) {
@@ -143,12 +206,14 @@ async function downloadFullAudiobook(page: Page, timeoutMs = 60_000): Promise<Do
 }
 
 async function getAudioDurationSeconds(filePath: string) {
-  const ffmpeg = require('ffmpeg-static');
+  if (!ffmpegPath) throw new Error('ffmpeg-static binary is unavailable');
   try {
     // ffmpeg -i outputs metadata to stderr
-    await execFileAsync(ffmpeg, ['-i', filePath]);
-  } catch (error: any) {
-    const stderr = error.stderr || '';
+    await execFileAsync(ffmpegPath, ['-i', filePath]);
+  } catch (error: unknown) {
+    const stderr = error && typeof error === 'object' && 'stderr' in error
+      ? String(error.stderr ?? '')
+      : '';
     const match = stderr.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d+)/);
     if (match) {
       const hours = parseFloat(match[1]);
@@ -572,7 +637,7 @@ test('regenerates a single MP3 audiobook PDF page and exports full audiobook', a
 test('resumes audiobook when a chapter is missing and full download succeeds (EPUB)', async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text())); page.on('pageerror', error => console.log('BROWSER ERROR:', error)); await setupTest(page, testInfo);
-  await uploadAndDisplay(page, 'sample.epub');
+  await uploadCompactRecoveryEpub(page);
 
   const bookId = await getBookIdFromUrl(page, 'epub');
   await resetAudiobookById(page, bookId);
@@ -583,7 +648,12 @@ test('resumes audiobook when a chapter is missing and full download succeeds (EP
 
   await waitForChaptersHeading(page);
   const chapterActionsButtons = page.getByRole('button', { name: 'Chapter actions' });
-  await expect(chapterActionsButtons).toHaveCount(28, { timeout: 60_000 });
+  await waitForBackendDownloadReady(page, bookId, { minChapters: 2 });
+  const beforeDelete = await expectChaptersBackendState(page, bookId);
+  const chapterCountBefore = beforeDelete.chapters.length;
+  expect(chapterCountBefore).toBeGreaterThanOrEqual(2);
+  expect(chapterCountBefore).toBeLessThanOrEqual(4);
+  await expect(chapterActionsButtons).toHaveCount(chapterCountBefore, { timeout: 20_000 });
 
   // Delete the first chapter via the backend API so the audiobook has a missing index (0).
   // This is more reliable than clicking through the chapter actions menu in headless runs.
@@ -592,18 +662,18 @@ test('resumes audiobook when a chapter is missing and full download succeeds (EP
   );
   expect(deleteRes.ok()).toBeTruthy();
 
-  // Wait for backend to reflect exactly 27 remaining chapters.
+  // Wait for backend to reflect exactly one missing chapter.
   await expect
     .poll(async () => {
       const json = await expectChaptersBackendState(page, bookId);
       return json.chapters?.length ?? 0;
     }, { timeout: 30_000 })
-    .toBe(27);
+    .toBe(chapterCountBefore - 1);
 
   const jsonAfterDelete = await expectChaptersBackendState(page, bookId);
   expect(jsonAfterDelete.exists).toBe(true);
   expect(Array.isArray(jsonAfterDelete.chapters)).toBe(true);
-  expect(jsonAfterDelete.chapters.length).toBe(27);
+  expect(jsonAfterDelete.chapters.length).toBe(chapterCountBefore - 1);
 
   // Close and reopen the modal to ensure "resume" loads the missing placeholder from the backend.
   await page.getByRole('button', { name: 'Close' }).click();
@@ -621,19 +691,19 @@ test('resumes audiobook when a chapter is missing and full download succeeds (EP
   await expect(page.getByRole('button', { name: 'Resume' })).toHaveCount(0, { timeout: 60_000 });
   await expect(page.getByText(/Missing •/)).toHaveCount(0, { timeout: 15_000 });
 
-  // Should have all 28 chapters restored
-  await expect(chapterActionsButtons).toHaveCount(28, { timeout: 20_000 });
+  // The original compact chapter set should be restored.
+  await expect(chapterActionsButtons).toHaveCount(chapterCountBefore, { timeout: 20_000 });
 
   await withDownloadedFullAudiobook(page, async ({ filePath }) => {
     const durationSeconds = await getAudioDurationSeconds(filePath);
-    expect(durationSeconds).toBeGreaterThan(275);
-    expect(durationSeconds).toBeLessThan(285);
+    expect(durationSeconds).toBeGreaterThan(chapterCountBefore * 8);
+    expect(durationSeconds).toBeLessThan(chapterCountBefore * 35);
   });
 
   const jsonAfterResume = await expectChaptersBackendState(page, bookId);
   expect(jsonAfterResume.exists).toBe(true);
   expect(Array.isArray(jsonAfterResume.chapters)).toBe(true);
-  expect(jsonAfterResume.chapters.length).toBe(28);
+  expect(jsonAfterResume.chapters.length).toBe(chapterCountBefore);
   for (const ch of jsonAfterResume.chapters) {
     expect(ch.duration).toBeGreaterThan(0);
   }

@@ -127,7 +127,7 @@ describe('Smart Audio profile secret boundary', () => {
     expect(merged.backupGeminiApiKey).toBeUndefined();
   });
 
-  it('copies stored keys using write-only source-profile metadata', () => {
+  it('copies stored keys using source-profile metadata without returning secrets', () => {
     const stored = makeProfile({
       geminiApiKey: 'stored-primary',
       backupGeminiApiKey: 'stored-backup',
@@ -143,8 +143,10 @@ describe('Smart Audio profile secret boundary', () => {
 
     expect(merged.geminiApiKey).toBe('stored-primary');
     expect(merged.backupGeminiApiKey).toBe('stored-backup');
-    expect(safeDuplicate).not.toHaveProperty('geminiApiKeySourceProfileId');
-    expect(safeDuplicate).not.toHaveProperty('backupGeminiApiKeySourceProfileId');
+    expect(safeDuplicate.geminiApiKeySourceProfileId).toBe(stored.id);
+    expect(safeDuplicate.backupGeminiApiKeySourceProfileId).toBe(stored.id);
+    expect(safeDuplicate).not.toHaveProperty('geminiApiKey');
+    expect(safeDuplicate).not.toHaveProperty('backupGeminiApiKey');
   });
 
   it('can cascade one stored key to multiple profiles without returning it', () => {

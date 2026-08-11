@@ -1,9 +1,17 @@
 name: Playwright Tests
 on:
   push:
-    branches: [ main, master ]  
+    branches: [ main, master ]
+    paths-ignore:
+      - 'docs-site/**'
+      - 'docs/**'
+      - '**/*.md'
   pull_request:
     branches: [ main, master ]
+    paths-ignore:
+      - 'docs-site/**'
+      - 'docs/**'
+      - '**/*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,11 +30,11 @@ jobs:
       S3_ENDPOINT: http://127.0.0.1:8333
     steps:
     - uses: actions/checkout@v5
+    - uses: pnpm/action-setup@v6
     - uses: actions/setup-node@v5
       with:
         node-version: lts/*
-        package-manager-cache: false
-    - uses: pnpm/action-setup@v6
+        cache: pnpm
     - name: Install system dependencies
       run: |
         sudo apt-get update
@@ -53,6 +61,8 @@ jobs:
         nats-server -v
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
+    - name: Apply drizzle migrations (SQLite)
+      run: pnpm migrate
     - name: Build app and enforce bundle guard
       run: |
         pnpm build
@@ -67,10 +77,10 @@ jobs:
         API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
       run: pnpm exec playwright test --max-failures=5 --reporter=list,github,html
     - uses: actions/upload-artifact@v7
-      if: ${{ always() }}
+      if: ${{ failure() || cancelled() }}
       with:
         name: playwright-report
         path: |
           playwright-report/
           tests/results/
-        retention-days: 30
+        retention-days: 7

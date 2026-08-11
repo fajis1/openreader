@@ -9,7 +9,7 @@ import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { LoadingSpinner } from '@/components/Spinner';
 import { GithubIcon } from '@/components/icons/Icons';
-import { Button, Field, IconButton, InlineButton, Input, Surface } from '@/components/ui';
+import { Button, Field, IconButton, InlineButton, Input, Surface, Textarea } from '@/components/ui';
 import toast from 'react-hot-toast';
 
 export default function SignUpPage() {
@@ -220,10 +220,11 @@ export default function SignUpPage() {
                     />
                   </Field>
                   <Field label="What do you plan to use OpenReader for?">
-                    <textarea
+                    <Textarea
                       value={joinUse}
                       onChange={(e) => setJoinUse(e.target.value)}
-                      className="w-full min-h-24 rounded-xl border border-line bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-accent"
+                      className="min-h-24"
+                      controlSize="lg"
                       placeholder="Example: listening to theological books while commuting..."
                     />
                   </Field>
