@@ -201,14 +201,46 @@ describe('LitRPG source and production wiring', () => {
     const queue = fs.readFileSync(path.join(process.cwd(), 'src/app/api/audiobooks/queue/route.ts'), 'utf8');
     const single = fs.readFileSync(path.join(process.cwd(), 'src/components/AudiobookExportModal.tsx'), 'utf8');
     const batch = fs.readFileSync(path.join(process.cwd(), 'src/components/doclist/BatchAudiobookSidebar.tsx'), 'utf8');
+    const library = fs.readFileSync(path.join(process.cwd(), 'src/components/doclist/DocumentList.tsx'), 'utf8');
     const jobs = fs.readFileSync(path.join(process.cwd(), 'src/components/doclist/views/JobsInlineView.tsx'), 'utf8');
     const listenPage = fs.readFileSync(path.join(process.cwd(), 'src/app/(app)/listen/[bookId]/page.tsx'), 'utf8');
     const studio = fs.readFileSync(path.join(process.cwd(), 'src/components/audiobooks/MultiVoiceReviewStudio.tsx'), 'utf8');
 
     expect(queue).toContain("code: 'CHARACTER_CAST_REQUIRED'");
     for (const surface of [single, batch, jobs]) expect(surface).toContain('<MultiVoiceCharacterModal');
+    expect(library).toContain('Pre-Scan Drama Characters');
+    expect(library).toContain('<MultiVoiceCharacterModal');
+    expect(library).toContain('standalone');
     expect(listenPage).toContain("fetch('/api/audiobook/review-flags'");
     expect(listenPage).not.toContain('Future: Post this to a DB table');
     expect(studio).toContain('/api/audiobook/review-flags?documentId=');
+  });
+
+  test('keeps character discovery explicit and exclusive to Audio Drama', () => {
+    const scanner = fs.readFileSync(
+      path.join(process.cwd(), 'src/components/doclist/MultiVoiceCharacterModal.tsx'),
+      'utf8',
+    );
+    const library = fs.readFileSync(
+      path.join(process.cwd(), 'src/components/doclist/DocumentList.tsx'),
+      'utf8',
+    );
+    const scanRoute = fs.readFileSync(
+      path.join(process.cwd(), 'src/app/api/audiobook/characters/scan/route.ts'),
+      'utf8',
+    );
+    const defaults = JSON.parse(fs.readFileSync(
+      path.join(process.cwd(), 'src/lib/server/default_smart_audio_profiles.json'),
+      'utf8',
+    )) as { profiles: Array<{ name: string; workerMode?: string }> };
+
+    expect(scanner).not.toContain('setTimeout(() => { if (!cancelled) void scanCharacters(); }, 0)');
+    expect(scanner).toContain('Start Character Scan');
+    expect(scanner).toContain('Regular LitRPG audiobooks do not scan characters');
+    expect(scanner).toContain("standalone ? 'Save Cast' : 'Save Cast & Continue'");
+    expect(library).toContain("profile.workerMode === 'multi-voice'");
+    expect(scanRoute).toContain("profile.workerMode !== MULTI_VOICE_WORKER_MODE");
+    expect(defaults.profiles.find((profile) => profile.name === 'LitRPG')?.workerMode).toBe('standard');
+    expect(defaults.profiles.find((profile) => profile.name === 'LitRPG Audio Drama')?.workerMode).toBe('multi-voice');
   });
 });

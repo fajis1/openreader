@@ -43,10 +43,12 @@ import { GalleryView } from './views/GalleryView';
 import { JobsInlineView } from './views/JobsInlineView';
 import { ScanForeignWordsModal } from './ScanForeignWordsModal';
 import { BookPronunciationInspectorModal } from './BookPronunciationInspectorModal';
+import { MultiVoiceCharacterModal } from './MultiVoiceCharacterModal';
 import { DocumentSelectionModal } from '@/components/documents/DocumentSelectionModal';
 import { PDFIcon } from '@/components/icons/Icons';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
+import type { SmartAudioProfile } from '@/types/client';
 
 let cachedDocumentListState: DocumentListState | null = null;
 
@@ -238,6 +240,11 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const [showBatchAudiobookSidebar, setShowBatchAudiobookSidebar] = useState(false);
   const [backgroundJobs, setBackgroundJobs] = useState<{ id: string, documentId: string, status: string, progress: number }[] | null>(null);
   const [docToScan, setDocToScan] = useState<DocumentListDocument | null>(null);
+  const [dramaCharacterScan, setDramaCharacterScan] = useState<{
+    document: DocumentListDocument;
+    profileId: string;
+  } | null>(null);
+  const [isOpeningDramaCharacterScan, setIsOpeningDramaCharacterScan] = useState(false);
   const [docToInspect, setDocToInspect] = useState<DocumentListDocument | null>(null);
   const [isActionSelectionModalOpen, setIsActionSelectionModalOpen] = useState(false);
   const [selectionModalProps, setSelectionModalProps] = useState<{
@@ -531,6 +538,42 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
   const handleScanDoc = useCallback((doc: DocumentListDocument) => {
     setDocToScan(doc);
   }, []);
+
+  const handleDramaCharacterScan = useCallback(async (doc: DocumentListDocument) => {
+    if (isOpeningDramaCharacterScan) return;
+    setIsOpeningDramaCharacterScan(true);
+    try {
+      const response = await fetch('/api/tts-settings', { cache: 'no-store' });
+      const body = await response.json().catch(() => ({})) as {
+        smartAudioProfiles?: SmartAudioProfile[];
+        selectedSmartAudioProfileId?: string;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error || 'Could not load Audio Drama scanner settings.');
+
+      const profiles = Array.isArray(body.smartAudioProfiles) ? body.smartAudioProfiles : [];
+      const selectedDramaProfile = profiles.find((profile) => (
+        profile.id === body.selectedSmartAudioProfileId && profile.workerMode === 'multi-voice'
+      ));
+      const dramaProfile = selectedDramaProfile
+        || profiles.find((profile) => profile.workerMode === 'multi-voice');
+      if (!dramaProfile) {
+        toast.error('Create a LitRPG Audio Drama profile before scanning a drama cast. Regular LitRPG profiles do not scan characters.');
+        window.dispatchEvent(new CustomEvent('open-smart-ai-profiles'));
+        return;
+      }
+      if (!dramaProfile.geminiApiKeyConfigured) {
+        toast.error('Add a Gemini API key to the LitRPG Audio Drama profile before starting its character scan.');
+        window.dispatchEvent(new CustomEvent('open-smart-ai-profiles'));
+        return;
+      }
+      setDramaCharacterScan({ document: doc, profileId: dramaProfile.id });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not open the Audio Drama character scanner.');
+    } finally {
+      setIsOpeningDramaCharacterScan(false);
+    }
+  }, [isOpeningDramaCharacterScan]);
 
   const handleInspectDoc = useCallback((doc: DocumentListDocument) => {
     setDocToInspect(doc);
@@ -830,6 +873,32 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
                   onClick={() => {
                     const selected = selection.getSelectedDocs();
                     if (selected.length > 0) {
+                      void handleDramaCharacterScan(selected[0]);
+                    } else if (allDocuments.length > 0) {
+                      setSelectionModalProps({
+                        title: 'Select Audio Drama to Pre-Scan',
+                        confirmLabel: 'Open Character Scanner',
+                        defaultSelected: false,
+                        onConfirmAction: (docs) => {
+                          if (docs.length > 0) void handleDramaCharacterScan(docs[0]);
+                        },
+                      });
+                      setIsActionSelectionModalOpen(true);
+                    } else {
+                      toast('Please upload a document first.', { icon: 'ℹ️' });
+                    }
+                  }}
+                  disabled={isOpeningDramaCharacterScan}
+                  className="px-3 py-1.5 bg-accent hover:bg-secondary-accent disabled:opacity-60 text-background font-bold text-xs rounded-md shadow transition-colors flex items-center gap-1.5"
+                  title="Only Audio Drama generation needs a character cast"
+                >
+                  🎭 {isOpeningDramaCharacterScan ? 'Opening Scanner…' : 'Pre-Scan Drama Characters'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const selected = selection.getSelectedDocs();
+                    if (selected.length > 0) {
                       router.push(`/listen/${selected[0].id}`);
                     } else {
                       if (allDocuments.length > 0) {
@@ -1064,6 +1133,20 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
           onClose={() => setDocToScan(null)}
           documentId={docToScan.id}
           documentName={docToScan.name}
+        />
+      )}
+
+      {dramaCharacterScan && (
+        <MultiVoiceCharacterModal
+          documentId={dramaCharacterScan.document.id}
+          profileId={dramaCharacterScan.profileId}
+          isOpen={true}
+          standalone
+          onClose={() => setDramaCharacterScan(null)}
+          onComplete={() => {
+            toast.success(`Saved the Audio Drama cast for ${dramaCharacterScan.document.name}.`);
+            setDramaCharacterScan(null);
+          }}
         />
       )}
 

@@ -13,6 +13,7 @@ interface MultiVoiceCharacterModalProps {
   profileId: string;
   isOpen: boolean;
   jobId?: string;
+  standalone?: boolean;
   onClose: () => void;
   onComplete: () => void | Promise<void>;
 }
@@ -30,6 +31,7 @@ export function MultiVoiceCharacterModal({
   profileId,
   isOpen,
   jobId,
+  standalone = false,
   onClose,
   onComplete,
 }: MultiVoiceCharacterModalProps) {
@@ -96,6 +98,7 @@ export function MultiVoiceCharacterModal({
     let cancelled = false;
     setIsLoading(true);
     setError(null);
+    setStatusMessage('Loading the saved Audio Drama cast…');
     void fetch(`/api/audiobook/characters/scan?documentId=${encodeURIComponent(documentId)}&profileId=${encodeURIComponent(profileId)}`, {
       cache: 'no-store',
     }).then(async (response) => {
@@ -105,12 +108,18 @@ export function MultiVoiceCharacterModal({
       const normalized = normalizeSmartAudioCharacterMap(body.characterMap);
       if (normalized?.profileId === profileId && !normalized.needsRescan) {
         setCharacterMap(normalized);
+        setStatusMessage(null);
       } else {
         setCharacterMap(null);
-        setTimeout(() => { if (!cancelled) void scanCharacters(); }, 0);
+        setStatusMessage(normalized?.needsRescan
+          ? 'The document narration filters changed. Start a new character scan to refresh the drama cast.'
+          : 'No Audio Drama character scan is saved yet. Start the scanner when you are ready to use Gemini credits.');
       }
     }).catch((loadError) => {
-      if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Failed to load the cast.');
+      if (!cancelled) {
+        setStatusMessage(null);
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load the cast.');
+      }
     }).finally(() => {
       if (!cancelled) setIsLoading(false);
     });
@@ -263,18 +272,22 @@ export function MultiVoiceCharacterModal({
       <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-2xl">
         <div className="flex items-center justify-between border-b border-line p-5">
           <div>
-            <h2 className="text-xl font-bold text-text-strong">LitRPG Audio Drama Casting</h2>
-            <p className="mt-1 text-sm text-text-soft">Review every detected speaker before audiobook generation begins.</p>
+            <h2 className="text-xl font-bold text-text-strong">Audio Drama Character Pre-Scan</h2>
+            <p className="mt-1 text-sm text-text-soft">Find and review the speaking cast before Audio Drama generation.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-full p-2 text-text-soft hover:bg-surface-raised hover:text-text-strong" aria-label="Close casting dialog">✕</button>
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto bg-surface-sunken p-5">
-          {(isLoading || isScanning) && (
+          {statusMessage && (
             <div className="rounded-xl border border-accent-line bg-accent-wash p-4 text-sm text-text-strong">
-              {statusMessage || 'Loading character cast…'}
+              {statusMessage}
             </div>
           )}
+          <div className="rounded-xl border border-line bg-surface p-4 text-sm text-text-soft">
+            This separate scan is used only for Audio Drama casting. Regular LitRPG audiobooks do not scan characters or spend Gemini credits on cast detection.
+            {standalone && ' Saving this cast will not start audiobook generation.'}
+          </div>
           {error && <div className="rounded-xl border border-danger bg-danger-wash p-4 text-sm text-danger">{error}</div>}
 
           {entries.map((character) => (
@@ -354,14 +367,14 @@ export function MultiVoiceCharacterModal({
 
         <div className="flex flex-col gap-3 border-t border-line p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-text-soft">
-            {!hasNarrator ? 'A Narrator entry is required.' : unassigned.length > 0 ? `${unassigned.length} primary character${unassigned.length === 1 ? '' : 's'} still need a voice.` : entries.length > 0 ? 'Cast is ready to save.' : 'Scan the book to create a cast.'}
+            {!hasNarrator ? (characterMap ? 'A Narrator entry is required.' : 'Start the character scanner to create a drama cast.') : unassigned.length > 0 ? `${unassigned.length} primary character${unassigned.length === 1 ? '' : 's'} still need a voice.` : entries.length > 0 ? 'Cast is ready to save.' : 'Start the character scanner to create a drama cast.'}
           </div>
           <div className="flex flex-wrap justify-end gap-2">
             <button type="button" onClick={addCharacter} disabled={!characterMap || isScanning} className="rounded-lg border border-line px-4 py-2 text-sm text-foreground disabled:opacity-50">Add Character</button>
-            <button type="button" onClick={() => void scanCharacters()} disabled={isScanning || isSaving} className="rounded-lg border border-line px-4 py-2 text-sm text-foreground disabled:opacity-50">{characterMap ? 'Rescan Book' : 'Scan Book'}</button>
+            <button type="button" onClick={() => void scanCharacters()} disabled={isScanning || isSaving || isLoading} className="rounded-lg border border-line px-4 py-2 text-sm text-foreground disabled:opacity-50">{characterMap ? 'Rescan Drama Cast' : 'Start Character Scan'}</button>
             <button type="button" onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm text-text-soft">Cancel</button>
             <button type="button" onClick={() => void handleSave()} disabled={!characterMap || !hasNarrator || unassigned.length > 0 || isSaving || isScanning} className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-background disabled:opacity-50">
-              {isSaving ? 'Saving…' : jobId ? 'Save Cast & Resume' : 'Save Cast & Continue'}
+              {isSaving ? 'Saving…' : jobId ? 'Save Cast & Resume' : standalone ? 'Save Cast' : 'Save Cast & Continue'}
             </button>
           </div>
         </div>
