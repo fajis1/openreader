@@ -18,6 +18,16 @@ export interface SmartAudioProfilesDocument {
   profiles: SmartAudioProfile[];
 }
 
+export interface RestoredSmartAudioProfile {
+  id: string;
+  name: string;
+}
+
+export interface RestoreMissingBuiltInProfilesResult {
+  document: SmartAudioProfilesDocument;
+  restoredProfiles: RestoredSmartAudioProfile[];
+}
+
 export function mergeGeneratedPronunciations(
   profile: SmartAudioProfile,
   generatedPronunciations: Record<string, string>,
@@ -163,6 +173,36 @@ const fallbackProfilesDocument: SmartAudioProfilesDocument = {
   profiles: defaultProfilesData.profiles.map(p => sanitizeProfile(p as unknown as Partial<SmartAudioProfile>)),
 };
 
+function cloneSmartAudioProfile(profile: SmartAudioProfile): SmartAudioProfile {
+  return {
+    ...profile,
+    abbreviations: { ...(profile.abbreviations || {}) },
+    pronunciations: { ...(profile.pronunciations || {}) },
+    books: { ...(profile.books || {}) },
+  };
+}
+
+export function restoreMissingBuiltInSmartAudioProfiles(
+  document: SmartAudioProfilesDocument,
+): RestoreMissingBuiltInProfilesResult {
+  const existingIds = new Set(document.profiles.map((profile) => profile.id));
+  const missingProfiles = fallbackProfilesDocument.profiles
+    .filter((profile) => !existingIds.has(profile.id))
+    .map(cloneSmartAudioProfile);
+  const profiles = [...document.profiles, ...missingProfiles];
+  const selectedProfileId = profiles.some((profile) => profile.id === document.selectedProfileId)
+    ? document.selectedProfileId
+    : profiles[0]?.id || fallbackProfilesDocument.selectedProfileId;
+
+  return {
+    document: {
+      selectedProfileId,
+      profiles,
+    },
+    restoredProfiles: missingProfiles.map(({ id, name }) => ({ id, name })),
+  };
+}
+
 function parseDataJson(val: unknown): Record<string, unknown> {
   if (typeof val === 'string') {
     try {
@@ -277,6 +317,82 @@ export async function writeSmartAudioProfilesDocument(userId: string | null | un
     console.error('Failed to write smart audio profiles', error);
   }
   return sanitizedDocument;
+}
+
+export async function restoreMissingBuiltInSmartAudioProfilesForUser(
+  userId: string | null | undefined,
+): Promise<RestoreMissingBuiltInProfilesResult> {
+  if (!userId) {
+    return {
+      document: {
+        selectedProfileId: fallbackProfilesDocument.selectedProfileId,
+        profiles: fallbackProfilesDocument.profiles.map(cloneSmartAudioProfile),
+      },
+      restoredProfiles: [],
+    };
+  }
+
+  const restoreFromRows = (
+    rows: Array<{ dataJson: unknown }>,
+  ): RestoreMissingBuiltInProfilesResult & { dataJson: Record<string, unknown> } => {
+    const dataJson = rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
+    const raw = dataJson.smartAudioProfiles as Partial<SmartAudioProfilesDocument> | undefined;
+    const profiles = Array.isArray(raw?.profiles) && raw.profiles.length > 0
+      ? raw.profiles.map((profile) => sanitizeProfile(profile as SmartAudioProfile))
+      : fallbackProfilesDocument.profiles.map(cloneSmartAudioProfile);
+    const selectedProfileId = typeof raw?.selectedProfileId === 'string'
+      && profiles.some((profile) => profile.id === raw.selectedProfileId)
+      ? raw.selectedProfileId
+      : profiles[0]?.id || fallbackProfilesDocument.selectedProfileId;
+    const result = restoreMissingBuiltInSmartAudioProfiles({ selectedProfileId, profiles });
+
+    if (result.restoredProfiles.length > 0) {
+      dataJson.smartAudioProfiles = result.document;
+    }
+
+    return { ...result, dataJson };
+  };
+
+  if (process.env.POSTGRES_URL) {
+    return db.transaction(async (tx: typeof db) => {
+      await lockSmartAudioProfilesRow(tx, userId);
+      const rows = await tx
+        .select({ dataJson: userPreferences.dataJson })
+        .from(userPreferences)
+        .where(eq(userPreferences.userId, userId))
+        .limit(1);
+      const { dataJson, ...result } = restoreFromRows(rows);
+      if (result.restoredProfiles.length === 0) return result;
+
+      await tx.insert(userPreferences)
+        .values({ userId, dataJson: serializeDataJson(dataJson) })
+        .onConflictDoUpdate({
+          target: [userPreferences.userId],
+          set: { dataJson: serializeDataJson(dataJson) },
+        });
+      return result;
+    });
+  }
+
+  return db.transaction((tx: typeof db) => {
+    const rows = tx
+      .select({ dataJson: userPreferences.dataJson })
+      .from(userPreferences)
+      .where(eq(userPreferences.userId, userId))
+      .limit(1)
+      .all();
+    const { dataJson, ...result } = restoreFromRows(rows);
+    if (result.restoredProfiles.length === 0) return result;
+
+    tx.insert(userPreferences)
+      .values({ userId, dataJson: serializeDataJson(dataJson) })
+      .onConflictDoUpdate({
+        target: [userPreferences.userId],
+        set: { dataJson: serializeDataJson(dataJson) },
+      })
+      .run();
+    return result;
+  });
 }
 
 export async function mergeGeneratedPronunciationsIntoLatestProfile(

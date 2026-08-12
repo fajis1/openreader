@@ -8,6 +8,7 @@ import {
   readSmartAudioProfilesDocument,
   redactSmartAudioProfileSecrets,
   redactSmartAudioProfilesDocument,
+  restoreMissingBuiltInSmartAudioProfilesForUser,
   writeSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
 import type { SmartAudioProfile } from '@/types/client';
@@ -58,8 +59,13 @@ export async function POST(request: NextRequest) {
 
     const currentDoc = await readSmartAudioProfilesDocument(userId);
     let savedDoc = currentDoc;
+    let restoredProfiles: Array<{ id: string; name: string }> = [];
 
-    if (Array.isArray(body.smartAudioProfiles)) {
+    if (body.restoreMissingBuiltInProfiles === true) {
+      const restored = await restoreMissingBuiltInSmartAudioProfilesForUser(userId);
+      savedDoc = restored.document;
+      restoredProfiles = restored.restoredProfiles;
+    } else if (Array.isArray(body.smartAudioProfiles)) {
       const selectedSmartAudioProfileId = typeof body.selectedSmartAudioProfileId === 'string'
         ? body.selectedSmartAudioProfileId
         : undefined;
@@ -70,7 +76,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    serverLogger.info({ event: 'tts_settings.saved' }, 'Saved smart audio settings');
+    serverLogger.info({
+      event: 'tts_settings.saved',
+      restoredBuiltInProfileIds: restoredProfiles.map((profile) => profile.id),
+    }, 'Saved smart audio settings');
     const safeDocument = redactSmartAudioProfilesDocument(savedDoc);
     return NextResponse.json({
       success: true,
@@ -78,6 +87,7 @@ export async function POST(request: NextRequest) {
       smartAudioProfiles: safeDocument.profiles,
       selectedSmartAudioProfileId: safeDocument.selectedProfileId,
       defaultSmartAudioProfileId: getDefaultSmartAudioProfile().id,
+      restoredProfiles,
     });
   } catch (error) {
     serverLogger.error({ event: 'tts_settings.save.failed', error }, 'Error processing smart audio settings');

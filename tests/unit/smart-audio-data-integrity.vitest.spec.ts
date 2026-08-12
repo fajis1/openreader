@@ -40,10 +40,25 @@ describe('Smart Audio data-integrity guards', () => {
   test('serializes every PostgreSQL Smart Audio profile writer with the same lock', () => {
     const profiles = source('src/lib/server/smart-audio-profiles.ts');
     expect(profiles).toContain('pg_advisory_xact_lock');
-    expect(profiles.match(/lockSmartAudioProfilesRow\(tx, userId\)/g)).toHaveLength(2);
+    expect(profiles.match(/lockSmartAudioProfilesRow\(tx, userId\)/g)).toHaveLength(3);
     expect(profiles).toContain('db.transaction((tx: typeof db) => {');
     expect(profiles).toContain('.limit(1).all();');
     expect(profiles).toContain('}).run();');
+  });
+
+  test('restores missing built-in profiles only through an explicit additive action', () => {
+    const profiles = source('src/lib/server/smart-audio-profiles.ts');
+    const route = source('src/app/api/tts-settings/route.ts');
+    const settings = source('src/components/SmartAudioSettings.tsx');
+
+    expect(profiles).toContain('restoreMissingBuiltInSmartAudioProfilesForUser');
+    expect(profiles).toContain('const profiles = [...document.profiles, ...missingProfiles];');
+    expect(profiles).toContain('if (result.restoredProfiles.length === 0) return result;');
+    expect(route).toContain('body.restoreMissingBuiltInProfiles === true');
+    expect(route).toContain('redactSmartAudioProfilesDocument(savedDoc)');
+    expect(settings).toContain('Restore missing built-ins');
+    expect(settings).toContain('body: JSON.stringify({ restoreMissingBuiltInProfiles: true })');
+    expect(settings).toContain('return [...currentProfiles, ...missingFromClient];');
   });
 
   test('keeps global pronunciation and definition libraries separate and reusable', () => {

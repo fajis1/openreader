@@ -124,6 +124,7 @@ export function SmartAudioSettings() {
   const [newAbbrev, setNewAbbrev] = useState({ key: '', value: '' });
   const [newBook, setNewBook] = useState({ key: '', value: '' });
   const [isLoading, setIsLoading] = useState(true);
+  const [isRestoringBuiltInProfiles, setIsRestoringBuiltInProfiles] = useState(false);
 
   const [isGlobalModalOpen, setIsGlobalModalOpen] = useState(false);
   const [globalPronunciations, setGlobalPronunciations] = useState<{key: string; values: string[]}[]>([]);
@@ -276,6 +277,44 @@ export function SmartAudioSettings() {
   useEffect(() => {
     void loadProfiles();
   }, [loadProfiles]);
+
+  const handleRestoreMissingBuiltInProfiles = useCallback(async () => {
+    setIsRestoringBuiltInProfiles(true);
+    try {
+      const response = await fetch('/api/tts-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restoreMissingBuiltInProfiles: true }),
+      });
+      const data = await response.json().catch(() => ({})) as {
+        error?: string;
+        smartAudioProfiles?: SmartAudioProfile[];
+        restoredProfiles?: Array<{ id: string; name: string }>;
+      };
+      if (!response.ok) throw new Error(data.error || 'Failed to restore built-in profiles.');
+
+      const serverProfiles = Array.isArray(data.smartAudioProfiles) ? data.smartAudioProfiles : [];
+      setProfiles((currentProfiles) => {
+        const currentIds = new Set(currentProfiles.map((profile) => profile.id));
+        const missingFromClient = serverProfiles.filter((profile) => !currentIds.has(profile.id));
+        return [...currentProfiles, ...missingFromClient];
+      });
+
+      const restoredProfiles = Array.isArray(data.restoredProfiles) ? data.restoredProfiles : [];
+      if (restoredProfiles.length === 0) {
+        toast.success('All built-in Smart Audio profiles are already available.');
+      } else {
+        toast.success(
+          `Restored ${restoredProfiles.length} built-in profile${restoredProfiles.length === 1 ? '' : 's'}: ${restoredProfiles.map((profile) => profile.name).join(', ')}`,
+        );
+      }
+      window.dispatchEvent(new CustomEvent('smart-audio-profiles-updated'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to restore built-in profiles.');
+    } finally {
+      setIsRestoringBuiltInProfiles(false);
+    }
+  }, []);
 
   const loadGlobalPronunciations = async () => {
     setIsLoadingGlobal(true);
@@ -960,7 +999,16 @@ export function SmartAudioSettings() {
             Create reusable Smart Audio presets for audiobook generation.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => void handleRestoreMissingBuiltInProfiles()}
+            disabled={isLoading || isRestoringBuiltInProfiles}
+            className="px-3 py-2 rounded bg-amber-50 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 border border-amber-200 dark:border-amber-800 text-sm font-medium text-amber-800 dark:text-amber-200 transition-colors"
+            title="Add missing OpenReader presets without changing your existing profiles"
+          >
+            {isRestoringBuiltInProfiles ? 'Restoring…' : 'Restore missing built-ins'}
+          </button>
           <button onClick={handleNewProfile} className="px-3 py-2 rounded bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm font-medium">
             New profile
           </button>
