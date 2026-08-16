@@ -9,6 +9,7 @@ import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { buildKokoroPronunciationInstructions, isKokoroCompatiblePronunciation } from '@/lib/shared/kokoro-pronunciation-policy';
 import { resolvePronunciationAiModel } from '@/lib/shared/smart-audio-models';
+import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemini-failover';
 
 const SEED_EXAMPLES = [
   "Make the ending sound more like -een instead of -ayn",
@@ -108,9 +109,6 @@ export async function POST(req: NextRequest) {
     }
 
     const model = resolvePronunciationAiModel(activeProfile);
-    const keysToTry = (useBackupKey ? [backupKey, primaryKey] : [primaryKey, backupKey])
-      .filter((k, idx, arr) => k && arr.indexOf(k) === idx);
-
     // 3. Call Gemini with automatic key failover
     const prompt = `${buildKokoroPronunciationInstructions(activeProfile)}
 
@@ -120,49 +118,25 @@ DO NOT generate any of the following previous choices: ${JSON.stringify(currentC
 Generate 5 NEW distinct, plausible Kokoro IPA pronunciation variations that address the user's feedback.
 Return a JSON object: { "newChoices": ["/pron1/", "/pron2/", "/pron3/", "/pron4/", "/pron5/"] }`;
 
-    let res: Response | null = null;
-    let errText = '';
-    let retryDelay = 2;
-
-    for (let keyIdx = 0; keyIdx < keysToTry.length; keyIdx++) {
-      const apiKey = keysToTry[keyIdx];
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: "user", parts: [{ text: prompt }] }],
-              generationConfig: { responseMimeType: "application/json" }
-            })
-          });
-
-          if (res.ok) break;
-
-          errText = await res.text();
-          console.warn(`Gemini API key ${keyIdx + 1} attempt ${attempt} failed (${res.status}):`, errText);
-
-          if ((res.status === 429 || res.status === 503) && keyIdx < keysToTry.length - 1) {
-            console.info(`Switching to backup Gemini API key due to HTTP ${res.status}...`);
-            break; // Switch to backup key!
-          }
-
-          if ((res.status === 429 || res.status === 503 || res.status === 500) && attempt < 2) {
-            await new Promise(resolve => setTimeout(resolve, retryDelay * 1000));
-            retryDelay *= 2;
-            continue;
-          } else {
-            break;
-          }
-        } catch (networkErr: any) {
-          console.error(`Gemini fetch error on attempt ${attempt}:`, networkErr);
-          if (attempt < 2) {
-            await new Promise(resolve => setTimeout(resolve, retryDelay * 1000));
-          }
-        }
-      }
-      if (res && res.ok) break;
-    }
+    const firstKey = useBackupKey && backupKey ? backupKey : primaryKey;
+    const secondKey = firstKey === backupKey ? primaryKey : backupKey;
+    const { response: res, usedModel } = await fetchGeminiWithRateLimitFallback({
+      primaryApiKey: firstKey,
+      backupApiKey: secondKey,
+      requestedModel: model,
+      request: (apiKey, requestModel) => fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(requestModel || model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: 'application/json' },
+          }),
+        },
+      ),
+    });
+    const errText = res.ok ? '' : await res.clone().text();
 
     if (!res || !res.ok) {
       console.error('Gemini API returned final error status:', res?.status, errText);
@@ -240,7 +214,11 @@ Return a JSON object: { "newChoices": ["/pron1/", "/pron2/", "/pron3/", "/pron4/
       console.error('Error in pre-caching refined audio', e);
     }
 
-    return NextResponse.json({ newChoices, feedbackExamples: examples });
+    return NextResponse.json({
+      newChoices,
+      feedbackExamples: examples,
+      pronunciationModel: usedModel || model,
+    });
   } catch (error: any) {
     console.error('Refine pronunciations POST error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

@@ -6,9 +6,11 @@ import {
   getDefaultSmartAudioProfile,
   mergeStoredSmartAudioProfileSecrets,
   readSmartAudioProfilesDocument,
+  readPronunciationModelUpgradeOffer,
   redactSmartAudioProfileSecrets,
   redactSmartAudioProfilesDocument,
   restoreMissingBuiltInSmartAudioProfilesForUser,
+  savePronunciationModelUpgradeDecision,
   writeSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
 import type { SmartAudioProfile } from '@/types/client';
@@ -32,11 +34,13 @@ export async function GET(request: NextRequest) {
     const profilesDocument = redactSmartAudioProfilesDocument(
       await readSmartAudioProfilesDocument(userId),
     );
+    const pronunciationModelUpgrade = await readPronunciationModelUpgradeOffer(userId);
 
     return NextResponse.json({
       smartAudioProfiles: profilesDocument.profiles,
       selectedSmartAudioProfileId: profilesDocument.selectedProfileId,
       defaultSmartAudioProfileId: getDefaultSmartAudioProfile().id,
+      pronunciationModelUpgrade,
     });
   } catch (error) {
     serverLogger.warn({ event: 'tts_settings.read.failed', error }, 'Error reading smart audio settings');
@@ -56,6 +60,20 @@ export async function POST(request: NextRequest) {
     if (ctxOrRes instanceof Response) return ctxOrRes;
     const userId = ctxOrRes.userId;
     const body = await request.json();
+
+    if (body.pronunciationModelUpgradeDecision === 'upgrade'
+      || body.pronunciationModelUpgradeDecision === 'stay') {
+      const pronunciationModelUpgrade = await savePronunciationModelUpgradeDecision(
+        userId,
+        body.pronunciationModelUpgradeDecision,
+      );
+      serverLogger.info({
+        event: 'tts_settings.pronunciation_model_upgrade_decided',
+        decision: body.pronunciationModelUpgradeDecision,
+        affectedProfileCount: pronunciationModelUpgrade.affectedProfileCount,
+      }, 'Saved pronunciation model upgrade decision');
+      return NextResponse.json({ success: true, pronunciationModelUpgrade });
+    }
 
     const currentDoc = await readSmartAudioProfilesDocument(userId);
     let savedDoc = currentDoc;

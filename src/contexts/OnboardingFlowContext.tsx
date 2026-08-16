@@ -5,6 +5,7 @@ import ClaimDataModal, { type ClaimableCounts } from '@/components/auth/ClaimDat
 import { DexieMigrationModal } from '@/components/documents/DexieMigrationModal';
 import { PrivacyModal } from '@/components/PrivacyModal';
 import { DictionaryUpdateModal } from '@/components/DictionaryUpdateModal';
+import { GeminiPronunciationModelUpgradeModal } from '@/components/GeminiPronunciationModelUpgradeModal';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useRuntimeConfig } from '@/contexts/RuntimeConfigContext';
 import { getAllEpubDocuments, getAllHtmlDocuments, getAllPdfDocuments, getAppConfig, setFirstVisit } from '@/lib/client/dexie';
@@ -121,6 +122,7 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
     missingCount: 0,
   });
   const [changelogOpenSignal, setChangelogOpenSignal] = useState(0);
+  const [hasResolvedModelUpgrade, setHasResolvedModelUpgrade] = useState(false);
 
   const pendingChangelogOpenRef = useRef(false);
   const claimDismissedUsersRef = useRef<Set<string>>(new Set());
@@ -230,8 +232,13 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
     void runFlow();
   }, [runFlow]);
 
+  const handleModelUpgradeResolved = useCallback(() => {
+    setHasResolvedModelUpgrade(true);
+  }, []);
+
   useEffect(() => {
     setHasResolvedBlockingFlow(false);
+    setHasResolvedModelUpgrade(false);
     void runFlow();
   }, [isAnonymous, runFlow, userId]);
 
@@ -286,7 +293,14 @@ export function OnboardingFlowProvider({ children }: { children: ReactNode }) {
         missingCount={migrationCounts.missingCount}
         onComplete={handleMigrationComplete}
       />
-      {hasResolvedBlockingFlow && activeBlockingModal === null ? <DictionaryUpdateModal /> : null}
+      {hasResolvedBlockingFlow && activeBlockingModal === null && !hasResolvedModelUpgrade ? (
+        <GeminiPronunciationModelUpgradeModal
+          onResolved={handleModelUpgradeResolved}
+        />
+      ) : null}
+      {hasResolvedBlockingFlow && activeBlockingModal === null && hasResolvedModelUpgrade ? (
+        <DictionaryUpdateModal />
+      ) : null}
     </OnboardingFlowContext.Provider>
   );
 }

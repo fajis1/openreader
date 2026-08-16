@@ -239,7 +239,7 @@ describe('bundled dictionary releases', () => {
     expect(modal).toContain('window.confirm(');
     expect(modal).toContain('may replace reviewed local pronunciations or definitions');
     expect(onboarding).toContain(
-      'hasResolvedBlockingFlow && activeBlockingModal === null ? <DictionaryUpdateModal /> : null',
+      'hasResolvedBlockingFlow && activeBlockingModal === null && hasResolvedModelUpgrade',
     );
     expect(appLayout).not.toContain('<DictionaryUpdateModal');
     expect(dockerfile).toContain('scripts/sync-dict-to-git.mjs');

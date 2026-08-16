@@ -1,5 +1,5 @@
 export const DEFAULT_CLEANUP_AI_MODEL = 'gemini-3.1-flash-lite';
-export const DEFAULT_PRONUNCIATION_AI_MODEL = 'gemini-3.6-flash';
+export const DEFAULT_PRONUNCIATION_AI_MODEL = 'gemini-3.7-flash';
 
 type SmartAudioModelProfile = {
   aiModel?: string | null;

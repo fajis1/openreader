@@ -182,8 +182,9 @@ ${JSON.stringify(candidateBatch)}`;
       const { response } = await fetchGeminiWithRateLimitFallback({
         primaryApiKey: apiKey,
         backupApiKey: profile?.backupGeminiApiKey,
-        request: (requestApiKey) => fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(requestApiKey)}`,
+        requestedModel: model,
+        request: (requestApiKey, requestModel) => fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(requestModel || model)}:generateContent?key=${encodeURIComponent(requestApiKey)}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

@@ -201,7 +201,7 @@ export function BookPronunciationInspectorModal({
     const prompt = refineInput[word] || "Generate 5 clean, standard Kokoro IPA pronunciations for this word";
     const currentWordData = words.find(w => w.word === word);
     const currentChoices = currentWordData?.globalChoices || [];
-    setRefineStatus(prev => ({ ...prev, [word]: 'Asking Gemini 3.6 Flash for 5 new options...' }));
+    setRefineStatus(prev => ({ ...prev, [word]: 'Asking the selected Gemini model for 5 new options...' }));
     try {
       const res = await fetch('/api/tts/refine-pronunciations', {
         method: 'POST',

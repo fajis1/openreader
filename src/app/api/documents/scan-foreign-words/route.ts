@@ -444,6 +444,7 @@ export async function POST(req: NextRequest) {
             throw new Error('Gemini API key is not configured for the selected Smart Audio profile.');
           }
           const model = resolvePronunciationAiModel(activeProfile);
+          let effectiveModel = model;
           const apiKey = (forceUseBackupKey && activeProfile?.backupGeminiApiKey)
             ? activeProfile.backupGeminiApiKey
             : (activeProfile?.geminiApiKey || activeProfile?.backupGeminiApiKey || '');
@@ -496,14 +497,15 @@ ${JSON.stringify(terms)}`;
           requestPrompt: string,
           pass: 'pronunciation_definition_scan' | 'pronunciation_quality_repair',
         ) => {
-          const { response: res, usedBackup } = await fetchGeminiWithRateLimitFallback({
+          const { response: res, usedBackup, usedModel } = await fetchGeminiWithRateLimitFallback({
             primaryApiKey: apiKey,
             backupApiKey: activeProfile?.backupGeminiApiKey,
+            requestedModel: model,
             onStatusUpdate: async (statusMessage) => {
               await saveJob({ statusMessage });
             },
-            request: (requestApiKey) => fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(requestApiKey)}`,
+            request: (requestApiKey, requestModel) => fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(requestModel || model)}:generateContent?key=${encodeURIComponent(requestApiKey)}`,
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -519,6 +521,7 @@ ${JSON.stringify(terms)}`;
             ),
           });
           const data = await res.json().catch(() => null);
+          effectiveModel = usedModel || model;
           if (!res.ok) {
             throw createGeminiHttpError(res.status, data, [
               apiKey,
@@ -529,7 +532,8 @@ ${JSON.stringify(terms)}`;
             event: 'pdf.scan.gemini.usage',
             jobId,
             documentId,
-            model,
+            model: usedModel || model,
+            requestedModel: model,
             usedBackup,
             pass,
             batch: i / chunkSize + 1,
@@ -695,7 +699,7 @@ ${JSON.stringify(repairRequests)}`;
               status: 'partial',
               definitionScanComplete: false,
               profileId: activeProfile.id,
-              pronunciationModel: model,
+              pronunciationModel: effectiveModel,
               scannedAt: Date.now(),
               entries: lexiconEntries,
             };

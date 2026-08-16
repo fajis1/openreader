@@ -40,7 +40,7 @@ describe('Smart Audio data-integrity guards', () => {
   test('serializes every PostgreSQL Smart Audio profile writer with the same lock', () => {
     const profiles = source('src/lib/server/smart-audio-profiles.ts');
     expect(profiles).toContain('pg_advisory_xact_lock');
-    expect(profiles.match(/lockSmartAudioProfilesRow\(tx, userId\)/g)).toHaveLength(3);
+    expect(profiles.match(/lockSmartAudioProfilesRow\(tx, userId\)/g)).toHaveLength(4);
     expect(profiles).toContain('db.transaction((tx: typeof db) => {');
     expect(profiles).toContain('.limit(1).all();');
     expect(profiles).toContain('}).run();');

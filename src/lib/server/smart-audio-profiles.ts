@@ -28,6 +28,19 @@ export interface RestoreMissingBuiltInProfilesResult {
   restoredProfiles: RestoredSmartAudioProfile[];
 }
 
+export const PRONUNCIATION_MODEL_UPGRADE_ID = 'gemini-3.6-flash-to-gemini-3.7-flash';
+export const PRONUNCIATION_MODEL_UPGRADE_FROM = 'gemini-3.6-flash';
+export const PRONUNCIATION_MODEL_UPGRADE_TO = 'gemini-3.7-flash';
+
+export type PronunciationModelUpgradeDecision = 'upgrade' | 'stay';
+
+export interface PronunciationModelUpgradeOffer {
+  available: boolean;
+  affectedProfileCount: number;
+  fromModel: string;
+  toModel: string;
+}
+
 export function mergeGeneratedPronunciations(
   profile: SmartAudioProfile,
   generatedPronunciations: Record<string, string>,
@@ -219,6 +232,117 @@ function parseDataJson(val: unknown): Record<string, unknown> {
 
 function serializeDataJson(val: Record<string, unknown>): string | Record<string, unknown> {
   return process.env.POSTGRES_URL ? val : JSON.stringify(val);
+}
+
+function getModelUpgradeDecision(data: Record<string, unknown>): string | null {
+  const decisions = data.smartAudioModelUpgradeDecisions;
+  if (!decisions || typeof decisions !== 'object' || Array.isArray(decisions)) return null;
+  const decision = (decisions as Record<string, unknown>)[PRONUNCIATION_MODEL_UPGRADE_ID];
+  return typeof decision === 'string' ? decision : null;
+}
+
+function profileDocumentFromData(data: Record<string, unknown>): SmartAudioProfilesDocument {
+  const raw = data.smartAudioProfiles as Partial<SmartAudioProfilesDocument> | undefined;
+  const profiles = Array.isArray(raw?.profiles) && raw.profiles.length > 0
+    ? raw.profiles.map((profile) => sanitizeProfile(profile as SmartAudioProfile))
+    : fallbackProfilesDocument.profiles.map(cloneSmartAudioProfile);
+  const selectedProfileId = typeof raw?.selectedProfileId === 'string'
+    && profiles.some((profile) => profile.id === raw.selectedProfileId)
+    ? raw.selectedProfileId
+    : profiles[0]?.id || fallbackProfilesDocument.selectedProfileId;
+  return { selectedProfileId, profiles };
+}
+
+export function buildPronunciationModelUpgradeOffer(
+  data: Record<string, unknown>,
+): PronunciationModelUpgradeOffer {
+  const document = profileDocumentFromData(data);
+  const affectedProfileCount = document.profiles.filter(
+    (profile) => profile.pronunciationAiModel === PRONUNCIATION_MODEL_UPGRADE_FROM,
+  ).length;
+  return {
+    available: affectedProfileCount > 0 && getModelUpgradeDecision(data) === null,
+    affectedProfileCount,
+    fromModel: PRONUNCIATION_MODEL_UPGRADE_FROM,
+    toModel: PRONUNCIATION_MODEL_UPGRADE_TO,
+  };
+}
+
+export function applyPronunciationModelUpgradeToData(
+  data: Record<string, unknown>,
+  decision: PronunciationModelUpgradeDecision,
+): PronunciationModelUpgradeOffer {
+  const document = profileDocumentFromData(data);
+  const affectedProfileCount = document.profiles.filter(
+    (profile) => profile.pronunciationAiModel === PRONUNCIATION_MODEL_UPGRADE_FROM,
+  ).length;
+  if (decision === 'upgrade') {
+    data.smartAudioProfiles = {
+      ...document,
+      profiles: document.profiles.map((profile) => profile.pronunciationAiModel === PRONUNCIATION_MODEL_UPGRADE_FROM
+        ? { ...profile, pronunciationAiModel: PRONUNCIATION_MODEL_UPGRADE_TO }
+        : profile),
+    } satisfies SmartAudioProfilesDocument;
+  }
+  const currentDecisions = data.smartAudioModelUpgradeDecisions;
+  data.smartAudioModelUpgradeDecisions = {
+    ...(currentDecisions && typeof currentDecisions === 'object' && !Array.isArray(currentDecisions)
+      ? currentDecisions as Record<string, unknown>
+      : {}),
+    [PRONUNCIATION_MODEL_UPGRADE_ID]: decision,
+  };
+  return {
+    available: false,
+    affectedProfileCount,
+    fromModel: PRONUNCIATION_MODEL_UPGRADE_FROM,
+    toModel: PRONUNCIATION_MODEL_UPGRADE_TO,
+  };
+}
+
+export async function readPronunciationModelUpgradeOffer(
+  userId: string | null,
+): Promise<PronunciationModelUpgradeOffer> {
+  if (!userId) return buildPronunciationModelUpgradeOffer({});
+  const rows = await db.select({ dataJson: userPreferences.dataJson })
+    .from(userPreferences)
+    .where(eq(userPreferences.userId, userId))
+    .limit(1);
+  return buildPronunciationModelUpgradeOffer(
+    rows.length > 0 ? parseDataJson(rows[0].dataJson) : {},
+  );
+}
+
+export async function savePronunciationModelUpgradeDecision(
+  userId: string | null,
+  decision: PronunciationModelUpgradeDecision,
+): Promise<PronunciationModelUpgradeOffer> {
+  if (!userId) throw new Error('A signed-in user is required to save a model upgrade decision.');
+  const mutate = (rows: Array<{ dataJson: unknown }>) => {
+    const data = rows.length > 0 ? parseDataJson(rows[0].dataJson) : {};
+    const offer = applyPronunciationModelUpgradeToData(data, decision);
+    return { data, offer };
+  };
+
+  if (process.env.POSTGRES_URL) {
+    return db.transaction(async (tx: typeof db) => {
+      await lockSmartAudioProfilesRow(tx, userId);
+      const rows = await tx.select({ dataJson: userPreferences.dataJson })
+        .from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
+      const { data, offer } = mutate(rows);
+      await tx.insert(userPreferences).values({ userId, dataJson: serializeDataJson(data) })
+        .onConflictDoUpdate({ target: [userPreferences.userId], set: { dataJson: serializeDataJson(data) } });
+      return offer;
+    });
+  }
+
+  return db.transaction((tx: typeof db) => {
+    const rows = tx.select({ dataJson: userPreferences.dataJson })
+      .from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1).all();
+    const { data, offer } = mutate(rows);
+    tx.insert(userPreferences).values({ userId, dataJson: serializeDataJson(data) })
+      .onConflictDoUpdate({ target: [userPreferences.userId], set: { dataJson: serializeDataJson(data) } }).run();
+    return offer;
+  });
 }
 
 async function lockSmartAudioProfilesRow(tx: typeof db, userId: string): Promise<void> {

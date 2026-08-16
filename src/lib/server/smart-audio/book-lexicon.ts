@@ -239,6 +239,7 @@ export async function resolveSmartAudioBookLexicon(input: {
   const apiKey = (input.profile.geminiApiKey || '').trim();
   if (!apiKey) throw new Error('Gemini API key is not configured for the selected Smart Audio profile.');
   const model = resolvePronunciationAiModel(input.profile);
+  let effectiveModel = model;
 
   for (let offset = 0; offset < unresolved.length; offset += 15) {
     const batch = unresolved.slice(offset, offset + 15);
@@ -257,11 +258,12 @@ Return JSON only in this shape:
 Terms:
 ${JSON.stringify(batch)}`;
 
-    const { response } = await fetchGeminiWithRateLimitFallback({
+    const { response, usedModel } = await fetchGeminiWithRateLimitFallback({
       primaryApiKey: apiKey,
       backupApiKey: input.profile.backupGeminiApiKey,
-      request: (requestApiKey) => fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(requestApiKey)}`,
+      requestedModel: model,
+      request: (requestApiKey, requestModel) => fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(requestModel || model)}:generateContent?key=${encodeURIComponent(requestApiKey)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -272,6 +274,7 @@ ${JSON.stringify(batch)}`;
         },
       ),
     });
+    effectiveModel = usedModel || model;
     if (!response.ok) {
       const error = new Error(`Gemini lexicon request failed (HTTP ${response.status}).`) as Error & {
         status?: number;
@@ -283,7 +286,7 @@ ${JSON.stringify(batch)}`;
     }
     const data = await response.json();
     input.onUsage?.({
-      model,
+      model: effectiveModel,
       batch: Math.floor(offset / 15) + 1,
       tokens: normalizeGeminiTokenUsage(data?.usageMetadata),
     });
@@ -334,7 +337,7 @@ ${JSON.stringify(batch)}`;
         status: 'partial',
         definitionScanComplete: false,
         profileId: input.profile.id,
-        pronunciationModel: model,
+        pronunciationModel: effectiveModel,
         scannedAt: Date.now(),
         entries,
       });
@@ -363,7 +366,7 @@ ${JSON.stringify(batch)}`;
     status: 'complete',
     definitionScanComplete: true,
     profileId: input.profile.id,
-    pronunciationModel: model,
+    pronunciationModel: effectiveModel,
     scannedAt: Date.now(),
     entries,
   };

@@ -5,6 +5,13 @@ const MAX_ATTEMPTS = 8;
 const INITIAL_DELAY_MS = 4000;
 const MAX_DELAY_MS = 300000; // 5 minutes
 
+export const GEMINI_MODEL_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
+  'gemini-3.7-flash': ['gemini-3.6-flash', 'gemini-3.5-flash'],
+  'gemini-3.6-flash': ['gemini-3.5-flash'],
+  'gemini-3.5-flash': ['gemini-2.5-flash'],
+  'gemini-3.5-flash-lite': ['gemini-3.1-flash-lite'],
+};
+
 const sleep = (ms: number) => new Promise((resolve) => {
   if (process.env.NODE_ENV === 'test') {
     resolve(undefined);
@@ -16,7 +23,8 @@ const sleep = (ms: number) => new Promise((resolve) => {
 export interface GeminiFallbackOptions {
   primaryApiKey: string;
   backupApiKey?: string | null;
-  request: (apiKey: string) => Promise<Response>;
+  requestedModel?: string;
+  request: (apiKey: string, model?: string) => Promise<Response>;
   onStatusUpdate?: (statusMessage: string) => Promise<void> | void;
   initialDelayMs?: number;
 }
@@ -92,7 +100,7 @@ async function fetchWithExponentialBackoff(
   return request(apiKey);
 }
 
-export async function fetchGeminiWithRateLimitFallback(
+async function fetchGeminiWithKeyFallback(
   input: GeminiFallbackOptions,
 ): Promise<{ response: Response; usedBackup: boolean }> {
   const primaryApiKey = input.primaryApiKey.trim();
@@ -138,5 +146,74 @@ export async function fetchGeminiWithRateLimitFallback(
   return {
     response: backupResponse,
     usedBackup: true,
+  };
+}
+
+export async function isGeminiModelUnavailableResponse(response: Response): Promise<boolean> {
+  if (response.ok || (response.status !== 400 && response.status !== 404)) return false;
+  const body = await response.clone().text().catch(() => '');
+  const normalized = body.toLowerCase();
+  if (response.status === 404 && normalized.length === 0) return true;
+  return normalized.includes('model_not_found')
+    || normalized.includes('model not found')
+    || normalized.includes('model does not exist')
+    || normalized.includes('model is not available')
+    || normalized.includes('model is not supported')
+    || normalized.includes('unsupported model')
+    || /models?\/[\w.-]+[^\n]{0,120}(?:not found|not supported|not available)/i.test(body);
+}
+
+export async function fetchGeminiWithRateLimitFallback(
+  input: GeminiFallbackOptions,
+): Promise<{
+  response: Response;
+  usedBackup: boolean;
+  requestedModel?: string;
+  usedModel?: string;
+  usedModelFallback: boolean;
+}> {
+  const requestedModel = input.requestedModel?.trim() || undefined;
+  const models: Array<string | undefined> = requestedModel
+    ? [requestedModel, ...(GEMINI_MODEL_FALLBACKS[requestedModel] || [])]
+    : [undefined];
+  let lastResult: { response: Response; usedBackup: boolean } | null = null;
+
+  for (const candidateModel of models) {
+    const result = await fetchGeminiWithKeyFallback({
+      ...input,
+      request: (apiKey) => candidateModel
+        ? input.request(apiKey, candidateModel)
+        : input.request(apiKey),
+    });
+    lastResult = result;
+    if (!(await isGeminiModelUnavailableResponse(result.response))) {
+      return {
+        ...result,
+        requestedModel,
+        usedModel: candidateModel,
+        usedModelFallback: Boolean(requestedModel && candidateModel !== requestedModel),
+      };
+    }
+
+    const nextIndex = models.indexOf(candidateModel) + 1;
+    const nextModel = models[nextIndex];
+    if (!nextModel) break;
+    const statusMessage = `${candidateModel} is unavailable for this Gemini API project. Using ${nextModel} for this request.`;
+    serverLogger.warn({
+      event: 'gemini.model.fallback',
+      requestedModel,
+      unavailableModel: candidateModel,
+      fallbackModel: nextModel,
+      httpStatus: result.response.status,
+    }, 'Falling back from an unavailable Gemini model');
+    await input.onStatusUpdate?.(statusMessage);
+  }
+
+  return {
+    response: lastResult?.response || new Response(null, { status: 502 }),
+    usedBackup: lastResult?.usedBackup || false,
+    requestedModel,
+    usedModel: models.at(-1),
+    usedModelFallback: models.length > 1,
   };
 }
