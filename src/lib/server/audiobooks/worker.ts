@@ -254,7 +254,7 @@ export async function processAudiobookQueue() {
 
   const MAX_CONCURRENT_JOBS = 3;
 
-  const RATE_LIMIT_BACKOFF_MS = 10 * 60 * 1000;
+  const RATE_LIMIT_BACKOFF_MS = 24 * 60 * 60 * 1000; // 24 hours
   const backoffThreshold = Date.now() - RATE_LIMIT_BACKOFF_MS;
 
   const rows = await db.select()

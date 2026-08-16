@@ -38,6 +38,18 @@ async function fetchWithExponentialBackoff(
         return response;
       }
 
+      if (response.status === 429) {
+        try {
+          const bodyStr = await response.clone().text();
+          const lowerBody = bodyStr.toLowerCase();
+          if (lowerBody.includes('quota') || lowerBody.includes('spending cap') || lowerBody.includes('billing')) {
+            return response;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
       const statusText = response.status === 429 ? 'rate-limited (HTTP 429)' : 'temporarily unavailable (HTTP 503)';
       const delaySeconds = Math.round(delayMs / 1000);
       const msg = `Gemini API ${statusText}. Retrying ${keyType} key (${maskedKey}) in ${delaySeconds}s (Attempt ${attempt}/${MAX_ATTEMPTS})...`;

@@ -163,24 +163,90 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
 
     counts = Counter(filtered_matches)
     total_occurrences = sum(counts.values())
-    sorted_words = counts.most_common()
+
+    global_dict = fetch_global_pronunciations(db_path)
+
+    def is_similar(aa, bb):
+        if not aa or not bb: return False
+        if aa == bb: return True
+        if len(aa) > 3 and aa in bb: return True
+        if len(bb) > 3 and bb in aa: return True
+        if len(aa) < 4 or abs(len(aa) - len(bb)) > 2: return False
+
+        v0 = list(range(len(aa) + 1))
+        v1 = [0] * (len(aa) + 1)
+        for i in range(len(bb)):
+            v1[0] = i + 1
+            for j in range(len(aa)):
+                cost = 0 if aa[j] == bb[i] else 1
+                v1[j + 1] = min(v1[j] + 1, v0[j + 1] + 1, v0[j] + cost)
+            for j in range(len(aa) + 1):
+                v0[j] = v1[j]
+        return v0[len(aa)] <= 2
+
+    unique_words = list(counts.keys())
+    unique_words_lower = [w.lower() for w in unique_words]
+    
+    parent = {w: w for w in unique_words}
+    def find(i):
+        if parent[i] == i: return i
+        parent[i] = find(parent[i])
+        return parent[i]
+    
+    def union(i, j):
+        root_i = find(i)
+        root_j = find(j)
+        if root_i != root_j:
+            parent[root_i] = root_j
+
+    for i, w1 in enumerate(unique_words_lower):
+        for j in range(i + 1, len(unique_words_lower)):
+            w2 = unique_words_lower[j]
+            if is_similar(w1, w2):
+                union(unique_words[i], unique_words[j])
+
+    PRONOUNS_AND_ARTICLES = {
+        "the", "a", "an", "this", "that", "these", "those",
+        "i", "me", "my", "mine", "we", "us", "our", "ours",
+        "you", "your", "yours", "he", "him", "his",
+        "she", "her", "hers", "it", "its",
+        "they", "them", "their", "theirs",
+        "who", "whom", "whose", "which", "what"
+    }
+
+    groups = {}
+    for w in unique_words:
+        root = find(w)
+        groups.setdefault(root, []).append(w)
+        
+    word_sort_weight = {}
+    for root, members in groups.items():
+        group_sum = sum(counts[m] for m in members)
+        # Deflate if any member of the group is a pronoun or article
+        is_deflated = any(m.lower() in PRONOUNS_AND_ARTICLES for m in members)
+        effective_group_sum = (group_sum / 10000.0) if is_deflated else group_sum
+        
+        for m in members:
+            effective_indiv_count = (counts[m] / 10000.0) if m.lower() in PRONOUNS_AND_ARTICLES else counts[m]
+            word_sort_weight[m] = (effective_group_sum, effective_indiv_count, counts[m])
+
+    sorted_unique_words = sorted(unique_words, key=lambda w: word_sort_weight[w], reverse=True)
 
     # Calculate cumulative percentage coverage threshold
     target_count = (target_percentile / 100.0) * total_occurrences
     cumulative = 0
     top_words = []
 
-    for word, freq in sorted_words:
+    for word in sorted_unique_words:
+        freq = counts[word]
         cumulative += freq
         top_words.append((word, freq))
         if cumulative >= target_count:
             break
 
     if not quiet:
-        print(f"\nFound {len(sorted_words)} unique terms ({total_occurrences} total occurrences).")
+        print(f"\nFound {len(unique_words)} unique terms ({total_occurrences} total occurrences).")
         print(f"Target {target_percentile:.0f}% cumulative frequency consists of {len(top_words)} unique words.\n")
-
-    global_dict = fetch_global_pronunciations(db_path)
 
     results = []
     for word, freq in top_words:
