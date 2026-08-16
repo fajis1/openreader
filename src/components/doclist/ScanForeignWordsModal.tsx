@@ -770,11 +770,18 @@ export function ScanForeignWordsModal({
                   </button>
                 </div>
               ) : scanJobStatus === 'completed' && scanJobProgress.total > 0 ? (
-                scanJobError ? (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-300">Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated {scanJobGeneratedChoices} new pronunciation choices. {scanJobError}</p>
-                ) : (
-                  <p className="text-[11px] text-green-700 dark:text-green-300">Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated {scanJobGeneratedChoices} new pronunciation choices.</p>
-                )
+                <div className="space-y-0.5">
+                  {scanJobError ? (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300">Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated {scanJobGeneratedChoices} new pronunciation choices. {scanJobError}</p>
+                  ) : (
+                    <p className="text-[11px] text-green-700 dark:text-green-300">Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated {scanJobGeneratedChoices} new pronunciation choices.</p>
+                  )}
+                  {scanJobProgress.completed > scanJobGenerated && (
+                    <p className="text-[11px] font-bold text-red-600 dark:text-red-400">
+                      ⚠️ {scanJobProgress.completed - scanJobGenerated} terms failed or were omitted by Gemini.
+                    </p>
+                  )}
+                </div>
               ) : scanJobStatus === 'failed' ? (
                 <p className="text-[11px] text-red-600 dark:text-red-400">Pronunciation generation failed: {scanJobError || 'check server logs'}</p>
               ) : scanJobStatus === 'cancelled' ? (

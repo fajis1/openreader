@@ -677,8 +677,15 @@ ${JSON.stringify(repairRequests)}`;
             batch: i / chunkSize + 1,
           }, 'Gemini pronunciation batch failed');
           const errors = Array.isArray(jobState.errors) ? [...jobState.errors, `Gemini batch ${i / chunkSize + 1}: ${message}`] : [`Gemini batch ${i / chunkSize + 1}: ${message}`];
-          await saveJob({ errors, completed: Math.min(i + chunk.length, wordsMissingOptions.length) });
-          if (err instanceof GeminiHttpError && (err.status === 400 || err.status === 429 || err.status === 503)) {
+          
+          const isTerminal = err instanceof GeminiHttpError && (err.status === 400 || err.status === 429 || err.status === 503);
+          
+          await saveJob({ 
+            errors, 
+            completed: isTerminal ? i : Math.min(i + chunk.length, wordsMissingOptions.length) 
+          });
+
+          if (isTerminal) {
             terminalGeminiError = message;
             break;
           }

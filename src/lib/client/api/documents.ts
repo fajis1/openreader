@@ -109,42 +109,79 @@ export class ParsedPdfNotReadyError extends Error {
   }
 }
 
+const parsedDocumentCache = new Map<string, Promise<ParsedPdfDocument>>();
+
+export function clearParsedPdfDocumentCache(id?: string) {
+  if (id) {
+    parsedDocumentCache.delete(id);
+  } else {
+    parsedDocumentCache.clear();
+  }
+}
+
 export async function getParsedPdfDocument(
   id: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal, bypassCache?: boolean },
 ): Promise<ParsedPdfDocument> {
-  const res = await fetch(`/api/documents/${encodeURIComponent(id)}/parsed`, {
-    signal: options?.signal,
-    cache: 'no-store',
-  });
+  if (!options?.bypassCache) {
+    const cached = parsedDocumentCache.get(id);
+    if (cached) {
+      try {
+        return await cached;
+      } catch (e) {
+        // If the cached promise rejected (e.g. not ready), remove it and fetch again
+        parsedDocumentCache.delete(id);
+      }
+    }
+  }
 
-  if (res.status === 409) {
-    const data = (await res.json().catch(() => null)) as {
-      parseStatus?: string;
-      parseProgress?: PdfParseProgress | null;
-      opId?: string | null;
-      error?: string;
-    } | null;
-    throw new ParsedPdfNotReadyError({
-      parseStatus: data?.parseStatus === 'running'
-        ? 'running'
-        : data?.parseStatus === 'ready'
-          ? 'ready'
-          : data?.parseStatus === 'failed'
-            ? 'failed'
-            : 'pending',
-      parseProgress: data?.parseProgress ?? null,
-      opId: data?.opId ?? null,
-      details: data?.error ?? null,
+  const fetchPromise = (async () => {
+    const res = await fetch(`/api/documents/${encodeURIComponent(id)}/parsed`, {
+      signal: options?.signal,
+      cache: 'no-store',
     });
+
+    if (res.status === 409) {
+      const data = (await res.json().catch(() => null)) as {
+        parseStatus?: string;
+        parseProgress?: PdfParseProgress | null;
+        opId?: string | null;
+        error?: string;
+      } | null;
+      throw new ParsedPdfNotReadyError({
+        parseStatus: data?.parseStatus === 'running'
+          ? 'running'
+          : data?.parseStatus === 'ready'
+            ? 'ready'
+            : data?.parseStatus === 'failed'
+              ? 'failed'
+              : 'pending',
+        parseProgress: data?.parseProgress ?? null,
+        opId: data?.opId ?? null,
+        details: data?.error ?? null,
+      });
+    }
+
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(data?.error || 'Failed to load parsed PDF');
+    }
+
+    return (await res.json()) as ParsedPdfDocument;
+  })();
+
+  if (!options?.bypassCache) {
+    parsedDocumentCache.set(id, fetchPromise);
   }
 
-  if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(data?.error || 'Failed to load parsed PDF');
+  try {
+    return await fetchPromise;
+  } catch (e) {
+    if (!options?.bypassCache) {
+      parsedDocumentCache.delete(id);
+    }
+    throw e;
   }
-
-  return (await res.json()) as ParsedPdfDocument;
 }
 
 export function subscribeParsedPdfDocumentEvents(
