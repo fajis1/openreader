@@ -163,6 +163,8 @@ describe('Kokoro pronunciation policy', () => {
     expect(source).toContain("event: 'pdf.scan.gemini.batch.failed'");
     expect(source).toContain('acceptedChoices += 1');
     expect(source).toContain('generatedChoices: acceptedChoices');
+    expect(source).toContain('librarySkipped: 0');
+    expect(source).toContain('librarySkipped,');
     expect(source).not.toContain('wordsMissingOptions.reduce((total');
   });
 

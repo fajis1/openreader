@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 import {
   replaceGlobalPronunciationChoices,
   recordLearnedGlobalPronunciation,
+  promoteHumanGlobalPronunciation,
   removeGlobalPronunciationChoice,
   previewGlobalPronunciationImport,
   setGlobalPronunciationDefault,
@@ -84,6 +85,17 @@ describe('global pronunciation administration', () => {
     expect(recordLearnedGlobalPronunciation(full, '/one/')[1].usageCount).toBe(6);
   });
 
+  test('promotes the latest human pronunciation while retaining alternatives', () => {
+    expect(promoteHumanGlobalPronunciation([
+      { phonetic: '/gemini/', usageCount: 0, isUserCustom: false },
+      { phonetic: '/human/', usageCount: 2, isUserCustom: true, timestamp: 10 },
+    ], '/human/', 20)).toEqual([
+      { phonetic: '/human/', usageCount: 3, isUserCustom: true, timestamp: 20 },
+      { phonetic: '/gemini/', usageCount: 0, isUserCustom: false },
+    ]);
+    expect(promoteHumanGlobalPronunciation([], '[OMIT]', 20)).toBeNull();
+  });
+
   test('removes one global choice and promotes the next choice when needed', () => {
     expect(removeGlobalPronunciationChoice(library, 'στοιχεῖα', 'stɔɪxɛːa')).toEqual({
       removed: true,
@@ -142,6 +154,17 @@ describe('global pronunciation administration', () => {
     expect(route).toContain('.limit(1)\n        .all();');
     expect(route).toContain('}).run();');
     expect(route).not.toContain('Object.keys(parsed).length === 0');
+  });
+
+  test('requires a verified personal value before promoting a shared default', () => {
+    const route = fs.readFileSync(
+      path.join(process.cwd(), 'src/app/api/tts/global-pronunciations/route.ts'),
+      'utf8',
+    );
+    expect(route).toContain("body.action === 'promote-personal-default'");
+    expect(route).toContain('requireAuthContext(req)');
+    expect(route).toContain('activeProfile?.pronunciations?.[word]');
+    expect(route).toContain('promoteHumanGlobalPronunciation');
   });
 
   test('keeps new-word-only generation as the scan default', () => {

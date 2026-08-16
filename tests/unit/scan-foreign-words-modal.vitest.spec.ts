@@ -66,6 +66,8 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('warmRemainingAudio');
     expect(source).toContain('Preparing additional pronunciation audio in the background');
     expect(source).toContain('Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated');
+    expect(source).toContain('Library matches skipped by Gemini: {scanJobLibrarySkipped}');
+    expect(source).toContain("action: 'promote-personal-default'");
     expect(source).toContain('No Gemini pronunciation was generated for this word');
     expect(source).toContain('English Definition');
     expect(source).toContain('definitionNeedsReview');

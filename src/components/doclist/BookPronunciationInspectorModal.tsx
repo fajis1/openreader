@@ -113,7 +113,7 @@ export function BookPronunciationInspectorModal({
       if (!profile.pronunciations) profile.pronunciations = {};
       profile.pronunciations[word] = phonetic;
       
-      await fetch('/api/tts-settings', {
+      const settingsSaveRes = await fetch('/api/tts-settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -121,17 +121,22 @@ export function BookPronunciationInspectorModal({
           selectedSmartAudioProfileId: selectedId
         })
       });
+      if (!settingsSaveRes.ok) throw new Error('Failed to save the personal pronunciation');
 
       // Then update global dictionary
-      const globalPayload: any = { word, phonetic };
-      if (isAdmin) {
-        globalPayload.action = 'set-default';
-      }
-      await fetch('/api/tts/global-pronunciations', {
+      const globalRes = await fetch('/api/tts/global-pronunciations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(globalPayload)
+        body: JSON.stringify({
+          action: 'promote-personal-default',
+          word,
+          phonetic,
+        })
       });
+      if (!globalRes.ok) {
+        const globalError = await globalRes.json().catch(() => ({}));
+        throw new Error(globalError.error || 'Failed to promote the personal pronunciation globally');
+      }
 
       // Automatically replace in text chunks
       toast.promise(
@@ -157,17 +162,13 @@ export function BookPronunciationInspectorModal({
           const existingChoices = w.globalChoices || [];
           let newChoices = existingChoices;
           
-          if (isAdmin) {
-            newChoices = [phonetic, ...existingChoices.filter((c: string) => c !== phonetic)];
-          } else if (!existingChoices.includes(phonetic)) {
-            newChoices = [...existingChoices, phonetic];
-          }
+          newChoices = [phonetic, ...existingChoices.filter((c: string) => c !== phonetic)].slice(0, 5);
 
           return {
             ...w,
             userOverride: phonetic,
             globalChoices: newChoices,
-            globalDefault: isAdmin ? phonetic : (w.globalDefault || phonetic)
+            globalDefault: phonetic
           };
         }
         return w;

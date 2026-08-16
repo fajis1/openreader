@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ModalFrame } from '@/components/ui';
 import toast from 'react-hot-toast';
 import { useTtsPreviewSettings } from '@/hooks/audio/useTtsPreviewSettings';
-import { useAuthSession } from '@/hooks/useAuthSession';
 import { BookPronunciationInspectorModal } from './BookPronunciationInspectorModal';
 
 type SuspectPronunciation = {
@@ -36,8 +35,6 @@ export function ScanForeignWordsModal({
   documentId?: string | null;
   documentName?: string | null;
 }) {
-  const { data: session } = useAuthSession();
-  const isAdmin = Boolean((session?.user as unknown as { isAdmin?: boolean } | undefined)?.isAdmin);
   const previewSettings = useTtsPreviewSettings();
   const [activeDocId, setActiveDocId] = useState<string | null>(documentId || null);
   const [activeDocName, setActiveDocName] = useState<string | null>(documentName || null);
@@ -73,6 +70,7 @@ export function ScanForeignWordsModal({
   const [scanJobStatus, setScanJobStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>('idle');
   const [scanJobId, setScanJobId] = useState<string | null>(null);
   const [scanJobProgress, setScanJobProgress] = useState({ completed: 0, total: 0 });
+  const [scanJobLibrarySkipped, setScanJobLibrarySkipped] = useState(0);
   const [scanJobGenerated, setScanJobGenerated] = useState(0);
   const [scanJobGeneratedChoices, setScanJobGeneratedChoices] = useState(0);
   const [scanJobError, setScanJobError] = useState<string | null>(null);
@@ -109,6 +107,7 @@ export function ScanForeignWordsModal({
       setScanJobStatus('idle');
       setScanJobId(null);
       setScanJobProgress({ completed: 0, total: 0 });
+      setScanJobLibrarySkipped(0);
       setScanJobGenerated(0);
       setScanJobGeneratedChoices(0);
       setScanJobError(null);
@@ -141,6 +140,7 @@ export function ScanForeignWordsModal({
       setScanJobStatus('idle');
       setScanJobId(null);
       setScanJobProgress({ completed: 0, total: 0 });
+      setScanJobLibrarySkipped(0);
       setScanJobGenerated(0);
       setScanJobGeneratedChoices(0);
       setScanJobError(null);
@@ -326,6 +326,7 @@ export function ScanForeignWordsModal({
     setHasScanned(true);
     if (job.status) setScanJobStatus(job.status);
     setScanJobProgress({ completed: Number(job.completed) || 0, total: Number(job.total) || 0 });
+    setScanJobLibrarySkipped(Number(job.librarySkipped) || 0);
     setScanJobGenerated(Number(job.generated) || 0);
     setScanJobGeneratedChoices(Number(job.generatedChoices) || 0);
     setScanJobError(job.error || (Array.isArray(job.errors) && job.errors.length > 0 ? job.errors.join(' ') : null));
@@ -477,6 +478,7 @@ export function ScanForeignWordsModal({
       setHasScanned(true);
       setScanJobStatus(data.scanStatus || 'completed');
       setScanJobProgress({ completed: 0, total: Number(data.scanTotal) || 0 });
+      setScanJobLibrarySkipped(0);
       setScanJobGenerated(0);
       setScanJobGeneratedChoices(0);
       setScanJobError(null);
@@ -533,7 +535,7 @@ export function ScanForeignWordsModal({
         return p;
       });
 
-      await fetch('/api/tts-settings', {
+      const settingsSaveRes = await fetch('/api/tts-settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -541,17 +543,24 @@ export function ScanForeignWordsModal({
           smartAudioProfiles: updatedProfiles
         })
       });
+      if (!settingsSaveRes.ok) throw new Error('Failed to save the personal pronunciation');
 
       // Also post to global pronunciations
-      const globalPayload: any = { word, phonetic: newPronunciation };
-      if (isAdmin) {
-        globalPayload.action = 'set-default';
+      if (newPronunciation !== '[OMIT]') {
+        const globalRes = await fetch('/api/tts/global-pronunciations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'promote-personal-default',
+            word,
+            phonetic: newPronunciation,
+          })
+        });
+        if (!globalRes.ok) {
+          const globalError = await globalRes.json().catch(() => ({}));
+          throw new Error(globalError.error || 'Failed to promote the personal pronunciation globally');
+        }
       }
-      await fetch('/api/tts/global-pronunciations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(globalPayload)
-      });
 
       // Update local state
       setWords(words.map(w => w.word === word ? { ...w, userOverride: newPronunciation } : w));
@@ -755,6 +764,11 @@ export function ScanForeignWordsModal({
                   <p className="text-[11px] text-amber-600 dark:text-amber-400">
                     Gemini scan: {scanJobProgress.total > 0 ? `${scanJobProgress.completed}/${scanJobProgress.total} terms processed` : 'queued'}…
                   </p>
+                  {scanJobLibrarySkipped > 0 && (
+                    <p className="text-[11px] text-blue-700 dark:text-blue-300">
+                      Library matches skipped by Gemini: {scanJobLibrarySkipped}
+                    </p>
+                  )}
                   {scanJobStatusMessage && (
                     <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300 animate-pulse">
                       {scanJobStatusMessage}
@@ -769,8 +783,11 @@ export function ScanForeignWordsModal({
                     Cancel scan
                   </button>
                 </div>
-              ) : scanJobStatus === 'completed' && scanJobProgress.total > 0 ? (
+              ) : scanJobStatus === 'completed' && (scanJobProgress.total > 0 || scanJobLibrarySkipped > 0) ? (
                 <div className="space-y-0.5">
+                  {scanJobLibrarySkipped > 0 && (
+                    <p className="text-[11px] text-blue-700 dark:text-blue-300">Library matches skipped by Gemini: {scanJobLibrarySkipped}</p>
+                  )}
                   {scanJobError ? (
                     <p className="text-[11px] text-amber-700 dark:text-amber-300">Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated {scanJobGeneratedChoices} new pronunciation choices. {scanJobError}</p>
                   ) : (
@@ -1110,13 +1127,15 @@ export function ScanForeignWordsModal({
                           const phoneticStr = p.phonetic || p;
                           const isMatch = w.userOverride === phoneticStr;
                           const isLibraryPronunciation = w.libraryPronunciation === phoneticStr;
+                          const isTransliterationMatch = p?.isTransliterationMatch === true;
                           const isGeminiRecommendation = w.pronunciationSource === 'gemini' && w.geminiRecommendedPronunciation === phoneticStr;
                           return (
                             <div key={idx} className={`flex items-center gap-2 p-1.5 rounded border ${isLibraryPronunciation ? 'bg-green-50 border-green-300 dark:bg-green-900/30 dark:border-green-800' : isGeminiRecommendation ? 'bg-red-50 border-red-300 dark:bg-red-900/30 dark:border-red-800' : isMatch ? 'bg-blue-100 border-blue-300 dark:bg-blue-900/30 dark:border-blue-800' : 'border-transparent hover:border-gray-200 dark:hover:border-gray-700'}`}>
                               <span className={`font-mono text-xs flex-1 ${isLibraryPronunciation ? 'text-green-700 dark:text-green-300' : isGeminiRecommendation ? 'text-red-700 dark:text-red-300' : 'text-purple-600 dark:text-purple-400'}`}>
                                 {phoneticStr}
                               </span>
-                              {isLibraryPronunciation && <span className="text-[10px] font-semibold text-green-700 dark:text-green-300">Library</span>}
+                              {isLibraryPronunciation && isTransliterationMatch && <span className="text-[10px] font-semibold text-green-700 dark:text-green-300">Transliteration: {w.transliterationSourceTerm}</span>}
+                              {isLibraryPronunciation && !isTransliterationMatch && <span className="text-[10px] font-semibold text-green-700 dark:text-green-300">Library</span>}
                               {isGeminiRecommendation && <span className="text-[10px] font-semibold text-red-700 dark:text-red-300">Gemini pick</span>}
                               <button
                                 type="button"

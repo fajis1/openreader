@@ -89,12 +89,12 @@ describe('Gemini foreign-word structured output', () => {
     expect(isUsableForeignWordCandidate({ word: '   ' })).toBe(false);
   });
 
-  test('stops and fails the job after a deterministic Gemini HTTP 400', () => {
+  test('stops and fails the job after a terminal Gemini HTTP error', () => {
     const route = readFileSync(resolve(
       process.cwd(),
       'src/app/api/documents/scan-foreign-words/route.ts',
     ), 'utf8');
-    expect(route).toContain('err instanceof GeminiHttpError && err.status === 400');
+    expect(route).toContain('err instanceof GeminiHttpError && (err.status === 400 || err.status === 429 || err.status === 503)');
     expect(route).toContain('terminalGeminiError = message;');
     expect(route).toContain("status: terminalGeminiError ? 'failed' : 'completed'");
   });

@@ -5,6 +5,14 @@ import 'dotenv/config';
 const playwrightSqliteDbPath = process.env.PLAYWRIGHT_SQLITE_DB_PATH?.trim()
   ? path.resolve(process.env.PLAYWRIGHT_SQLITE_DB_PATH)
   : path.resolve(process.cwd(), 'docstore/test-sqlite3.db');
+const requestedPlaywrightWorkers = Number.parseInt(
+  process.env.PLAYWRIGHT_WORKERS?.trim() ?? '',
+  10,
+);
+const playwrightWorkers =
+  Number.isFinite(requestedPlaywrightWorkers) && requestedPlaywrightWorkers > 0
+    ? requestedPlaywrightWorkers
+    : 2;
 
 process.env.USE_EMBEDDED_WEED_MINI = 'true';
 process.env.S3_ACCESS_KEY_ID = 'test';
@@ -30,9 +38,10 @@ export default defineConfig({
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  // PDF parsing is handled by one embedded compute worker. Keeping CI browser
-  // concurrency bounded prevents its queue from exhausting per-test timeouts.
-  workers: process.env.CI ? 2 : undefined,
+  // PDF parsing is handled by one embedded compute worker. Keep browser
+  // concurrency bounded locally and in CI, while allowing deliberate
+  // diagnostic overrides such as PLAYWRIGHT_WORKERS=1.
+  workers: playwrightWorkers,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */

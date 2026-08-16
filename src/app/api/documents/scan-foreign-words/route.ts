@@ -46,6 +46,7 @@ import {
   normalizeDictionaryDefinition,
   shouldOmitDictionaryDefinition,
 } from '@/lib/shared/dictionary-definition-policy';
+import { findTransliterationLibraryMatch } from '@/lib/server/smart-audio/transliteration-library-match';
 
 const execFileAsync = util.promisify(execFile);
 const GREEK = /[\u0370-\u03ff\u1f00-\u1fff]/u;
@@ -96,6 +97,7 @@ export async function POST(req: NextRequest) {
       words: [],
       total: 0,
       completed: 0,
+      librarySkipped: 0,
       errors: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -285,23 +287,60 @@ export async function POST(req: NextRequest) {
             };
           }
         }
+        const aliasLibraryTerms = new Set([
+          ...Object.keys(globalDict),
+          ...Object.keys(globalDefinitions),
+          ...Object.keys(compatibleOverrides),
+          ...Object.keys(lexiconEntries),
+        ]);
+        const aliasLibraryRecords = Object.fromEntries([...aliasLibraryTerms].map((term) => {
+          const globalPronunciation = (globalDict[term] || [])
+            .map((choice) => choice?.phonetic)
+            .find((pronunciation) => isKokoroSafePronunciation(term, pronunciation));
+          return [term, {
+            pronunciation: compatibleOverrides[term]
+              || lexiconEntries[term]?.pronunciation
+              || globalPronunciation
+              || null,
+            definition: lexiconEntries[term]?.definition || globalDefinitions[term] || null,
+          }];
+        }));
+        const transliterationMatches = new Map<string, ReturnType<typeof findTransliterationLibraryMatch>>();
+        for (const w of words) {
+          if (typeof w.word !== 'string') continue;
+          const match = findTransliterationLibraryMatch(w.word, aliasLibraryRecords);
+          if (match) transliterationMatches.set(w.word, match);
+        }
         for (const w of words) {
           const term = w.word;
           if (!term || typeof term !== 'string') continue;
+          const transliterationMatch = transliterationMatches.get(term);
           const userPron = compatibleOverrides[term] || null;
           const globalPron = preExistingCompatibleGlobalWords.has(term)
             ? globalDict[term]
               ?.map((choice) => choice?.phonetic)
               .find((pronunciation) => isKokoroSafePronunciation(term, pronunciation)) || null
             : null;
-          const libraryPron = userPron || globalPron;
-          if (libraryPron && !lexiconEntries[term]) {
+          const aliasPronunciation = transliterationMatch?.pronunciation
+            && isKokoroSafePronunciation(term, transliterationMatch.pronunciation)
+            ? transliterationMatch.pronunciation
+            : null;
+          const libraryPron = userPron || globalPron || aliasPronunciation;
+          const libraryDefinition = globalDefinitions[term]
+            || transliterationMatch?.definition
+            || null;
+          if (libraryPron) {
             lexiconEntries[term] = {
+              ...lexiconEntries[term],
               term,
               pronunciation: libraryPron,
-              definition: globalDefinitions[term] || null,
-              definitionOmitted: globalDefinitions[term] ? false : undefined,
-              language: languageForTerm(term),
+              definition: lexiconEntries[term]?.definition || libraryDefinition,
+              definitionOmitted: lexiconEntries[term]?.definitionOmitted === true
+                ? true
+                : libraryDefinition ? false : undefined,
+              language: languageForTerm(term) === 'other' && transliterationMatch
+                ? languageForTerm(transliterationMatch.sourceTerm)
+                : languageForTerm(term),
               context: Array.isArray(w.contexts) ? w.contexts[0] : undefined,
             };
           }
@@ -310,10 +349,15 @@ export async function POST(req: NextRequest) {
 
         const wordsMissingOptions = words
           .filter((w: any) => {
+            const transliterationPronunciation = transliterationMatches.get(w.word)?.pronunciation;
             const compatibleGlobalChoices = (globalDict[w.word] || []).filter((choice) => (
               isKokoroSafePronunciation(w.word, choice?.phonetic)
             ));
             const needsPronunciations = !compatibleOverrides[w.word]
+              && !(
+                transliterationPronunciation
+                && isKokoroSafePronunciation(w.word, transliterationPronunciation)
+              )
               && (compatibleGlobalChoices.length === 0
                 || (!generateOnlyForNewWords && compatibleGlobalChoices.length < 5));
             const language = languageForTerm(w.word);
@@ -329,6 +373,7 @@ export async function POST(req: NextRequest) {
             return needsPronunciations || needsDefinition;
           })
           .map((w: any) => w.word);
+        const librarySkipped = Math.max(0, words.length - wordsMissingOptions.length);
         const updatedGlobalWords = new Set<string>();
         const confirmedOcrFragments = new Set<string>();
         let acceptedChoices = 0;
@@ -336,19 +381,34 @@ export async function POST(req: NextRequest) {
         let terminalGeminiError: string | null = null;
 
         const enrichWords = () => words.map((w: any) => {
+          const transliterationMatch = transliterationMatches.get(w.word);
           const userPronunciation = compatibleOverrides[w.word] || null;
           const globalPronunciation = preExistingCompatibleGlobalWords.has(w.word)
             ? globalDict[w.word]
               ?.map((choice) => choice?.phonetic)
               .find((pronunciation) => isKokoroSafePronunciation(w.word, pronunciation)) || null
             : null;
-          const libraryPronunciation = userPronunciation || globalPronunciation;
+          const transliterationPronunciation = transliterationMatch?.pronunciation
+            && isKokoroSafePronunciation(w.word, transliterationMatch.pronunciation)
+            ? transliterationMatch.pronunciation
+            : null;
+          const libraryPronunciation = userPronunciation || globalPronunciation || transliterationPronunciation;
           const globalChoices = (globalDict[w.word] || []).map((item: any) => ({
             ...(typeof item === 'string' ? { phonetic: item } : item),
             isInGlobalLibrary: preExistingCompatibleGlobalPhonetics
               .get(w.word)
               ?.has(item?.phonetic) === true,
           }));
+          if (
+            transliterationPronunciation
+            && !globalChoices.some((choice: any) => choice.phonetic === transliterationPronunciation)
+          ) {
+            globalChoices.unshift({
+              phonetic: transliterationPronunciation,
+              isInGlobalLibrary: true,
+              isTransliterationMatch: true,
+            });
+          }
 
           return {
             ...w,
@@ -357,7 +417,8 @@ export async function POST(req: NextRequest) {
               : globalChoices,
             userOverride: userPronunciation,
             libraryPronunciation,
-            pronunciationSource: userPronunciation ? 'personal' : globalPronunciation ? 'global' : geminiRecommendations[w.word] ? 'gemini' : 'none',
+            pronunciationSource: userPronunciation ? 'personal' : globalPronunciation ? 'global' : transliterationPronunciation ? 'transliteration' : geminiRecommendations[w.word] ? 'gemini' : 'none',
+            transliterationSourceTerm: transliterationMatch?.sourceTerm || null,
             geminiRecommendedPronunciation: geminiRecommendations[w.word] || null,
             definition: lexiconEntries[w.word]?.definition || null,
             definitionOmitted: lexiconEntries[w.word]?.definitionOmitted === true,
@@ -373,6 +434,7 @@ export async function POST(req: NextRequest) {
           words: enrichWords(),
           total: wordsMissingOptions.length,
           completed: 0,
+          librarySkipped,
         });
 
 
@@ -397,10 +459,14 @@ export async function POST(req: NextRequest) {
         const batchUpdatedWords = new Set<string>();
         const terms = chunk.map((word: string) => {
           const scanned = words.find((item: any) => item.word === word);
+          const transliterationPronunciation = transliterationMatches.get(word)?.pronunciation;
           const storedPronunciation = compatibleOverrides[word]
             || (globalDict[word] || [])
               .map((choice) => choice?.phonetic)
-              .find((choice) => isKokoroSafePronunciation(word, choice));
+              .find((choice) => isKokoroSafePronunciation(word, choice))
+            || (transliterationPronunciation && isKokoroSafePronunciation(word, transliterationPronunciation)
+              ? transliterationPronunciation
+              : null);
           return {
             term: word,
             contexts: Array.isArray(scanned?.contexts) ? scanned.contexts.slice(0, 2) : [],
@@ -576,6 +642,10 @@ ${JSON.stringify(repairRequests)}`;
 
               const pronunciation = compatibleOverrides[w]
                 || current[0]?.phonetic
+                || (transliterationMatches.get(w)?.pronunciation
+                  && isKokoroSafePronunciation(w, transliterationMatches.get(w)?.pronunciation)
+                  ? transliterationMatches.get(w)?.pronunciation
+                  : null)
                 || prons.find((candidate) => isKokoroSafePronunciation(w, candidate));
               if (pronunciation) {
                 if (!geminiRecommendations[w] && !compatibleOverrides[w] && !preExistingCompatibleGlobalWords.has(w)) {
@@ -585,9 +655,16 @@ ${JSON.stringify(repairRequests)}`;
                   || shouldOmitDictionaryDefinition(result.definition);
                 const definition = definitionOmitted
                   ? null
-                  : normalizeDictionaryDefinition(result.definition);
+                  : normalizeDictionaryDefinition(result.definition)
+                    || transliterationMatches.get(w)?.definition
+                    || null;
+                const transliterationSourceLanguage = languageForTerm(
+                  transliterationMatches.get(w)?.sourceTerm || '',
+                );
                 const language = result.language === 'other'
-                  ? 'other'
+                  ? transliterationSourceLanguage === 'other'
+                    ? 'other'
+                    : transliterationSourceLanguage
                   : result.language === 'biblical_hebrew'
                     ? 'biblical_hebrew'
                     : result.language === 'koine_greek'

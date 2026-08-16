@@ -5,6 +5,8 @@ import { eq, sql } from 'drizzle-orm';
 import { requireAdminContext } from '@/lib/server/auth/admin';
 import {
   normalizeGlobalPronunciationLibrary,
+  normalizeGlobalPronunciation,
+  promoteHumanGlobalPronunciation,
   recordLearnedGlobalPronunciation,
   removeGlobalPronunciationChoice,
   replaceGlobalPronunciationChoices,
@@ -12,6 +14,8 @@ import {
   previewGlobalPronunciationImport,
   type GlobalPronunciationLibrary,
 } from '@/lib/server/tts/global-pronunciation-library';
+import { requireAuthContext } from '@/lib/server/auth/auth';
+import { findSmartAudioProfileById, readSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { serverLogger } from '@/lib/server/logger';
 import {
@@ -211,12 +215,42 @@ export async function POST(req: NextRequest) {
     const phonetic = typeof body.phonetic === 'string' ? body.phonetic : '';
     const isReplaceAction = body.action === 'replace-choices';
     const isDeleteWordAction = body.action === 'delete-word';
+    const isPersonalPromotionAction = body.action === 'promote-personal-default';
     const isPhoneticAction = body.action === 'set-default' || body.action === 'delete-choice';
     if (!word || (isReplaceAction && !Array.isArray(body.choices))) {
       return NextResponse.json({ error: 'Missing word or replacement choices' }, { status: 400 });
     }
     if (!phonetic && !isReplaceAction && !isDeleteWordAction) {
       return NextResponse.json({ error: 'Missing phonetic' }, { status: 400 });
+    }
+
+    if (isPersonalPromotionAction) {
+      const auth = await requireAuthContext(req);
+      if (auth instanceof Response) return auth;
+      const normalized = normalizeGlobalPronunciation(phonetic);
+      if (!normalized) {
+        return NextResponse.json({ error: 'The personal pronunciation is not safe Kokoro IPA.' }, { status: 400 });
+      }
+      const profilesDocument = await readSmartAudioProfilesDocument(auth.userId);
+      const activeProfile = findSmartAudioProfileById(
+        profilesDocument,
+        profilesDocument.selectedProfileId,
+      );
+      if (normalizeGlobalPronunciation(activeProfile?.pronunciations?.[word]) !== normalized) {
+        return NextResponse.json({
+          error: 'Save this pronunciation to the selected personal profile before promoting it globally.',
+        }, { status: 409 });
+      }
+      const updatedList = await mutateGlobalPronunciationLibrary((currentGlobal) => {
+        const promoted = promoteHumanGlobalPronunciation(currentGlobal[word] || [], normalized);
+        if (promoted) currentGlobal[word] = promoted;
+        return { result: promoted, changed: promoted !== null };
+      });
+      serverLogger.info({
+        event: 'tts.global_pronunciations.personal_default_promoted',
+        word,
+      }, 'Promoted a verified personal pronunciation to the global default');
+      return NextResponse.json({ success: true, updatedList });
     }
 
     if (isPhoneticAction || isReplaceAction || isDeleteWordAction) {

@@ -82,6 +82,32 @@ export function recordLearnedGlobalPronunciation(
   return choices;
 }
 
+export function promoteHumanGlobalPronunciation(
+  current: GlobalPronunciationChoice[],
+  pronunciation: unknown,
+  now = Date.now(),
+): GlobalPronunciationChoice[] | null {
+  if (typeof pronunciation === 'string' && pronunciation.trim() === '[OMIT]') return null;
+  const normalized = normalizeGlobalPronunciation(pronunciation);
+  if (!normalized) return null;
+  const existing = current.find(
+    (choice) => normalizeGlobalPronunciation(choice.phonetic) === normalized,
+  );
+  const promoted: GlobalPronunciationChoice = {
+    ...existing,
+    phonetic: normalized,
+    usageCount: (existing?.usageCount || 0) + 1,
+    isUserCustom: true,
+    timestamp: now,
+  };
+  return [
+    promoted,
+    ...current.filter(
+      (choice) => normalizeGlobalPronunciation(choice.phonetic) !== normalized,
+    ),
+  ].slice(0, 5);
+}
+
 export function normalizeGlobalPronunciation(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();

@@ -23,8 +23,10 @@ describe('Playwright standalone runtime configuration', () => {
     expect(source).not.toContain('/tmp/webserver.log');
   });
 
-  test('bounds CI concurrency to the embedded compute worker capacity', () => {
-    expect(source).toContain('workers: process.env.CI ? 2 : undefined');
+  test('bounds concurrency to the embedded compute worker capacity', () => {
+    expect(source).toContain('process.env.PLAYWRIGHT_WORKERS?.trim()');
+    expect(source).toContain(': 2;');
+    expect(source).toContain('workers: playwrightWorkers');
   });
 
   test('does not reuse a stale web server in CI', () => {
