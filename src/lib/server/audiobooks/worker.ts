@@ -977,7 +977,6 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         } catch (e) {
           if (e instanceof AudiobookJobStoppedError) throw e;
           serverLogger.error({ event: 'audiobook.queue.smart_audio.failed', error: e }, 'Smart audio processing failed. Aborting generation.');
-          require('fs').appendFileSync('/home/cisco/openreader/audiobook_err.txt', String((e as any).stack || e) + '\n');
           if (nc) await nc.close();
           
           const jobSettingsParsed = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});

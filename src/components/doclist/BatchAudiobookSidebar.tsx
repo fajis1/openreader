@@ -10,6 +10,7 @@ import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharact
 import { Button, Select, Card } from '@/components/ui';
 import { getVoices } from '@/lib/client/api/audiobooks';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
+import { getNarratorVoiceId, MULTI_VOICE_WORKER_MODE } from '@/lib/shared/multi-voice';
 import {
   AUDIOBOOK_QUOTA_UPDATED_EVENT,
   formatMonthlyAudiobookQuotaMessage,
@@ -18,6 +19,7 @@ import {
 import type { TTSAudiobookFormat } from '@/types/tts';
 import type { DocumentListDocument } from '@/types/documents';
 import type { SmartAudioProfile } from '@/types/client';
+import type { SmartAudioCharacterMap } from '@/types/document-settings';
 
 interface BatchAudiobookSidebarProps {
   isOpen: boolean;
@@ -134,23 +136,60 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
   }, []);
 
   const selectedSmartAudioProfile = smartAudioProfiles.find((p) => p.id === selectedSmartAudioProfileId) || smartAudioProfiles[0] || null;
+  const isDramaProfile = useSmartAudio
+    && selectedSmartAudioProfile?.workerMode === MULTI_VOICE_WORKER_MODE;
+  const [dramaNarratorVoices, setDramaNarratorVoices] = useState<Record<string, string | null>>({});
+  const [isLoadingDramaNarrators, setIsLoadingDramaNarrators] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || !isDramaProfile || !selectedSmartAudioProfileId || selectedDocs.length === 0) {
+      setDramaNarratorVoices({});
+      setIsLoadingDramaNarrators(false);
+      return;
+    }
+    const controller = new AbortController();
+    setIsLoadingDramaNarrators(true);
+    void Promise.all(selectedDocs.map(async (doc) => {
+      const response = await fetch(`/api/audiobook/characters/scan?documentId=${encodeURIComponent(doc.id)}&profileId=${encodeURIComponent(selectedSmartAudioProfileId)}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!response.ok) return [doc.id, null] as const;
+      const body = await response.json().catch(() => ({}));
+      return [doc.id, getNarratorVoiceId(body.characterMap)] as const;
+    })).then((entries) => {
+      if (!controller.signal.aborted) setDramaNarratorVoices(Object.fromEntries(entries));
+    }).catch((error) => {
+      if ((error as Error)?.name !== 'AbortError') setDramaNarratorVoices({});
+    }).finally(() => {
+      if (!controller.signal.aborted) setIsLoadingDramaNarrators(false);
+    });
+    return () => controller.abort();
+  }, [isDramaProfile, isOpen, selectedDocs, selectedSmartAudioProfileId]);
 
   // ── Queueing ─────────────────────────────────────────────────────────────
   const [isQueueing, setIsQueueing] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
   const [queuedCount, setQueuedCount] = useState(0);
   const [showScholarScanWarning, setShowScholarScanWarning] = useState(false);
+  const [showDramaReplacementWarning, setShowDramaReplacementWarning] = useState(false);
   const [pendingCharacterDoc, setPendingCharacterDoc] = useState<DocumentListDocument | null>(null);
   const [pendingBatchScholarConfirm, setPendingBatchScholarConfirm] = useState(false);
 
-  const handleStartBatch = async (confirmScholarAutoScan = false) => {
+  const handleStartBatch = async (
+    confirmScholarAutoScan = false,
+    narratorOverrides: Record<string, string | null> = {},
+    confirmReplaceExisting = false,
+  ) => {
     if (selectedDocs.length === 0) return;
     setIsQueueing(true);
     setQueueError(null);
     setQueuedCount(0);
     try {
-      const settings = {
-        voice: audiobookVoice,
+      const settingsFor = (documentId: string) => ({
+        voice: isDramaProfile
+          ? narratorOverrides[documentId] || dramaNarratorVoices[documentId] || audiobookVoice
+          : audiobookVoice,
         format: audiobookFormat,
         providerRef: providerRef || '',
         providerType,
@@ -160,7 +199,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
         useSmartAudio,
         smartAudioProfileId: useSmartAudio ? selectedSmartAudioProfileId : undefined,
         scholarIncludeDefinitions: useScholarDefinitions,
-      };
+      });
 
       if (!confirmScholarAutoScan) {
         for (const doc of selectedDocs) {
@@ -169,8 +208,9 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               documentId: doc.id,
-              settings,
+              settings: settingsFor(doc.id),
               preflightOnly: true,
+              confirmReplaceExisting,
             }),
           });
           const preflightBody = await preflight.json().catch(() => null);
@@ -181,6 +221,11 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
           if (preflight.status === 409 && preflightBody?.code === 'CHARACTER_CAST_REQUIRED') {
             setPendingBatchScholarConfirm(confirmScholarAutoScan);
             setPendingCharacterDoc(doc);
+            return;
+          }
+          if (preflight.status === 409 && preflightBody?.code === 'AUDIOBOOK_REPLACEMENT_REQUIRED') {
+            setPendingBatchScholarConfirm(confirmScholarAutoScan);
+            setShowDramaReplacementWarning(true);
             return;
           }
           if (!preflight.ok) {
@@ -194,7 +239,12 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
         const res = await fetch('/api/audiobooks/queue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ documentId: doc.id, settings, confirmScholarAutoScan }),
+          body: JSON.stringify({
+            documentId: doc.id,
+            settings: settingsFor(doc.id),
+            confirmScholarAutoScan,
+            confirmReplaceExisting,
+          }),
         });
         const responseBody = await res.json().catch(() => null);
         if (res.status === 409 && responseBody?.code === 'SCHOLAR_SCAN_REQUIRED') {
@@ -206,6 +256,12 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
           setQueuedCount(count);
           setPendingBatchScholarConfirm(confirmScholarAutoScan);
           setPendingCharacterDoc(doc);
+          return;
+        }
+        if (res.status === 409 && responseBody?.code === 'AUDIOBOOK_REPLACEMENT_REQUIRED') {
+          setQueuedCount(count);
+          setPendingBatchScholarConfirm(confirmScholarAutoScan);
+          setShowDramaReplacementWarning(true);
           return;
         }
         if (!res.ok) {
@@ -249,7 +305,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
         </div>
 
         {/* Voice picker */}
-        <div className="space-y-1.5">
+        {!isDramaProfile && <div className="space-y-1.5">
           <label className="text-[11px] uppercase tracking-wider font-medium text-soft">
             Voice {isFetchingVoices && <span className="text-soft normal-case">(loading…)</span>}
           </label>
@@ -267,7 +323,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
               No voices found. Make sure a TTS provider is configured in Settings.
             </p>
           )}
-        </div>
+        </div>}
 
         {/* Format picker */}
         <div className="space-y-1.5">
@@ -354,16 +410,37 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
                     ))}
                   </select>
                   {selectedSmartAudioProfile && (
-                    <p className="text-xs text-soft">
-                      {selectedSmartAudioProfile.aiModel} ·{' '}
-                      {Object.keys(selectedSmartAudioProfile.abbreviations || {}).length} abbreviations ·{' '}
-                      {Object.keys(selectedSmartAudioProfile.pronunciations || {}).length} pronunciations
-                    </p>
+                    <div className="text-xs text-soft">
+                      <p>Pronunciation: {selectedSmartAudioProfile.pronunciationAiModel || selectedSmartAudioProfile.aiModel}</p>
+                      <p>Cleanup: {selectedSmartAudioProfile.aiModel} · {Object.keys(selectedSmartAudioProfile.abbreviations || {}).length} abbreviations · {Object.keys(selectedSmartAudioProfile.pronunciations || {}).length} pronunciations</p>
+                    </div>
                   )}
                 </>
               )}
             </div>
           </Card>
+        )}
+
+        {isDramaProfile && (
+          <div className="rounded-lg border border-accent bg-accent-wash p-3 space-y-2" role="status">
+            <div>
+              <p className="text-sm font-medium text-foreground">Audio Drama · Multiple voices</p>
+              <p className="text-xs text-soft">
+                Narration and each character use the voices from that book’s reviewed cast. Books without a completed cast will pause for review before they are queued.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[11px] uppercase tracking-wider font-medium text-soft">Narrator Voice</p>
+              {selectedDocs.map((doc) => (
+                <div key={doc.id} className="flex items-center justify-between gap-3 text-xs">
+                  <span className="truncate text-primary">{doc.name}</span>
+                  <span className="shrink-0 font-medium text-foreground">
+                    {isLoadingDramaNarrators ? 'Loading…' : dramaNarratorVoices[doc.id] || 'Not assigned yet'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* 📖 Scholar Definitions Toggle — only for scholar-like profiles */}
@@ -436,6 +513,19 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
         )}
       </div>
       <ConfirmDialog
+        isOpen={showDramaReplacementWarning}
+        onClose={() => setShowDramaReplacementWarning(false)}
+        onConfirm={() => {
+          setShowDramaReplacementWarning(false);
+          void handleStartBatch(pendingBatchScholarConfirm, {}, true);
+        }}
+        title="Replace Existing Audiobook?"
+        message="At least one selected document already has a regular audiobook. Converting to Audio Drama will permanently delete every existing generated chapter and combined audiobook file for each affected document, then regenerate them with the reviewed narrator and character voices."
+        confirmText="Replace & Regenerate"
+        cancelText="Keep Existing Audiobook"
+        isDangerous={true}
+      />
+      <ConfirmDialog
         isOpen={showScholarScanWarning}
         onClose={() => setShowScholarScanWarning(false)}
         onConfirm={() => {
@@ -454,9 +544,12 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
           profileId={selectedSmartAudioProfileId}
           isOpen={true}
           onClose={() => setPendingCharacterDoc(null)}
-          onComplete={async () => {
+          onComplete={async (savedCharacterMap: SmartAudioCharacterMap) => {
+            const documentId = pendingCharacterDoc.id;
+            const narratorVoice = getNarratorVoiceId(savedCharacterMap);
+            setDramaNarratorVoices((current) => ({ ...current, [documentId]: narratorVoice }));
             setPendingCharacterDoc(null);
-            await handleStartBatch(pendingBatchScholarConfirm);
+            await handleStartBatch(pendingBatchScholarConfirm, { [documentId]: narratorVoice });
           }}
         />
       )}

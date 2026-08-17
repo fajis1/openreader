@@ -72,13 +72,13 @@ export function GeminiPronunciationModelUpgradeModal({
       <div className="w-[min(92vw,34rem)] bg-surface p-6 text-foreground">
         <h2 className="text-xl font-bold">Gemini 3.7 Flash is available</h2>
         <p className="mt-3 text-sm text-soft">
-          You currently use Gemini 3.6 Flash for pronunciation work in{' '}
-          {offer.affectedProfileCount} {profileLabel}. Upgrade those profiles to Gemini 3.7 Flash,
-          or keep 3.6 if you prefer it.
+          You currently use Gemini 3.6 Flash for cleanup, pronunciation work, or both in{' '}
+          {offer.affectedProfileCount} {profileLabel}. Upgrade every 3.6 selection in those profiles
+          to Gemini 3.7 Flash, or keep 3.6 if you prefer it.
         </p>
         <p className="mt-2 text-sm text-soft">
-          New profiles will default to 3.7. This choice only changes the pronunciation model;
-          your prompts, API keys, pronunciations, and cleanup model stay unchanged.
+          This updates both cleanup and pronunciation fields that are currently set to 3.6.
+          Custom and other model choices, prompts, API keys, and pronunciations stay unchanged.
         </p>
         {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

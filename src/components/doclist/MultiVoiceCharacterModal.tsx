@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  getDuplicateVoiceAssignments,
   KOKORO_CHARACTER_VOICES,
   normalizeSmartAudioCharacterMap,
 } from '@/lib/shared/multi-voice';
@@ -15,7 +16,7 @@ interface MultiVoiceCharacterModalProps {
   jobId?: string;
   standalone?: boolean;
   onClose: () => void;
-  onComplete: () => void | Promise<void>;
+  onComplete: (characterMap: SmartAudioCharacterMap) => void | Promise<void>;
 }
 
 type CastResponse = {
@@ -133,6 +134,27 @@ export function MultiVoiceCharacterModal({
   const primaryCharacters = entries.filter((entry) => !entry.aliasFor);
   const unassigned = primaryCharacters.filter((entry) => !entry.voiceId);
   const hasNarrator = primaryCharacters.some((entry) => entry.name.toLocaleLowerCase() === 'narrator');
+  const duplicateVoiceAssignments = useMemo(
+    () => getDuplicateVoiceAssignments(characterMap),
+    [characterMap],
+  );
+  const duplicateVoiceByCharacter = useMemo(() => new Map(
+    duplicateVoiceAssignments.flatMap((assignment) => assignment.characterNames.map((name) => [
+      name,
+      assignment,
+    ] as const)),
+  ), [duplicateVoiceAssignments]);
+  const charactersByVoice = useMemo(() => {
+    const assignments = new Map<string, string[]>();
+    for (const entry of primaryCharacters) {
+      if (!entry.voiceId) continue;
+      assignments.set(entry.voiceId, [
+        ...(assignments.get(entry.voiceId) || []),
+        entry.name,
+      ]);
+    }
+    return assignments;
+  }, [primaryCharacters]);
 
   const updateEntry = (name: string, update: (entry: SmartAudioCharacterMap['entries'][string]) => void) => {
     setCharacterMap((current) => {
@@ -256,7 +278,8 @@ export function MultiVoiceCharacterModal({
       });
       const body = await response.json().catch(() => ({})) as CastResponse;
       if (!response.ok) throw new Error(body.error || 'Failed to save the reviewed cast.');
-      await onComplete();
+      const savedCharacterMap = normalizeSmartAudioCharacterMap(body.characterMap) || characterMap;
+      await onComplete(savedCharacterMap);
       onClose();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Failed to save the reviewed cast.');
@@ -342,18 +365,50 @@ export function MultiVoiceCharacterModal({
                     ))}
                   </select>
                   {!character.aliasFor && (
-                    <div className="flex gap-2">
-                      <select
-                        value={character.voiceId || ''}
-                        onChange={(event) => updateEntry(character.name, (entry) => { entry.voiceId = event.target.value; })}
-                        className="min-w-0 flex-1 rounded-lg border border-line bg-background p-2 text-sm text-foreground"
-                      >
-                        <option value="">Select a Kokoro voice</option>
-                        {KOKORO_CHARACTER_VOICES.map((voice) => <option key={voice} value={voice}>{voice}</option>)}
-                      </select>
-                      <button type="button" onClick={() => void handlePreview(character.name)} disabled={!character.voiceId || isPlaying === character.name} className="rounded-lg border border-accent px-3 text-accent disabled:opacity-50" title="Preview this character voice">
-                        {isPlaying === character.name ? '…' : '▶'}
-                      </button>
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <select
+                          value={character.voiceId || ''}
+                          onChange={(event) => updateEntry(character.name, (entry) => { entry.voiceId = event.target.value; })}
+                          className="min-w-0 flex-1 rounded-lg border border-line bg-background p-2 text-sm text-foreground"
+                        >
+                          <option value="">Select a Kokoro voice</option>
+                          {KOKORO_CHARACTER_VOICES.map((voice) => {
+                            const assignedNames = charactersByVoice.get(voice) || [];
+                            const assignedToCurrent = assignedNames.includes(character.name);
+                            const assignedToOthers = assignedNames.filter((name) => name !== character.name);
+                            const suffix = assignedToCurrent
+                              ? ' — current'
+                              : assignedToOthers.length > 0
+                                ? ` — chosen by ${assignedToOthers.join(', ')}`
+                                : '';
+                            return (
+                              <option
+                                key={voice}
+                                value={voice}
+                                className={assignedToOthers.length > 0 && !assignedToCurrent ? 'text-text-soft' : ''}
+                              >
+                                {voice}{suffix}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <button type="button" onClick={() => void handlePreview(character.name)} disabled={!character.voiceId || isPlaying === character.name} className="rounded-lg border border-accent px-3 text-accent disabled:opacity-50" title="Preview this character voice">
+                          {isPlaying === character.name ? '…' : '▶'}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-text-soft">
+                        Voices marked “chosen by” are already in use but remain selectable for intentional sharing.
+                      </p>
+                      {duplicateVoiceByCharacter.has(character.name) && (() => {
+                        const assignment = duplicateVoiceByCharacter.get(character.name)!;
+                        const otherNames = assignment.characterNames.filter((name) => name !== character.name);
+                        return (
+                          <div role="alert" className="rounded-lg border border-warning bg-warning-wash px-3 py-2 text-xs text-warning">
+                            Warning: {assignment.voiceId} is also assigned to {otherNames.join(', ')}. Reusing it is allowed, but these characters may sound identical.
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                   {character.name.toLocaleLowerCase() !== 'narrator' && (

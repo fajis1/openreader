@@ -11,6 +11,8 @@ import { BASE_BOOKS } from "@/components/constants";
 import { toast } from "react-hot-toast";
 import { ModalFrame } from "@/components/ui";
 import { SmartAudioSettings } from "@/components/SmartAudioSettings";
+import { parseVoiceTaggedText, renderVoiceSegments } from "@/lib/shared/multi-voice";
+import type { SmartAudioCharacterMap } from "@/types/document-settings";
 
 interface Chapter {
   index: number;
@@ -52,8 +54,31 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [cleanTarget, setCleanTarget] = useState<'original' | 'edited'>('edited');
   const [isFixingAll, setIsFixingAll] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [voiceCharacters, setVoiceCharacters] = useState<Record<string, string[]>>({});
+  const [castCharacters, setCastCharacters] = useState<Array<{ name: string; voiceId: string }>>([]);
+  const [playingSpeakerSegment, setPlayingSpeakerSegment] = useState<number | null>(null);
+  const [speakerTextDrafts, setSpeakerTextDrafts] = useState<Record<number, string>>({});
 
   const isMultiVoice = chapterText.includes('<voice');
+  const speakerSegments = useMemo(() => {
+    if (!isMultiVoice) return [];
+    try {
+      return parseVoiceTaggedText(chapterText).map((segment, index) => ({
+        id: `${index}-${segment.voiceId}`,
+        voiceId: segment.voiceId,
+        speaker: voiceCharacters[segment.voiceId]?.join(', ') || segment.voiceId,
+        text: segment.text,
+      }));
+    } catch {
+      return [];
+    }
+  }, [chapterText, isMultiVoice, voiceCharacters]);
+
+  useEffect(() => {
+    setSpeakerTextDrafts(Object.fromEntries(
+      speakerSegments.map((segment, index) => [index, segment.text]),
+    ));
+  }, [currentChapterIndex, speakerSegments]);
 
   useEffect(() => {
     const handleOpenSettings = () => setIsSettingsModalOpen(true);
@@ -112,6 +137,41 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     // Poll every 5 seconds to get live updates for background tasks
     const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
+  }, [bookId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(`/api/documents/${encodeURIComponent(bookId)}/settings`, { cache: 'no-store' })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((body) => {
+        if (cancelled) return;
+        const map = body?.settings?.smartAudioCharacters as SmartAudioCharacterMap | undefined;
+        if (!map?.entries) {
+          setVoiceCharacters({});
+          setCastCharacters([]);
+          return;
+        }
+        const labels: Record<string, string[]> = {};
+        const choices: Array<{ name: string; voiceId: string }> = [];
+        for (const entry of Object.values(map.entries)) {
+          const primary = entry.aliasFor ? map.entries[entry.aliasFor] : entry;
+          if (!primary?.voiceId) continue;
+          labels[primary.voiceId] = Array.from(new Set([
+            ...(labels[primary.voiceId] || []),
+            entry.name,
+          ]));
+          if (!entry.aliasFor) choices.push({ name: entry.name, voiceId: primary.voiceId });
+        }
+        setVoiceCharacters(labels);
+        setCastCharacters(choices);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVoiceCharacters({});
+          setCastCharacters([]);
+        }
+      });
+    return () => { cancelled = true; };
   }, [bookId]);
 
   useEffect(() => {
@@ -203,8 +263,9 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     toast.success("Abbreviations expanded successfully!");
   };
 
-  const handleRegenerate = async () => {
-    if (!chapterText) return;
+  const handleRegenerate = async (textOverride?: string) => {
+    const textToRecord = textOverride || chapterText;
+    if (!textToRecord) return;
     setIsRegenerating(true);
     const currentChapter = chapters[currentChapterIndex];
     try {
@@ -216,7 +277,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           documentId: bookId,
           chapterIndex: currentChapterIndex,
           chapterTitle: currentChapter.title,
-          text: chapterText,
+          text: textToRecord,
           useSmartAudio: false,
           format: currentChapter.format,
         }),
@@ -232,6 +293,79 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       toast.error(error.message || "Failed to trigger regeneration");
     } finally {
       setIsRegenerating(false);
+    }
+  };
+
+  const updateSpeakerAssignment = (segmentIndex: number, characterName: string) => {
+    const choice = castCharacters.find((character) => character.name === characterName);
+    if (!choice) return;
+    try {
+      const parsed = parseVoiceTaggedText(chapterText);
+      if (!parsed[segmentIndex]) return;
+      parsed[segmentIndex] = {
+        ...parsed[segmentIndex],
+        speaker: characterName,
+        voiceId: choice.voiceId,
+      };
+      setChapterText(renderVoiceSegments(parsed));
+      setHasEditedText(true);
+    } catch {
+      toast.error('This chunk has invalid speaker markup and cannot be reassigned safely.');
+    }
+  };
+
+  const updateSpeakerText = (segmentIndex: number, text: string) => {
+    try {
+      const parsed = parseVoiceTaggedText(chapterText);
+      if (!parsed[segmentIndex] || !text.trim()) return;
+      parsed[segmentIndex] = { ...parsed[segmentIndex], text: text.trim() };
+      setChapterText(renderVoiceSegments(parsed));
+      setHasEditedText(true);
+    } catch {
+      toast.error('This chunk has invalid speaker markup and cannot be edited safely.');
+    }
+  };
+
+  const rerecordSpeakerSegment = (segmentIndex: number) => {
+    try {
+      const parsed = parseVoiceTaggedText(chapterText);
+      const nextText = speakerTextDrafts[segmentIndex]?.trim();
+      if (!parsed[segmentIndex] || !nextText) return;
+      parsed[segmentIndex] = { ...parsed[segmentIndex], text: nextText };
+      const updatedChapterText = renderVoiceSegments(parsed);
+      setChapterText(updatedChapterText);
+      setHasEditedText(true);
+      void handleRegenerate(updatedChapterText);
+    } catch {
+      toast.error('This chunk has invalid speaker markup and cannot be re-recorded safely.');
+    }
+  };
+
+  const previewSpeakerSegment = async (segmentIndex: number) => {
+    const segment = speakerSegments[segmentIndex];
+    if (!segment) return;
+    setPlayingSpeakerSegment(segmentIndex);
+    try {
+      const response = await fetch('/api/tts/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: segment.text.slice(0, 500), voice: segment.voiceId }),
+      });
+      if (!response.ok) throw new Error('Speaker preview failed.');
+      const url = URL.createObjectURL(await response.blob());
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      const finish = () => {
+        URL.revokeObjectURL(url);
+        setPlayingSpeakerSegment(null);
+        if (audioRef.current === audio) audioRef.current = null;
+      };
+      audio.onended = finish;
+      audio.onerror = finish;
+      await audio.play();
+    } catch (error) {
+      setPlayingSpeakerSegment(null);
+      toast.error(error instanceof Error ? error.message : 'Speaker preview failed.');
     }
   };
 
@@ -519,7 +653,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         </div>
         
         <button 
-          onClick={handleRegenerate} 
+            onClick={() => void handleRegenerate()}
           disabled={isRegenerating || isTextLoading}
           className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50 shrink-0"
         >
@@ -530,33 +664,111 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Far Left side: Chapter List / Guesses */}
         {showLeftPane && (
-          <div className="w-full md:w-1/4 flex flex-col border-r border-line-soft bg-surface h-1/3 md:h-full">
+          <div className={`w-full ${isMultiVoice ? 'md:w-1/2' : 'md:w-1/4'} flex flex-col border-r border-line-soft bg-surface h-1/3 md:h-full`}>
             <div className="p-4 border-b border-line-soft font-semibold text-text-strong bg-surface-raised shrink-0">
-              Context / Chapter Guesses
+              {isMultiVoice ? 'Chapters & Speakers' : 'Context / Chapter Guesses'}
             </div>
             <div className="flex-1 overflow-y-auto p-2">
-              {chapters.map((chap, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setCurrentChapterIndex(idx)}
-                  className={`w-full text-left p-3 mb-1 rounded text-sm transition-colors ${
-                    idx === currentChapterIndex
-                      ? "bg-brand-500/20 text-brand-400 border border-brand-500/30"
-                      : "text-text-soft hover:bg-surface-raised border border-transparent"
-                  }`}
-                >
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="font-medium">Chunk {chap.index + 1}</div>
-                    {/* @ts-ignore */}
-                    {chap.isEmptyText && (
-                      <span className="text-red-500 shrink-0 text-base" title="Warning: AI returned empty text for this chunk!">
-                        ⚠️
-                      </span>
+              {chapters.map((chap, idx) => {
+                const selected = idx === currentChapterIndex;
+                return (
+                  <div key={chap.index} className="mb-1">
+                    <button
+                      onClick={() => setCurrentChapterIndex(idx)}
+                      className={`w-full text-left p-3 rounded text-sm transition-colors ${
+                        selected
+                          ? "bg-brand-500/20 text-brand-400 border border-brand-500/30"
+                          : "text-text-soft hover:bg-surface-raised border border-transparent"
+                      }`}
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="font-medium">Chunk {chap.index + 1}</div>
+                        {/* @ts-ignore */}
+                        {chap.isEmptyText && (
+                          <span className="text-red-500 shrink-0 text-base" title="Warning: AI returned empty text for this chunk!">
+                            ⚠️
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs mt-1 line-clamp-2 opacity-80">{chap.title}</div>
+                    </button>
+                    {selected && isMultiVoice && (
+                      <div className="ml-3 border-l border-brand-500/30 py-1 pl-2" aria-label="Speaker segments for selected chapter">
+                        {speakerSegments.length > 0 ? speakerSegments.map((segment, segmentIndex) => (
+                          <div
+                            key={segment.id}
+                            className="mb-2 grid w-full grid-cols-1 gap-2 rounded border border-line-soft bg-surface-raised p-2 text-left lg:grid-cols-[2.5rem_minmax(9rem,0.7fr)_minmax(14rem,1.5fr)_auto] lg:items-start"
+                          >
+                            <div className="text-xs font-semibold text-text-soft">#{segmentIndex + 1}</div>
+                            <div>
+                              <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-soft">Character</label>
+                              <select
+                                value={castCharacters.find((character) => character.voiceId === segment.voiceId)?.name || ''}
+                                onChange={(event) => updateSpeakerAssignment(segmentIndex, event.target.value)}
+                                className="mt-1 w-full rounded border border-line-soft bg-surface px-2 py-1 text-xs font-semibold text-text-strong"
+                                aria-label={`Speaker for segment ${segmentIndex + 1}`}
+                              >
+                                {!castCharacters.some((character) => character.voiceId === segment.voiceId) && (
+                                  <option value="">{segment.speaker} — {segment.voiceId}</option>
+                                )}
+                                {castCharacters.map((character) => (
+                                  <option key={character.name} value={character.name}>
+                                    {character.name} — {character.voiceId}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-soft">Text</label>
+                              <textarea
+                                value={speakerTextDrafts[segmentIndex] ?? segment.text}
+                                onChange={(event) => setSpeakerTextDrafts((current) => ({
+                                  ...current,
+                                  [segmentIndex]: event.target.value,
+                                }))}
+                                onBlur={(event) => updateSpeakerText(segmentIndex, event.target.value)}
+                                className="mt-1 min-h-20 w-full rounded border border-line-soft bg-surface p-2 text-xs leading-relaxed text-text-strong"
+                                aria-label={`Text for speaker segment ${segmentIndex + 1}`}
+                              />
+                            </div>
+                            <div className="flex gap-1 lg:flex-col">
+                              <button
+                                type="button"
+                                onClick={() => void previewSpeakerSegment(segmentIndex)}
+                                disabled={playingSpeakerSegment === segmentIndex}
+                                className="rounded border border-line-soft px-2 py-1 text-xs text-text-strong disabled:opacity-50"
+                              >
+                                {playingSpeakerSegment === segmentIndex ? 'Playing…' : '▶ Audio'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => rerecordSpeakerSegment(segmentIndex)}
+                                disabled={isRegenerating}
+                                className="rounded bg-accent px-2 py-1 text-xs font-semibold text-background disabled:opacity-50"
+                                title="Re-record this corrected turn and rebuild the containing audio chunk"
+                              >
+                                {isRegenerating ? 'Recording…' : 'Re-record'}
+                              </button>
+                            </div>
+                          </div>
+                        )) : (
+                          <p className="p-2 text-[11px] text-text-soft">No valid speaker segments were found in this chunk.</p>
+                        )}
+                        {speakerSegments.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => void handleRegenerate()}
+                            disabled={!hasEditedText || isRegenerating}
+                            className="mt-1 w-full rounded bg-accent px-2 py-1.5 text-xs font-semibold text-background disabled:opacity-50"
+                          >
+                            {isRegenerating ? 'Re-recording…' : `Apply Changes & Re-record Chunk ${chap.index + 1}`}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
-                  <div className="text-xs mt-1 line-clamp-2 opacity-80">{chap.title}</div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

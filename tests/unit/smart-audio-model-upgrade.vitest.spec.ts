@@ -4,6 +4,7 @@ import {
   applyPronunciationModelUpgradeToData,
   buildPronunciationModelUpgradeOffer,
   PRONUNCIATION_MODEL_UPGRADE_FROM,
+  PRONUNCIATION_MODEL_UPGRADE_ID,
   PRONUNCIATION_MODEL_UPGRADE_TO,
 } from '@/lib/server/smart-audio-profiles';
 
@@ -39,18 +40,36 @@ describe('Gemini pronunciation model upgrade offer', () => {
     });
   });
 
-  it('does not prompt after the user has chosen to stay', () => {
+  it('does not prompt after the user has chosen to stay on the all-task migration', () => {
     const offer = buildPronunciationModelUpgradeOffer({
       smartAudioProfiles: {
         selectedProfileId: 'one',
         profiles: [profile('one', PRONUNCIATION_MODEL_UPGRADE_FROM)],
       },
       smartAudioModelUpgradeDecisions: {
-        'gemini-3.6-flash-to-gemini-3.7-flash': 'stay',
+        [PRONUNCIATION_MODEL_UPGRADE_ID]: 'stay',
       },
     });
 
     expect(offer.available).toBe(false);
+    expect(offer.affectedProfileCount).toBe(1);
+  });
+
+  it('offers the corrective migration after the earlier pronunciation-only upgrade', () => {
+    const offer = buildPronunciationModelUpgradeOffer({
+      smartAudioProfiles: {
+        selectedProfileId: 'one',
+        profiles: [{
+          ...profile('one', PRONUNCIATION_MODEL_UPGRADE_TO),
+          aiModel: PRONUNCIATION_MODEL_UPGRADE_FROM,
+        }],
+      },
+      smartAudioModelUpgradeDecisions: {
+        'gemini-3.6-flash-to-gemini-3.7-flash': 'upgrade',
+      },
+    });
+
+    expect(offer.available).toBe(true);
     expect(offer.affectedProfileCount).toBe(1);
   });
 
@@ -63,13 +82,13 @@ describe('Gemini pronunciation model upgrade offer', () => {
     }).available).toBe(false);
   });
 
-  it('upgrades only 3.6 pronunciation profiles and records the decision', () => {
+  it('upgrades cleanup and pronunciation fields set to 3.6 and preserves other models', () => {
     const data: Record<string, unknown> = {
       unrelatedPreference: true,
       smartAudioProfiles: {
         selectedProfileId: 'one',
         profiles: [
-          profile('one', PRONUNCIATION_MODEL_UPGRADE_FROM),
+          { ...profile('one', PRONUNCIATION_MODEL_UPGRADE_FROM), aiModel: PRONUNCIATION_MODEL_UPGRADE_FROM },
           profile('two', 'custom-pronunciation-model'),
         ],
       },
@@ -77,14 +96,20 @@ describe('Gemini pronunciation model upgrade offer', () => {
 
     applyPronunciationModelUpgradeToData(data, 'upgrade');
 
-    const document = data.smartAudioProfiles as { profiles: Array<{ pronunciationAiModel: string }> };
+    const document = data.smartAudioProfiles as {
+      profiles: Array<{ aiModel: string; pronunciationAiModel: string }>;
+    };
     expect(document.profiles.map((item) => item.pronunciationAiModel)).toEqual([
       PRONUNCIATION_MODEL_UPGRADE_TO,
       'custom-pronunciation-model',
     ]);
+    expect(document.profiles.map((item) => item.aiModel)).toEqual([
+      PRONUNCIATION_MODEL_UPGRADE_TO,
+      'gemini-3.1-flash-lite',
+    ]);
     expect(data.unrelatedPreference).toBe(true);
     expect(data.smartAudioModelUpgradeDecisions).toEqual({
-      'gemini-3.6-flash-to-gemini-3.7-flash': 'upgrade',
+      [PRONUNCIATION_MODEL_UPGRADE_ID]: 'upgrade',
     });
   });
 

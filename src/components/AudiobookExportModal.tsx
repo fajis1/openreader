@@ -23,8 +23,13 @@ import {
   formatMonthlyAudiobookQuotaMessage,
   isMonthlyAudiobookQuotaProblem,
 } from '@/lib/shared/audiobook-quota';
-import { WAITING_FOR_VOICES_STATUS } from '@/lib/shared/multi-voice';
+import {
+  MULTI_VOICE_WORKER_MODE,
+  getNarratorVoiceId,
+  WAITING_FOR_VOICES_STATUS,
+} from '@/lib/shared/multi-voice';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
+import type { SmartAudioCharacterMap } from '@/types/document-settings';
 import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, MenuRoot, MenuTransition, MenuTrigger, RangeInput, Select } from '@/components/ui';
 import { 
   getAudiobookStatus, 
@@ -91,8 +96,13 @@ export function AudiobookExportModal({
   const [showRegenerateHint, setShowRegenerateHint] = useState(false);
   const [showBackgroundWarning, setShowBackgroundWarning] = useState(false);
   const [showScholarScanWarning, setShowScholarScanWarning] = useState(false);
+  const [showDramaReplacementWarning, setShowDramaReplacementWarning] = useState(false);
+  const [pendingDramaReplacementScholarConfirm, setPendingDramaReplacementScholarConfirm] = useState(false);
   const [showCharacterCasting, setShowCharacterCasting] = useState(false);
   const [castingJobId, setCastingJobId] = useState<string | null>(null);
+  const [startAfterCasting, setStartAfterCasting] = useState(false);
+  const [dramaNarratorVoice, setDramaNarratorVoice] = useState<string | null>(null);
+  const [isLoadingDramaNarrator, setIsLoadingDramaNarrator] = useState(false);
   const [pendingScholarRegeneration, setPendingScholarRegeneration] = useState<TTSAudiobookChapter | null>(null);
   const [pendingCloseAction, setPendingCloseAction] = useState<'close_modal' | 'navigate' | null>(null);
 
@@ -105,10 +115,44 @@ export function AudiobookExportModal({
   );
   const nativeSpeedSupported = providerModelPolicy.supportsNativeModelSpeed;
   const effectiveNativeSpeed = nativeSpeedSupported ? nativeSpeed : 1;
+  const hasExistingAudiobook = Boolean(bookId) || chapters.length > 0;
+  const isLegacyAudiobookMissingSettings = hasExistingAudiobook && savedSettings === null;
   const selectedSmartAudioProfile = useMemo(
     () => smartAudioProfiles.find((profile) => profile.id === selectedSmartAudioProfileId) || smartAudioProfiles[0] || null,
     [smartAudioProfiles, selectedSmartAudioProfileId],
   );
+  const isDramaProfile = useSmartAudio
+    && selectedSmartAudioProfile?.workerMode === MULTI_VOICE_WORKER_MODE;
+
+  const applyDramaNarratorVoice = useCallback((value: unknown): string | null => {
+    const voiceId = getNarratorVoiceId(value);
+    setDramaNarratorVoice(voiceId);
+    if (voiceId && !savedSettings && !hasExistingAudiobook) setAudiobookVoice(voiceId);
+    return voiceId;
+  }, [hasExistingAudiobook, savedSettings]);
+
+  useEffect(() => {
+    if (!isOpen || !isDramaProfile || !selectedSmartAudioProfileId) {
+      setDramaNarratorVoice(null);
+      setIsLoadingDramaNarrator(false);
+      return;
+    }
+    const controller = new AbortController();
+    setIsLoadingDramaNarrator(true);
+    void fetch(`/api/audiobook/characters/scan?documentId=${encodeURIComponent(documentId)}&profileId=${encodeURIComponent(selectedSmartAudioProfileId)}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) throw new Error('Failed to load the Audio Drama narrator voice.');
+      const body = await response.json().catch(() => ({}));
+      applyDramaNarratorVoice(body.characterMap);
+    }).catch((error) => {
+      if ((error as Error)?.name !== 'AbortError') setDramaNarratorVoice(null);
+    }).finally(() => {
+      if (!controller.signal.aborted) setIsLoadingDramaNarrator(false);
+    });
+    return () => controller.abort();
+  }, [applyDramaNarratorVoice, documentId, isDramaProfile, isOpen, selectedSmartAudioProfileId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -145,15 +189,13 @@ export function AudiobookExportModal({
     };
   }, [smartAudioProfileId]);
 
-  const hasExistingAudiobook = Boolean(bookId) || chapters.length > 0;
-  const isLegacyAudiobookMissingSettings = hasExistingAudiobook && savedSettings === null;
-
   useEffect(() => {
     // For new audiobooks (no saved settings/chapters), keep generation defaults aligned
     // with the current playback controls so users don't need a route remount.
     if (!isOpen) return;
     if (savedSettings) return;
     if (hasExistingAudiobook) return;
+    if (isDramaProfile) return;
 
     setNativeSpeed(voiceSpeed);
     setPostSpeed(audioPlayerSpeed);
@@ -166,6 +208,7 @@ export function AudiobookExportModal({
     audioPlayerSpeed,
     configVoice,
     availableVoices,
+    isDramaProfile,
   ]);
 
   useEffect(() => {
@@ -234,6 +277,7 @@ export function AudiobookExportModal({
         if (activeJob) {
           if (activeJob.status === WAITING_FOR_VOICES_STATUS) {
             setCastingJobId(activeJob.id);
+            setStartAfterCasting(false);
             setShowCharacterCasting(true);
             setIsGenerating(false);
             setCurrentChapter('Waiting for character voice review…');
@@ -331,7 +375,11 @@ export function AudiobookExportModal({
     setCurrentChapter(chapter.title);
   }, []);
 
-  const handleStartGeneration = useCallback(async (confirmScholarAutoScan = false) => {
+  const handleStartGeneration = useCallback(async (
+    confirmScholarAutoScan = false,
+    narratorVoiceOverride?: string | null,
+    confirmReplaceExisting = false,
+  ) => {
     if (!effectiveSettings) {
       setErrorMessage('No voice selected; please choose a voice before generating.');
       return;
@@ -347,13 +395,22 @@ export function AudiobookExportModal({
     abortControllerRef.current = new AbortController();
 
     try {
-      const settingsWithToggle = { ...effectiveSettings, useSmartAudio };
+      const settingsWithToggle = {
+        ...effectiveSettings,
+        ...(narratorVoiceOverride ? { voice: narratorVoiceOverride } : {}),
+        useSmartAudio,
+      };
 
       // Queue it on the server
       const res = await fetch('/api/audiobooks/queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentId, settings: settingsWithToggle, confirmScholarAutoScan })
+        body: JSON.stringify({
+          documentId,
+          settings: settingsWithToggle,
+          confirmScholarAutoScan,
+          confirmReplaceExisting,
+        })
       });
       const responseBody = await res.json().catch(() => null);
       if (res.status === 409 && responseBody?.code === 'SCHOLAR_SCAN_REQUIRED') {
@@ -365,7 +422,14 @@ export function AudiobookExportModal({
       if (res.status === 409 && responseBody?.code === 'CHARACTER_CAST_REQUIRED') {
         setIsGenerating(false);
         setCastingJobId(null);
+        setStartAfterCasting(true);
         setShowCharacterCasting(true);
+        return;
+      }
+      if (res.status === 409 && responseBody?.code === 'AUDIOBOOK_REPLACEMENT_REQUIRED') {
+        setIsGenerating(false);
+        setPendingDramaReplacementScholarConfirm(confirmScholarAutoScan);
+        setShowDramaReplacementWarning(true);
         return;
       }
       if (res.status === 429 && isMonthlyAudiobookQuotaProblem(responseBody)) {
@@ -765,19 +829,41 @@ export function AudiobookExportModal({
 			                                <div className="space-y-4">
 			                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 			                                    <div className="space-y-1.5">
-			                                      <label className="text-[11px] uppercase tracking-wider font-medium text-soft">Voice</label>
-			                                      <VoicesControlBase
-			                                        availableVoices={availableVoices}
-			                                        voice={audiobookVoice}
-			                                        onChangeVoice={(newVoice) => {
-			                                          setAudiobookVoice(newVoice);
-			                                          updateConfigKey('voice', newVoice);
-			                                        }}
-			                                        providerType={providerType}
-			                                        ttsModel={ttsModel}
-			                                        dropdownDirection="down"
-			                                        variant="field"
-			                                      />
+			                                      <label className="text-[11px] uppercase tracking-wider font-medium text-soft">
+			                                        {isDramaProfile ? 'Narrator Voice' : 'Voice'}
+			                                      </label>
+			                                      {isDramaProfile ? (
+			                                        <div className="space-y-1.5">
+			                                          <div className="rounded-md border border-line bg-surface px-3 py-2 text-sm font-medium text-foreground">
+			                                            {isLoadingDramaNarrator
+			                                              ? 'Loading narrator voice…'
+			                                              : dramaNarratorVoice || 'Not assigned yet'}
+			                                          </div>
+			                                          <button
+			                                            type="button"
+			                                            onClick={() => {
+			                                              setStartAfterCasting(false);
+			                                              setShowCharacterCasting(true);
+			                                            }}
+			                                            className="text-xs font-medium text-accent hover:underline"
+			                                          >
+			                                            {dramaNarratorVoice ? 'Review character voices' : 'Assign narrator and character voices'}
+			                                          </button>
+			                                        </div>
+			                                      ) : (
+			                                        <VoicesControlBase
+			                                          availableVoices={availableVoices}
+			                                          voice={audiobookVoice}
+			                                          onChangeVoice={(newVoice) => {
+			                                            setAudiobookVoice(newVoice);
+			                                            updateConfigKey('voice', newVoice);
+			                                          }}
+			                                          providerType={providerType}
+			                                          ttsModel={ttsModel}
+			                                          dropdownDirection="down"
+			                                          variant="field"
+			                                        />
+			                                      )}
 			                                    </div>
 
 			                                    <div className="space-y-1.5">
@@ -931,9 +1017,10 @@ export function AudiobookExportModal({
                                                 )}
                                               </select>
                                               {selectedSmartAudioProfile && (
-                                                <p className="text-xs text-soft">
-                                                  {selectedSmartAudioProfile.aiModel} · {Object.keys(selectedSmartAudioProfile.abbreviations || {}).length} abbreviations · {Object.keys(selectedSmartAudioProfile.pronunciations || {}).length} pronunciations
-                                                </p>
+                                                <div className="space-y-0.5 text-xs text-soft">
+                                                  <p>Pronunciation: {selectedSmartAudioProfile.pronunciationAiModel || selectedSmartAudioProfile.aiModel}</p>
+                                                  <p>Cleanup: {selectedSmartAudioProfile.aiModel} · {Object.keys(selectedSmartAudioProfile.abbreviations || {}).length} abbreviations · {Object.keys(selectedSmartAudioProfile.pronunciations || {}).length} pronunciations</p>
+                                                </div>
                                               )}
                                             </div>
                                           </Card>
@@ -1191,6 +1278,23 @@ export function AudiobookExportModal({
       </ReaderSidebarShell>
 
       <ConfirmDialog
+        isOpen={showDramaReplacementWarning}
+        onClose={() => setShowDramaReplacementWarning(false)}
+        onConfirm={() => {
+          setShowDramaReplacementWarning(false);
+          void handleStartGeneration(
+            pendingDramaReplacementScholarConfirm,
+            dramaNarratorVoice,
+            true,
+          );
+        }}
+        title="Replace Existing Audiobook?"
+        message="A regular audiobook already exists for this document. Converting to Audio Drama will permanently delete every existing generated chapter and combined audiobook file, then regenerate the complete book with the reviewed narrator and character voices."
+        confirmText="Replace & Regenerate"
+        cancelText="Keep Existing Audiobook"
+        isDangerous={true}
+      />
+      <ConfirmDialog
         isOpen={showScholarScanWarning}
         onClose={() => setShowScholarScanWarning(false)}
         onConfirm={() => {
@@ -1277,15 +1381,20 @@ export function AudiobookExportModal({
           profileId={selectedSmartAudioProfileId}
           jobId={castingJobId || undefined}
           isOpen={showCharacterCasting}
-          onClose={() => setShowCharacterCasting(false)}
-          onComplete={async () => {
+          onClose={() => {
+            setStartAfterCasting(false);
+            setShowCharacterCasting(false);
+          }}
+          onComplete={async (savedCharacterMap: SmartAudioCharacterMap) => {
             const resumedExistingJob = Boolean(castingJobId);
+            const narratorVoice = applyDramaNarratorVoice(savedCharacterMap);
             setCastingJobId(null);
             setShowCharacterCasting(false);
             if (resumedExistingJob) {
               await fetchExistingChapters();
-            } else {
-              await handleStartGeneration();
+            } else if (startAfterCasting) {
+              setStartAfterCasting(false);
+              await handleStartGeneration(false, narratorVoice);
             }
           }}
         />

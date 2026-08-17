@@ -2,7 +2,7 @@ import { NextResponse, NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { eq, and, asc, lt, inArray } from 'drizzle-orm';
 import { db } from '@/db';
-import { audiobookChapters, audiobookJobs, documents, documentSettings } from '@/db/schema';
+import { audiobookChapters, audiobookJobs, audiobooks, documents, documentSettings } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { serverLogger, errorToLog } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
@@ -25,10 +25,13 @@ import { mergeDocumentSettings } from '@/lib/shared/document-settings';
 import {
   getCharacterMapReadiness,
   MULTI_VOICE_WORKER_MODE,
+  requiresDramaAudiobookReplacement,
   WAITING_FOR_VOICES_STATUS,
 } from '@/lib/shared/multi-voice';
 import { isKokoroModel } from '@/lib/shared/kokoro';
 import { DEFAULT_DOCUMENT_SETTINGS } from '@/types/document-settings';
+import { audiobookPrefix, deleteAudiobookPrefix } from '@/lib/server/audiobooks/blobstore';
+import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +62,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { documentId, settings } = body;
     const confirmScholarAutoScan = body.confirmScholarAutoScan === true;
+    const confirmReplaceExisting = body.confirmReplaceExisting === true;
     const preflightOnly = body.preflightOnly === true;
 
     if (!documentId) {
@@ -90,8 +94,11 @@ export async function POST(req: NextRequest) {
     }
 
     let resolvedSmartAudioProfileId: string | null = null;
+    let requestedWorkerMode: string | null = null;
+    let profilesDocument: Awaited<ReturnType<typeof readSmartAudioProfilesDocument>> | null = null;
     if (settingsRecord.useSmartAudio === true) {
       const profiles = await readSmartAudioProfilesDocument(userId);
+      profilesDocument = profiles;
       const profile = findSmartAudioProfileById(
         profiles,
         typeof settingsRecord.smartAudioProfileId === 'string'
@@ -99,6 +106,7 @@ export async function POST(req: NextRequest) {
           : profiles.selectedProfileId,
       );
       resolvedSmartAudioProfileId = profile?.id || null;
+      requestedWorkerMode = profile?.workerMode || null;
       if (profile?.workerMode === 'scholar' || profile?.workerMode === 'bibliography-catcher') {
         const lexicon = await readBookLexicon(userId, documentId);
         const hasCompletedDefinitionScan = lexicon?.status === 'complete'
@@ -144,13 +152,6 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-    if (preflightOnly) {
-      return NextResponse.json({
-        ready: true,
-        smartAudioProfileId: resolvedSmartAudioProfileId,
-      });
-    }
-
     const existingChapter = await db.select({ id: audiobookChapters.id })
       .from(audiobookChapters)
       .where(and(
@@ -158,6 +159,38 @@ export async function POST(req: NextRequest) {
         eq(audiobookChapters.bookId, documentId),
       ))
       .limit(1);
+    const previousJob = [...existingJobs]
+      .filter((candidate) => (
+        candidate.status === 'completed'
+        && parseJobSettings(candidate.settingsJson).batchRegenerate !== true
+      ))
+      .sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0))[0];
+    const previousSettings = parseJobSettings(previousJob?.settingsJson);
+    const previousProfileId = typeof previousSettings.smartAudioProfileId === 'string'
+      ? previousSettings.smartAudioProfileId
+      : '';
+    const previousProfile = profilesDocument?.profiles.find(
+      (candidate) => candidate.id === previousProfileId,
+    ) || null;
+    const requiresDramaReplacement = requiresDramaAudiobookReplacement({
+      hasExistingChapters: existingChapter.length > 0,
+      requestedWorkerMode,
+      previousUseSmartAudio: previousSettings.useSmartAudio === true,
+      previousWorkerMode: previousProfile?.workerMode,
+    });
+    if (requiresDramaReplacement && !confirmReplaceExisting) {
+      return NextResponse.json({
+        code: 'AUDIOBOOK_REPLACEMENT_REQUIRED',
+        error: 'A regular audiobook already exists for this document.',
+        message: 'Converting it to Audio Drama requires deleting and regenerating every existing chapter and combined audiobook file.',
+      }, { status: 409 });
+    }
+    if (preflightOnly) {
+      return NextResponse.json({
+        ready: true,
+        smartAudioProfileId: resolvedSmartAudioProfileId,
+      });
+    }
     const hasPriorFullGenerationJob = existingJobs.some((job: typeof audiobookJobs.$inferSelect) => (
       parseJobSettings(job.settingsJson).batchRegenerate !== true
     ));
@@ -198,9 +231,6 @@ export async function POST(req: NextRequest) {
 
     const jobId = randomUUID();
     const testNamespace = req.headers.get('x-openreader-test-namespace');
-    const previousJob = [...existingJobs]
-      .sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0))[0];
-    const previousSettings = parseJobSettings(previousJob?.settingsJson);
     // Existing chapter indexes must keep the batching map that created them.
     // Jobs from before explicit versioning are therefore conservatively legacy.
     const cleanupBatchVersion = queuedAudiobookBatchVersion(
@@ -215,6 +245,28 @@ export async function POST(req: NextRequest) {
     };
     if (testNamespace) {
       settingsJson.testNamespace = testNamespace;
+    }
+
+    if (requiresDramaReplacement) {
+      await db.delete(audiobookChapters).where(and(
+        eq(audiobookChapters.bookId, documentId),
+        eq(audiobookChapters.userId, userId),
+      ));
+      await db.delete(audiobookJobs).where(and(
+        eq(audiobookJobs.documentId, documentId),
+        eq(audiobookJobs.userId, userId),
+      ));
+      await db.delete(audiobooks).where(and(
+        eq(audiobooks.id, documentId),
+        eq(audiobooks.userId, userId),
+      ));
+      const namespace = getOpenReaderTestNamespace(req.headers);
+      await deleteAudiobookPrefix(audiobookPrefix(documentId, userId, namespace));
+      serverLogger.info({
+        event: 'audiobook.queue.drama_replacement.confirmed',
+        documentId,
+        userId,
+      }, 'Deleted an existing regular audiobook before Audio Drama regeneration');
     }
 
     await db.insert(audiobookJobs).values({

@@ -28,7 +28,9 @@ export interface RestoreMissingBuiltInProfilesResult {
   restoredProfiles: RestoredSmartAudioProfile[];
 }
 
-export const PRONUNCIATION_MODEL_UPGRADE_ID = 'gemini-3.6-flash-to-gemini-3.7-flash';
+// Versioned because the first rollout migrated pronunciationAiModel only.
+// The v2 decision also migrates cleanup profiles explicitly set to 3.6.
+export const PRONUNCIATION_MODEL_UPGRADE_ID = 'gemini-3.6-flash-to-gemini-3.7-flash-all-tasks-v2';
 export const PRONUNCIATION_MODEL_UPGRADE_FROM = 'gemini-3.6-flash';
 export const PRONUNCIATION_MODEL_UPGRADE_TO = 'gemini-3.7-flash';
 
@@ -258,7 +260,8 @@ export function buildPronunciationModelUpgradeOffer(
 ): PronunciationModelUpgradeOffer {
   const document = profileDocumentFromData(data);
   const affectedProfileCount = document.profiles.filter(
-    (profile) => profile.pronunciationAiModel === PRONUNCIATION_MODEL_UPGRADE_FROM,
+    (profile) => profile.pronunciationAiModel === PRONUNCIATION_MODEL_UPGRADE_FROM
+      || profile.aiModel === PRONUNCIATION_MODEL_UPGRADE_FROM,
   ).length;
   return {
     available: affectedProfileCount > 0 && getModelUpgradeDecision(data) === null,
@@ -274,14 +277,21 @@ export function applyPronunciationModelUpgradeToData(
 ): PronunciationModelUpgradeOffer {
   const document = profileDocumentFromData(data);
   const affectedProfileCount = document.profiles.filter(
-    (profile) => profile.pronunciationAiModel === PRONUNCIATION_MODEL_UPGRADE_FROM,
+    (profile) => profile.pronunciationAiModel === PRONUNCIATION_MODEL_UPGRADE_FROM
+      || profile.aiModel === PRONUNCIATION_MODEL_UPGRADE_FROM,
   ).length;
   if (decision === 'upgrade') {
     data.smartAudioProfiles = {
       ...document,
-      profiles: document.profiles.map((profile) => profile.pronunciationAiModel === PRONUNCIATION_MODEL_UPGRADE_FROM
-        ? { ...profile, pronunciationAiModel: PRONUNCIATION_MODEL_UPGRADE_TO }
-        : profile),
+      profiles: document.profiles.map((profile) => ({
+        ...profile,
+        aiModel: profile.aiModel === PRONUNCIATION_MODEL_UPGRADE_FROM
+          ? PRONUNCIATION_MODEL_UPGRADE_TO
+          : profile.aiModel,
+        pronunciationAiModel: profile.pronunciationAiModel === PRONUNCIATION_MODEL_UPGRADE_FROM
+          ? PRONUNCIATION_MODEL_UPGRADE_TO
+          : profile.pronunciationAiModel,
+      })),
     } satisfies SmartAudioProfilesDocument;
   }
   const currentDecisions = data.smartAudioModelUpgradeDecisions;

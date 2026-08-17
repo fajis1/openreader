@@ -8,6 +8,15 @@ const source = (relativePath: string) => fs.readFileSync(
 );
 
 describe('Smart Audio data-integrity guards', () => {
+  test('never masks Smart Audio failures with a developer-machine debug-file write', () => {
+    const worker = source('src/lib/server/audiobooks/worker.ts');
+
+    expect(worker).not.toContain('audiobook_err.txt');
+    expect(worker).not.toContain("appendFileSync('/home/cisco/openreader");
+    expect(worker).toContain("event: 'audiobook.queue.smart_audio.failed'");
+    expect(worker).toContain("event: 'audiobook.queue.smart_audio.retry_scheduled'");
+  });
+
   test('shows and persists the final Smart Audio title instead of the inherited blob title', () => {
     const statusRoute = source('src/app/api/audiobook/status/route.ts');
     const combineRoute = source('src/app/api/audiobook/route.ts');

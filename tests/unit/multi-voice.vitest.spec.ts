@@ -6,10 +6,13 @@ import { describe, expect, test } from 'vitest';
 import {
   buildMultiVoiceCast,
   finalizeSmartAudioCharacterMap,
+  getDuplicateVoiceAssignments,
+  getNarratorVoiceId,
   getCharacterMapReadiness,
   mergeExtractedCharacters,
   normalizeSmartAudioCharacterMap,
   parseVoiceTaggedText,
+  requiresDramaAudiobookReplacement,
   renderVoiceSegments,
   resolveMultiVoiceWorkerResult,
 } from '../../src/lib/shared/multi-voice';
@@ -111,6 +114,66 @@ describe('LitRPG character casting', () => {
       { name: 'Arin', voiceId: 'am_adam', aliases: ['Hero'] },
     ]);
   });
+
+  test('reports shared voices across primary characters but ignores aliases', () => {
+    const cast = completeCast();
+    const duplicated = {
+      ...cast,
+      entries: {
+        ...cast.entries,
+        Mira: {
+          name: 'Mira',
+          description: 'Mage',
+          sampleText: 'Spark.',
+          voiceId: 'am_adam',
+          aliasFor: null,
+        },
+        Champion: {
+          name: 'Champion',
+          description: 'Alias',
+          sampleText: '',
+          voiceId: null,
+          aliasFor: 'Arin',
+        },
+      },
+    };
+
+    expect(getDuplicateVoiceAssignments(duplicated)).toEqual([
+      { voiceId: 'am_adam', characterNames: ['Arin', 'Mira'] },
+    ]);
+  });
+
+  test('resolves the reviewed narrator voice for audiobook generation settings', () => {
+    expect(getNarratorVoiceId(completeCast())).toBe('af_heart');
+    expect(getNarratorVoiceId({
+      ...completeCast(),
+      entries: {
+        ...completeCast().entries,
+        Narrator: { ...completeCast().entries.Narrator, voiceId: null },
+      },
+    })).toBeNull();
+  });
+
+  test('requires explicit replacement when converting existing regular audio to Drama', () => {
+    expect(requiresDramaAudiobookReplacement({
+      hasExistingChapters: true,
+      requestedWorkerMode: 'multi-voice',
+      previousUseSmartAudio: false,
+      previousWorkerMode: null,
+    })).toBe(true);
+    expect(requiresDramaAudiobookReplacement({
+      hasExistingChapters: true,
+      requestedWorkerMode: 'multi-voice',
+      previousUseSmartAudio: true,
+      previousWorkerMode: 'multi-voice',
+    })).toBe(false);
+    expect(requiresDramaAudiobookReplacement({
+      hasExistingChapters: false,
+      requestedWorkerMode: 'multi-voice',
+      previousUseSmartAudio: false,
+      previousWorkerMode: null,
+    })).toBe(false);
+  });
 });
 
 describe('LitRPG speaker output validation', () => {
@@ -207,11 +270,36 @@ describe('LitRPG source and production wiring', () => {
     const studio = fs.readFileSync(path.join(process.cwd(), 'src/components/audiobooks/MultiVoiceReviewStudio.tsx'), 'utf8');
 
     expect(queue).toContain("code: 'CHARACTER_CAST_REQUIRED'");
+    expect(queue).toContain("code: 'AUDIOBOOK_REPLACEMENT_REQUIRED'");
     for (const surface of [single, batch, jobs]) expect(surface).toContain('<MultiVoiceCharacterModal');
     expect(library).toContain('Pre-Scan Drama Characters');
     expect(library).toContain('<MultiVoiceCharacterModal');
     expect(library).toContain('standalone');
+    expect(single).toContain("{isDramaProfile ? 'Narrator Voice' : 'Voice'}");
+    expect(single).toContain("dramaNarratorVoice || 'Not assigned yet'");
+    expect(single).toContain('Pronunciation: {selectedSmartAudioProfile.pronunciationAiModel || selectedSmartAudioProfile.aiModel}');
+    expect(single).toContain('handleStartGeneration(false, narratorVoice)');
+    expect(fs.readFileSync(path.join(process.cwd(), 'src/components/doclist/MultiVoiceCharacterModal.tsx'), 'utf8'))
+      .toContain('chosen by ${assignedToOthers.join');
+    expect(batch).toContain('Audio Drama · Multiple voices');
+    expect(batch).toContain('Narrator Voice');
+    expect(batch).toContain('dramaNarratorVoices[doc.id]');
+    expect(batch).toContain('Pronunciation: {selectedSmartAudioProfile.pronunciationAiModel || selectedSmartAudioProfile.aiModel}');
+    expect(batch).toContain('settings: settingsFor(doc.id)');
+    expect(single).toContain('Replace & Regenerate');
+    expect(batch).toContain('Replace & Regenerate');
     expect(listenPage).toContain("fetch('/api/audiobook/review-flags'");
+    expect(listenPage).toContain('Chapters & Speakers');
+    expect(listenPage).toContain('Speaker segments for selected chapter');
+    expect(listenPage).toContain('parseVoiceTaggedText(chapterText)');
+    expect(listenPage).toContain('segment.speaker');
+    expect(listenPage).toContain('updateSpeakerAssignment(segmentIndex, event.target.value)');
+    expect(listenPage).toContain('setChapterText(renderVoiceSegments(parsed))');
+    expect(listenPage).toContain('Apply Changes & Re-record Chunk');
+    expect(listenPage).toContain('updateSpeakerText(segmentIndex, event.target.value)');
+    expect(listenPage).toContain('previewSpeakerSegment(segmentIndex)');
+    expect(listenPage).toContain('rerecordSpeakerSegment(segmentIndex)');
+    expect(listenPage).toContain('Re-record this corrected turn and rebuild the containing audio chunk');
     expect(listenPage).not.toContain('Future: Post this to a DB table');
     expect(studio).toContain('/api/audiobook/review-flags?documentId=');
   });
@@ -238,6 +326,8 @@ describe('LitRPG source and production wiring', () => {
     expect(scanner).toContain('Start Character Scan');
     expect(scanner).toContain('Regular LitRPG audiobooks do not scan characters');
     expect(scanner).toContain("standalone ? 'Save Cast' : 'Save Cast & Continue'");
+    expect(scanner).toContain('duplicateVoiceByCharacter.has(character.name)');
+    expect(scanner).toContain('Reusing it is allowed, but these characters may sound identical.');
     expect(library).toContain("profile.workerMode === 'multi-voice'");
     expect(scanRoute).toContain("profile.workerMode !== MULTI_VOICE_WORKER_MODE");
     expect(defaults.profiles.find((profile) => profile.name === 'LitRPG')?.workerMode).toBe('standard');

@@ -30,6 +30,11 @@ export type MultiVoiceCastMember = {
   aliases: string[];
 };
 
+export type DuplicateVoiceAssignment = {
+  voiceId: string;
+  characterNames: string[];
+};
+
 export type ResolvedMultiVoiceWorkerResult = {
   taggedText: string;
   segments: MultiVoiceSegment[];
@@ -112,6 +117,40 @@ export function normalizeSmartAudioCharacterMap(value: unknown): SmartAudioChara
     ...(source.needsRescan === true ? { needsRescan: true } : {}),
     entries,
   };
+}
+
+export function getDuplicateVoiceAssignments(value: unknown): DuplicateVoiceAssignment[] {
+  const map = normalizeSmartAudioCharacterMap(value);
+  if (!map) return [];
+  const namesByVoice = new Map<string, string[]>();
+  for (const entry of Object.values(map.entries)) {
+    if (entry.aliasFor || !entry.voiceId) continue;
+    const names = namesByVoice.get(entry.voiceId) || [];
+    names.push(entry.name);
+    namesByVoice.set(entry.voiceId, names);
+  }
+  return [...namesByVoice.entries()]
+    .filter(([, characterNames]) => characterNames.length > 1)
+    .map(([voiceId, characterNames]) => ({ voiceId, characterNames }));
+}
+
+export function getNarratorVoiceId(value: unknown): string | null {
+  const map = normalizeSmartAudioCharacterMap(value);
+  const narrator = Object.values(map?.entries || {}).find(
+    (entry) => !entry.aliasFor && entry.name.toLocaleLowerCase() === 'narrator',
+  );
+  return narrator?.voiceId || null;
+}
+
+export function requiresDramaAudiobookReplacement(input: {
+  hasExistingChapters: boolean;
+  requestedWorkerMode: string | null | undefined;
+  previousUseSmartAudio: boolean;
+  previousWorkerMode: string | null | undefined;
+}): boolean {
+  return input.hasExistingChapters
+    && input.requestedWorkerMode === MULTI_VOICE_WORKER_MODE
+    && !(input.previousUseSmartAudio && input.previousWorkerMode === MULTI_VOICE_WORKER_MODE);
 }
 
 export function getCharacterMapReadiness(value: unknown): {
