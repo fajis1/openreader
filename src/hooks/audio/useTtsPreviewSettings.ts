@@ -26,6 +26,8 @@ export function useTtsPreviewSettings() {
 
     return {
       voice: target.voice,
+      provider: target.providerRef,
+      model: target.model,
       headers,
     };
   }, [apiKey, baseUrl, providerRef, providerType, ttsModel, voice]);

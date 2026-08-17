@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ModalFrame } from '@/components/ui';
 import toast from 'react-hot-toast';
 import { useTtsPreviewSettings } from '@/hooks/audio/useTtsPreviewSettings';
@@ -45,6 +45,11 @@ export function BookPronunciationInspectorModal({
   const [rebuildStatus, setRebuildStatus] = useState<string>('');
   const [pendingRebuildBooks, setPendingRebuildBooks] = useState<any[] | null>(null);
   const [selectedRebuildBooks, setSelectedRebuildBooks] = useState<Record<string, boolean>>({});
+  const [generatingPreviewKey, setGeneratingPreviewKey] = useState<string | null>(null);
+  const previewRequestId = useRef(0);
+  const previewAbortController = useRef<AbortController | null>(null);
+  const activePreviewAudio = useRef<HTMLAudioElement | null>(null);
+  const activePreviewUrl = useRef<string | null>(null);
 
   const [showAddWord, setShowAddWord] = useState(false);
   const [newWord, setNewWord] = useState('');
@@ -83,20 +88,67 @@ export function BookPronunciationInspectorModal({
     }
   }, [isOpen, selectedBookId, letterFilter, initialSearchQuery, initialUseFuzzySearch]);
 
+  useEffect(() => {
+    if (isOpen) return;
+    previewRequestId.current += 1;
+    previewAbortController.current?.abort();
+    previewAbortController.current = null;
+    activePreviewAudio.current?.pause();
+    activePreviewAudio.current = null;
+    if (activePreviewUrl.current) URL.revokeObjectURL(activePreviewUrl.current);
+    activePreviewUrl.current = null;
+    setGeneratingPreviewKey(null);
+  }, [isOpen]);
+
+  useEffect(() => () => {
+    previewRequestId.current += 1;
+    previewAbortController.current?.abort();
+    activePreviewAudio.current?.pause();
+    if (activePreviewUrl.current) URL.revokeObjectURL(activePreviewUrl.current);
+  }, []);
+
   const handleListen = async (word: string, phonetic: string) => {
+    const previewKey = `${word}\u0000${phonetic}`;
+    const requestId = previewRequestId.current + 1;
+    previewRequestId.current = requestId;
+    previewAbortController.current?.abort();
+    const controller = new AbortController();
+    previewAbortController.current = controller;
+    activePreviewAudio.current?.pause();
+    activePreviewAudio.current = null;
+    if (activePreviewUrl.current) URL.revokeObjectURL(activePreviewUrl.current);
+    activePreviewUrl.current = null;
+    setGeneratingPreviewKey(previewKey);
     try {
       const res = await fetch('/api/tts/preview', {
         method: 'POST',
         headers: previewSettings.headers,
-        body: JSON.stringify({ text: `[${word}](/${phonetic}/)`, voice: previewSettings.voice })
+        body: JSON.stringify({ text: `[${word}](/${phonetic}/)`, voice: previewSettings.voice }),
+        signal: controller.signal,
       });
-      if (!res.ok) return;
+      if (!res.ok) throw new Error('TTS Preview failed');
       const audioBlob = await res.blob();
+      if (requestId !== previewRequestId.current) return;
       const url = URL.createObjectURL(audioBlob);
       const audio = new Audio(url);
-      audio.play();
+      activePreviewUrl.current = url;
+      activePreviewAudio.current = audio;
+      audio.addEventListener('ended', () => {
+        if (activePreviewAudio.current === audio) activePreviewAudio.current = null;
+        if (activePreviewUrl.current === url) activePreviewUrl.current = null;
+        URL.revokeObjectURL(url);
+      }, { once: true });
+      await audio.play();
     } catch (e) {
-      console.error('Playback error', e);
+      if (!(e instanceof DOMException && e.name === 'AbortError')) {
+        console.error('Playback error', e);
+        toast.error('Could not generate this pronunciation preview.');
+      }
+    } finally {
+      if (requestId === previewRequestId.current) {
+        previewAbortController.current = null;
+        setGeneratingPreviewKey(null);
+      }
     }
   };
 
@@ -509,6 +561,7 @@ export function BookPronunciationInspectorModal({
 
         <div className="mb-2 text-xs text-gray-500 dark:text-gray-400 italic">
           💡 Hint: You can double-click any word in the review text to instantly highlight it, then open this Dictionary to fix its pronunciation.
+          <span className="ml-2 not-italic">Preview voice: {previewSettings.voice} · {previewSettings.provider}/{previewSettings.model}</span>
         </div>
 
         <div className="flex gap-4 mb-4 items-center flex-wrap">
@@ -649,8 +702,10 @@ export function BookPronunciationInspectorModal({
                       <button
                         className="mt-2 px-2 py-1 text-xs font-semibold bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300 dark:hover:bg-gray-600"
                         onClick={() => handleListen(w.word, w.phonetic)}
+                        disabled={generatingPreviewKey === `${w.word}\u0000${w.phonetic}`}
+                        aria-busy={generatingPreviewKey === `${w.word}\u0000${w.phonetic}`}
                       >
-                        Listen 🔊
+                        {generatingPreviewKey === `${w.word}\u0000${w.phonetic}` ? 'Generating…' : 'Listen 🔊'}
                       </button>
                     </td>
                     <td className="p-3 align-top">
@@ -664,7 +719,14 @@ export function BookPronunciationInspectorModal({
                           <div key={cIdx} className={`flex items-center gap-2 p-1.5 border rounded ${choice === w.globalDefault ? 'bg-purple-50 dark:bg-purple-900/30 border-purple-200 dark:border-purple-800' : 'bg-white dark:bg-gray-900 dark:border-gray-700'}`}>
                             <span className="font-mono text-xs flex-1 truncate">{choice}</span>
                             {choice === w.globalDefault && <span className="px-1 py-0.5 text-[8px] uppercase font-bold bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 rounded">Global Default</span>}
-                            <button className="px-2 py-0.5 text-[10px] bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300" onClick={() => handleListen(w.word, choice)}>🔊</button>
+                            <button
+                              className="px-2 py-0.5 text-[10px] bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300"
+                              onClick={() => handleListen(w.word, choice)}
+                              disabled={generatingPreviewKey === `${w.word}\u0000${choice}`}
+                              aria-busy={generatingPreviewKey === `${w.word}\u0000${choice}`}
+                            >
+                              {generatingPreviewKey === `${w.word}\u0000${choice}` ? <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" aria-label="Generating preview" /> : '🔊'}
+                            </button>
                             <button className="px-2 py-0.5 text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200 rounded" onClick={() => handleSaveOverride(w.word, choice)}>Adopt</button>
                           </div>
                           ));
@@ -689,7 +751,14 @@ export function BookPronunciationInspectorModal({
                          <div className="flex flex-col gap-1 items-start">
                            <span className="font-mono text-sm text-blue-600 dark:text-blue-400 font-bold">{w.userOverride || '-'}</span>
                            {w.userOverride && (
-                             <button className="px-2 py-0.5 text-[10px] bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300" onClick={() => handleListen(w.word, w.userOverride)}>Listen 🔊</button>
+                             <button
+                               className="px-2 py-0.5 text-[10px] bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300"
+                               onClick={() => handleListen(w.word, w.userOverride)}
+                               disabled={generatingPreviewKey === `${w.word}\u0000${w.userOverride}`}
+                               aria-busy={generatingPreviewKey === `${w.word}\u0000${w.userOverride}`}
+                             >
+                               {generatingPreviewKey === `${w.word}\u0000${w.userOverride}` ? 'Generating…' : 'Listen 🔊'}
+                             </button>
                            )}
                            <button className="px-2 py-0.5 text-[10px] bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300" onClick={() => { setEditingWord(w.word); setEditValue(w.userOverride || ''); }}>Custom Edit</button>
                          </div>

@@ -16,12 +16,13 @@ export const KOKORO_CHARACTER_VOICES = KOKORO_DEFAULT_VOICES;
 
 const KOKORO_CHARACTER_VOICE_SET = new Set<string>(KOKORO_CHARACTER_VOICES);
 const PRIVATE_MULTI_VOICE_MARKER = /\[(?:CONTINUITY|TITLE|CHAPTER_TITLE|LAYOUT_ENGINE_TAG|SYSTEM HINT)\s*:/iu;
-const VOICE_TAG = /<voice\s+name="([^"]+)">([\s\S]*?)<\/voice>/giu;
+const VOICE_TAG = /<voice\s+name="([^"]+)"(\s+omitted="true")?>([\s\S]*?)<\/voice>/giu;
 
 export type MultiVoiceSegment = {
   speaker: string;
   voiceId: string;
   text: string;
+  omitted?: boolean;
 };
 
 export type MultiVoiceCastMember = {
@@ -153,6 +154,29 @@ export function requiresDramaAudiobookReplacement(input: {
     && !(input.previousUseSmartAudio && input.previousWorkerMode === MULTI_VOICE_WORKER_MODE);
 }
 
+export function estimateSpeakerSegmentAtTime(
+  texts: readonly string[],
+  currentTimeSeconds: number,
+  durationSeconds: number,
+): number | null {
+  if (texts.length === 0 || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+  const weights = texts.map((text) => Math.max(
+    1,
+    text.trim().length
+      + (text.match(/[.!?…]/gu)?.length || 0) * 12
+      + (text.match(/\n/gu)?.length || 0) * 20,
+  ));
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const boundedTime = Math.min(Math.max(currentTimeSeconds, 0), durationSeconds);
+  const targetWeight = (boundedTime / durationSeconds) * totalWeight;
+  let elapsedWeight = 0;
+  for (let index = 0; index < weights.length; index += 1) {
+    elapsedWeight += weights[index];
+    if (targetWeight < elapsedWeight || index === weights.length - 1) return index;
+  }
+  return texts.length - 1;
+}
+
 export function getCharacterMapReadiness(value: unknown): {
   ready: boolean;
   map: SmartAudioCharacterMap | null;
@@ -279,7 +303,7 @@ function safeSegmentText(value: unknown, authoritativePronunciations?: Record<st
 
 export function renderVoiceSegments(segments: readonly MultiVoiceSegment[]): string {
   return segments
-    .map((segment) => `<voice name="${segment.voiceId}">${segment.text}</voice>`)
+    .map((segment) => `<voice name="${segment.voiceId}"${segment.omitted ? ' omitted="true"' : ''}>${segment.text}</voice>`)
     .join('\n\n');
 }
 
@@ -328,7 +352,16 @@ export function resolveMultiVoiceWorkerResult(
     }
     const text = safeSegmentText(segment.text, options.authoritativePronunciations);
     if (!text) continue;
-    segments.push({ speaker, voiceId: member.voiceId, text });
+    const omitted = segment.omit_from_audio === true;
+    if (omitted && member.name.toLocaleLowerCase() !== 'narrator') {
+      throw new SmartAudioOutputValidationError('Only Narrator attribution segments may be omitted from Audio Drama TTS.');
+    }
+    const previous = segments.at(-1);
+    if (!omitted && !previous?.omitted && previous?.speaker === member.name) {
+      previous.text = `${previous.text}\n\n${text}`;
+    } else {
+      segments.push({ speaker: member.name, voiceId: member.voiceId, text, ...(omitted ? { omitted: true } : {}) });
+    }
   }
   if (segments.length === 0) {
     throw new SmartAudioOutputValidationError('Multi-voice worker returned only empty segments.');
@@ -349,7 +382,10 @@ export function resolveMultiVoiceWorkerResult(
   };
 }
 
-export function parseVoiceTaggedText(text: string): MultiVoiceSegment[] {
+export function parseVoiceTaggedText(
+  text: string,
+  options: { includeOmitted?: boolean } = {},
+): MultiVoiceSegment[] {
   const segments: MultiVoiceSegment[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -362,8 +398,11 @@ export function parseVoiceTaggedText(text: string): MultiVoiceSegment[] {
     if (!KOKORO_CHARACTER_VOICE_SET.has(voiceId)) {
       throw new SmartAudioOutputValidationError(`Multi-voice text used an unsupported voice: ${voiceId}.`);
     }
-    const segmentText = safeSegmentText(match[2]);
-    if (segmentText) segments.push({ speaker: voiceId, voiceId, text: segmentText });
+    const omitted = Boolean(match[2]);
+    const segmentText = safeSegmentText(match[3]);
+    if (segmentText && (!omitted || options.includeOmitted)) {
+      segments.push({ speaker: voiceId, voiceId, text: segmentText, ...(omitted ? { omitted: true } : {}) });
+    }
     lastIndex = VOICE_TAG.lastIndex;
   }
   if (text.slice(lastIndex).trim()) {

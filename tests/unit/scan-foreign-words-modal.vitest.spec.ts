@@ -62,9 +62,8 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('Generate 5 only for new words');
     expect(source).toContain('/api/documents/scan-foreign-words/status?jobId=');
     expect(source).toContain('setInterval(() => void pollScanJob');
-    expect(source).toContain('warmGeminiDefaults');
-    expect(source).toContain('warmRemainingAudio');
-    expect(source).toContain('Preparing additional pronunciation audio in the background');
+    expect(source).not.toContain('warmGeminiDefaults');
+    expect(source).not.toContain('warmRemainingAudio');
     expect(source).toContain('Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated');
     expect(source).toContain('Library matches skipped by Gemini: {scanJobLibrarySkipped}');
     expect(source).toContain("action: 'promote-personal-default'");
@@ -84,6 +83,15 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('isInGlobalLibrary');
     expect(source).toContain('Try paid API key');
     expect(source).toContain('[30, 60, 120, 240]');
+  });
+
+  test('shows pending pronunciation previews and prevents stale requests from playing later', () => {
+    expect(source).toContain('generatingPreviewKey');
+    expect(source).toContain('new AbortController()');
+    expect(source).toContain('requestId !== previewRequestId.current');
+    expect(source).toContain("'Generating…'");
+    expect(source).toContain('aria-busy={isGeneratingPreview}');
+    expect(source).toContain('Preview voice: {previewSettings.voice}');
   });
 
   test('offers a saved-pronunciation health scan across global and personal libraries', () => {

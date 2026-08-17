@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vitest';
 import {
   buildMultiVoiceCast,
   finalizeSmartAudioCharacterMap,
+  estimateSpeakerSegmentAtTime,
   getDuplicateVoiceAssignments,
   getNarratorVoiceId,
   getCharacterMapReadiness,
@@ -174,6 +175,12 @@ describe('LitRPG character casting', () => {
       previousWorkerMode: null,
     })).toBe(false);
   });
+
+  test('maps chapter playback time to the estimated active speaker turn', () => {
+    expect(estimateSpeakerSegmentAtTime(['Short.', 'A much longer speaker turn with several words.'], 1, 10)).toBe(0);
+    expect(estimateSpeakerSegmentAtTime(['Short.', 'A much longer speaker turn with several words.'], 8, 10)).toBe(1);
+    expect(estimateSpeakerSegmentAtTime([], 1, 10)).toBeNull();
+  });
 });
 
 describe('LitRPG speaker output validation', () => {
@@ -196,6 +203,42 @@ describe('LitRPG speaker output validation', () => {
     expect(parseVoiceTaggedText(resolved.taggedText)).toEqual([
       { speaker: 'af_heart', voiceId: 'af_heart', text: 'The gate opened.' },
       { speaker: 'am_adam', voiceId: 'am_adam', text: 'I accept the quest.' },
+    ]);
+  });
+
+  test('coalesces consecutive turns from the same character after redundant attribution removal', () => {
+    const resolved = resolveMultiVoiceWorkerResult({
+      status: 'success',
+      segments: [
+        { speaker: 'Arin', voice_id: 'am_adam', text: 'I knew you would come.' },
+        { speaker: 'Hero', voice_id: 'am_adam', text: 'Now let us finish this.' },
+      ],
+    }, buildMultiVoiceCast(completeCast()));
+
+    expect(resolved.segments).toEqual([{
+      speaker: 'Arin',
+      voiceId: 'am_adam',
+      text: 'I knew you would come.\n\nNow let us finish this.',
+    }]);
+    expect(resolved.taggedText.match(/<voice name=/gu)).toHaveLength(1);
+  });
+
+  test('preserves omitted Narrator attributions for review while excluding them from TTS parsing', () => {
+    const resolved = resolveMultiVoiceWorkerResult({
+      status: 'success',
+      segments: [
+        { speaker: 'Arin', text: 'First line.' },
+        { speaker: 'Narrator', text: 'Charles replied.', omit_from_audio: true },
+        { speaker: 'Arin', text: 'Second line.' },
+      ],
+    }, buildMultiVoiceCast(completeCast()));
+
+    expect(resolved.taggedText).toContain('omitted="true"');
+    expect(parseVoiceTaggedText(resolved.taggedText)).toHaveLength(2);
+    expect(parseVoiceTaggedText(resolved.taggedText, { includeOmitted: true })).toMatchObject([
+      { text: 'First line.' },
+      { text: 'Charles replied.', omitted: true },
+      { text: 'Second line.' },
     ]);
   });
 
@@ -256,6 +299,12 @@ describe('LitRPG source and production wiring', () => {
     expect(worker).toContain('await nc.subscribe("audiobooks.multivoice.extract"');
     expect(worker).toContain('await nc.subscribe("audiobooks.multivoice.assign"');
     expect(worker).toContain('VoiceAssignmentResult,');
+    expect(worker).toContain('redundant speech attribution');
+    expect(worker).toContain('Dominic replied as he squirmed');
+    expect(worker).toContain('any action/reaction clause is narrative prose and must remain');
+    expect(worker).toContain('he softly muttered');
+    expect(worker).toContain('preserve the entire segment');
+    expect(worker).toContain('Petra shouted as a ball of water');
     expect(entrypoint).toContain('audiobook_worker.py');
     expect(legacyWorker).toContain('Start audiobook_worker.py instead.');
   });
@@ -291,7 +340,9 @@ describe('LitRPG source and production wiring', () => {
     expect(listenPage).toContain("fetch('/api/audiobook/review-flags'");
     expect(listenPage).toContain('Chapters & Speakers');
     expect(listenPage).toContain('Speaker segments for selected chapter');
-    expect(listenPage).toContain('parseVoiceTaggedText(chapterText)');
+    expect(listenPage).toContain('parseVoiceTaggedText(chapterText, { includeOmitted: true })');
+    expect(listenPage).toContain('Removed from audio');
+    expect(listenPage).toContain('restoreOmittedSegment(segmentIndex)');
     expect(listenPage).toContain('segment.speaker');
     expect(listenPage).toContain('updateSpeakerAssignment(segmentIndex, event.target.value)');
     expect(listenPage).toContain('setChapterText(renderVoiceSegments(parsed))');
@@ -300,6 +351,8 @@ describe('LitRPG source and production wiring', () => {
     expect(listenPage).toContain('previewSpeakerSegment(segmentIndex)');
     expect(listenPage).toContain('rerecordSpeakerSegment(segmentIndex)');
     expect(listenPage).toContain('Re-record this corrected turn and rebuild the containing audio chunk');
+    expect(listenPage).toContain('Now playing');
+    expect(listenPage).toContain('estimateSpeakerSegmentAtTime(');
     expect(listenPage).not.toContain('Future: Post this to a DB table');
     expect(studio).toContain('/api/audiobook/review-flags?documentId=');
   });

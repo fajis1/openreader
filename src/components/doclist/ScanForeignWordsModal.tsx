@@ -76,7 +76,6 @@ export function ScanForeignWordsModal({
   const [scanJobError, setScanJobError] = useState<string | null>(null);
   const [scanJobStatusMessage, setScanJobStatusMessage] = useState<string | null>(null);
   const scanActive = scanJobStatus === 'queued' || scanJobStatus === 'running';
-  const [audioWarmStatus, setAudioWarmStatus] = useState<'idle' | 'warming' | 'ready'>('idle');
   const [libraryScanStatus, setLibraryScanStatus] = useState<'idle' | 'scanning' | 'complete' | 'repairing'>('idle');
   const [libraryScan, setLibraryScan] = useState<PronunciationLibraryScan | null>(null);
   const [libraryScanError, setLibraryScanError] = useState<string | null>(null);
@@ -88,9 +87,11 @@ export function ScanForeignWordsModal({
   const retryTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
   const scanPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const modalSession = useRef(0);
-  const warmedAudio = useRef<Set<string>>(new Set());
-  const warmingAudio = useRef<Set<string>>(new Set());
-  const audioWarmStarted = useRef(false);
+  const [generatingPreviewKey, setGeneratingPreviewKey] = useState<string | null>(null);
+  const previewRequestId = useRef(0);
+  const previewAbortController = useRef<AbortController | null>(null);
+  const activePreviewAudio = useRef<HTMLAudioElement | null>(null);
+  const activePreviewUrl = useRef<string | null>(null);
 
   useEffect(() => {
     modalSession.current += 1;
@@ -111,16 +112,13 @@ export function ScanForeignWordsModal({
       setScanJobGenerated(0);
       setScanJobGeneratedChoices(0);
       setScanJobError(null);
-      setAudioWarmStatus('idle');
       setLibraryScanStatus('idle');
       setLibraryScan(null);
       setLibraryScanError(null);
       setDefinitionAuditStatus('idle');
       setSuspectDefinitions(null);
       setDefinitionAuditError(null);
-      warmedAudio.current.clear();
-      warmingAudio.current.clear();
-      audioWarmStarted.current = false;
+      setGeneratingPreviewKey(null);
       if (documentId) {
         setActiveDocId(documentId);
         setActiveDocName(documentName || null);
@@ -144,16 +142,20 @@ export function ScanForeignWordsModal({
       setScanJobGenerated(0);
       setScanJobGeneratedChoices(0);
       setScanJobError(null);
-      setAudioWarmStatus('idle');
       setLibraryScanStatus('idle');
       setLibraryScan(null);
       setLibraryScanError(null);
       setDefinitionAuditStatus('idle');
       setSuspectDefinitions(null);
       setDefinitionAuditError(null);
-      warmedAudio.current.clear();
-      warmingAudio.current.clear();
-      audioWarmStarted.current = false;
+      previewRequestId.current += 1;
+      previewAbortController.current?.abort();
+      previewAbortController.current = null;
+      activePreviewAudio.current?.pause();
+      activePreviewAudio.current = null;
+      if (activePreviewUrl.current) URL.revokeObjectURL(activePreviewUrl.current);
+      activePreviewUrl.current = null;
+      setGeneratingPreviewKey(null);
       setActiveDocId(null);
       setActiveDocName(null);
     }
@@ -162,6 +164,10 @@ export function ScanForeignWordsModal({
   useEffect(() => () => {
     Object.values(retryTimers.current).forEach(clearInterval);
     if (scanPollTimer.current) clearInterval(scanPollTimer.current);
+    previewRequestId.current += 1;
+    previewAbortController.current?.abort();
+    activePreviewAudio.current?.pause();
+    if (activePreviewUrl.current) URL.revokeObjectURL(activePreviewUrl.current);
   }, []);
 
   const loadFeedbackExamples = async () => {
@@ -321,7 +327,6 @@ export function ScanForeignWordsModal({
     if (typeof job.id === 'string') setScanJobId(job.id);
     if (Array.isArray(job.words)) {
       setWords(job.words);
-      void warmGeminiDefaults(job.words);
     }
     setHasScanned(true);
     if (job.status) setScanJobStatus(job.status);
@@ -394,59 +399,6 @@ export function ScanForeignWordsModal({
     }
   };
 
-  const warmPreview = async (word: string, phonetic: string) => {
-    const key = `${word}\u0000${phonetic}`;
-    if (!phonetic || warmedAudio.current.has(key) || warmingAudio.current.has(key)) return;
-    warmingAudio.current.add(key);
-    try {
-      const textToSynthesize = phonetic.startsWith('/') ? `[${word}](${phonetic})` : `[${word}](/${phonetic}/)`;
-      const res = await fetch('/api/tts/preview', {
-        method: 'POST',
-        headers: previewSettings.headers,
-        body: JSON.stringify({ text: textToSynthesize, voice: previewSettings.voice }),
-      });
-      if (res.ok) {
-        await res.arrayBuffer();
-        warmedAudio.current.add(key);
-      }
-    } catch (error) {
-      console.error('Failed to warm pronunciation audio', error);
-    } finally {
-      warmingAudio.current.delete(key);
-    }
-  };
-
-  const warmGeminiDefaults = async (nextWords: any[]) => {
-    const defaults = nextWords
-      .filter((w: any) => w.pronunciationSource === 'gemini' && w.geminiRecommendedPronunciation)
-      .map((w: any) => warmPreview(w.word, w.geminiRecommendedPronunciation));
-    if (defaults.length > 0) await Promise.all(defaults);
-  };
-
-  const warmRemainingAudio = async () => {
-    if (audioWarmStarted.current) return;
-    audioWarmStarted.current = true;
-    setAudioWarmStatus('warming');
-    const pending: Array<() => Promise<void>> = [];
-    for (const item of words) {
-      const choices = Array.isArray(item.pronunciations) ? item.pronunciations : [];
-      for (const choice of choices) {
-        const phonetic = choice?.phonetic || choice;
-        if (phonetic) pending.push(() => warmPreview(item.word, phonetic));
-      }
-      if (item.userOverride) pending.push(() => warmPreview(item.word, item.userOverride));
-    }
-    let next = 0;
-    const worker = async () => {
-      while (next < pending.length) {
-        const task = pending[next++];
-        await task();
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(4, pending.length) }, worker));
-    setAudioWarmStatus('ready');
-  };
-
   const [scanMode, setScanMode] = useState<'all_foreign' | 'fantasy_litrpg' | 'greek_hebrew' | 'custom'>('all_foreign');
   const [customQuery, setCustomQuery] = useState<string>('');
 
@@ -496,21 +448,48 @@ export function ScanForeignWordsModal({
   };
 
   const handleListen = async (word: string, phonetic: string) => {
+    const previewKey = `${word}\u0000${phonetic}`;
+    const requestId = previewRequestId.current + 1;
+    previewRequestId.current = requestId;
+    previewAbortController.current?.abort();
+    const controller = new AbortController();
+    previewAbortController.current = controller;
+    activePreviewAudio.current?.pause();
+    activePreviewAudio.current = null;
+    if (activePreviewUrl.current) URL.revokeObjectURL(activePreviewUrl.current);
+    activePreviewUrl.current = null;
+    setGeneratingPreviewKey(previewKey);
     try {
       const textToSynthesize = phonetic ? (phonetic.startsWith('/') ? `[${word}](${phonetic})` : `[${word}](/${phonetic}/)`) : word;
       const res = await fetch(`/api/tts/preview`, {
         method: 'POST',
         headers: previewSettings.headers,
-        body: JSON.stringify({ text: textToSynthesize, voice: previewSettings.voice })
+        body: JSON.stringify({ text: textToSynthesize, voice: previewSettings.voice }),
+        signal: controller.signal,
       });
       if (!res.ok) throw new Error('TTS Preview failed');
       const blob = await res.blob();
+      if (requestId !== previewRequestId.current) return;
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
-      audio.play();
-      void warmRemainingAudio();
+      activePreviewUrl.current = url;
+      activePreviewAudio.current = audio;
+      audio.addEventListener('ended', () => {
+        if (activePreviewAudio.current === audio) activePreviewAudio.current = null;
+        if (activePreviewUrl.current === url) activePreviewUrl.current = null;
+        URL.revokeObjectURL(url);
+      }, { once: true });
+      await audio.play();
     } catch (e) {
-      console.error('Failed to listen', e);
+      if (!(e instanceof DOMException && e.name === 'AbortError')) {
+        console.error('Failed to listen', e);
+        toast.error('Could not generate this pronunciation preview.');
+      }
+    } finally {
+      if (requestId === previewRequestId.current) {
+        previewAbortController.current = null;
+        setGeneratingPreviewKey(null);
+      }
     }
   };
 
@@ -804,12 +783,9 @@ export function ScanForeignWordsModal({
               ) : scanJobStatus === 'cancelled' ? (
                 <p className="text-[11px] text-amber-700 dark:text-amber-300">Scan cancelled. Completed results were kept; you can restart it later.</p>
               ) : null}
-              {audioWarmStatus === 'warming' && (
-                <p className="text-[11px] text-blue-600 dark:text-blue-400">Preparing additional pronunciation audio in the background…</p>
-              )}
-              {audioWarmStatus === 'ready' && (
-                <p className="text-[11px] text-green-700 dark:text-green-300">Additional pronunciation audio is ready.</p>
-              )}
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                Preview voice: {previewSettings.voice} · {previewSettings.provider}/{previewSettings.model}
+              </p>
             </div>
             <button onClick={handleClose} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 text-lg font-bold">✕</button>
           </div>
@@ -1129,6 +1105,8 @@ export function ScanForeignWordsModal({
                           const isLibraryPronunciation = w.libraryPronunciation === phoneticStr;
                           const isTransliterationMatch = p?.isTransliterationMatch === true;
                           const isGeminiRecommendation = w.pronunciationSource === 'gemini' && w.geminiRecommendedPronunciation === phoneticStr;
+                          const previewKey = `${w.word}\u0000${phoneticStr}`;
+                          const isGeneratingPreview = generatingPreviewKey === previewKey;
                           return (
                             <div key={idx} className={`flex items-center gap-2 p-1.5 rounded border ${isLibraryPronunciation ? 'bg-green-50 border-green-300 dark:bg-green-900/30 dark:border-green-800' : isGeminiRecommendation ? 'bg-red-50 border-red-300 dark:bg-red-900/30 dark:border-red-800' : isMatch ? 'bg-blue-100 border-blue-300 dark:bg-blue-900/30 dark:border-blue-800' : 'border-transparent hover:border-gray-200 dark:hover:border-gray-700'}`}>
                               <span className={`font-mono text-xs flex-1 ${isLibraryPronunciation ? 'text-green-700 dark:text-green-300' : isGeminiRecommendation ? 'text-red-700 dark:text-red-300' : 'text-purple-600 dark:text-purple-400'}`}>
@@ -1141,8 +1119,11 @@ export function ScanForeignWordsModal({
                                 type="button"
                                 className="px-2 py-0.5 text-[10px] font-semibold bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded hover:bg-gray-300"
                                 onClick={() => handleListen(w.word, phoneticStr)}
+                                disabled={isGeneratingPreview}
+                                aria-busy={isGeneratingPreview}
                               >
-                                Listen
+                                {isGeneratingPreview && <span className="mr-1 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent align-[-2px]" aria-hidden="true" />}
+                                {isGeneratingPreview ? 'Generating…' : 'Listen'}
                               </button>
                               <button
                                 type="button"
@@ -1418,8 +1399,11 @@ export function ScanForeignWordsModal({
                                 type="button"
                                 className="px-2 py-0.5 text-[10px] font-semibold bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded hover:bg-gray-300 self-start"
                                 onClick={() => handleListen(w.word, w.userOverride)}
+                                disabled={generatingPreviewKey === `${w.word}\u0000${w.userOverride}`}
+                                aria-busy={generatingPreviewKey === `${w.word}\u0000${w.userOverride}`}
                               >
-                                Listen
+                                {generatingPreviewKey === `${w.word}\u0000${w.userOverride}` && <span className="mr-1 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent align-[-2px]" aria-hidden="true" />}
+                                {generatingPreviewKey === `${w.word}\u0000${w.userOverride}` ? 'Generating…' : 'Listen'}
                               </button>
                             )}
                           </div>

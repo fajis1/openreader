@@ -11,7 +11,7 @@ import { BASE_BOOKS } from "@/components/constants";
 import { toast } from "react-hot-toast";
 import { ModalFrame } from "@/components/ui";
 import { SmartAudioSettings } from "@/components/SmartAudioSettings";
-import { parseVoiceTaggedText, renderVoiceSegments } from "@/lib/shared/multi-voice";
+import { estimateSpeakerSegmentAtTime, parseVoiceTaggedText, renderVoiceSegments } from "@/lib/shared/multi-voice";
 import type { SmartAudioCharacterMap } from "@/types/document-settings";
 
 interface Chapter {
@@ -40,7 +40,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [isTextLoading, setIsTextLoading] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isRebuildingAll, setIsRebuildingAll] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isPronunciationModalOpen, setIsPronunciationModalOpen] = useState(false);
   const [isQuickAbbrevModalOpen, setIsQuickAbbrevModalOpen] = useState(false);
   const [newAbbrevKey, setNewAbbrevKey] = useState('');
@@ -58,16 +58,18 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [castCharacters, setCastCharacters] = useState<Array<{ name: string; voiceId: string }>>([]);
   const [playingSpeakerSegment, setPlayingSpeakerSegment] = useState<number | null>(null);
   const [speakerTextDrafts, setSpeakerTextDrafts] = useState<Record<number, string>>({});
+  const [activeSpeakerSegment, setActiveSpeakerSegment] = useState<number | null>(null);
 
   const isMultiVoice = chapterText.includes('<voice');
   const speakerSegments = useMemo(() => {
     if (!isMultiVoice) return [];
     try {
-      return parseVoiceTaggedText(chapterText).map((segment, index) => ({
+      return parseVoiceTaggedText(chapterText, { includeOmitted: true }).map((segment, index) => ({
         id: `${index}-${segment.voiceId}`,
         voiceId: segment.voiceId,
         speaker: voiceCharacters[segment.voiceId]?.join(', ') || segment.voiceId,
         text: segment.text,
+        omitted: segment.omitted === true,
       }));
     } catch {
       return [];
@@ -79,6 +81,18 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       speakerSegments.map((segment, index) => [index, segment.text]),
     ));
   }, [currentChapterIndex, speakerSegments]);
+
+  useEffect(() => {
+    setActiveSpeakerSegment(null);
+  }, [currentChapterIndex]);
+
+  useEffect(() => {
+    if (activeSpeakerSegment === null) return;
+    document.getElementById(`drama-speaker-row-${activeSpeakerSegment}`)?.scrollIntoView({
+      block: 'nearest',
+      behavior: 'smooth',
+    });
+  }, [activeSpeakerSegment]);
 
   useEffect(() => {
     const handleOpenSettings = () => setIsSettingsModalOpen(true);
@@ -300,7 +314,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     const choice = castCharacters.find((character) => character.name === characterName);
     if (!choice) return;
     try {
-      const parsed = parseVoiceTaggedText(chapterText);
+      const parsed = parseVoiceTaggedText(chapterText, { includeOmitted: true });
       if (!parsed[segmentIndex]) return;
       parsed[segmentIndex] = {
         ...parsed[segmentIndex],
@@ -316,7 +330,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
 
   const updateSpeakerText = (segmentIndex: number, text: string) => {
     try {
-      const parsed = parseVoiceTaggedText(chapterText);
+      const parsed = parseVoiceTaggedText(chapterText, { includeOmitted: true });
       if (!parsed[segmentIndex] || !text.trim()) return;
       parsed[segmentIndex] = { ...parsed[segmentIndex], text: text.trim() };
       setChapterText(renderVoiceSegments(parsed));
@@ -328,7 +342,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
 
   const rerecordSpeakerSegment = (segmentIndex: number) => {
     try {
-      const parsed = parseVoiceTaggedText(chapterText);
+      const parsed = parseVoiceTaggedText(chapterText, { includeOmitted: true });
       const nextText = speakerTextDrafts[segmentIndex]?.trim();
       if (!parsed[segmentIndex] || !nextText) return;
       parsed[segmentIndex] = { ...parsed[segmentIndex], text: nextText };
@@ -341,9 +355,21 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     }
   };
 
+  const restoreOmittedSegment = (segmentIndex: number) => {
+    try {
+      const parsed = parseVoiceTaggedText(chapterText, { includeOmitted: true });
+      if (!parsed[segmentIndex]) return;
+      parsed[segmentIndex] = { ...parsed[segmentIndex], omitted: false };
+      setChapterText(renderVoiceSegments(parsed));
+      setHasEditedText(true);
+    } catch {
+      toast.error('This removed segment could not be restored safely.');
+    }
+  };
+
   const previewSpeakerSegment = async (segmentIndex: number) => {
     const segment = speakerSegments[segmentIndex];
-    if (!segment) return;
+    if (!segment || segment.omitted) return;
     setPlayingSpeakerSegment(segmentIndex);
     try {
       const response = await fetch('/api/tts/preview', {
@@ -354,11 +380,11 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       if (!response.ok) throw new Error('Speaker preview failed.');
       const url = URL.createObjectURL(await response.blob());
       const audio = new Audio(url);
-      audioRef.current = audio;
+      previewAudioRef.current = audio;
       const finish = () => {
         URL.revokeObjectURL(url);
         setPlayingSpeakerSegment(null);
-        if (audioRef.current === audio) audioRef.current = null;
+        if (previewAudioRef.current === audio) previewAudioRef.current = null;
       };
       audio.onended = finish;
       audio.onerror = finish;
@@ -367,6 +393,18 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       setPlayingSpeakerSegment(null);
       toast.error(error instanceof Error ? error.message : 'Speaker preview failed.');
     }
+  };
+
+  const activeSpeakerAtPlaybackTime = (currentTime: number, duration: number) => {
+    const audible = speakerSegments
+      .map((segment, index) => ({ segment, index }))
+      .filter(({ segment }) => !segment.omitted);
+    const audibleIndex = estimateSpeakerSegmentAtTime(
+      audible.map(({ segment }) => segment.text),
+      currentTime,
+      duration,
+    );
+    return audibleIndex === null ? null : audible[audibleIndex]?.index ?? null;
   };
 
   const handleRebuildAllModified = async () => {
@@ -697,15 +735,26 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                         {speakerSegments.length > 0 ? speakerSegments.map((segment, segmentIndex) => (
                           <div
                             key={segment.id}
-                            className="mb-2 grid w-full grid-cols-1 gap-2 rounded border border-line-soft bg-surface-raised p-2 text-left lg:grid-cols-[2.5rem_minmax(9rem,0.7fr)_minmax(14rem,1.5fr)_auto] lg:items-start"
+                            id={`drama-speaker-row-${segmentIndex}`}
+                            className={`mb-2 grid w-full grid-cols-1 gap-2 rounded border p-2 text-left lg:grid-cols-[2.5rem_minmax(9rem,0.7fr)_minmax(14rem,1.5fr)_auto] lg:items-start ${
+                              segment.omitted
+                                ? 'border-line bg-transparent outline outline-1 outline-dashed outline-line'
+                                : activeSpeakerSegment === segmentIndex
+                                ? 'border-accent bg-accent-wash shadow-sm'
+                                : 'border-line-soft bg-surface-raised'
+                            }`}
                           >
-                            <div className="text-xs font-semibold text-text-soft">#{segmentIndex + 1}</div>
+                            <div className={`text-xs font-bold ${activeSpeakerSegment === segmentIndex ? 'text-accent' : 'text-text-soft'}`}>
+                              #{segmentIndex + 1}
+                              {segment.omitted && <span className="mt-1 block text-[9px] uppercase text-text-soft">Removed from audio</span>}
+                              {activeSpeakerSegment === segmentIndex && <span className="mt-1 block text-[9px] uppercase">Now playing</span>}
+                            </div>
                             <div>
                               <label className="block text-[10px] font-semibold uppercase tracking-wide text-text-soft">Character</label>
                               <select
                                 value={castCharacters.find((character) => character.voiceId === segment.voiceId)?.name || ''}
                                 onChange={(event) => updateSpeakerAssignment(segmentIndex, event.target.value)}
-                                className="mt-1 w-full rounded border border-line-soft bg-surface px-2 py-1 text-xs font-semibold text-text-strong"
+                                className={`mt-1 w-full rounded border bg-surface px-2 py-1 text-xs font-semibold text-text-strong ${activeSpeakerSegment === segmentIndex ? 'border-accent ring-1 ring-accent' : 'border-line-soft'}`}
                                 aria-label={`Speaker for segment ${segmentIndex + 1}`}
                               >
                                 {!castCharacters.some((character) => character.voiceId === segment.voiceId) && (
@@ -735,12 +784,20 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                               <button
                                 type="button"
                                 onClick={() => void previewSpeakerSegment(segmentIndex)}
-                                disabled={playingSpeakerSegment === segmentIndex}
+                                disabled={segment.omitted || playingSpeakerSegment === segmentIndex}
                                 className="rounded border border-line-soft px-2 py-1 text-xs text-text-strong disabled:opacity-50"
                               >
-                                {playingSpeakerSegment === segmentIndex ? 'Playing…' : '▶ Audio'}
+                                {segment.omitted ? 'No audio' : playingSpeakerSegment === segmentIndex ? 'Playing…' : '▶ Audio'}
                               </button>
-                              <button
+                              {segment.omitted ? (
+                                <button
+                                  type="button"
+                                  onClick={() => restoreOmittedSegment(segmentIndex)}
+                                  className="rounded border border-accent px-2 py-1 text-xs font-semibold text-accent"
+                                >
+                                  Restore
+                                </button>
+                              ) : <button
                                 type="button"
                                 onClick={() => rerecordSpeakerSegment(segmentIndex)}
                                 disabled={isRegenerating}
@@ -748,7 +805,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                                 title="Re-record this corrected turn and rebuild the containing audio chunk"
                               >
                                 {isRegenerating ? 'Recording…' : 'Re-record'}
-                              </button>
+                              </button>}
                             </div>
                           </div>
                         )) : (
@@ -840,6 +897,11 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
             key={`${bookId}-${currentChapterIndex}`}
             controls 
             autoPlay
+            onTimeUpdate={(event) => setActiveSpeakerSegment(activeSpeakerAtPlaybackTime(
+              event.currentTarget.currentTime,
+              event.currentTarget.duration,
+            ))}
+            onEnded={() => setActiveSpeakerSegment(null)}
             className="w-full max-w-2xl"
             src={`/api/audiobook/chapter?bookId=${bookId}&chapterIndex=${currentChapterIndex}`}
           />

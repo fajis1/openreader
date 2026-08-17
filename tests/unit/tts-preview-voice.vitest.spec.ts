@@ -77,6 +77,8 @@ describe('TTS preview voice resolution', () => {
       expect(source).toContain('useTtsPreviewSettings');
       expect(source).toContain('voice: previewSettings.voice');
     }
+    expect(previewCallers[2]).toContain('Preview voice: {previewSettings.voice}');
+    expect(previewCallers[3]).toContain('Preview voice: {previewSettings.voice}');
   });
 
   test('enforces the server-side model policy before generating a preview', () => {

@@ -237,6 +237,7 @@ class VoiceSegment(BaseModel):
     speaker: str = Field(description="Exact primary character or alias name from the supplied cast")
     voice_id: str = Field(description="Exact voice ID assigned to that character")
     text: str = Field(description="Complete narration or dialogue for this consecutive speaker segment")
+    omit_from_audio: bool = Field(default=False, description="True only for a redundant attribution retained for review but skipped by TTS")
 
 
 class VoiceAssignmentResult(BaseModel):
@@ -359,8 +360,25 @@ async def process_multivoice_assign(msg):
             "You are assigning speakers for a LitRPG audiobook. Return structured JSON only. Split the supplied text "
             "into consecutive speaker segments. Use only exact primary names or aliases from REVIEWED CAST, and copy "
             "that cast member's exact voiceId into voice_id. Narrative prose belongs to Narrator. Preserve every "
-            "narratable sentence and its order: do not summarize, omit, invent, or duplicate text. You may make only "
-            "minor punctuation changes for speaking cadence. Never emit XML, HTML, bracketed control markers, stage "
+            "narratable sentence and its order: do not summarize, omit, invent, or duplicate text, with one narrow "
+            "Audio Drama exception. If a very short narrative sentence is only a redundant speech attribution and "
+            "is directly between two speech turns by the same reviewed character, retain that Narrator segment in its "
+            "original position but set omit_from_audio=true so it remains reviewable and is skipped by TTS. Return the "
+            "surrounding speech as consecutive segments for that character. Examples include ‘Charles, his "
+            "grandfather, said.’, ‘his mother, Trina, replied.’, ‘Charles finally replied.’, ‘Trina said harshly.’, "
+            "or ‘Charles replied.’ Remove one only when the surrounding speaker is certainly the same and the sentence "
+            "contains no meaningful action, setting, reaction, internal state, timing, or plot information. An "
+            "attribution followed by any action/reaction clause is narrative prose and must remain. If any sentence in "
+            "the same Narrator segment contains an action, consequence, environmental effect, or world-state change, "
+            "preserve the entire segment rather than deleting only its attribution sentence. For example, never "
+            "remove: ‘Dominic replied as he squirmed a bit from the pressure that had slowly been building in him. Now "
+            "that the excitement had paused, he could no longer ignore it.’ Also never remove: ‘he softly muttered. "
+            "The cone of water quickly froze and exploded into shards of small ice chunks.’ And never remove: ‘Charles "
+            "Petra shouted as a ball of water quickly shot toward Lamoch. The orb slowly shifted into a cone as it "
+            "neared the man. Lamoch turned toward his foe, all the while his hands moved slowly and deliberately.’ "
+            "Preserve attribution whenever it "
+            "disambiguates the speaker or carries narrative meaning. You may make only minor punctuation changes for "
+            "speaking cadence. Never emit XML, HTML, bracketed control markers, stage "
             "directions, or commentary. Apply pronunciation overrides using Kokoro markup only where supplied.\n\n"
             f"REVIEWED CAST:\n{cast_json}\n\n"
             f"CONTINUITY FROM PREVIOUS CHUNK:\n{data.get('continuity_state') or 'Beginning of book.'}\n\n"
