@@ -3,6 +3,7 @@ import { ModalFrame } from '@/components/ui';
 import toast from 'react-hot-toast';
 import { useTtsPreviewSettings } from '@/hooks/audio/useTtsPreviewSettings';
 import { BookPronunciationInspectorModal } from './BookPronunciationInspectorModal';
+import { matchesTransliteratedTerm } from '@/lib/shared/transliteration-search';
 
 type SuspectPronunciation = {
   word: string;
@@ -1072,21 +1073,37 @@ export function ScanForeignWordsModal({
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                 {(sortMissingFirst
                   ? [...words].sort((a, b) => {
-                      const aMissing = (!a.pronunciations || a.pronunciations.length === 0) && !a.userOverride ? 0 : 1;
-                      const bMissing = (!b.pronunciations || b.pronunciations.length === 0) && !b.userOverride ? 0 : 1;
+                      const aMissing = (!a.pronunciations || a.pronunciations.length === 0) && !a.userOverride && !a.ocrFragment ? 0 : 1;
+                      const bMissing = (!b.pronunciations || b.pronunciations.length === 0) && !b.userOverride && !b.ocrFragment ? 0 : 1;
                       if (aMissing !== bMissing) return aMissing - bMissing;
+                      const fuzzyPriority = Number(b.fuzzyGroupCount || b.count || 0)
+                        - Number(a.fuzzyGroupCount || a.count || 0);
+                      if (fuzzyPriority !== 0) return fuzzyPriority;
                       return b.count - a.count;
                     })
                   : words
                 )
-                  .filter((w) => !searchQuery || w.word.toLowerCase().includes(searchQuery.toLowerCase()))
+                  .filter((w) => !searchQuery || matchesTransliteratedTerm(w.word, searchQuery))
                   .map((w, i) => {
-                  const isMissing = (!w.pronunciations || w.pronunciations.length === 0) && !w.userOverride;
+                  const isMissing = (!w.pronunciations || w.pronunciations.length === 0) && !w.userOverride && !w.ocrFragment;
                   return (
                   <tr key={i} className={`transition-colors ${isMissing ? 'bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-100/60 dark:hover:bg-amber-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}>
                     <td className="px-4 py-3 font-medium text-lg text-gray-900 dark:text-gray-100 align-top [overflow-wrap:anywhere]">
                       <div className="flex flex-col gap-1">
                         <span>{w.word}</span>
+                        {Array.isArray(w.fuzzyGroupVariants) && w.fuzzyGroupVariants.length > 1 && (
+                          <span
+                            className="inline-block w-fit rounded bg-accent-wash px-1.5 py-0.5 text-[10px] font-semibold text-accent border border-accent-line"
+                            title={`Fuzzy group: ${w.fuzzyGroupVariants.join(', ')}`}
+                          >
+                            Fuzzy priority · {w.fuzzyGroupCount} combined · {w.fuzzyGroupVariants.length} variants
+                          </span>
+                        )}
+                        {w.ocrFragment && (
+                          <span className="inline-block w-fit rounded bg-surface-sunken px-1.5 py-0.5 text-[10px] font-semibold text-soft border border-line" title={w.automaticIgnoreReason || 'Confirmed OCR fragment'}>
+                            🚫 Ignored extraction artifact
+                          </span>
+                        )}
                         {isMissing && (
                           <span className="inline-block w-fit rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300 border border-amber-500/30">
                             ⚠️ Missing / Needs Fix
@@ -1135,7 +1152,11 @@ export function ScanForeignWordsModal({
                             </div>
                           );
                           })}
-                        {(!w.pronunciations || w.pronunciations.length === 0) && (
+                        {w.ocrFragment ? (
+                          <span className="text-soft text-xs italic">
+                            Skipped automatically; this extraction artifact will not be added to the pronunciation library.
+                          </span>
+                        ) : (!w.pronunciations || w.pronunciations.length === 0) && (
                           <span className="text-gray-500 text-xs italic">
                             {scanJobStatus === 'queued' || scanJobStatus === 'running'
                               ? 'Waiting for Gemini pronunciation choices…'

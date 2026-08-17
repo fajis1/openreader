@@ -194,7 +194,7 @@ export async function POST(req: NextRequest) {
           if (!Array.isArray(words)) {
             throw new Error('PDF foreign-word scanner returned an invalid candidate list.');
           }
-          const cachedCandidates = JSON.stringify({ version: 4, words });
+          const cachedCandidates = JSON.stringify({ version: 5, words });
           await db.insert(adminSettings).values({
             key: candidateCacheKey,
             valueJson: cachedCandidates,
@@ -346,9 +346,15 @@ export async function POST(req: NextRequest) {
           }
         }
         const needsScholarDefinition = activeProfile?.workerMode === 'scholar';
+        const automaticOcrFragments = new Set<string>(
+          words
+            .filter((word: any) => word?.ocrFragment === true)
+            .map((word: any) => word.word),
+        );
 
         const wordsMissingOptions = words
           .filter((w: any) => {
+            if (automaticOcrFragments.has(w.word)) return false;
             const transliterationPronunciation = transliterationMatches.get(w.word)?.pronunciation;
             const compatibleGlobalChoices = (globalDict[w.word] || []).filter((choice) => (
               isKokoroSafePronunciation(w.word, choice?.phonetic)
@@ -373,9 +379,12 @@ export async function POST(req: NextRequest) {
             return needsPronunciations || needsDefinition;
           })
           .map((w: any) => w.word);
-        const librarySkipped = Math.max(0, words.length - wordsMissingOptions.length);
+        const librarySkipped = Math.max(
+          0,
+          words.length - automaticOcrFragments.size - wordsMissingOptions.length,
+        );
         const updatedGlobalWords = new Set<string>();
-        const confirmedOcrFragments = new Set<string>();
+        const confirmedOcrFragments = new Set<string>(automaticOcrFragments);
         let acceptedChoices = 0;
         let updatedLexicon = false;
         let terminalGeminiError: string | null = null;

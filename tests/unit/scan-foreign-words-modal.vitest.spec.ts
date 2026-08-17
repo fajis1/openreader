@@ -70,6 +70,10 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('No Gemini pronunciation was generated for this word');
     expect(source).toContain('English Definition');
     expect(source).toContain('definitionNeedsReview');
+    expect(source).toContain('fuzzyGroupCount');
+    expect(source).toContain('Fuzzy priority · {w.fuzzyGroupCount} combined');
+    expect(source).toContain('🚫 Ignored extraction artifact');
+    expect(source).toContain('&& !w.ocrFragment');
   });
 
   test('labels library pronunciations and new Gemini recommendations distinctly', () => {

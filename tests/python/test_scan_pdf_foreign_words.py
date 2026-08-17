@@ -62,6 +62,43 @@ class ForeignWordContextTests(unittest.TestCase):
         self.assertEqual(shard["ocrEvidence"], ["vio[θεσ]iα"])
         self.assertNotIn("ocrSuspect", intact)
 
+    def test_exposes_fuzzy_group_priority_and_variants(self):
+        text = "Aethrian Aethrian Aethriann Common Common Common Common."
+        with (
+            patch.object(scan_pdf_foreign_words, "load_pdf_text", return_value=text),
+            patch.object(scan_pdf_foreign_words, "fetch_global_pronunciations", return_value={}),
+        ):
+            results = scan_pdf_foreign_words.scan_pdf_foreign_words(
+                "unused.pdf",
+                target_percentile=100,
+                mode="fantasy_litrpg",
+                quiet=True,
+            )
+
+        aethrian = next(item for item in results if item["word"] == "Aethrian")
+        common = next(item for item in results if item["word"] == "Common")
+        self.assertEqual(aethrian["fuzzyGroupCount"], 3)
+        self.assertEqual(aethrian["fuzzyGroupVariants"], ["Aethrian", "Aethriann"])
+        self.assertEqual(common["fuzzyGroupCount"], 4)
+        self.assertEqual(common["fuzzyGroupVariants"], ["Common"])
+
+    def test_marks_safe_extraction_artifacts_for_automatic_ignore(self):
+        text = "δ᾽ σ᾿ υἱοθεσ דמותὁμοίωμα Θεσμοφόρος θεός·"
+        with (
+            patch.object(scan_pdf_foreign_words, "load_pdf_text", return_value=text),
+            patch.object(scan_pdf_foreign_words, "fetch_global_pronunciations", return_value={}),
+        ):
+            results = scan_pdf_foreign_words.scan_pdf_foreign_words(
+                "unused.pdf", target_percentile=100, mode="greek_hebrew", quiet=True,
+            )
+
+        by_word = {item["word"]: item for item in results}
+        for artifact in ("δ᾽", "σ᾿", "υἱοθεσ", "דמותὁμοίωμα"):
+            self.assertTrue(by_word[artifact]["ocrFragment"])
+            self.assertTrue(by_word[artifact]["automaticIgnoreReason"])
+        self.assertNotIn("ocrFragment", by_word["Θεσμοφόρος"])
+        self.assertNotIn("ocrFragment", by_word["θεός"])
+
 
 if __name__ == "__main__":
     unittest.main()

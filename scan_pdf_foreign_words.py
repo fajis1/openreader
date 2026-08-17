@@ -47,6 +47,9 @@ KNOWN_OCR_FRAGMENTS = {'κω'}
 OCR_TOKEN_DELIMITERS = re.compile(r'[\s,;:!?"\'“”(){}<>]+')
 ASCII_LETTER_REGEX = re.compile(r'[A-Za-z]')
 GREEK_OR_HEBREW_REGEX = re.compile(r'[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF]')
+GREEK_REGEX = re.compile(r'[\u0370-\u03FF\u1F00-\u1FFF]')
+HEBREW_REGEX = re.compile(r'[\u0590-\u05FF]')
+GREEK_ELISION_REGEX = re.compile(r"^[\u0370-\u03FF\u1F00-\u1FFF][\u1FBD\u1FBF'’]$")
 
 
 def get_ocr_suspect_evidence(full_text, start, end):
@@ -71,11 +74,22 @@ def collect_foreign_matches(full_text, regex):
     """Collect matches plus any raw mixed-script OCR evidence around them."""
     matches = []
     for match in regex.finditer(full_text):
-        word = match.group(0).strip('.,;:!?·\'"()[]{}«»')
+        word = match.group(0).strip('.,;:!?··\'"()[]{}«»')
         if not word:
             continue
         matches.append((word, get_ocr_suspect_evidence(full_text, match.start(), match.end())))
     return matches
+
+
+def classify_automatic_ocr_ignore(word):
+    """Identify extraction artifacts that are unsafe to send to the dictionary."""
+    if GREEK_ELISION_REGEX.fullmatch(word):
+        return "single-letter Greek elision"
+    if GREEK_REGEX.search(word) and HEBREW_REGEX.search(word):
+        return "adjacent Hebrew and Greek text without a separator"
+    if word.endswith('σ'):
+        return "Greek OCR fragment ending in non-final sigma"
+    return None
 
 def load_pdf_text(pdf_path):
     """Extract text from a PDF file using pypdf or PyMuPDF if available."""
@@ -220,6 +234,7 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
         groups.setdefault(root, []).append(w)
         
     word_sort_weight = {}
+    fuzzy_group_metadata = {}
     for root, members in groups.items():
         group_sum = sum(counts[m] for m in members)
         # Deflate if any member of the group is a pronoun or article
@@ -229,6 +244,13 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
         for m in members:
             effective_indiv_count = (counts[m] / 10000.0) if m.lower() in PRONOUNS_AND_ARTICLES else counts[m]
             word_sort_weight[m] = (effective_group_sum, effective_indiv_count, counts[m])
+            fuzzy_group_metadata[m] = {
+                "fuzzyGroupCount": group_sum,
+                "fuzzyGroupVariants": sorted(
+                    members,
+                    key=lambda variant: (-counts[variant], variant.casefold()),
+                ),
+            }
 
     sorted_unique_words = sorted(unique_words, key=lambda w: word_sort_weight[w], reverse=True)
 
@@ -289,10 +311,15 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
         result = {
             "word": word,
             "count": freq,
+            **fuzzy_group_metadata[word],
             "percentage": round(pct, 2),
             "pronunciations": pronunciations,
             "contexts": contexts,
         }
+        automatic_ignore_reason = classify_automatic_ocr_ignore(word)
+        if automatic_ignore_reason:
+            result["ocrFragment"] = True
+            result["automaticIgnoreReason"] = automatic_ignore_reason
         if word in ocr_suspect_evidence:
             result["ocrSuspect"] = True
             result["ocrEvidence"] = sorted(ocr_suspect_evidence[word])[:2]
