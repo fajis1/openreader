@@ -194,7 +194,7 @@ export async function POST(req: NextRequest) {
           if (!Array.isArray(words)) {
             throw new Error('PDF foreign-word scanner returned an invalid candidate list.');
           }
-          const cachedCandidates = JSON.stringify({ version: 6, words });
+          const cachedCandidates = JSON.stringify({ version: 7, words });
           await db.insert(adminSettings).values({
             key: candidateCacheKey,
             valueJson: cachedCandidates,
@@ -271,12 +271,13 @@ export async function POST(req: NextRequest) {
           ...(activeProfile && existingLexicon?.profileId === activeProfile.id ? existingLexicon.entries : {}),
         };
         for (const [term, entry] of Object.entries(lexiconEntries)) {
-          if (shouldOmitDictionaryDefinition(entry.definition)) {
+          const normalizedDefinition = normalizeDictionaryDefinition(entry.definition);
+          if (entry.definition && normalizedDefinition !== entry.definition) {
             lexiconEntries[term] = {
               ...entry,
-              definition: null,
-              definitionOmitted: true,
-              needsReview: false,
+              definition: normalizedDefinition,
+              definitionOmitted: normalizedDefinition === null,
+              needsReview: normalizedDefinition === null ? false : entry.needsReview,
             };
           }
           if (!entry.definition && globalDefinitions[term]) {
@@ -491,6 +492,8 @@ Create pronunciation choices and short audiobook definitions for these terms.
 For each term without currentPronunciation, return 5 distinct, plausible Kokoro IPA pronunciation variations and put the best first.
 If currentPronunciation is supplied, preserve it exactly and return it as the only pronunciation; do not generate extra variations.
 For Koine Greek or Biblical Hebrew, use the supplied contexts to return a contextual English definition of one to four words.
+Return exactly one meaning, never a comma-, slash-, semicolon-, "and"-, or "or"-separated list of synonyms or alternatives.
+Do not return a definition that consists only of a common function or connecting word such as "the", "or", "of", "off", or "like"; return null and set definitionOmitted to true instead.
 If the surrounding book context already states the definition, return that same concise gloss; OpenReader will recognize the author-supplied definition and will not speak it twice.
 Set language to "koine_greek", "biblical_hebrew", or "other". For other languages, abbreviations, or invented names, set language to "other" and definition to null.
 If a token is an OCR fragment, an unidentifiable fragment, or an inflected form with no reliable contextual English gloss, return definition as null and definitionOmitted as true. Never use placeholder text such as "Fragment or inflected form" as a definition.

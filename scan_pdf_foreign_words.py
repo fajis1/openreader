@@ -3,6 +3,7 @@ import re
 import json
 import sqlite3
 import argparse
+import unicodedata
 from collections import Counter
 from functools import lru_cache
 
@@ -81,6 +82,21 @@ STOP_WORDS = {
     'μετά', 'κατά', 'περί', 'ὑπέρ', 'ὑπό', 'ἐπί', 'παρά', 'σύν', 'ὦ', 'εἰ', 'ὡς', 'ἄν', 'ὅτι', 'ἵνα',
     'אֵת', 'אֶת', 'וְ', 'הַ', 'בְּ', 'לְ', 'כְּ', 'מִ', 'עַל', 'אֶל', 'כִּי', 'אֲשֶׁר', 'עַד', 'עִם'
 }
+STOP_WORDS_FOLDED = {
+    ''.join(
+        character for character in unicodedata.normalize('NFD', word.casefold())
+        if unicodedata.category(character) != 'Mn'
+    )
+    for word in STOP_WORDS
+}
+
+
+def normalize_foreign_term_for_fuzzy_match(word):
+    """Fold case and accents so inflection/OCR variants group consistently."""
+    return ''.join(
+        character for character in unicodedata.normalize('NFD', word.casefold())
+        if unicodedata.category(character) != 'Mn'
+    )
 
 # Known extraction fragments that are not usable standalone dictionary terms.
 # Keep this intentionally narrow; Gemini handles genuine inflected forms using context.
@@ -199,7 +215,11 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
         raw_matches = collect_foreign_matches(full_text, GREEK_HEBREW_REGEX)
         filtered_matches = []
         for word, evidence in raw_matches:
-            if len(word) > 1 and word not in STOP_WORDS and word not in KNOWN_OCR_FRAGMENTS:
+            if (
+                len(word) > 1
+                and normalize_foreign_term_for_fuzzy_match(word) not in STOP_WORDS_FOLDED
+                and word not in KNOWN_OCR_FRAGMENTS
+            ):
                 filtered_matches.append(word)
                 if evidence:
                     ocr_suspect_evidence.setdefault(word, set()).add(evidence)
@@ -211,7 +231,11 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
         raw_matches = collect_foreign_matches(full_text, ALL_FOREIGN_REGEX)
         filtered_matches = []
         for word, evidence in raw_matches:
-            if len(word) > 1 and word not in STOP_WORDS and word not in KNOWN_OCR_FRAGMENTS:
+            if (
+                len(word) > 1
+                and normalize_foreign_term_for_fuzzy_match(word) not in STOP_WORDS_FOLDED
+                and word not in KNOWN_OCR_FRAGMENTS
+            ):
                 filtered_matches.append(word)
                 if evidence:
                     ocr_suspect_evidence.setdefault(word, set()).add(evidence)
@@ -245,7 +269,7 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
         return v0[len(aa)] <= 2
 
     unique_words = list(counts.keys())
-    unique_words_lower = [w.lower() for w in unique_words]
+    unique_words_lower = [normalize_foreign_term_for_fuzzy_match(w) for w in unique_words]
     
     parent = {w: w for w in unique_words}
     def find(i):

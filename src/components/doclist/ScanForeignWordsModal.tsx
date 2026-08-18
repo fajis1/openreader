@@ -1,9 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ModalFrame } from '@/components/ui';
 import toast from 'react-hot-toast';
 import { useTtsPreviewSettings } from '@/hooks/audio/useTtsPreviewSettings';
 import { BookPronunciationInspectorModal } from './BookPronunciationInspectorModal';
 import { matchesTransliteratedTerm } from '@/lib/shared/transliteration-search';
+import {
+  isAutomaticallyIgnoredForeignWord,
+  prepareForeignWordScanRows,
+  sortForeignWordScanRows,
+} from '@/lib/shared/foreign-word-scan-results';
 
 type SuspectPronunciation = {
   word: string;
@@ -64,7 +69,7 @@ export function ScanForeignWordsModal({
   const [onlyNewPronunciations, setOnlyNewPronunciations] = useState(false);
   const [generateOnlyForNewWords, setGenerateOnlyForNewWords] = useState(true);
   const [forceUseBackupKey, setForceUseBackupKey] = useState(false);
-  const [sortMissingFirst, setSortMissingFirst] = useState(true);
+  const [sortMissingFirst, setSortMissingFirst] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [hideHealthChecks, setHideHealthChecks] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
@@ -93,6 +98,15 @@ export function ScanForeignWordsModal({
   const previewAbortController = useRef<AbortController | null>(null);
   const activePreviewAudio = useRef<HTMLAudioElement | null>(null);
   const activePreviewUrl = useRef<string | null>(null);
+  const preparedWords = useMemo(() => prepareForeignWordScanRows(words), [words]);
+  const ignoredWordCount = useMemo(
+    () => preparedWords.filter(isAutomaticallyIgnoredForeignWord).length,
+    [preparedWords],
+  );
+  const sortedReviewableWords = useMemo(() => sortForeignWordScanRows(
+    preparedWords.filter((word) => !isAutomaticallyIgnoredForeignWord(word)),
+    { pinMissingFirst: sortMissingFirst },
+  ), [preparedWords, sortMissingFirst]);
 
   useEffect(() => {
     modalSession.current += 1;
@@ -254,7 +268,7 @@ export function ScanForeignWordsModal({
     }
   };
 
-  const removeSuspectDefinitions = async () => {
+  const cleanSuspectDefinitions = async () => {
     if (!activeDocId || !suspectDefinitions?.length) return;
     setDefinitionAuditStatus('removing');
     setDefinitionAuditError(null);
@@ -269,13 +283,22 @@ export function ScanForeignWordsModal({
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Definition cleanup failed');
-      const removed = new Set(Array.isArray(data.removed) ? data.removed : []);
+      const cleaned = new Map<string, string | null>(
+        Array.isArray(data.cleaned)
+          ? data.cleaned.map((item: { term: string; definition: string | null }) => [item.term, item.definition] as const)
+          : [],
+      );
       setWords((current) => current.map((word) => (
-        removed.has(word.word)
-          ? { ...word, definition: null, definitionNeedsReview: false, definitionOmitted: true }
+        cleaned.has(word.word)
+          ? {
+            ...word,
+            definition: cleaned.get(word.word) ?? null,
+            definitionNeedsReview: false,
+            definitionOmitted: cleaned.get(word.word) == null,
+          }
           : word
       )));
-      toast.success(`Removed ${removed.size} unusable saved definition${removed.size === 1 ? '' : 's'}.`);
+      toast.success(`Cleaned ${cleaned.size} saved definition${cleaned.size === 1 ? '' : 's'}.`);
       await scanSavedDefinitions();
     } catch (cleanupError) {
       const message = cleanupError instanceof Error ? cleanupError.message : 'Definition cleanup failed';
@@ -870,14 +893,14 @@ export function ScanForeignWordsModal({
                       />
                       Hide health checks
                     </label>
-                    <label className="flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 font-semibold whitespace-nowrap" title="Pin words missing Gemini pronunciations or needing review to the top of the table.">
+                    <label className="flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 font-semibold whitespace-nowrap" title="Optional: override the default combined fuzzy-frequency order by putting missing pronunciations first.">
                       <input
                         type="checkbox"
                         checked={sortMissingFirst}
                         onChange={(event) => setSortMissingFirst(event.target.checked)}
                         disabled={loading}
                       />
-                      📌 Pin missing/failed words to top
+                      📌 Override fuzzy order: missing first
                     </label>
                   </>
                 )}
@@ -954,7 +977,7 @@ export function ScanForeignWordsModal({
                 <div>
                   <h4 className="text-sm font-semibold text-foreground">Saved definition health check</h4>
                   <p className="mt-0.5 text-xs text-soft">
-                    Find placeholder glosses such as &quot;Fragment or inflected form&quot; in this document and remove them from audiobook narration.
+                    Find multiple-meaning glosses, placeholders, and connector-only definitions. Keep one useful meaning and omit entries that should not be narrated.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -969,11 +992,11 @@ export function ScanForeignWordsModal({
                   {suspectDefinitions && suspectDefinitions.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => void removeSuspectDefinitions()}
+                      onClick={() => void cleanSuspectDefinitions()}
                       disabled={definitionAuditStatus === 'scanning' || definitionAuditStatus === 'removing'}
                       className="rounded bg-danger px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {definitionAuditStatus === 'removing' ? 'Removing definitions…' : 'Remove All Suspect Definitions'}
+                      {definitionAuditStatus === 'removing' ? 'Cleaning definitions…' : 'Clean Up All Suspect Definitions'}
                     </button>
                   )}
                 </div>
@@ -1052,7 +1075,17 @@ export function ScanForeignWordsModal({
             <div className="p-4 text-gray-500">Choose the scan settings, then click Start Scan.</div>
           ) : words.length === 0 ? (
             <div className="p-4 text-gray-500">No foreign words found.</div>
+          ) : sortedReviewableWords.length === 0 ? (
+            <div className="p-4 text-gray-500">
+              No reviewable foreign words found. Automatically ignored {ignoredWordCount} extraction artifact{ignoredWordCount === 1 ? '' : 's'} or low-value function term{ignoredWordCount === 1 ? '' : 's'}.
+            </div>
           ) : (
+            <>
+            {ignoredWordCount > 0 && (
+              <div className="mb-3 rounded border border-line bg-surface-sunken px-3 py-2 text-xs text-soft">
+                Automatically hidden: {ignoredWordCount} deterministic extraction artifact{ignoredWordCount === 1 ? '' : 's'} or low-value Greek/Hebrew function term{ignoredWordCount === 1 ? '' : 's'}. Complete words remain reviewable.
+              </div>
+            )}
             <table className="w-full table-fixed text-sm text-left">
               <colgroup>
                 <col className="w-[16%]" />
@@ -1071,21 +1104,10 @@ export function ScanForeignWordsModal({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                {(sortMissingFirst
-                  ? [...words].sort((a, b) => {
-                      const aMissing = (!a.pronunciations || a.pronunciations.length === 0) && !a.userOverride && !a.ocrFragment ? 0 : 1;
-                      const bMissing = (!b.pronunciations || b.pronunciations.length === 0) && !b.userOverride && !b.ocrFragment ? 0 : 1;
-                      if (aMissing !== bMissing) return aMissing - bMissing;
-                      const fuzzyPriority = Number(b.fuzzyGroupCount || b.count || 0)
-                        - Number(a.fuzzyGroupCount || a.count || 0);
-                      if (fuzzyPriority !== 0) return fuzzyPriority;
-                      return b.count - a.count;
-                    })
-                  : words
-                )
+                {sortedReviewableWords
                   .filter((w) => !searchQuery || matchesTransliteratedTerm(w.word, searchQuery))
                   .map((w, i) => {
-                  const isMissing = (!w.pronunciations || w.pronunciations.length === 0) && !w.userOverride && !w.ocrFragment;
+                  const isMissing = (!w.pronunciations || w.pronunciations.length === 0) && !w.userOverride;
                   return (
                   <tr key={i} className={`transition-colors ${isMissing ? 'bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-100/60 dark:hover:bg-amber-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}>
                     <td className="px-4 py-3 font-medium text-lg text-gray-900 dark:text-gray-100 align-top [overflow-wrap:anywhere]">
@@ -1097,11 +1119,6 @@ export function ScanForeignWordsModal({
                             title={`Fuzzy group: ${w.fuzzyGroupVariants.join(', ')}`}
                           >
                             Fuzzy priority · {w.fuzzyGroupCount} combined · {w.fuzzyGroupVariants.length} variants
-                          </span>
-                        )}
-                        {w.ocrFragment && (
-                          <span className="inline-block w-fit rounded bg-surface-sunken px-1.5 py-0.5 text-[10px] font-semibold text-soft border border-line" title={w.automaticIgnoreReason || 'Confirmed OCR fragment'}>
-                            🚫 Ignored extraction artifact
                           </span>
                         )}
                         {isMissing && (
@@ -1152,11 +1169,7 @@ export function ScanForeignWordsModal({
                             </div>
                           );
                           })}
-                        {w.ocrFragment ? (
-                          <span className="text-soft text-xs italic">
-                            Skipped automatically; this extraction artifact will not be added to the pronunciation library.
-                          </span>
-                        ) : (!w.pronunciations || w.pronunciations.length === 0) && (
+                        {(!w.pronunciations || w.pronunciations.length === 0) && (
                           <span className="text-gray-500 text-xs italic">
                             {scanJobStatus === 'queued' || scanJobStatus === 'running'
                               ? 'Waiting for Gemini pronunciation choices…'
@@ -1436,6 +1449,7 @@ export function ScanForeignWordsModal({
                 })}
               </tbody>
             </table>
+            </>
           )}
         </div>
         <div

@@ -71,22 +71,29 @@ export async function DELETE(req: NextRequest) {
         : [],
     );
     const suspects = collectSuspectDefinitions(result.lexicon.entries);
-    const removed = suspects
-      .map(({ term }) => term)
-      .filter((term) => requestedTerms.size === 0 || requestedTerms.has(term));
-    for (const term of removed) {
+    const selected = suspects
+      .filter(({ term }) => requestedTerms.size === 0 || requestedTerms.has(term));
+    const cleaned = selected.map(({ term, definition }) => ({
+      term,
+      definition: normalizeDictionaryDefinition(definition),
+    }));
+    for (const { term, definition } of cleaned) {
       result.lexicon.entries[term] = {
         ...result.lexicon.entries[term],
-        definition: null,
-        definitionOmitted: true,
+        definition,
+        definitionOmitted: definition === null,
         needsReview: false,
       };
     }
-    if (removed.length > 0) {
+    if (cleaned.length > 0) {
       result.lexicon.scannedAt = Date.now();
       await writeBookLexicon(result.userId, documentId, result.lexicon);
     }
-    return NextResponse.json({ removed });
+    return NextResponse.json({
+      cleaned,
+      updated: cleaned.filter(({ definition }) => definition !== null).map(({ term }) => term),
+      removed: cleaned.filter(({ definition }) => definition === null).map(({ term }) => term),
+    });
   } catch (error) {
     return errorResponse(error, {
       logger: serverLogger,

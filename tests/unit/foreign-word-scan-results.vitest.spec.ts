@@ -1,0 +1,64 @@
+import { describe, expect, test } from 'vitest';
+import {
+  getAutomaticForeignWordIgnoreReason,
+  isAutomaticallyIgnoredForeignWord,
+  isLowValueForeignFunctionTerm,
+  prepareForeignWordScanRows,
+  sortForeignWordScanRows,
+} from '@/lib/shared/foreign-word-scan-results';
+
+describe('foreign-word scan result preparation', () => {
+  test('ignores only deterministic extraction artifacts and retains complete words', () => {
+    for (const artifact of [
+      'δ᾽',
+      'σ᾿',
+      'οὐσ',
+      'דמותὁμοίωμα',
+      'מהτί',
+      'σχ',
+      'κλ',
+      'θεός·',
+    ]) {
+      expect(getAutomaticForeignWordIgnoreReason(artifact), artifact).toBeTruthy();
+    }
+    for (const word of ['Θεσμοφόρος', 'θεῷ', 'εἶναι', 'Χριστός', 'θεοῦ']) {
+      expect(getAutomaticForeignWordIgnoreReason(word), word).toBeNull();
+    }
+  });
+
+  test('hides low-value function terms without treating content words as artifacts', () => {
+    for (const term of ['τὸ', 'καὶ', 'τὴν', 'δὲ', 'κατὰ']) {
+      expect(isLowValueForeignFunctionTerm(term), term).toBe(true);
+    }
+    expect(isLowValueForeignFunctionTerm('Θεσμοφόρος')).toBe(false);
+    const [functionRow, contentRow] = prepareForeignWordScanRows([
+      { word: 'τὸ', count: 802, pronunciations: ['/toʊ/'] },
+      { word: 'Θεσμοφόρος', count: 2, pronunciations: [] },
+    ]);
+    expect(isAutomaticallyIgnoredForeignWord(functionRow)).toBe(true);
+    expect(isAutomaticallyIgnoredForeignWord(contentRow)).toBe(false);
+  });
+
+  test('rebuilds accent-insensitive fuzzy groups and sorts by combined frequency', () => {
+    const prepared = prepareForeignWordScanRows([
+      { word: 'Θεσμοφόρος', count: 800, pronunciations: ['/valid/'] },
+      { word: 'ἁρπαγμός', count: 664, pronunciations: ['/one/'] },
+      { word: 'ἅρπαγμα', count: 214, pronunciations: ['/two/'] },
+    ]);
+    const harpagmos = prepared.find((row) => row.word === 'ἁρπαγμός');
+    expect(harpagmos?.fuzzyGroupCount).toBe(878);
+    expect(harpagmos?.fuzzyGroupVariants).toEqual(['ἁρπαγμός', 'ἅρπαγμα']);
+    expect(sortForeignWordScanRows(prepared).map((row) => row.word))
+      .toEqual(['ἁρπαγμός', 'ἅρπαγμα', 'Θεσμοφόρος']);
+  });
+
+  test('uses missing-first only when the user explicitly enables it', () => {
+    const prepared = prepareForeignWordScanRows([
+      { word: 'λόγος', count: 20, pronunciations: ['/loɡos/'] },
+      { word: 'Θεσμοφόρος', count: 2, pronunciations: [] },
+    ]);
+    expect(sortForeignWordScanRows(prepared)[0].word).toBe('λόγος');
+    expect(sortForeignWordScanRows(prepared, { pinMissingFirst: true })[0].word)
+      .toBe('Θεσμοφόρος');
+  });
+});

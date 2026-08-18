@@ -3,6 +3,7 @@ import { requireAuthContext } from '@/lib/server/auth/auth';
 import { mergeGlobalDefinitions } from '@/lib/server/smart-audio/global-definition-library';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { serverLogger } from '@/lib/server/logger';
+import { normalizeDictionaryDefinition } from '@/lib/shared/dictionary-definition-policy';
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,9 +17,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing word' }, { status: 400 });
     }
 
-    await mergeGlobalDefinitions({ [word]: definition || null });
+    const normalizedDefinition = normalizeDictionaryDefinition(definition);
+    await mergeGlobalDefinitions({ [word]: normalizedDefinition });
 
-    return NextResponse.json({ success: true, word, definition: definition || null });
+    return NextResponse.json({ success: true, word, definition: normalizedDefinition });
   } catch (error) {
     return errorResponse(error, {
       logger: serverLogger,

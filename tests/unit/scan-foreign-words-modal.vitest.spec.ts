@@ -72,8 +72,11 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('definitionNeedsReview');
     expect(source).toContain('fuzzyGroupCount');
     expect(source).toContain('Fuzzy priority · {w.fuzzyGroupCount} combined');
-    expect(source).toContain('🚫 Ignored extraction artifact');
-    expect(source).toContain('&& !w.ocrFragment');
+    expect(source).toContain('prepareForeignWordScanRows(words)');
+    expect(source).toContain('sortForeignWordScanRows');
+    expect(source).toContain('Automatically hidden: {ignoredWordCount}');
+    expect(source).toContain('useState(false)');
+    expect(source).toContain('Override fuzzy order: missing first');
   });
 
   test('labels library pronunciations and new Gemini recommendations distinctly', () => {

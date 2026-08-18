@@ -180,14 +180,22 @@ export async function resolveSmartAudioBookLexicon(input: {
   const entries: Record<string, SmartAudioBookLexiconEntry> = Object.fromEntries(
     Object.entries(input.existing?.entries || {})
       .filter(([term]) => candidateTerms.has(term))
-      .map(([term, entry]) => [term, shouldOmitDictionaryDefinition(entry.definition)
-        ? {
-          ...entry,
-          definition: null,
-          definitionOmitted: true,
-          needsReview: false,
-        }
-        : entry]),
+      .map(([term, entry]) => {
+        const definition = normalizeDictionaryDefinition(entry.definition);
+        if (definition === entry.definition) return [term, entry];
+        return [term, definition === null
+          ? {
+            ...entry,
+            definition: null,
+            definitionOmitted: true,
+            needsReview: false,
+          }
+          : {
+            ...entry,
+            definition,
+            definitionOmitted: false,
+          }];
+      }),
   );
   // A valid global or personal pronunciation is already resolved for this
   // document, even if an earlier book-lexicon write was interrupted. Seed it
@@ -247,6 +255,8 @@ export async function resolveSmartAudioBookLexicon(input: {
 
 Create an audiobook lexicon for the following isolated Koine Greek or Biblical Hebrew terms.
 Use the supplied context to choose a short contextual English gloss of one to four words.
+Return exactly one meaning, never a comma-, slash-, semicolon-, "and"-, or "or"-separated list of synonyms or alternatives.
+Do not return a definition that consists only of a common function or connecting word such as "the", "or", "of", "off", or "like"; omit it instead.
 If the context already states the term's definition, return that same concise gloss; OpenReader suppresses duplicate insertion locally.
 If a term is not Koine Greek or Biblical Hebrew, set definition to null.
 If a token is an OCR fragment, an unidentifiable fragment, or an inflected form with no reliable contextual English gloss, return definition as null and definitionOmitted as true. Never return placeholder prose such as "Fragment or inflected form" as the definition.
@@ -353,12 +363,14 @@ ${JSON.stringify(batch)}`;
     );
   });
   if (incomplete.length > 0) {
-    serverLogger.warn(
-      `Gemini did not resolve pronunciation and definition defaults for: ${incomplete
+    serverLogger.warn({
+      event: 'smart_audio.book_lexicon.incomplete',
+      incompleteTerms: incomplete
         .slice(0, 10)
         .map((candidate) => candidate.term)
-        .join(', ')}${incomplete.length > 10 ? '…' : ''}. Proceeding with resolved entries.`
-    );
+        .join(', '),
+      incompleteCount: incomplete.length,
+    }, 'Gemini did not resolve all pronunciation and definition defaults; proceeding with resolved entries.');
   }
 
   return {
@@ -425,6 +437,7 @@ export function enrichTextFromBookLexicon(
   return enriched.replace(pattern, (term, offset: number) => {
     const entry = entriesByTerm.get(term);
     if (!entry) return term;
+    const definition = normalizeDictionaryDefinition(entry.definition);
     const beforeRaw = enriched.slice(0, offset);
     const afterRaw = enriched.slice(offset + term.length);
     // Strip HTML tags so that formatting like <i> or <span> doesn't hide adjacent foreign words
@@ -432,16 +445,16 @@ export function enrichTextFromBookLexicon(
     const after = afterRaw.replace(/<[^>]+>/g, ' ');
     const isIsolated = !FOREIGN_WORD_BEFORE.test(before) && !FOREIGN_WORD_AFTER.test(after);
     const definitionAlreadyPresent = Boolean(
-      entry.definition
-      && nearbyTextAlreadyHasDefinition(enriched, offset, term.length, entry.definition),
+      definition
+      && nearbyTextAlreadyHasDefinition(enriched, offset, term.length, definition),
     );
     if (definitionAlreadyPresent) definedTerms.add(term);
     const spokenDefinition = options.includeDefinitions
       && isIsolated
-      && entry.definition
+      && definition
       && !definitionAlreadyPresent
       && !definedTerms.has(term)
-      ? `, ${entry.definition},`
+      ? `, ${definition},`
       : '';
     if (spokenDefinition) definedTerms.add(term);
     const pronunciation = options.pronunciationOverrides?.[term] || entry.pronunciation;

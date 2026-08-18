@@ -102,6 +102,31 @@ describe('Smart Audio book lexicon', () => {
     );
   });
 
+  test('speaks one useful gloss and suppresses connector-only definitions', () => {
+    const dirtyLexicon: SmartAudioBookLexicon = {
+      ...lexicon,
+      entries: {
+        φρονεῖν: {
+          term: 'φρονεῖν',
+          pronunciation: '/frɒneɪn/',
+          definition: 'to think, set mind',
+          language: 'koine_greek',
+        },
+        καί: {
+          term: 'καί',
+          pronunciation: '/keɪ/',
+          definition: 'or',
+          language: 'koine_greek',
+        },
+      },
+    };
+    expect(enrichTextFromBookLexicon(
+      'The φρονεῖν appears before καί.',
+      dirtyLexicon,
+      { includeDefinitions: true },
+    )).toBe('The [φρονεῖν](/frɒneɪn/), to think, appears before [καί](/keɪ/).');
+  });
+
   test('does not replace a lexicon term inside a longer foreign-script word', () => {
     const prefixLexicon: SmartAudioBookLexicon = {
       ...lexicon,

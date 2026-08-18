@@ -30,6 +30,7 @@ export const GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA = {
       },
       definition: {
         type: ['string', 'null'],
+        description: 'One concise contextual English meaning, never a list of alternative glosses or a function-word-only gloss.',
       },
       definitionOmitted: {
         type: 'boolean',
@@ -220,7 +221,7 @@ export function foreignWordCandidateCacheKey(input: {
   const scopeHash = createHash('sha256')
     .update(JSON.stringify(input))
     .digest('hex');
-  return `foreign_word_candidates:v6:${scopeHash}`;
+  return `foreign_word_candidates:v7:${scopeHash}`;
 }
 
 export function parseForeignWordCandidateCache(value: unknown): unknown[] | null {
@@ -229,7 +230,7 @@ export function parseForeignWordCandidateCache(value: unknown): unknown[] | null
     if (
       !parsed
       || typeof parsed !== 'object'
-      || (parsed as { version?: unknown }).version !== 6
+      || (parsed as { version?: unknown }).version !== 7
       || !Array.isArray((parsed as { words?: unknown }).words)
     ) {
       return null;

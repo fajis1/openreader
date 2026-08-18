@@ -130,6 +130,24 @@ class ForeignWordContextTests(unittest.TestCase):
         self.assertEqual(aethrian["fuzzyGroupVariants"], ["Aethrian", "Aethriann"])
         self.assertNotIn("Common", [item["word"] for item in results])
 
+    def test_folds_accents_for_function_terms_and_fuzzy_priority(self):
+        text = "τὸ καὶ δὲ ἁρπαγμός ἁρπαγμός ἅρπαγμα Θεσμοφόρος"
+        with (
+            patch.object(scan_pdf_foreign_words, "load_pdf_text", return_value=text),
+            patch.object(scan_pdf_foreign_words, "fetch_global_pronunciations", return_value={}),
+        ):
+            results = scan_pdf_foreign_words.scan_pdf_foreign_words(
+                "unused.pdf", target_percentile=100, mode="greek_hebrew", quiet=True,
+            )
+
+        by_word = {item["word"]: item for item in results}
+        self.assertNotIn("τὸ", by_word)
+        self.assertNotIn("καὶ", by_word)
+        self.assertNotIn("δὲ", by_word)
+        self.assertEqual(by_word["ἁρπαγμός"]["fuzzyGroupCount"], 3)
+        self.assertEqual(by_word["ἁρπαγμός"]["fuzzyGroupVariants"], ["ἁρπαγμός", "ἅρπαγμα"])
+        self.assertIn("Θεσμοφόρος", by_word)
+
     def test_marks_safe_extraction_artifacts_for_automatic_ignore(self):
         text = "δ᾽ σ᾿ υἱοθεσ דמותὁμοίωμα Θεσμοφόρος θεός·"
         with (

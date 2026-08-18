@@ -68,7 +68,7 @@ describe('bundled dictionary releases', () => {
     expect(pronunciationPreview.validWords).toBe(2_584);
     expect(pronunciationPreview.validChoices).toBe(9_782);
     expect(definitionPreview.issues).toEqual([]);
-    expect(definitionPreview.validDefinitions).toBe(2_225);
+    expect(definitionPreview.validDefinitions).toBe(1_978);
     expect(Object.keys(parsedTombstones.entries)).toHaveLength(957);
     expect(parsedTombstones.entries['πáντων']?.reasons).toContain('mixed-script-key');
     expect(parsedTombstones.entries['πνεν͂']?.pronunciations?.choices).toContain('/pnuːm/');

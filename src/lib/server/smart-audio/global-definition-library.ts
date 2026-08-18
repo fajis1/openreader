@@ -74,13 +74,18 @@ export async function readGlobalDefinitions(): Promise<Record<string, string>> {
 export async function mergeGlobalDefinitions(
   definitions: Record<string, string | null | undefined>,
 ): Promise<string[]> {
-  const additions = Object.fromEntries(
-    Object.entries(definitions).flatMap(([term, value]) => {
-      const definition = normalizeDictionaryDefinition(value);
-      return definition ? [[term, definition]] : [];
-    }),
-  );
-  if (Object.keys(additions).length === 0) return [];
+  const updates = Object.entries(definitions).flatMap(([term, value]) => (
+    value === undefined ? [] : [[term, normalizeDictionaryDefinition(value)] as const]
+  ));
+  if (updates.length === 0) return [];
+
+  const applyUpdates = (current: Record<string, string>) => {
+    for (const [term, definition] of updates) {
+      if (definition) current[term] = definition;
+      else delete current[term];
+    }
+    return current;
+  };
 
   if (process.env.POSTGRES_URL) {
     return db.transaction(async (tx: typeof db) => {
@@ -88,8 +93,7 @@ export async function mergeGlobalDefinitions(
         .from(adminSettings)
         .where(eq(adminSettings.key, GLOBAL_DEFINITIONS_KEY))
         .limit(1);
-      const current = normalizeGlobalDefinitions(rows[0]?.valueJson || {});
-      Object.assign(current, additions);
+      const current = applyUpdates(normalizeGlobalDefinitions(rows[0]?.valueJson || {}));
       await tx.insert(adminSettings).values({
         key: GLOBAL_DEFINITIONS_KEY,
         valueJson: JSON.stringify(current),
@@ -97,7 +101,7 @@ export async function mergeGlobalDefinitions(
         target: adminSettings.key,
         set: { valueJson: JSON.stringify(current) },
       });
-      return Object.keys(additions);
+      return updates.map(([term]) => term);
     });
   }
 
@@ -107,8 +111,7 @@ export async function mergeGlobalDefinitions(
       .where(eq(adminSettings.key, GLOBAL_DEFINITIONS_KEY))
       .limit(1)
       .all();
-    const current = normalizeGlobalDefinitions(rows[0]?.valueJson || {});
-    Object.assign(current, additions);
+    const current = applyUpdates(normalizeGlobalDefinitions(rows[0]?.valueJson || {}));
     tx.insert(adminSettings).values({
       key: GLOBAL_DEFINITIONS_KEY,
       valueJson: JSON.stringify(current),
@@ -116,6 +119,6 @@ export async function mergeGlobalDefinitions(
       target: adminSettings.key,
       set: { valueJson: JSON.stringify(current) },
     }).run();
-    return Object.keys(additions);
+    return updates.map(([term]) => term);
   });
 }
