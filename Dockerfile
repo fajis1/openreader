@@ -125,7 +125,7 @@ COPY --from=app-builder /app/biblical_scholar_worker.py ./biblical_scholar_worke
 COPY --from=app-builder /app/gemini_rate_limiter.py ./gemini_rate_limiter.py
 COPY --from=app-builder /app/scan_pdf_foreign_words.py ./scan_pdf_foreign_words.py
 RUN python3 -m venv .venv && \
-    .venv/bin/pip install --no-cache-dir nats-py google-genai pydantic pypdf nltk
+    .venv/bin/pip install --no-cache-dir nats-py google-genai pydantic pypdf nltk wordfreq
 
 # Match the app's historical container port now that standalone server.js
 # is started directly instead of `next start -p 3003`.

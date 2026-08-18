@@ -4,6 +4,12 @@ import json
 import sqlite3
 import argparse
 from collections import Counter
+from functools import lru_cache
+
+try:
+    from wordfreq import zipf_frequency
+except ImportError:
+    zipf_frequency = None
 
 # Unicode ranges:
 # Greek: 0370-03FF, 1F00-1FFF
@@ -15,7 +21,9 @@ from collections import Counter
 ALL_FOREIGN_REGEX = re.compile(r'[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF\u0400-\u04FF\u4E00-\u9FFF\u0600-\u06FF\u00C0-\u024F\u1E00-\u1EFF]+')
 GREEK_HEBREW_REGEX = re.compile(r'[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF]+')
 # Fantasy / LitRPG capitalized terms / uncommon non-dictionary words (e.g. Xylar, Eldoria, Statblock terms, Khar'Thok)
-FANTASY_LITRPG_REGEX = re.compile(r"\b[A-Z][a-z]+(?:'[A-Z][a-z]+)?\b|\b[a-zA-Z]*[0-9]+[a-zA-Z]*\b")
+FANTASY_LITRPG_REGEX = re.compile(
+    r"\b[A-Za-z]+(?:'[A-Za-z]+)?\b|\b(?:[A-Za-z]+[0-9]+[A-Za-z]*|[0-9]+[A-Za-z]+[A-Za-z0-9]*)\b"
+)
 ALL_FOREIGN_TERM_CHARS = r"\u0300-\u036F\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF\u0400-\u04FF\u4E00-\u9FFF\u0600-\u06FF\u00C0-\u024F\u1E00-\u1EFF"
 GREEK_HEBREW_TERM_CHARS = r"\u0300-\u036F\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF"
 
@@ -28,6 +36,28 @@ ENGLISH_STOP_WORDS = {
     'Is', 'Are', 'Was', 'Were', 'Be', 'Been', 'Being', 'Have', 'Has', 'Had', 'Do', 'Does', 'Did',
     'Can', 'Could', 'Will', 'Would', 'Shall', 'Should', 'May', 'Might', 'Must', 'Not', 'No', 'So'
 }
+ENGLISH_STOP_WORDS_CASEFOLD = {word.casefold() for word in ENGLISH_STOP_WORDS}
+
+# Words at or above this frequency are familiar enough that Kokoro normally
+# handles them without a book-specific pronunciation.  wordfreq's Zipf scale
+# puts ordinary English vocabulary above this line while invented fantasy
+# names and compounds generally score zero or very close to it.
+STANDARD_ENGLISH_ZIPF_THRESHOLD = 2.5
+
+
+@lru_cache(maxsize=None)
+def is_fantasy_litrpg_candidate(word):
+    """Keep book-specific terms, not ordinary English vocabulary."""
+    normalized = word.casefold()
+    if len(word) <= 2 or normalized in ENGLISH_STOP_WORDS_CASEFOLD:
+        return False
+    if any(char.isdigit() for char in word):
+        return True
+    if zipf_frequency is None:
+        raise RuntimeError(
+            "Fantasy/LitRPG scanning requires the wordfreq Python package."
+        )
+    return zipf_frequency(normalized, 'en') < STANDARD_ENGLISH_ZIPF_THRESHOLD
 
 STOP_WORDS = {
     'ὁ', 'ἡ', 'τό', 'τοῦ', 'τῆς', 'τῷ', 'τήν', 'τόν', 'οἱ', 'αἱ', 'τά', 'τῶν', 'τοῖς', 'ταῖς', 'τούς', 'τάς',
@@ -148,7 +178,7 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
     if mode == "fantasy_litrpg":
         raw_matches = FANTASY_LITRPG_REGEX.findall(full_text)
         cleaned_matches = [m.strip('.,;:!?·\'"()[]{}«»') for m in raw_matches]
-        filtered_matches = [m for m in cleaned_matches if len(m) > 2 and m not in ENGLISH_STOP_WORDS]
+        filtered_matches = [m for m in cleaned_matches if is_fantasy_litrpg_candidate(m)]
     elif mode == "greek_hebrew":
         raw_matches = collect_foreign_matches(full_text, GREEK_HEBREW_REGEX)
         filtered_matches = []
