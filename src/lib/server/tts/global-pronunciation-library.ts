@@ -12,6 +12,12 @@ export type GlobalPronunciationChoice = {
 
 export type GlobalPronunciationLibrary = Record<string, GlobalPronunciationChoice[]>;
 
+export function isMachineGeneratedGlobalPronunciationChoice(
+  choice: GlobalPronunciationChoice,
+): boolean {
+  return choice.isUserCustom === false && typeof choice.timestamp === 'number';
+}
+
 export type GlobalPronunciationImportIssue = {
   word: string;
   pronunciation?: string;

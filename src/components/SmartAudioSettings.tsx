@@ -92,6 +92,14 @@ type GlobalPronunciationImportPreview = {
   definitionIssues: Array<{ term: string; reason: string }>;
 };
 
+type CommonEnglishCandidate = {
+  word: string;
+  zipfFrequency: number;
+  choices: string[];
+  removable: boolean;
+  protectedChoices: number;
+};
+
 export function SmartAudioSettings() {
   const { data: session } = useAuthSession();
   const previewSettings = useTtsPreviewSettings();
@@ -146,6 +154,10 @@ export function SmartAudioSettings() {
   const [globalImportPreview, setGlobalImportPreview] = useState<GlobalPronunciationImportPreview | null>(null);
   const [replaceImportedGlobalEntries, setReplaceImportedGlobalEntries] = useState(false);
   const [isImportingGlobalPronunciations, setIsImportingGlobalPronunciations] = useState(false);
+  const [commonEnglishCandidates, setCommonEnglishCandidates] = useState<CommonEnglishCandidate[] | null>(null);
+  const [selectedCommonEnglishWords, setSelectedCommonEnglishWords] = useState<string[]>([]);
+  const [isScanningCommonEnglish, setIsScanningCommonEnglish] = useState(false);
+  const [isRemovingCommonEnglish, setIsRemovingCommonEnglish] = useState(false);
 
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
@@ -335,6 +347,54 @@ export function SmartAudioSettings() {
       console.error(err);
     } finally {
       setIsLoadingGlobal(false);
+    }
+  };
+
+  const scanCommonEnglishPronunciations = async () => {
+    setIsScanningCommonEnglish(true);
+    try {
+      const response = await fetch('/api/tts/global-pronunciations/common-english', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'scan' }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Common-English scan failed.');
+      const candidates = Array.isArray(data.candidates) ? data.candidates as CommonEnglishCandidate[] : [];
+      setCommonEnglishCandidates(candidates);
+      setSelectedCommonEnglishWords(candidates.filter((candidate) => candidate.removable).map((candidate) => candidate.word));
+      toast.success(`Found ${candidates.length} machine-generated common-English ${candidates.length === 1 ? 'entry' : 'entries'}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Common-English scan failed.');
+    } finally {
+      setIsScanningCommonEnglish(false);
+    }
+  };
+
+  const removeSelectedCommonEnglishPronunciations = async () => {
+    if (selectedCommonEnglishWords.length === 0) return;
+    if (!window.confirm(
+      `Remove ${selectedCommonEnglishWords.length} selected common-English ${selectedCommonEnglishWords.length === 1 ? 'word' : 'words'} from the global dictionary, global definitions, and every saved book lexicon? Human-created choices are protected.`,
+    )) return;
+    setIsRemovingCommonEnglish(true);
+    try {
+      const response = await fetch('/api/tts/global-pronunciations/common-english', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', words: selectedCommonEnglishWords }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Failed to remove common-English entries.');
+      toast.success(
+        `Removed ${data.removedWords?.length || 0} global words and ${data.bookLexiconEntriesRemoved || 0} linked book ${data.bookLexiconEntriesRemoved === 1 ? 'entry' : 'entries'}.`,
+      );
+      setCommonEnglishCandidates(null);
+      setSelectedCommonEnglishWords([]);
+      await loadGlobalPronunciations();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to remove common-English entries.');
+    } finally {
+      setIsRemovingCommonEnglish(false);
     }
   };
 
@@ -1653,6 +1713,96 @@ export function SmartAudioSettings() {
             })()}
 
             <div className="p-4 overflow-y-auto flex-1">
+              {isAdmin && (
+                <div className="mb-4 rounded border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-blue-950 dark:text-blue-100">Common-English cleanup</p>
+                      <p className="mt-1 text-xs text-blue-800 dark:text-blue-200">
+                        Finds ordinary English words added automatically by earlier scans. Human-created and legacy entries are protected.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isScanningCommonEnglish || isRemovingCommonEnglish}
+                      onClick={() => void scanCommonEnglishPronunciations()}
+                      className="rounded bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
+                    >
+                      {isScanningCommonEnglish ? 'Scanning…' : 'Scan Regular English'}
+                    </button>
+                  </div>
+                  {commonEnglishCandidates !== null && (
+                    <div className="mt-3 border-t border-blue-200 pt-3 dark:border-blue-900">
+                      {commonEnglishCandidates.length === 0 ? (
+                        <p className="text-xs text-blue-800 dark:text-blue-200">No machine-generated common-English entries were found.</p>
+                      ) : (
+                        <>
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs text-blue-900 dark:text-blue-100">
+                              Review {commonEnglishCandidates.length} matches. Higher frequency means more ordinary English.
+                            </p>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedCommonEnglishWords(
+                                  commonEnglishCandidates.filter((candidate) => candidate.removable).map((candidate) => candidate.word),
+                                )}
+                                className="text-xs font-semibold text-blue-800 hover:underline dark:text-blue-200"
+                              >
+                                Select removable
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedCommonEnglishWords([])}
+                                className="text-xs font-semibold text-blue-800 hover:underline dark:text-blue-200"
+                              >
+                                Clear
+                              </button>
+                            </div>
+                          </div>
+                          <ul className="max-h-56 space-y-1 overflow-y-auto rounded border border-blue-200 bg-white p-2 dark:border-blue-900 dark:bg-gray-950">
+                            {commonEnglishCandidates.map((candidate) => (
+                              <li key={candidate.word}>
+                                <label className={`flex items-start gap-2 rounded px-2 py-1 text-xs ${candidate.removable ? 'hover:bg-blue-50 dark:hover:bg-blue-950/40' : 'opacity-60'}`}>
+                                  <input
+                                    type="checkbox"
+                                    disabled={!candidate.removable || isRemovingCommonEnglish}
+                                    checked={selectedCommonEnglishWords.includes(candidate.word)}
+                                    onChange={(event) => setSelectedCommonEnglishWords((current) => (
+                                      event.target.checked
+                                        ? [...new Set([...current, candidate.word])]
+                                        : current.filter((word) => word !== candidate.word)
+                                    ))}
+                                    className="mt-0.5"
+                                  />
+                                  <span className="min-w-0 flex-1">
+                                    <strong>{candidate.word}</strong>
+                                    <span className="ml-2 text-gray-500">English frequency {candidate.zipfFrequency.toFixed(2)}</span>
+                                    <span className="block truncate font-mono text-[10px] text-gray-500">{candidate.choices.join(' · ')}</span>
+                                    {!candidate.removable && (
+                                      <span className="block text-amber-700 dark:text-amber-300">Protected: contains {candidate.protectedChoices} human or legacy choice.</span>
+                                    )}
+                                  </span>
+                                </label>
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="mt-3 flex justify-end">
+                            <button
+                              type="button"
+                              disabled={selectedCommonEnglishWords.length === 0 || isRemovingCommonEnglish}
+                              onClick={() => void removeSelectedCommonEnglishPronunciations()}
+                              className="rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                            >
+                              {isRemovingCommonEnglish ? 'Removing…' : `Remove Selected (${selectedCommonEnglishWords.length})`}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               {!isLoadingGlobal && globalPronunciations.length > 0 && (
                 <div className="mb-4 rounded border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
                   <div className="flex flex-wrap items-center gap-2">

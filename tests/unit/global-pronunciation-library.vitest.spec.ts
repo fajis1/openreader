@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import {
+  isMachineGeneratedGlobalPronunciationChoice,
   replaceGlobalPronunciationChoices,
   recordLearnedGlobalPronunciation,
   promoteHumanGlobalPronunciation,
@@ -19,6 +20,40 @@ describe('global pronunciation administration', () => {
       { phonetic: '/stixia/', usageCount: 1 },
     ],
   };
+
+  test('distinguishes scanner-generated choices from human and legacy choices', () => {
+    expect(isMachineGeneratedGlobalPronunciationChoice({
+      phonetic: '/ðə/',
+      isUserCustom: false,
+      timestamp: 123,
+    })).toBe(true);
+    expect(isMachineGeneratedGlobalPronunciationChoice({
+      phonetic: '/ðə/',
+      isUserCustom: true,
+      timestamp: 123,
+    })).toBe(false);
+    expect(isMachineGeneratedGlobalPronunciationChoice({ phonetic: '/ðə/' })).toBe(false);
+  });
+
+  test('admin common-English cleanup is previewed, rechecked, and removes linked lexicons', () => {
+    const route = fs.readFileSync(
+      path.join(process.cwd(), 'src/app/api/tts/global-pronunciations/common-english/route.ts'),
+      'utf8',
+    );
+    const settings = fs.readFileSync(
+      path.join(process.cwd(), 'src/components/SmartAudioSettings.tsx'),
+      'utf8',
+    );
+    expect(route).toContain('requireAdminContext(request)');
+    expect(route).toContain("body.action === 'scan'");
+    expect(route).toContain("body.action !== 'remove'");
+    expect(route).toContain('classifyCommonEnglishWords(requested)');
+    expect(route).toContain('isMachineGeneratedGlobalPronunciationChoice');
+    expect(route).toContain('delete lexicon.entries[word]');
+    expect(settings).toContain('Scan Regular English');
+    expect(settings).toContain('Remove Selected');
+    expect(settings).toContain('Human-created choices are protected');
+  });
 
   test('moves an existing choice to the first/default position and repairs wrappers', () => {
     expect(setGlobalPronunciationDefault(library, 'στοιχεῖα', 'stixia')).toEqual([

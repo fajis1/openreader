@@ -59,6 +59,22 @@ def is_fantasy_litrpg_candidate(word):
         )
     return zipf_frequency(normalized, 'en') < STANDARD_ENGLISH_ZIPF_THRESHOLD
 
+
+def classify_standard_english_words(words):
+    """Return English-frequency evidence for dictionary cleanup previews."""
+    if zipf_frequency is None:
+        raise RuntimeError(
+            "English dictionary cleanup requires the wordfreq Python package."
+        )
+    results = []
+    for word in words:
+        if not isinstance(word, str) or not re.fullmatch(r"[A-Za-z]+(?:'[A-Za-z]+)?", word):
+            continue
+        score = zipf_frequency(word.casefold(), 'en')
+        if score >= STANDARD_ENGLISH_ZIPF_THRESHOLD:
+            results.append({"word": word, "zipfFrequency": round(score, 3)})
+    return results
+
 STOP_WORDS = {
     'ὁ', 'ἡ', 'τό', 'τοῦ', 'τῆς', 'τῷ', 'τήν', 'τόν', 'οἱ', 'αἱ', 'τά', 'τῶν', 'τοῖς', 'ταῖς', 'τούς', 'τάς',
     'καί', 'δέ', 'τε', 'γάρ', 'ἀλλά', 'μή', 'οὐ', 'οὐκ', 'οὐχ', 'ἐν', 'εἰς', 'ἐκ', 'ἐξ', 'πρός', 'ἀπό', 'διά',
@@ -359,14 +375,25 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
 
 def main():
     parser = argparse.ArgumentParser(description="Scan PDF for foreign words / LitRPG terms and output frequencies.")
-    parser.add_argument("pdf_path", help="Path to the PDF file")
+    parser.add_argument("pdf_path", nargs="?", help="Path to the PDF file")
     parser.add_argument("--db", default="drizzle/sqlite.db", help="Path to SQLite database")
     parser.add_argument("--target", type=float, default=80.0, help="Target percentage threshold (80.0 or 100.0)")
     parser.add_argument("--mode", default="all_foreign", choices=["all_foreign", "fantasy_litrpg", "greek_hebrew", "custom"], help="Scanning mode")
     parser.add_argument("--query", default=None, help="Custom search query term")
     parser.add_argument("--json", action="store_true", help="Output raw JSON format")
+    parser.add_argument("--classify-english-json", default=None, help="Classify words from a JSON file for admin cleanup")
 
     args = parser.parse_args()
+
+    if args.classify_english_json:
+        with open(args.classify_english_json, "r", encoding="utf-8") as source:
+            words = json.load(source)
+        if not isinstance(words, list):
+            raise ValueError("English cleanup input must be a JSON array.")
+        print(json.dumps(classify_standard_english_words(words), ensure_ascii=False))
+        return
+    if not args.pdf_path:
+        parser.error("pdf_path is required unless --classify-english-json is used")
 
     results = scan_pdf_foreign_words(args.pdf_path, args.db, args.target, mode=args.mode, query=args.query, quiet=args.json)
 

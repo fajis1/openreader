@@ -5,6 +5,26 @@ import scan_pdf_foreign_words
 
 
 class ForeignWordContextTests(unittest.TestCase):
+    def test_classifies_only_frequent_english_dictionary_words(self):
+        scores = {"the": 7.7, "dungeon": 4.1, "aethrian": 0.0, "don't": 6.2}
+        with patch.object(
+            scan_pdf_foreign_words,
+            "zipf_frequency",
+            side_effect=lambda word, _language: scores.get(word, 0.0),
+        ):
+            results = scan_pdf_foreign_words.classify_standard_english_words(
+                ["The", "Dungeon", "Aethrian", "don't", "Rank42", "λόγος"],
+            )
+
+        self.assertEqual(
+            results,
+            [
+                {"word": "The", "zipfFrequency": 7.7},
+                {"word": "Dungeon", "zipfFrequency": 4.1},
+                {"word": "don't", "zipfFrequency": 6.2},
+            ],
+        )
+
     def test_litrpg_mode_rejects_standard_english_and_keeps_book_terms(self):
         text = (
             "The hero entered the Dungeon with Aethrian and cast manamancy. "
