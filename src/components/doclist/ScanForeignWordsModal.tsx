@@ -1118,7 +1118,7 @@ export function ScanForeignWordsModal({
                             className="inline-block w-fit rounded bg-accent-wash px-1.5 py-0.5 text-[10px] font-semibold text-accent border border-accent-line"
                             title={`Fuzzy group: ${w.fuzzyGroupVariants.join(', ')}`}
                           >
-                            Fuzzy priority · {w.fuzzyGroupCount} combined · {w.fuzzyGroupVariants.length} variants
+                            Fuzzy priority · {w.fuzzyGroupCount} combined · {w.fuzzyGroupVariants.length} direct variants
                           </span>
                         )}
                         {isMissing && (

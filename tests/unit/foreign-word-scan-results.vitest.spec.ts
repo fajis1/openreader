@@ -52,6 +52,20 @@ describe('foreign-word scan result preparation', () => {
       .toEqual(['ἁρπαγμός', 'ἅρπαγμα', 'Θεσμοφόρος']);
   });
 
+  test('does not chain indirect fuzzy matches into one group', () => {
+    const prepared = prepareForeignWordScanRows([
+      { word: 'Aaaa', count: 3, pronunciations: [] },
+      { word: 'Aabb', count: 2, pronunciations: [] },
+      { word: 'Bbbb', count: 1, pronunciations: [] },
+    ]);
+    const byWord = Object.fromEntries(prepared.map((row) => [row.word, row]));
+
+    expect(byWord.Aaaa.fuzzyGroupCount).toBe(5);
+    expect(byWord.Aaaa.fuzzyGroupVariants).toEqual(['Aaaa', 'Aabb']);
+    expect(byWord.Bbbb.fuzzyGroupCount).toBe(1);
+    expect(byWord.Bbbb.fuzzyGroupVariants).toEqual(['Bbbb']);
+  });
+
   test('uses missing-first only when the user explicitly enables it', () => {
     const prepared = prepareForeignWordScanRows([
       { word: 'λόγος', count: 20, pronunciations: ['/loɡos/'] },

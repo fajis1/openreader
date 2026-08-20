@@ -130,6 +130,26 @@ class ForeignWordContextTests(unittest.TestCase):
         self.assertEqual(aethrian["fuzzyGroupVariants"], ["Aethrian", "Aethriann"])
         self.assertNotIn("Common", [item["word"] for item in results])
 
+    def test_does_not_chain_indirect_fuzzy_matches_into_one_group(self):
+        text = "Aaaa Aaaa Aaaa Aabb Aabb Bbbb"
+        with (
+            patch.object(scan_pdf_foreign_words, "load_pdf_text", return_value=text),
+            patch.object(scan_pdf_foreign_words, "fetch_global_pronunciations", return_value={}),
+            patch.object(scan_pdf_foreign_words, "zipf_frequency", return_value=0.0),
+        ):
+            results = scan_pdf_foreign_words.scan_pdf_foreign_words(
+                "unused.pdf",
+                target_percentile=100,
+                mode="fantasy_litrpg",
+                quiet=True,
+            )
+
+        by_word = {item["word"]: item for item in results}
+        self.assertEqual(by_word["Aaaa"]["fuzzyGroupCount"], 5)
+        self.assertEqual(by_word["Aaaa"]["fuzzyGroupVariants"], ["Aaaa", "Aabb"])
+        self.assertEqual(by_word["Bbbb"]["fuzzyGroupCount"], 1)
+        self.assertEqual(by_word["Bbbb"]["fuzzyGroupVariants"], ["Bbbb"])
+
     def test_folds_accents_for_function_terms_and_fuzzy_priority(self):
         text = "τὸ καὶ δὲ ἁρπαγμός ἁρπαγμός ἅρπαγμα Θεσμοφόρος"
         with (

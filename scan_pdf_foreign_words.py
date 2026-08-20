@@ -44,6 +44,7 @@ ENGLISH_STOP_WORDS_CASEFOLD = {word.casefold() for word in ENGLISH_STOP_WORDS}
 # puts ordinary English vocabulary above this line while invented fantasy
 # names and compounds generally score zero or very close to it.
 STANDARD_ENGLISH_ZIPF_THRESHOLD = 2.5
+MAX_FUZZY_GROUP_VARIANTS = 25
 
 
 @lru_cache(maxsize=None)
@@ -271,24 +272,6 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
     unique_words = list(counts.keys())
     unique_words_lower = [normalize_foreign_term_for_fuzzy_match(w) for w in unique_words]
     
-    parent = {w: w for w in unique_words}
-    def find(i):
-        if parent[i] == i: return i
-        parent[i] = find(parent[i])
-        return parent[i]
-    
-    def union(i, j):
-        root_i = find(i)
-        root_j = find(j)
-        if root_i != root_j:
-            parent[root_i] = root_j
-
-    for i, w1 in enumerate(unique_words_lower):
-        for j in range(i + 1, len(unique_words_lower)):
-            w2 = unique_words_lower[j]
-            if is_similar(w1, w2):
-                union(unique_words[i], unique_words[j])
-
     PRONOUNS_AND_ARTICLES = {
         "the", "a", "an", "this", "that", "these", "those",
         "i", "me", "my", "mine", "we", "us", "our", "ours",
@@ -298,14 +281,31 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
         "who", "whom", "whose", "which", "what"
     }
 
-    groups = {}
-    for w in unique_words:
-        root = find(w)
-        groups.setdefault(root, []).append(w)
+    # Anchor each group on its most frequent unassigned spelling. Members must
+    # match that anchor directly; do not union A~B and B~C into an A~C chain.
+    # A small cap is a final guard against a very broad OCR neighborhood
+    # dominating the priority list.
+    normalized_by_word = dict(zip(unique_words, unique_words_lower))
+    ordered_anchors = sorted(
+        unique_words,
+        key=lambda word: (-counts[word], word.casefold()),
+    )
+    assigned_words = set()
+    groups = []
+    for anchor in ordered_anchors:
+        if anchor in assigned_words:
+            continue
+        direct_matches = [
+            word for word in ordered_anchors
+            if word not in assigned_words
+            and is_similar(normalized_by_word[anchor], normalized_by_word[word])
+        ][:MAX_FUZZY_GROUP_VARIANTS]
+        assigned_words.update(direct_matches)
+        groups.append(direct_matches)
         
     word_sort_weight = {}
     fuzzy_group_metadata = {}
-    for root, members in groups.items():
+    for members in groups:
         group_sum = sum(counts[m] for m in members)
         # Deflate if any member of the group is a pronoun or article
         is_deflated = any(m.lower() in PRONOUNS_AND_ARTICLES for m in members)

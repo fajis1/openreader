@@ -23,6 +23,7 @@ const HEBREW = /\p{Script=Hebrew}/u;
 const GREEK_ELISION = /^[\p{Script=Greek}][\u1FBD\u1FBF'’]$/u;
 const TRAILING_SCAN_PUNCTUATION = /[··.,;:!?]$/u;
 const GREEK_CONSONANTS = new Set('βγδζθκλμνξπρστφχψ'.split(''));
+const MAX_FUZZY_GROUP_VARIANTS = 25;
 
 // These terms are real words, but they are low-value articles, conjunctions,
 // particles, and prepositions that do not need a reusable audiobook entry.
@@ -126,30 +127,25 @@ export function prepareForeignWordScanRows<T extends ForeignWordScanResultRow>(
   const reviewableIndexes = rows
     .map((row, index) => ({ row, index }))
     .filter(({ row }) => row.ocrFragment !== true && row.automaticIgnore !== true);
-  const parents = reviewableIndexes.map((_, index) => index);
   const normalized = reviewableIndexes.map(({ row }) => normalizeForeignWordForFuzzyMatch(row.word));
-  const find = (index: number): number => {
-    if (parents[index] !== index) parents[index] = find(parents[index]);
-    return parents[index];
-  };
-  const union = (left: number, right: number) => {
-    const leftRoot = find(left);
-    const rightRoot = find(right);
-    if (leftRoot !== rightRoot) parents[leftRoot] = rightRoot;
-  };
-
-  for (let left = 0; left < normalized.length; left += 1) {
-    for (let right = left + 1; right < normalized.length; right += 1) {
-      if (isFuzzyMatch(normalized[left], normalized[right])) union(left, right);
-    }
+  const orderedAnchors = reviewableIndexes
+    .map((_, index) => index)
+    .sort((left, right) => Number(reviewableIndexes[right].row.count || 0)
+      - Number(reviewableIndexes[left].row.count || 0)
+      || reviewableIndexes[left].row.word.localeCompare(reviewableIndexes[right].row.word));
+  const assigned = new Set<number>();
+  const groups: number[][] = [];
+  for (const anchor of orderedAnchors) {
+    if (assigned.has(anchor)) continue;
+    const directMatches = orderedAnchors
+      .filter((candidate) => !assigned.has(candidate)
+        && isFuzzyMatch(normalized[anchor], normalized[candidate]))
+      .slice(0, MAX_FUZZY_GROUP_VARIANTS);
+    directMatches.forEach((member) => assigned.add(member));
+    groups.push(directMatches);
   }
 
-  const groups = new Map<number, number[]>();
-  for (let index = 0; index < reviewableIndexes.length; index += 1) {
-    const root = find(index);
-    groups.set(root, [...(groups.get(root) || []), index]);
-  }
-  for (const members of groups.values()) {
+  for (const members of groups) {
     const groupCount = members.reduce(
       (total, member) => total + Number(reviewableIndexes[member].row.count || 0),
       0,

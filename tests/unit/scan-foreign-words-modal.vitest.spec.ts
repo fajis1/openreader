@@ -71,7 +71,7 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('English Definition');
     expect(source).toContain('definitionNeedsReview');
     expect(source).toContain('fuzzyGroupCount');
-    expect(source).toContain('Fuzzy priority · {w.fuzzyGroupCount} combined');
+    expect(source).toContain('Fuzzy priority · {w.fuzzyGroupCount} combined · {w.fuzzyGroupVariants.length} direct variants');
     expect(source).toContain('prepareForeignWordScanRows(words)');
     expect(source).toContain('sortForeignWordScanRows');
     expect(source).toContain('Automatically hidden: {ignoredWordCount}');

@@ -194,7 +194,7 @@ export async function POST(req: NextRequest) {
           if (!Array.isArray(words)) {
             throw new Error('PDF foreign-word scanner returned an invalid candidate list.');
           }
-          const cachedCandidates = JSON.stringify({ version: 7, words });
+          const cachedCandidates = JSON.stringify({ version: 8, words });
           await db.insert(adminSettings).values({
             key: candidateCacheKey,
             valueJson: cachedCandidates,
