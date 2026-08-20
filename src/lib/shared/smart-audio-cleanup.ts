@@ -16,6 +16,8 @@ export const FINAL_SMART_AUDIO_PRONUNCIATION_CHECK = `FINAL PRONUNCIATION-MARKUP
   VALID: [θετὸν](/θɛtɒn/)
 - INVALID: [υἱοῦσθαι](/juoʊsθaɪ/) (the rough-breathing υἱ- onset must retain its h sound)
   VALID: [υἱοῦσθαι](/huioʊsθaɪ/)
+- INVALID: [ἡgούμενοι](/heɪɡumɛnoɪ/) (Latin g is OCR corruption inside a Greek word)
+  VALID: [ἡγούμενοι](/heɪɡumɛnoɪ/)
 - Before responding, scan every [...](/.../) tag and correct any violation.`;
 
 export const REQUIRED_SMART_AUDIO_CLEANUP_INSTRUCTIONS = `
@@ -89,6 +91,19 @@ function scriptCount(value: string): number {
   ].filter(Boolean).length;
 }
 
+function repairUnambiguousGreekOcrSubstitution(word: string): string {
+  if (!/\p{Script=Greek}/u.test(word) || /\p{Script=Hebrew}/u.test(word)) return word;
+  const latinLetters = word.match(/\p{Script=Latin}/gu) || [];
+  if (latinLetters.length !== 1) return word;
+  const replacement = latinLetters[0] === 'g'
+    ? 'γ'
+    : latinLetters[0] === 'G'
+      ? 'Γ'
+      : null;
+  if (!replacement) return word;
+  return word.replace(/\p{Script=Latin}/u, replacement);
+}
+
 function assertSingleScriptWord(word: string): void {
   if (scriptCount(word) > 1) {
     throw new SmartAudioOutputValidationError(
@@ -125,7 +140,10 @@ function rewriteSmartAudioPronunciationTags(
   return text.replace(KOKORO_PRONUNCIATION_TAG, (_tag, rawTerm: string, rawIpa: string) => {
     const term = rawTerm.trim();
     const ipa = rawIpa.trim();
-    const termWords = term.split(/\s+/u).filter(Boolean);
+    const termWords = term
+      .split(/\s+/u)
+      .filter(Boolean)
+      .map(repairUnambiguousGreekOcrSubstitution);
     const ipaWords = ipa.split(/\s+/u).filter(Boolean);
 
     if (termWords.length !== ipaWords.length) {

@@ -115,10 +115,13 @@ describe('Smart Audio cleanup contract', () => {
     )).toBe('[καὶ](/kaɪ/) [τὸ](/toʊ/) [ἄγιον](/ɑɡioʊn/) [βάπτισμα](/bɑptɪsmɑ/)');
   });
 
-  test('rejects unalignable phrases and mixed-script OCR before TTS', () => {
+  test('repairs an unambiguous Greek OCR substitution but rejects ambiguous mixed-script text', () => {
     expect(() => normalizeSmartAudioPronunciationTags(
       '[τὴν θέσιν](/teɪn/)',
     )).toThrow('cannot be aligned safely');
+    expect(normalizeSmartAudioPronunciationTags(
+      '[ἡgούμενοι](/heɪɡumɛnoɪ/)',
+    )).toBe('[ἡγούμενοι](/heɪɡumɛnoɪ/)');
     expect(() => normalizeSmartAudioPronunciationTags(
       '[ἄγiov](/ɑɡioʊn/)',
     )).toThrow('mixed-script OCR text');
@@ -153,6 +156,13 @@ describe('Smart Audio cleanup contract', () => {
     }, {
       authoritativePronunciations: { 'ὑμῖν': '/hjumin/' },
     })).toEqual({ outcome: 'cleaned', text: '[ὑμῖν](/hjumin/)' });
+    expect(resolveSmartAudioWorkerResult({
+      status: 'success',
+      outcome: 'cleaned',
+      cleaned_text: '[ἡgούμενοι](/wrong/)',
+    }, {
+      authoritativePronunciations: { 'ἡγούμενοι': '/heɪɡumɛnoɪ/' },
+    })).toEqual({ outcome: 'cleaned', text: '[ἡγούμενοι](/heɪɡumɛnoɪ/)' });
   });
 
   test('reconciles split phrase tags and canonically equivalent Unicode without changing visible text', () => {

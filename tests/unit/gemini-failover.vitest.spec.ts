@@ -73,7 +73,54 @@ describe('Gemini key failover', () => {
     );
   });
 
-  test('does not hide credentials, quota, transient, or ordinary bad-request errors behind a model change', async () => {
+  test('falls back to the next model after sustained HTTP 503 overload', async () => {
+    const request = vi.fn();
+    for (let i = 0; i < 16; i += 1) {
+      request.mockResolvedValueOnce(new Response('model is overloaded', { status: 503 }));
+    }
+    request.mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    const onStatusUpdate = vi.fn();
+
+    const result = await fetchGeminiWithRateLimitFallback({
+      primaryApiKey: 'primary-placeholder',
+      backupApiKey: 'backup-placeholder',
+      requestedModel: 'gemini-3.7-flash',
+      request,
+      onStatusUpdate,
+      initialDelayMs: 0,
+    });
+
+    expect(result.response.status).toBe(200);
+    expect(result.usedBackup).toBe(false);
+    expect(result.requestedModel).toBe('gemini-3.7-flash');
+    expect(result.usedModel).toBe('gemini-3.6-flash');
+    expect(result.usedModelFallback).toBe(true);
+    expect(request).toHaveBeenNthCalledWith(1, 'primary-placeholder', 'gemini-3.7-flash');
+    expect(request).toHaveBeenNthCalledWith(9, 'backup-placeholder', 'gemini-3.7-flash');
+    expect(request).toHaveBeenNthCalledWith(17, 'primary-placeholder', 'gemini-3.6-flash');
+    expect(onStatusUpdate).toHaveBeenCalledWith(
+      'gemini-3.7-flash remained overloaded after retries. Using gemini-3.6-flash for this request.',
+    );
+  });
+
+  test('does not change models after HTTP 429 quota exhaustion', async () => {
+    const request = vi.fn().mockResolvedValue(new Response('quota exceeded', { status: 429 }));
+
+    const result = await fetchGeminiWithRateLimitFallback({
+      primaryApiKey: 'primary-placeholder',
+      requestedModel: 'gemini-3.7-flash',
+      request,
+      initialDelayMs: 0,
+    });
+
+    expect(result.response.status).toBe(429);
+    expect(result.usedModel).toBe('gemini-3.7-flash');
+    expect(result.usedModelFallback).toBe(false);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith('primary-placeholder', 'gemini-3.7-flash');
+  });
+
+  test('classifies only definitive unavailable-model responses as unavailable', async () => {
     for (const response of [
       new Response('forbidden', { status: 403 }),
       new Response('quota exceeded', { status: 429 }),

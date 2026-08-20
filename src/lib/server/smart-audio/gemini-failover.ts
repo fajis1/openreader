@@ -53,7 +53,7 @@ async function fetchWithExponentialBackoff(
           if (lowerBody.includes('quota') || lowerBody.includes('spending cap') || lowerBody.includes('billing')) {
             return response;
           }
-        } catch (e) {
+        } catch {
           // ignore
         }
       }
@@ -70,7 +70,7 @@ async function fetchWithExponentialBackoff(
         attempt,
         maxAttempts: MAX_ATTEMPTS,
         nextDelaySeconds: delaySeconds,
-      }, msg);
+      }, 'Retrying Gemini request after a transient HTTP response');
 
       if (onStatusUpdate) {
         await onStatusUpdate(msg);
@@ -88,7 +88,7 @@ async function fetchWithExponentialBackoff(
         maxAttempts: MAX_ATTEMPTS,
         nextDelaySeconds: delaySeconds,
         error: error instanceof Error ? error.message : error,
-      }, msg);
+      }, 'Retrying Gemini request after a network error');
 
       if (onStatusUpdate) {
         await onStatusUpdate(msg);
@@ -129,7 +129,7 @@ async function fetchGeminiWithKeyFallback(
     event: 'gemini.failover.backup_key',
     primaryHttpStatus: primaryResponse.status,
     backupMasked,
-  }, failoverMsg);
+  }, 'Switching to the backup Gemini API key');
 
   if (input.onStatusUpdate) {
     await input.onStatusUpdate(failoverMsg);
@@ -163,6 +163,19 @@ export async function isGeminiModelUnavailableResponse(response: Response): Prom
     || /models?\/[\w.-]+[^\n]{0,120}(?:not found|not supported|not available)/i.test(body);
 }
 
+type GeminiModelFallbackReason = 'unavailable' | 'overloaded';
+
+async function getGeminiModelFallbackReason(
+  response: Response,
+): Promise<GeminiModelFallbackReason | null> {
+  // A 503 only reaches this point after the retry and backup-key policy for the
+  // current model has been exhausted, so it represents sustained overload for
+  // this request rather than a single transient response.
+  if (response.status === 503) return 'overloaded';
+  if (await isGeminiModelUnavailableResponse(response)) return 'unavailable';
+  return null;
+}
+
 export async function fetchGeminiWithRateLimitFallback(
   input: GeminiFallbackOptions,
 ): Promise<{
@@ -186,7 +199,8 @@ export async function fetchGeminiWithRateLimitFallback(
         : input.request(apiKey),
     });
     lastResult = result;
-    if (!(await isGeminiModelUnavailableResponse(result.response))) {
+    const fallbackReason = await getGeminiModelFallbackReason(result.response);
+    if (!fallbackReason) {
       return {
         ...result,
         requestedModel,
@@ -198,14 +212,28 @@ export async function fetchGeminiWithRateLimitFallback(
     const nextIndex = models.indexOf(candidateModel) + 1;
     const nextModel = models[nextIndex];
     if (!nextModel) break;
-    const statusMessage = `${candidateModel} is unavailable for this Gemini API project. Using ${nextModel} for this request.`;
-    serverLogger.warn({
-      event: 'gemini.model.fallback',
-      requestedModel,
-      unavailableModel: candidateModel,
-      fallbackModel: nextModel,
-      httpStatus: result.response.status,
-    }, 'Falling back from an unavailable Gemini model');
+    const statusMessage = fallbackReason === 'overloaded'
+      ? `${candidateModel} remained overloaded after retries. Using ${nextModel} for this request.`
+      : `${candidateModel} is unavailable for this Gemini API project. Using ${nextModel} for this request.`;
+    if (fallbackReason === 'overloaded') {
+      serverLogger.warn({
+        event: 'gemini.model.fallback',
+        requestedModel,
+        overloadedModel: candidateModel,
+        fallbackModel: nextModel,
+        httpStatus: result.response.status,
+        reason: fallbackReason,
+      }, 'Falling back from an overloaded Gemini model');
+    } else {
+      serverLogger.warn({
+        event: 'gemini.model.fallback',
+        requestedModel,
+        unavailableModel: candidateModel,
+        fallbackModel: nextModel,
+        httpStatus: result.response.status,
+        reason: fallbackReason,
+      }, 'Falling back from an unavailable Gemini model');
+    }
     await input.onStatusUpdate?.(statusMessage);
   }
 
