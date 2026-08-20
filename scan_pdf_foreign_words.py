@@ -25,8 +25,15 @@ GREEK_HEBREW_REGEX = re.compile(r'[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF]+')
 FANTASY_LITRPG_REGEX = re.compile(
     r"\b[A-Za-z]+(?:'[A-Za-z]+)?\b|\b(?:[A-Za-z]+[0-9]+[A-Za-z]*|[0-9]+[A-Za-z]+[A-Za-z0-9]*)\b"
 )
+LATIN_TRANSLITERATION_LETTERS = r"A-Za-z\u00C0-\u024F\u02B0-\u02FF\u1E00-\u1EFF\u0300-\u036F"
+LATIN_TRANSLITERATION_REGEX = re.compile(
+    rf"(?<![{LATIN_TRANSLITERATION_LETTERS}])"
+    rf"[{LATIN_TRANSLITERATION_LETTERS}]+(?:['’][{LATIN_TRANSLITERATION_LETTERS}]+)?"
+    rf"(?![{LATIN_TRANSLITERATION_LETTERS}])"
+)
 ALL_FOREIGN_TERM_CHARS = r"\u0300-\u036F\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF\u0400-\u04FF\u4E00-\u9FFF\u0600-\u06FF\u00C0-\u024F\u1E00-\u1EFF"
 GREEK_HEBREW_TERM_CHARS = r"\u0300-\u036F\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF"
+BIBLICAL_TERM_CHARS = GREEK_HEBREW_TERM_CHARS + LATIN_TRANSLITERATION_LETTERS
 
 # Common English stop words for LitRPG / Fantasy filtering
 ENGLISH_STOP_WORDS = {
@@ -60,6 +67,25 @@ def is_fantasy_litrpg_candidate(word):
             "Fantasy/LitRPG scanning requires the wordfreq Python package."
         )
     return zipf_frequency(normalized, 'en') < STANDARD_ENGLISH_ZIPF_THRESHOLD
+
+
+@lru_cache(maxsize=None)
+def is_latin_transliteration_candidate(word):
+    """Keep uncommon Latin spellings for Gemini's biblical-language check."""
+    base_letters = ''.join(
+        character for character in unicodedata.normalize('NFD', word)
+        if unicodedata.category(character) != 'Mn'
+    )
+    plain_letters = re.sub(r"['’ʾʿ]", "", base_letters)
+    if len(plain_letters) < 4 or not re.fullmatch(r"[A-Za-z]+", plain_letters):
+        return False
+    if base_letters.casefold() in ENGLISH_STOP_WORDS_CASEFOLD:
+        return False
+    # Keep Greek/Hebrew-script extraction available in minimal environments;
+    # the production image installs wordfreq for this additional candidate pass.
+    if zipf_frequency is None:
+        return False
+    return zipf_frequency(word.casefold(), 'en') < STANDARD_ENGLISH_ZIPF_THRESHOLD
 
 
 def classify_standard_english_words(words):
@@ -208,6 +234,7 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
     full_text = load_pdf_text(pdf_path)
 
     ocr_suspect_evidence = {}
+    latin_transliteration_candidates = set()
     if mode == "fantasy_litrpg":
         raw_matches = FANTASY_LITRPG_REGEX.findall(full_text)
         cleaned_matches = [m.strip('.,;:!?·\'"()[]{}«»') for m in raw_matches]
@@ -224,6 +251,11 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
                 filtered_matches.append(word)
                 if evidence:
                     ocr_suspect_evidence.setdefault(word, set()).add(evidence)
+        for match in LATIN_TRANSLITERATION_REGEX.finditer(full_text):
+            word = match.group(0)
+            if is_latin_transliteration_candidate(word):
+                filtered_matches.append(word)
+                latin_transliteration_candidates.add(word)
     elif mode == "custom" and query:
         custom_regex = re.compile(re.escape(query), re.IGNORECASE)
         raw_matches = custom_regex.findall(full_text)
@@ -348,7 +380,7 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
         if mode == "fantasy_litrpg":
             term_chars = r"A-Za-z0-9'"
         elif mode == "greek_hebrew":
-            term_chars = GREEK_HEBREW_TERM_CHARS
+            term_chars = BIBLICAL_TERM_CHARS
         elif mode == "all_foreign":
             term_chars = ALL_FOREIGN_TERM_CHARS
         else:
@@ -393,6 +425,8 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
         if word in ocr_suspect_evidence:
             result["ocrSuspect"] = True
             result["ocrEvidence"] = sorted(ocr_suspect_evidence[word])[:2]
+        if word in latin_transliteration_candidates:
+            result["latinTransliterationCandidate"] = True
         results.append(result)
 
     return results

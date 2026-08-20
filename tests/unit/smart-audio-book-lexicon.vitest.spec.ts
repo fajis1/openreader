@@ -195,7 +195,9 @@ describe('Smart Audio book lexicon', () => {
       'utf8',
     );
     expect(scanRoute).toContain('needsScholarDefinition');
-    expect(scanRoute).toContain('definitionScanComplete: Boolean(');
+    expect(scanRoute).toContain('const definitionScanComplete = Boolean(');
+    expect(scanRoute).toContain('Individual Gemini omissions');
+    expect(scanRoute).not.toContain('const requiredDefinitionWords');
   });
 
   test('server-managed lexicon writes do not advance the client settings clock', () => {

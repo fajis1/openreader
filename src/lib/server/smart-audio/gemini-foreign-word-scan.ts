@@ -68,7 +68,15 @@ export type GeminiForeignWordTerm = {
   currentPronunciation: string | null;
   ocrSuspect?: boolean;
   ocrEvidence?: string[];
+  latinTransliterationCandidate?: boolean;
 };
+
+export function isRejectedLatinTransliteration(
+  term: GeminiForeignWordTerm,
+  result: GeminiForeignWordResult | undefined,
+): boolean {
+  return term.latinTransliterationCandidate === true && result?.language === 'other';
+}
 
 /**
  * The foreign-word scanner is a lexical dictionary builder. It must not send
@@ -101,6 +109,7 @@ export function collectGeminiPronunciationRepairRequests(
   return terms.flatMap((term) => {
     const result = resultsByTerm.get(term.term);
     if (term.ocrSuspect === true && result?.ocrFragment === true) return [];
+    if (isRejectedLatinTransliteration(term, result)) return [];
     const pronunciations = Array.isArray(result?.pronunciations) ? result.pronunciations : [];
     const acceptedPronunciations = pronunciations
       .filter((pronunciation): pronunciation is string => (
@@ -221,7 +230,7 @@ export function foreignWordCandidateCacheKey(input: {
   const scopeHash = createHash('sha256')
     .update(JSON.stringify(input))
     .digest('hex');
-  return `foreign_word_candidates:v8:${scopeHash}`;
+  return `foreign_word_candidates:v9:${scopeHash}`;
 }
 
 export function parseForeignWordCandidateCache(value: unknown): unknown[] | null {
@@ -230,7 +239,7 @@ export function parseForeignWordCandidateCache(value: unknown): unknown[] | null
     if (
       !parsed
       || typeof parsed !== 'object'
-      || (parsed as { version?: unknown }).version !== 8
+      || (parsed as { version?: unknown }).version !== 9
       || !Array.isArray((parsed as { words?: unknown }).words)
     ) {
       return null;

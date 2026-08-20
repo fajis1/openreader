@@ -74,10 +74,12 @@ export function ScanForeignWordsModal({
   const [hideHealthChecks, setHideHealthChecks] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const [scanJobStatus, setScanJobStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'>('idle');
+  const [scanJobStage, setScanJobStage] = useState<string>('idle');
   const [scanJobId, setScanJobId] = useState<string | null>(null);
   const [scanJobProgress, setScanJobProgress] = useState({ completed: 0, total: 0 });
   const [scanJobLibrarySkipped, setScanJobLibrarySkipped] = useState(0);
-  const [scanJobGenerated, setScanJobGenerated] = useState(0);
+  const [scanJobTransliterationRejected, setScanJobTransliterationRejected] = useState(0);
+  const [scanJobResolved, setScanJobResolved] = useState(0);
   const [scanJobGeneratedChoices, setScanJobGeneratedChoices] = useState(0);
   const [scanJobError, setScanJobError] = useState<string | null>(null);
   const [scanJobStatusMessage, setScanJobStatusMessage] = useState<string | null>(null);
@@ -121,10 +123,12 @@ export function ScanForeignWordsModal({
       setSearchQuery('');
       setPanelWidth(null);
       setScanJobStatus('idle');
+      setScanJobStage('idle');
       setScanJobId(null);
       setScanJobProgress({ completed: 0, total: 0 });
       setScanJobLibrarySkipped(0);
-      setScanJobGenerated(0);
+      setScanJobTransliterationRejected(0);
+      setScanJobResolved(0);
       setScanJobGeneratedChoices(0);
       setScanJobError(null);
       setLibraryScanStatus('idle');
@@ -151,10 +155,12 @@ export function ScanForeignWordsModal({
       setSearchQuery('');
       setPanelWidth(null);
       setScanJobStatus('idle');
+      setScanJobStage('idle');
       setScanJobId(null);
       setScanJobProgress({ completed: 0, total: 0 });
       setScanJobLibrarySkipped(0);
-      setScanJobGenerated(0);
+      setScanJobTransliterationRejected(0);
+      setScanJobResolved(0);
       setScanJobGeneratedChoices(0);
       setScanJobError(null);
       setLibraryScanStatus('idle');
@@ -354,9 +360,11 @@ export function ScanForeignWordsModal({
     }
     setHasScanned(true);
     if (job.status) setScanJobStatus(job.status);
+    if (typeof job.stage === 'string') setScanJobStage(job.stage);
     setScanJobProgress({ completed: Number(job.completed) || 0, total: Number(job.total) || 0 });
     setScanJobLibrarySkipped(Number(job.librarySkipped) || 0);
-    setScanJobGenerated(Number(job.generated) || 0);
+    setScanJobTransliterationRejected(Number(job.transliterationRejected) || 0);
+    setScanJobResolved(Number(job.resolved ?? job.generated) || 0);
     setScanJobGeneratedChoices(Number(job.generatedChoices) || 0);
     setScanJobError(job.error || (Array.isArray(job.errors) && job.errors.length > 0 ? job.errors.join(' ') : null));
     setScanJobStatusMessage(typeof job.statusMessage === 'string' ? job.statusMessage : null);
@@ -453,9 +461,11 @@ export function ScanForeignWordsModal({
       setWords(data.words || []);
       setHasScanned(true);
       setScanJobStatus(data.scanStatus || 'completed');
+      setScanJobStage('extracting');
       setScanJobProgress({ completed: 0, total: Number(data.scanTotal) || 0 });
       setScanJobLibrarySkipped(0);
-      setScanJobGenerated(0);
+      setScanJobTransliterationRejected(0);
+      setScanJobResolved(0);
       setScanJobGeneratedChoices(0);
       setScanJobError(null);
       stopScanPolling();
@@ -765,7 +775,11 @@ export function ScanForeignWordsModal({
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="space-y-0.5">
                   <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                    Gemini scan: {scanJobProgress.total > 0 ? `${scanJobProgress.completed}/${scanJobProgress.total} terms processed` : 'queued'}…
+                    Pre-scan: {scanJobProgress.total > 0
+                      ? `${scanJobProgress.completed}/${scanJobProgress.total} terms processed`
+                      : scanJobStage === 'extracting'
+                        ? 'extracting PDF candidates on the CPU; term progress begins when extraction finishes'
+                        : 'queued'}…
                   </p>
                   {scanJobLibrarySkipped > 0 && (
                     <p className="text-[11px] text-blue-700 dark:text-blue-300">
@@ -791,14 +805,17 @@ export function ScanForeignWordsModal({
                   {scanJobLibrarySkipped > 0 && (
                     <p className="text-[11px] text-blue-700 dark:text-blue-300">Library matches skipped by Gemini: {scanJobLibrarySkipped}</p>
                   )}
+                  {scanJobTransliterationRejected > 0 && (
+                    <p className="text-[11px] text-soft">Non-biblical Latin candidates ignored: {scanJobTransliterationRejected}</p>
+                  )}
                   {scanJobError ? (
                     <p className="text-[11px] text-amber-700 dark:text-amber-300">Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated {scanJobGeneratedChoices} new pronunciation choices. {scanJobError}</p>
                   ) : (
                     <p className="text-[11px] text-green-700 dark:text-green-300">Gemini processed {scanJobProgress.completed}/{scanJobProgress.total} terms and generated {scanJobGeneratedChoices} new pronunciation choices.</p>
                   )}
-                  {scanJobProgress.completed > scanJobGenerated && (
+                  {scanJobProgress.completed > scanJobResolved && (
                     <p className="text-[11px] font-bold text-red-600 dark:text-red-400">
-                      ⚠️ {scanJobProgress.completed - scanJobGenerated} terms failed or were omitted by Gemini.
+                      ⚠️ {scanJobProgress.completed - scanJobResolved} terms need manual review because Gemini omitted them or returned no usable pronunciation.
                     </p>
                   )}
                 </div>
@@ -826,7 +843,7 @@ export function ScanForeignWordsModal({
                 >
                   <option value="all_foreign">🌐 All Foreign Languages (Greek, Hebrew, Cyrillic, CJK, etc.)</option>
                   <option value="fantasy_litrpg">⚔️ Fantasy & LitRPG (Proper Nouns, Stat Names, Races)</option>
-                  <option value="greek_hebrew">🏛️ Biblical Scholarship (Greek & Hebrew Only)</option>
+                  <option value="greek_hebrew">🏛️ Biblical Scholarship (Greek, Hebrew & Latin Transliteration)</option>
                   <option value="custom">🔍 Custom Term Search</option>
                 </select>
 
@@ -839,6 +856,11 @@ export function ScanForeignWordsModal({
                     placeholder="Enter word to search (e.g. Xylar)"
                     className="px-2.5 py-1 text-xs border rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-700"
                   />
+                )}
+                {scanMode === 'greek_hebrew' && (
+                  <span className="max-w-md text-[11px] text-soft">
+                    Includes uncommon Latin-letter forms such as phronein; Gemini confirms the biblical language before anything is saved.
+                  </span>
                 )}
               </div>
 
@@ -1077,13 +1099,13 @@ export function ScanForeignWordsModal({
             <div className="p-4 text-gray-500">No foreign words found.</div>
           ) : sortedReviewableWords.length === 0 ? (
             <div className="p-4 text-gray-500">
-              No reviewable foreign words found. Automatically ignored {ignoredWordCount} extraction artifact{ignoredWordCount === 1 ? '' : 's'} or low-value function term{ignoredWordCount === 1 ? '' : 's'}.
+              No reviewable foreign words found. Automatically ignored {ignoredWordCount} extraction artifact{ignoredWordCount === 1 ? '' : 's'}, low-value function term{ignoredWordCount === 1 ? '' : 's'}, or rejected Latin transliteration candidate{ignoredWordCount === 1 ? '' : 's'}.
             </div>
           ) : (
             <>
             {ignoredWordCount > 0 && (
               <div className="mb-3 rounded border border-line bg-surface-sunken px-3 py-2 text-xs text-soft">
-                Automatically hidden: {ignoredWordCount} deterministic extraction artifact{ignoredWordCount === 1 ? '' : 's'} or low-value Greek/Hebrew function term{ignoredWordCount === 1 ? '' : 's'}. Complete words remain reviewable.
+                Automatically hidden: {ignoredWordCount} deterministic extraction artifact{ignoredWordCount === 1 ? '' : 's'}, low-value Greek/Hebrew function term{ignoredWordCount === 1 ? '' : 's'}, or Latin candidate Gemini did not recognize as Greek/Hebrew. Complete recognized words remain reviewable.
               </div>
             )}
             <table className="w-full table-fixed text-sm text-left">

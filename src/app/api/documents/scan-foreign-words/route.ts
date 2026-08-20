@@ -38,6 +38,7 @@ import {
   GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA,
   GeminiHttpError,
   mergeGeminiPronunciationRepairResults,
+  isRejectedLatinTransliteration,
   isUsableForeignWordCandidate,
   parseForeignWordCandidateCache,
   parseGeminiForeignWordResults,
@@ -97,7 +98,9 @@ export async function POST(req: NextRequest) {
       words: [],
       total: 0,
       completed: 0,
+      resolved: 0,
       librarySkipped: 0,
+      transliterationRejected: 0,
       errors: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -194,7 +197,7 @@ export async function POST(req: NextRequest) {
           if (!Array.isArray(words)) {
             throw new Error('PDF foreign-word scanner returned an invalid candidate list.');
           }
-          const cachedCandidates = JSON.stringify({ version: 8, words });
+          const cachedCandidates = JSON.stringify({ version: 9, words });
           await db.insert(adminSettings).values({
             key: candidateCacheKey,
             valueJson: cachedCandidates,
@@ -352,6 +355,7 @@ export async function POST(req: NextRequest) {
             .filter((word: any) => word?.ocrFragment === true)
             .map((word: any) => word.word),
         );
+        const rejectedLatinTransliterations = new Set<string>();
 
         const wordsMissingOptions = words
           .filter((w: any) => {
@@ -386,6 +390,7 @@ export async function POST(req: NextRequest) {
         );
         const updatedGlobalWords = new Set<string>();
         const confirmedOcrFragments = new Set<string>(automaticOcrFragments);
+        const resolvedGeminiWords = new Set<string>();
         let acceptedChoices = 0;
         let updatedLexicon = false;
         let terminalGeminiError: string | null = null;
@@ -435,6 +440,10 @@ export async function POST(req: NextRequest) {
             definitionNeedsReview: lexiconEntries[w.word]?.needsReview === true,
             ocrSuspect: w.ocrSuspect === true,
             ocrFragment: confirmedOcrFragments.has(w.word),
+            automaticIgnore: w.automaticIgnore === true || rejectedLatinTransliterations.has(w.word),
+            automaticIgnoreReason: rejectedLatinTransliterations.has(w.word)
+              ? 'Gemini did not recognize this rare Latin term as Koine Greek or Biblical Hebrew transliteration'
+              : w.automaticIgnoreReason,
           };
         });
 
@@ -484,14 +493,16 @@ export async function POST(req: NextRequest) {
             currentPronunciation: storedPronunciation || null,
             ocrSuspect: scanned?.ocrSuspect === true,
             ocrEvidence: Array.isArray(scanned?.ocrEvidence) ? scanned.ocrEvidence.slice(0, 2) : [],
+            latinTransliterationCandidate: scanned?.latinTransliterationCandidate === true,
           };
         });
         const prompt = `${buildKokoroPronunciationInstructions(activeProfile)}
 
 Create pronunciation choices and short audiobook definitions for these terms.
-For each term without currentPronunciation, return 5 distinct, plausible Kokoro IPA pronunciation variations and put the best first.
+For each term without currentPronunciation, return 5 distinct, plausible Kokoro IPA pronunciation variations and put the best first, except for a rejected Latin transliteration candidate as described below.
 If currentPronunciation is supplied, preserve it exactly and return it as the only pronunciation; do not generate extra variations.
 For Koine Greek or Biblical Hebrew, use the supplied contexts to return a contextual English definition of one to four words.
+When latinTransliterationCandidate is true, decide from the spelling and supplied context whether the term is genuinely a Latin-letter transliteration of Koine Greek or Biblical Hebrew. If it is, classify it as koine_greek or biblical_hebrew and provide its pronunciation and contextual definition normally. If it is ordinary English, a proper name, Latin, another language, or otherwise not a credible biblical-language transliteration, set language to other, return pronunciations as [], definition as null, definitionOmitted as true, and needsReview as false. Never invent a biblical-language identity merely because the word is uncommon.
 Return exactly one meaning, never a comma-, slash-, semicolon-, "and"-, or "or"-separated list of synonyms or alternatives.
 Do not return a definition that consists only of a common function or connecting word such as "the", "or", "of", "off", or "like"; return null and set definitionOmitted to true instead.
 If the surrounding book context already states the definition, return that same concise gloss; OpenReader will recognize the author-supplied definition and will not speak it twice.
@@ -621,6 +632,16 @@ ${JSON.stringify(repairRequests)}`;
             const w = requestedTerms.get(result.term);
             if (w) {
               const scanned = words.find((item: any) => item.word === w);
+              const requestedTerm = terms.find((term) => term.term === w);
+              if (requestedTerm && isRejectedLatinTransliteration(requestedTerm, result)) {
+                // Latin candidates are deliberately broad enough to find
+                // unknown transliterations. Gemini-confirmed non-biblical
+                // terms stay visible only in the ignored count and never
+                // enter a book, profile, or global pronunciation library.
+                rejectedLatinTransliterations.add(w);
+                acceptedWords.add(w);
+                continue;
+              }
               if (scanned?.ocrSuspect === true && result.ocrFragment === true) {
                 // Gemini, not a brittle local heuristic, made the final call.
                 // Do not let a confirmed OCR shard reuse or create a global entry.
@@ -717,6 +738,7 @@ ${JSON.stringify(repairRequests)}`;
             };
             await writeBookLexicon(userId, documentId, partialLexicon);
           }
+          acceptedWords.forEach((word) => resolvedGeminiWords.add(word));
           if (acceptedWords.size === 0) {
             throw new Error('Gemini returned no Kokoro-compatible pronunciation choices for this batch.');
           }
@@ -783,7 +805,11 @@ ${JSON.stringify(repairRequests)}`;
             break;
           }
         }
-        await saveJob({ completed: Math.min(i + chunk.length, wordsMissingOptions.length) });
+        await saveJob({
+          completed: Math.min(i + chunk.length, wordsMissingOptions.length),
+          resolved: resolvedGeminiWords.size,
+          transliterationRejected: rejectedLatinTransliterations.size,
+        });
       }
         }
 
@@ -825,31 +851,20 @@ ${JSON.stringify(repairRequests)}`;
 
     if (activeProfile) {
       const errors = Array.isArray(jobState.errors) ? jobState.errors : [];
-      const requiredDefinitionWords = needsScholarDefinition
-        ? words
-          .map((word: any) => word.word as string)
-          .filter((word: string) => !confirmedOcrFragments.has(word))
-          .filter((word: string) => languageForTerm(word) !== 'other')
-        : [];
-      const definitionScanComplete = requiredDefinitionWords.every(
-        (word: string) => Boolean(
-          lexiconEntries[word]?.pronunciation
-          && isKokoroSafePronunciation(word, lexiconEntries[word].pronunciation),
-        ),
+      // "Complete" means every candidate in the full Scholar scope was
+      // attempted without a batch-level failure. Individual Gemini omissions
+      // remain reviewable, but cannot force the user into an endless rescan
+      // loop; cleanup can still learn those pronunciations during generation.
+      const definitionScanComplete = Boolean(
+        needsScholarDefinition
+        && errors.length === 0
+        && !terminalGeminiError
+        && isCompleteScholarScanScope({ mode, target, query }),
       );
       await writeBookLexicon(userId, documentId, {
         schemaVersion: 1,
-        status: errors.length === 0
-          && definitionScanComplete
-          && isCompleteScholarScanScope({ mode, target, query })
-          ? 'complete'
-          : 'partial',
-        definitionScanComplete: Boolean(
-          needsScholarDefinition
-          && errors.length === 0
-          && definitionScanComplete
-          && isCompleteScholarScanScope({ mode, target, query }),
-        ),
+        status: definitionScanComplete ? 'complete' : 'partial',
+        definitionScanComplete,
         profileId: activeProfile.id,
         pronunciationModel: resolvePronunciationAiModel(activeProfile),
         scannedAt: Date.now(),
@@ -909,6 +924,8 @@ ${JSON.stringify(repairRequests)}`;
             : wordsMissingOptions.length,
           generated,
           generatedChoices: acceptedChoices,
+          resolved: resolvedGeminiWords.size,
+          transliterationRejected: rejectedLatinTransliterations.size,
           error: terminalGeminiError
             || (errors.length > 0 ? `${errors.length} Gemini batch${errors.length === 1 ? '' : 'es'} failed. ${errors[0]}` : null),
           words: enrichWords(),

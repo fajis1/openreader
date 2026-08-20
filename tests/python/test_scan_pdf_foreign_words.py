@@ -50,6 +50,31 @@ class ForeignWordContextTests(unittest.TestCase):
         terms = {item["word"] for item in results}
         self.assertEqual(terms, {"Aethrian", "manamancy", "Khar'Thok", "Rank42"})
 
+    def test_biblical_mode_adds_rare_latin_transliteration_candidates(self):
+        text = (
+            "The scholar compares phronein with qādôš and ordinary words. "
+            "The Greek spelling φρονεῖν also appears."
+        )
+        rare_transliterations = {"phronein", "qādôš"}
+        with (
+            patch.object(scan_pdf_foreign_words, "load_pdf_text", return_value=text),
+            patch.object(scan_pdf_foreign_words, "fetch_global_pronunciations", return_value={}),
+            patch.object(
+                scan_pdf_foreign_words,
+                "zipf_frequency",
+                side_effect=lambda word, _language: 0.0 if word in rare_transliterations else 5.0,
+            ),
+        ):
+            results = scan_pdf_foreign_words.scan_pdf_foreign_words(
+                "unused.pdf", target_percentile=100, mode="greek_hebrew", quiet=True,
+            )
+
+        by_word = {item["word"]: item for item in results}
+        self.assertIn("φρονεῖν", by_word)
+        for term in rare_transliterations:
+            self.assertTrue(by_word[term]["latinTransliterationCandidate"])
+        self.assertNotIn("ordinary", by_word)
+
     def test_known_ocr_fragments_are_not_returned_as_dictionary_candidates(self):
         text = "The fragment κω appears beside the valid term λόγος."
         for mode in ("greek_hebrew", "all_foreign"):

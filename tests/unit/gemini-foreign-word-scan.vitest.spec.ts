@@ -9,6 +9,7 @@ import {
   GEMINI_FOREIGN_WORD_RESPONSE_JSON_SCHEMA,
   GeminiHttpError,
   mergeGeminiPronunciationRepairResults,
+  isRejectedLatinTransliteration,
   isUsableForeignWordCandidate,
   parseForeignWordCandidateCache,
   parseGeminiForeignWordResults,
@@ -76,11 +77,11 @@ describe('Gemini foreign-word structured output', () => {
       mode: 'greek_hebrew',
     }));
     expect(parseForeignWordCandidateCache(JSON.stringify({
-      version: 8,
+      version: 9,
       words: [{ word: 'λόγος' }],
     }))).toEqual([{ word: 'λόγος' }]);
     expect(parseForeignWordCandidateCache(JSON.stringify({
-      version: 7,
+      version: 8,
       words: [{ word: 'stale' }],
     }))).toBeNull();
     expect(parseForeignWordCandidateCache('{invalid')).toBeNull();
@@ -149,6 +150,27 @@ describe('Gemini foreign-word structured output', () => {
     expect(repairs).toEqual([]);
   });
 
+  test('accepts Gemini rejection of an unrelated Latin transliteration candidate', () => {
+    const term = {
+      term: 'Bradford',
+      contexts: ['Bradford discusses the passage.'],
+      currentPronunciation: null,
+      latinTransliterationCandidate: true,
+    };
+    const result = {
+      term: 'Bradford',
+      language: 'other',
+      pronunciations: [],
+    };
+
+    expect(isRejectedLatinTransliteration(term, result)).toBe(true);
+    expect(collectGeminiPronunciationRepairRequests([term], [result])).toEqual([]);
+    expect(isRejectedLatinTransliteration(term, {
+      ...result,
+      language: 'koine_greek',
+    })).toBe(false);
+  });
+
   test('merges only warning-free correction choices', () => {
     expect(mergeGeminiPronunciationRepairResults(
       [{ term: 'υἱοὶ', pronunciations: ['/hyjoɪ/'], language: 'koine_greek' }],
@@ -181,5 +203,19 @@ describe('Gemini foreign-word structured output', () => {
     expect(route).toContain('ocrEvidence: Array.isArray(scanned?.ocrEvidence)');
     expect(route).toContain('Gemini, not a brittle local heuristic, made the final call.');
     expect(route).toContain('result.ocrFragment === true');
+  });
+
+  test('classifies rare Latin candidates before allowing dictionary persistence', () => {
+    const route = readFileSync(resolve(
+      process.cwd(),
+      'src/app/api/documents/scan-foreign-words/route.ts',
+    ), 'utf8');
+    expect(route).toContain('latinTransliterationCandidate: scanned?.latinTransliterationCandidate === true');
+    expect(route).toContain('isRejectedLatinTransliteration(requestedTerm, result)');
+    expect(route.indexOf('isRejectedLatinTransliteration(requestedTerm, result)'))
+      .toBeLessThan(route.indexOf('for (const p of prons)'));
+    expect(route).toContain('rejectedLatinTransliterations.add(w);');
+    expect(route.indexOf('rejectedLatinTransliterations.add(w);'))
+      .toBeLessThan(route.indexOf('updatedGlobalWords.add(w);'));
   });
 });

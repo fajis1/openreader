@@ -75,6 +75,12 @@ describe('foreign-word scan modal', () => {
     expect(source).toContain('prepareForeignWordScanRows(words)');
     expect(source).toContain('sortForeignWordScanRows');
     expect(source).toContain('Automatically hidden: {ignoredWordCount}');
+    expect(source).toContain('Biblical Scholarship (Greek, Hebrew & Latin Transliteration)');
+    expect(source).toContain('Gemini confirms the biblical language before anything is saved.');
+    expect(source).toContain('Non-biblical Latin candidates ignored: {scanJobTransliterationRejected}');
+    expect(source).toContain('setScanJobResolved(Number(job.resolved ?? job.generated) || 0)');
+    expect(source).toContain('terms need manual review because Gemini omitted them or returned no usable pronunciation.');
+    expect(source).toContain('extracting PDF candidates on the CPU; term progress begins when extraction finishes');
     expect(source).toContain('useState(false)');
     expect(source).toContain('Override fuzzy order: missing first');
   });
