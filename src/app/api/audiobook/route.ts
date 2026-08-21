@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+export const maxDuration = 300; // 5 minutes max duration for large audiobook generation
 import { spawn } from 'child_process';
 import { mkdtemp, rm, writeFile, stat } from 'fs/promises';
 import { createReadStream } from 'fs';
