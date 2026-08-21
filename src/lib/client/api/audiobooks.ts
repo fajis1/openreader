@@ -216,7 +216,7 @@ export const combineAudiobook = async (bookId: string, format: string): Promise<
 };
 
 export const checkCombineStatus = async (bookId: string, format: string): Promise<{ status: string, progress?: number, error?: string }> => {
-  const response = await fetch(`/api/audiobook/status?bookId=${bookId}&format=${format}`);
+  const response = await fetch(`/api/audiobook/combine-status?bookId=${bookId}&format=${format}`);
   if (!response.ok) throw new Error('Failed to check combine status');
   return await response.json();
 };

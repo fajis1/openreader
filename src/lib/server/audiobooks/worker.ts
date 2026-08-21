@@ -257,9 +257,8 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
     const bookId = doc.id;
     const userId = job.userId;
-
-    
     const jobSettings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
+
     if (jobSettings.jobType === 'combine') {
       const { executeAudiobookCombine } = await import('./combine');
       try {
@@ -273,7 +272,6 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     }
 
     const existingBook = await db.select().from(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, userId)));
-    const jobSettings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
     // Missing/legacy versions must retain the exact pre-12K chapter map so a
     // resumed job never reuses an existing numeric index for different text.
     const usesCurrentBatching = jobSettings.cleanupBatchVersion === CURRENT_AUDIOBOOK_BATCH_VERSION;
