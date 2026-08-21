@@ -279,6 +279,22 @@ export async function POST(request: NextRequest) {
     if (chapters.length === 0) {
       return NextResponse.json({ error: 'No chapters found' }, { status: 404 });
     }
+
+    const chapterRows = await db
+      .select({
+        chapterIndex: audiobookChapters.chapterIndex,
+        title: audiobookChapters.title,
+      })
+      .from(audiobookChapters)
+      .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, storageUserId)));
+    const titleByIndex = new Map<number, string>();
+    for (const row of chapterRows) {
+      if (row.title.trim()) titleByIndex.set(row.chapterIndex, row.title.trim());
+    }
+    chapters = chapters.map((chapter) => ({
+      ...chapter,
+      title: titleByIndex.get(chapter.index) ?? chapter.title,
+    }));
     
     const format: TTSAudiobookFormat = requestedFormat ?? chapters[0].format;
     const completeName = `complete.${format}`;
