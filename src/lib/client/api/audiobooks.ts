@@ -207,11 +207,18 @@ export const downloadAudiobook = async (bookId: string, format: string): Promise
   return response;
 };
 
-export const combineAudiobook = async (bookId: string, format: string): Promise<void> => {
+export const combineAudiobook = async (bookId: string, format: string): Promise<{ status: string }> => {
   const response = await fetch(`/api/audiobook?bookId=${bookId}&format=${format}`, {
     method: 'POST',
   });
   if (!response.ok) throw new Error('Failed to combine audiobook');
+  return await response.json();
+};
+
+export const checkCombineStatus = async (bookId: string, format: string): Promise<{ status: string, progress?: number, error?: string }> => {
+  const response = await fetch(`/api/audiobook/status?bookId=${bookId}&format=${format}`);
+  if (!response.ok) throw new Error('Failed to check combine status');
+  return await response.json();
 };
 
 export const deleteAudiobookChapter = async (bookId: string, chapterIndex: number): Promise<void> => {
@@ -282,4 +289,38 @@ export const ensureTtsSegments = async (
   }
 
   return await response.json();
+};
+
+export const downloadAudiobookWithBackgroundPolling = async (bookId: string, format: string, toast: any, toastId: string): Promise<void> => {
+  const { status } = await combineAudiobook(bookId, format);
+  if (status === 'ready') {
+    toast.success('Audiobook prepared. Starting download.', { id: toastId });
+    window.location.href = `/api/audiobook?bookId=${bookId}&format=${format}`;
+    return;
+  }
+  
+  toast.loading('Audiobook is very large, assembling in background...', { id: toastId });
+  return new Promise((resolve, reject) => {
+    const interval = setInterval(async () => {
+      try {
+        const st = await checkCombineStatus(bookId, format);
+        if (st.status === 'completed' || st.status === 'ready') {
+          clearInterval(interval);
+          toast.success('Audiobook assembly complete! Starting download.', { id: toastId });
+          window.location.href = `/api/audiobook?bookId=${bookId}&format=${format}`;
+          resolve();
+        } else if (st.status === 'error') {
+          clearInterval(interval);
+          toast.error(st.error || 'Failed to assemble audiobook', { id: toastId });
+          reject(new Error(st.error));
+        } else if (st.status === 'running') {
+          toast.loading(`Assembling audiobook (${Math.round(st.progress || 0)}%)...`, { id: toastId });
+        }
+      } catch (e) {
+        clearInterval(interval);
+        toast.error('Lost connection to background job', { id: toastId });
+        reject(e);
+      }
+    }, 5000);
+  });
 };

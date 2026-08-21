@@ -105,63 +105,9 @@ function streamBuffer(buffer: Buffer): ReadableStream<Uint8Array> {
   });
 }
 
-async function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const ffmpeg = spawn(getFFmpegPath(), args);
-    let finished = false;
 
-    const onAbort = () => {
-      if (finished) return;
-      finished = true;
-      try {
-        ffmpeg.kill('SIGKILL');
-      } catch {}
-      reject(new Error('ABORTED'));
-    };
 
-    if (signal) {
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
 
-    ffmpeg.stderr.on('data', (data) => {
-      serverLogger.warn({
-        event: 'audiobook.ffmpeg.stderr',
-        degraded: true,
-        step: 'ffmpeg',
-        stderr: String(data),
-      }, 'ffmpeg stderr');
-    });
-
-    ffmpeg.on('close', (code) => {
-      if (finished) return;
-      finished = true;
-      signal?.removeEventListener('abort', onAbort);
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`FFmpeg process exited with code ${code}`));
-      }
-    });
-
-    ffmpeg.on('error', (err) => {
-      if (finished) return;
-      finished = true;
-      signal?.removeEventListener('abort', onAbort);
-      reject(err);
-    });
-  });
-}
-
-async function ensurePositiveDuration(filePath: string, signal?: AbortSignal): Promise<void> {
-  const probe = await ffprobeAudio(filePath, signal);
-  if (!probe.durationSec || probe.durationSec <= 0) {
-    throw new Error(`Invalid duration for output file: ${filePath}`);
-  }
-}
 
 export async function GET(request: NextRequest) {
   let workDir: string | null = null;
@@ -503,16 +449,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  let workDir: string | null = null;
   try {
     if (!isS3Configured()) return s3NotConfiguredResponse();
 
     const bookId = request.nextUrl.searchParams.get('bookId');
     const requestedFormat = request.nextUrl.searchParams.get('format') as TTSAudiobookFormat | null;
-    if (!bookId) {
-      return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
-    }
-    if (!isSafeId(bookId)) {
+    if (!bookId || !isSafeId(bookId)) {
       return NextResponse.json({ error: 'Invalid bookId parameter' }, { status: 400 });
     }
 
@@ -532,38 +474,15 @@ export async function POST(request: NextRequest) {
 
     const objects = await listAudiobookObjects(bookId, storageUserId, testNamespace);
     const objectNames = objects.map((item) => item.fileName);
+    const { listChapterObjects } = await import('@/lib/server/audiobooks/chapters');
     let chapters = listChapterObjects(objectNames);
     if (chapters.length === 0) {
       return NextResponse.json({ error: 'No chapters found' }, { status: 404 });
     }
-
-    const chapterRows = await db
-      .select({
-        chapterIndex: audiobookChapters.chapterIndex,
-        duration: audiobookChapters.duration,
-        title: audiobookChapters.title,
-      })
-      .from(audiobookChapters)
-      .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, storageUserId)));
-    const durationByIndex = new Map<number, number>();
-    const titleByIndex = new Map<number, string>();
-    for (const row of chapterRows) {
-      durationByIndex.set(row.chapterIndex, Number(row.duration ?? 0));
-      if (row.title.trim()) titleByIndex.set(row.chapterIndex, row.title.trim());
-    }
-    chapters = chapters.map((chapter) => ({
-      ...chapter,
-      title: titleByIndex.get(chapter.index) ?? chapter.title,
-    }));
-
-    const chapterFormats = new Set(chapters.map((chapter) => chapter.format));
-    if (chapterFormats.size > 1) {
-      return NextResponse.json({ error: 'Mixed chapter formats detected; reset the audiobook to continue' }, { status: 400 });
-    }
-
+    
     const format: TTSAudiobookFormat = requestedFormat ?? chapters[0].format;
-    const completeName = `complete.${format}`;
-    const manifestName = `${completeName}.manifest.json`;
+    const completeName = ;
+    const manifestName = ;
     const signature = chapters.map((chapter) => ({
       index: chapter.index,
       fileName: chapter.fileName,
@@ -574,209 +493,50 @@ export async function POST(request: NextRequest) {
       try {
         const manifest = JSON.parse((await getAudiobookObjectBuffer(bookId, storageUserId, manifestName, testNamespace)).toString('utf8'));
         if (JSON.stringify(manifest) === JSON.stringify(signature)) {
-          return NextResponse.json({ success: true, message: 'Audiobook already combined' });
+          return NextResponse.json({ success: true, message: 'Audiobook already combined', status: 'ready' });
         }
-      } catch {
-        // Force regeneration below.
-      }
-
+      } catch {}
       await deleteAudiobookObject(bookId, storageUserId, completeName, testNamespace).catch(() => {});
       await deleteAudiobookObject(bookId, storageUserId, manifestName, testNamespace).catch(() => {});
     }
 
-    workDir = await mkdtemp(join(tmpdir(), 'openreader-audiobook-combine-'));
-    const metadataPath = join(workDir, 'metadata.txt');
-    const listPath = join(workDir, 'list.txt');
-    const outputPath = join(workDir, completeName);
-
-    const localChapters: Array<{ index: number; title: string; localPath: string; duration: number }> = [];
-    for (const chapter of chapters) {
-      const localPath = join(workDir, chapter.fileName);
-      const bytes = await getAudiobookObjectBuffer(bookId, storageUserId, chapter.fileName, testNamespace);
-      await writeFile(localPath, bytes);
-
-      let duration = 0;
-      try {
-        const probe = await ffprobeAudio(localPath, request.signal);
-        if (probe.durationSec && probe.durationSec > 0) {
-          duration = probe.durationSec;
-        }
-      } catch {
-        duration = 0;
+    // Insert or update combine job
+    const existingJobs = await db.select().from(audiobookJobs)
+      .where(and(eq(audiobookJobs.documentId, bookId), eq(audiobookJobs.userId, storageUserId), eq(audiobookJobs.status, 'queued')));
+      
+    let isCombining = false;
+    for (const job of existingJobs) {
+      const settings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
+      if (settings.jobType === 'combine' && settings.format === format) {
+        isCombining = true;
+        break;
       }
-      if (!duration || duration <= 0) {
-        duration = durationByIndex.get(chapter.index) ?? 0;
-      }
-
-      localChapters.push({
-        index: chapter.index,
-        title: chapter.title,
-        localPath,
-        duration,
+    }
+    
+    if (!isCombining) {
+      const jobId = crypto.randomUUID();
+      await db.insert(audiobookJobs).values({
+        id: jobId,
+        userId: storageUserId,
+        documentId: bookId,
+        status: 'queued',
+        progress: 0,
+        settingsJson: { jobType: 'combine', format, testNamespace },
       });
     }
 
-    const metadata: string[] = [];
-    let currentTime = 0;
-    let currentChapterTitle: string | null = null;
-    let currentChapterStartMs = 0;
-
-    for (let i = 0; i < localChapters.length; i++) {
-      const chapter = localChapters[i];
-      const startMs = Math.floor(currentTime * 1000);
-
-      if (currentChapterTitle !== chapter.title) {
-        if (currentChapterTitle !== null) {
-          metadata.push(
-            '[CHAPTER]',
-            'TIMEBASE=1/1000',
-            `START=${currentChapterStartMs}`,
-            `END=${startMs}`,
-            `title=${escapeFFMetadata(currentChapterTitle)}`
-          );
-        }
-        currentChapterTitle = chapter.title;
-        currentChapterStartMs = startMs;
-      }
-
-      currentTime += chapter.duration;
-    }
-
-    if (currentChapterTitle !== null) {
-      const endMs = Math.floor(currentTime * 1000);
-      metadata.push(
-        '[CHAPTER]',
-        'TIMEBASE=1/1000',
-        `START=${currentChapterStartMs}`,
-        `END=${endMs}`,
-        `title=${escapeFFMetadata(currentChapterTitle)}`
-      );
-    }
-
-    await writeFile(metadataPath, ';FFMETADATA1\n' + metadata.join('\n'));
-    await writeFile(
-      listPath,
-      localChapters
-        .map((chapter) => `file '${chapter.localPath.replace(/'/g, "'\\''")}'`)
-        .join('\n'),
-    );
-
-    if (format === 'mp3') {
-      try {
-        await runFFmpeg(
-          ['-f', 'concat', '-safe', '0', '-i', listPath, '-map_metadata', '-1', '-c:a', 'copy', outputPath]
-        );
-      } catch (copyError) {
-        if ((copyError as Error)?.message === 'ABORTED' || request.signal.aborted) {
-          throw copyError;
-        }
-        serverLogger.warn({
-          event: 'audiobook.concat_copy.mp3.failed',
-          degraded: true,
-          fallbackPath: 'reencode',
-          error: errorToLog(copyError),
-        }, 'MP3 concat copy failed; falling back to re-encode');
-        await runFFmpeg(
-          ['-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-b:a', '64k', outputPath]
-        );
-      }
-    } else {
-      try {
-        await runFFmpeg(
-          [
-            '-f',
-            'concat',
-            '-safe',
-            '0',
-            '-i',
-            listPath,
-            '-i',
-            metadataPath,
-            '-map',
-            '0:a',
-            '-map_metadata',
-            '1',
-            '-map_chapters',
-            '1',
-            '-c:a',
-            'copy',
-            '-movflags',
-            'use_metadata_tags',
-            '-f',
-            'mp4',
-            outputPath,
-          ]
-        );
-      } catch (copyError) {
-        if ((copyError as Error)?.message === 'ABORTED' || request.signal.aborted) {
-          throw copyError;
-        }
-        serverLogger.warn({
-          event: 'audiobook.concat_copy.m4b.failed',
-          degraded: true,
-          fallbackPath: 'reencode',
-          error: errorToLog(copyError),
-        }, 'M4B concat copy failed; falling back to re-encode');
-        await runFFmpeg(
-          [
-            '-f',
-            'concat',
-            '-safe',
-            '0',
-            '-i',
-            listPath,
-            '-i',
-            metadataPath,
-            '-map',
-            '0:a',
-            '-map_metadata',
-            '1',
-            '-map_chapters',
-            '1',
-            '-c:a',
-            'aac',
-            '-b:a',
-            '64k',
-            '-movflags',
-            'use_metadata_tags',
-            '-f',
-            'mp4',
-            outputPath,
-          ]
-        );
-      }
-    }
-    await ensurePositiveDuration(outputPath, request.signal);
-
-    const outputStreamForPut = createReadStream(outputPath);
-    await putAudiobookObject(bookId, storageUserId, completeName, outputStreamForPut, chapterFileMimeType(format), testNamespace);
-    await putAudiobookObject(
-      bookId,
-      storageUserId,
-      manifestName,
-      Buffer.from(JSON.stringify(signature, null, 2), 'utf8'),
-      'application/json; charset=utf-8',
-      testNamespace,
-    );
-
-    return NextResponse.json({ success: true, message: 'Audiobook combined successfully' });
+    return NextResponse.json({ success: true, message: 'Audiobook combination queued', status: 'queued' });
   } catch (error) {
-    if ((error as Error)?.message === 'ABORTED' || request.signal.aborted) {
-      return NextResponse.json({ error: 'cancelled' }, { status: 499 });
-    }
     serverLogger.error({
-      event: 'audiobook.create.failed',
+      event: 'audiobook.combine.failed',
       error: errorToLog(error),
-    }, 'Failed to create full audiobook');
+    }, 'Failed to queue audiobook combine');
     return errorResponse(error, {
-      apiErrorMessage: 'Failed to combine audiobook file',
+      apiErrorMessage: 'Failed to queue audiobook combine',
       normalize: { code: 'AUDIOBOOK_COMBINE_FAILED', errorClass: 'upstream' },
     });
-  } finally {
-    if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
-
 export async function DELETE(request: NextRequest) {
   try {
     if (!isS3Configured()) return s3NotConfiguredResponse();

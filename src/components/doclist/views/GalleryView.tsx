@@ -278,15 +278,11 @@ export function GalleryView({
                         setIsDownloadingAudiobook(true);
                         try {
                           const { combineAudiobook } = await import('@/lib/client/api/audiobooks');
-                          await combineAudiobook(activeDoc.id, 'm4b');
-                          const url = `/api/audiobook?bookId=${encodeURIComponent(activeDoc.id)}&format=m4b`;
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = '';
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                          await new Promise(resolve => setTimeout(resolve, 2000));
+                          const { default: toast } = await import('react-hot-toast');
+      const toastId = toast.loading('Preparing audiobook...');
+      const { downloadAudiobookWithBackgroundPolling } = await import('@/lib/client/api/audiobooks');
+      await downloadAudiobookWithBackgroundPolling(activeDoc.id, 'm4b', toast, toastId);
+      await new Promise(resolve => setTimeout(resolve, 2000));
                         } catch (err) {
                           console.error('Error combining audiobook:', err);
                           const { default: toast } = await import('react-hot-toast');

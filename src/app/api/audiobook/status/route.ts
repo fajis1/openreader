@@ -1,183 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { audiobooks, audiobookChapters, audiobookJobs } from '@/db/schema';
+import { audiobookJobs } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
-import { getAudiobookObjectBuffer, isMissingBlobError, listAudiobookObjects } from '@/lib/server/audiobooks/blobstore';
-import { decodeChapterFileName } from '@/lib/server/audiobooks/chapters';
-import { pruneAudiobookChaptersNotOnDisk } from '@/lib/server/audiobooks/prune';
-import { isS3Configured } from '@/lib/server/storage/s3';
-import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
-import type { AudiobookGenerationSettings } from '@/types/client';
-import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
-import { errorToLog, serverLogger } from '@/lib/server/logger';
-import { errorResponse } from '@/lib/server/errors/next-response';
+import { isSafeId } from '@/lib/server/utils/safe-id';
 
 export const dynamic = 'force-dynamic';
 
-const SAFE_ID_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
-
-function isSafeId(value: string): boolean {
-  return SAFE_ID_REGEX.test(value);
-}
-
-function s3NotConfiguredResponse(): NextResponse {
-  return NextResponse.json(
-    { error: 'Audiobooks storage is not configured. Set S3_* environment variables.' },
-    { status: 503 },
-  );
-}
-
-type ChapterObject = {
-  index: number;
-  title: string;
-  format: TTSAudiobookFormat;
-  fileName: string;
-};
-
-function listChapterObjects(fileNames: string[]): ChapterObject[] {
-  const chapters = fileNames
-    .map((fileName) => {
-      const decoded = decodeChapterFileName(fileName);
-      if (!decoded) return null;
-      return {
-        index: decoded.index,
-        title: decoded.title,
-        format: decoded.format,
-        fileName,
-      } satisfies ChapterObject;
-    })
-    .filter((value): value is ChapterObject => Boolean(value))
-    .sort((a, b) => a.index - b.index);
-
-  const deduped = new Map<number, ChapterObject>();
-  for (const chapter of chapters) {
-    const current = deduped.get(chapter.index);
-    if (!current || chapter.fileName > current.fileName) {
-      deduped.set(chapter.index, chapter);
-    }
-  }
-
-  return Array.from(deduped.values()).sort((a, b) => a.index - b.index);
-}
-
 export async function GET(request: NextRequest) {
-  try {
-    if (!isS3Configured()) return s3NotConfiguredResponse();
-
-    const bookId = request.nextUrl.searchParams.get('bookId');
-    if (!bookId || !isSafeId(bookId)) {
-      return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
-    }
-
-    const ctxOrRes = await requireAuthContext(request);
-    if (ctxOrRes instanceof Response) return ctxOrRes;
-    if (!ctxOrRes.userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const storageUserId = ctxOrRes.userId;
-    const testNamespace = getOpenReaderTestNamespace(request.headers);
-    const existingBookRows = await db
-      .select({ userId: audiobooks.userId })
-      .from(audiobooks)
-      .where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, storageUserId)));
-
-    if (existingBookRows.length === 0) {
-      return NextResponse.json({
-        chapters: [],
-        exists: false,
-        hasComplete: false,
-        bookId: null,
-        settings: null,
-      });
-    }
-
-    const objects = await listAudiobookObjects(bookId, storageUserId, testNamespace);
-    const objectNames = objects.map((object) => object.fileName);
-    const chapterObjects = listChapterObjects(objectNames);
-
-    await pruneAudiobookChaptersNotOnDisk(
-      bookId,
-      storageUserId,
-      chapterObjects.map((chapter) => chapter.index),
-    );
-
-    const chapterRows = await db
-      .select({
-        chapterIndex: audiobookChapters.chapterIndex,
-        duration: audiobookChapters.duration,
-        title: audiobookChapters.title,
-      })
-      .from(audiobookChapters)
-      .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, storageUserId)));
-    const durationByIndex = new Map<number, number>();
-    const titleByIndex = new Map<number, string>();
-    for (const row of chapterRows) {
-      durationByIndex.set(row.chapterIndex, Number(row.duration ?? 0));
-      if (row.title.trim()) titleByIndex.set(row.chapterIndex, row.title.trim());
-    }
-
-    const chapters: TTSAudiobookChapter[] = chapterObjects.map((chapter) => {
-      const oneBasedPrefix = String(chapter.index + 1).padStart(4, '0') + '__';
-      const txtFileObj = objects.find(o => o.fileName.startsWith(oneBasedPrefix) && o.fileName.endsWith('.txt'));
-      const isEmptyText = !txtFileObj || txtFileObj.size < 5; // empty or extremely small
-      
-      return {
-        index: chapter.index,
-        title: titleByIndex.get(chapter.index) ?? chapter.title,
-        duration: durationByIndex.get(chapter.index),
-        status: 'completed',
-        bookId,
-        format: chapter.format,
-        isEmptyText,
-      };
-    });
-
-    let settings: AudiobookGenerationSettings | null = null;
-    try {
-      settings = JSON.parse((await getAudiobookObjectBuffer(bookId, storageUserId, 'audiobook.meta.json', testNamespace)).toString('utf8')) as AudiobookGenerationSettings;
-    } catch (error) {
-      if (!isMissingBlobError(error)) throw error;
-      settings = null;
-    }
-
-    const hasComplete = objectNames.includes('complete.mp3') || objectNames.includes('complete.m4b');
-    const exists = chapters.length > 0 || hasComplete || settings !== null;
-
-    if (!exists) {
-      // Check if there's an active job before deleting to prevent race condition
-      const activeJobs = await db
-        .select({ id: audiobookJobs.id })
-        .from(audiobookJobs)
-        .where(and(eq(audiobookJobs.documentId, bookId), eq(audiobookJobs.userId, storageUserId)));
-      
-      if (activeJobs.length === 0) {
-        // Deleting the audiobook row cascades to audiobookChapters via bookFk
-        await db.delete(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, storageUserId)));
-      }
-      return NextResponse.json({
-        chapters: [],
-        exists: false,
-        hasComplete: false,
-        bookId: null,
-        settings: null,
-      });
-    }
-
-    return NextResponse.json({
-      chapters,
-      exists: true,
-      hasComplete,
-      bookId,
-      settings,
-    });
-  } catch (error) {
-    serverLogger.error({
-      event: 'audiobook.status.fetch.failed',
-      error: errorToLog(error),
-    }, 'Failed to fetch audiobook chapters');
-    return errorResponse(error, {
-      apiErrorMessage: 'Failed to fetch chapters',
-      normalize: { code: 'AUDIOBOOK_STATUS_FETCH_FAILED', errorClass: 'db' },
-    });
+  const bookId = request.nextUrl.searchParams.get('bookId');
+  if (!bookId || !isSafeId(bookId)) {
+    return NextResponse.json({ error: 'Invalid bookId' }, { status: 400 });
   }
+
+  const ctxOrRes = await requireAuthContext(request);
+  if (ctxOrRes instanceof Response) return ctxOrRes;
+  if (!ctxOrRes.userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const format = request.nextUrl.searchParams.get('format');
+  if (!format) return NextResponse.json({ error: 'Missing format' }, { status: 400 });
+
+  const jobs = await db.select()
+    .from(audiobookJobs)
+    .where(and(
+      eq(audiobookJobs.documentId, bookId),
+      eq(audiobookJobs.userId, ctxOrRes.userId)
+    ))
+    .orderBy(audiobookJobs.createdAt);
+
+  let combineJob = null;
+  for (let i = jobs.length - 1; i >= 0; i--) {
+    const job = jobs[i];
+    const settings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
+    if (settings.jobType === 'combine' && settings.format === format) {
+      combineJob = job;
+      break;
+    }
+  }
+
+  if (!combineJob) {
+    return NextResponse.json({ status: 'not_found' });
+  }
+
+  return NextResponse.json({
+    status: combineJob.status,
+    progress: combineJob.progress,
+    error: combineJob.error,
+  });
 }

@@ -266,15 +266,10 @@ export function DocumentTile({
                 if (isDownloadingAudiobook) return;
                 setIsDownloadingAudiobook(true);
                 try {
-                  const { combineAudiobook } = await import('@/lib/client/api/audiobooks');
-                  await combineAudiobook(doc.id, 'm4b');
-                  const url = `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`;
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = '';
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
+                  const { default: toast } = await import('react-hot-toast');
+                  const toastId = toast.loading('Preparing audiobook...');
+                  const { downloadAudiobookWithBackgroundPolling } = await import('@/lib/client/api/audiobooks');
+                  await downloadAudiobookWithBackgroundPolling(doc.id, 'm4b', toast, toastId);
                   await new Promise(resolve => setTimeout(resolve, 2000));
                 } catch (err) {
                   console.error('Error combining audiobook:', err);

@@ -625,19 +625,13 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     if (selectedDocs.length === 0) return;
     
     (async () => {
-      const { combineAudiobook } = await import('@/lib/client/api/audiobooks');
+      const { downloadAudiobookWithBackgroundPolling } = await import('@/lib/client/api/audiobooks');
       let combinedCount = 0;
       const toastId = 'batch-download';
       toast.loading(`Preparing ${selectedDocs.length} audiobook${selectedDocs.length === 1 ? '' : 's'} for download...`, { id: toastId });
       for (const doc of selectedDocs) {
         try {
-          await combineAudiobook(doc.id, 'm4b');
-          const a = document.createElement('a');
-          a.href = `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`;
-          a.download = `${doc.name}.m4b`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+          await downloadAudiobookWithBackgroundPolling(doc.id, 'm4b', toast, toastId);
           combinedCount++;
           await new Promise(r => setTimeout(r, 500));
         } catch (err) {

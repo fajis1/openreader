@@ -678,14 +678,10 @@ export function AudiobookExportModal({
 
     setIsCombining(true);
     try {
-      await combineAudiobook(bookId, format);
-      const url = `/api/audiobook?bookId=${bookId}&format=${format}`;
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = '';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const { default: toast } = await import('react-hot-toast');
+      const toastId = toast.loading('Preparing audiobook...');
+      const { downloadAudiobookWithBackgroundPolling } = await import('@/lib/client/api/audiobooks');
+      await downloadAudiobookWithBackgroundPolling(bookId, format, toast, toastId);
       
       // Delay disabling the loading state so the browser has time to start the download
       await new Promise(resolve => setTimeout(resolve, 2000));

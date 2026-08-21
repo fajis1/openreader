@@ -258,6 +258,20 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     const bookId = doc.id;
     const userId = job.userId;
 
+    
+    const jobSettings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
+    if (jobSettings.jobType === 'combine') {
+      const { executeAudiobookCombine } = await import('./combine');
+      try {
+        await executeAudiobookCombine(bookId, userId, jobSettings.format, jobSettings.testNamespace, updateProgress);
+        await updateClaimedAudiobookJob(job.id, 'running', { status: 'completed', progress: 100, completedAt: Date.now() });
+      } catch (combineError) {
+        serverLogger.error({ event: 'audiobook.combine.failed', jobId: job.id, error: errorToLog(combineError) }, 'Audiobook background combine failed');
+        await markError((combineError as Error)?.message || 'Combine failed');
+      }
+      return;
+    }
+
     const existingBook = await db.select().from(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, userId)));
     const jobSettings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
     // Missing/legacy versions must retain the exact pre-12K chapter map so a

@@ -10,8 +10,6 @@ describe('AudiobookExportModal downloads', () => {
 
   test('starts complete audiobook downloads without navigating the page', () => {
     expect(source).not.toContain('window.location.assign(url)');
-    expect(source).toContain("a.download = ''");
-    expect(source).toContain('document.body.appendChild(a)');
-    expect(source).toContain('document.body.removeChild(a)');
+    expect(source).toContain("downloadAudiobookWithBackgroundPolling");
   });
 });
