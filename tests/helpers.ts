@@ -65,7 +65,11 @@ export async function uploadFile(page: Page, filePath: string) {
 /**
  * Upload and display a document
  */
-export async function uploadAndDisplay(page: Page, fileName: string) {
+export async function uploadAndDisplay(
+  page: Page,
+  fileName: string,
+  options: { pdfReadyTimeoutMs?: number } = {},
+) {
   await uploadFile(page, fileName);
 
   const lower = fileName.toLowerCase();
@@ -76,7 +80,7 @@ export async function uploadAndDisplay(page: Page, fileName: string) {
     await expect(targetLink).toBeVisible({ timeout: 15000 });
     await dismissOnboardingModals(page);
     await targetLink.click();
-    await waitForPdfViewerReady(page, 60000);
+    await waitForPdfViewerReady(page, options.pdfReadyTimeoutMs);
     return;
   }
 
@@ -93,7 +97,7 @@ export async function uploadAndDisplay(page: Page, fileName: string) {
   }
 
   if (lower.endsWith('.pdf')) {
-    await waitForPdfViewerReady(page, 60000);
+    await waitForPdfViewerReady(page, options.pdfReadyTimeoutMs);
   } else if (lower.endsWith('.epub')) {
     await page.waitForSelector('.epub-container', { timeout: 10000 });
   } else if (lower.endsWith('.txt') || lower.endsWith('.md')) {

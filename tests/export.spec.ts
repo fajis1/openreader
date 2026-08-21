@@ -363,7 +363,9 @@ test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ 
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text())); page.on('pageerror', error => console.log('BROWSER ERROR:', error)); await setupTest(page, testInfo);
 
   // Upload and open the sample PDF in the viewer
-  await uploadAndDisplay(page, 'sample.pdf');
+  await uploadAndDisplay(page, 'sample.pdf', {
+    pdfReadyTimeoutMs: testInfo.timeout - 10_000,
+  });
 
   // Capture the generated document/book id from the /pdf/[id] URL
   const bookId = await getBookIdFromUrl(page, 'pdf');
@@ -478,7 +480,7 @@ test('exports partial MP3 audiobook for EPUB using mocked 10s TTS sample', async
 });
 
 test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page }, testInfo) => {
-  test.setTimeout(60_000);
+  test.setTimeout(180_000);
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text())); page.on('pageerror', error => console.log('BROWSER ERROR:', error)); await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 

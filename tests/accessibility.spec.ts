@@ -56,9 +56,11 @@ test.describe('Accessibility smoke', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('TTS controls expose aria labels and are keyboard focusable', async ({ page }) => {
+  test('TTS controls expose aria labels and are keyboard focusable', async ({ page }, testInfo) => {
     test.setTimeout(120_000);
-    await uploadAndDisplay(page, 'sample.pdf');
+    await uploadAndDisplay(page, 'sample.pdf', {
+      pdfReadyTimeoutMs: testInfo.timeout - 10_000,
+    });
 
     // TTS bar present
     const ttsbar = page.locator('[data-app-ttsbar]');

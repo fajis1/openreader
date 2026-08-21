@@ -61,6 +61,13 @@ jobs:
         nats-server -v
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
+    - name: Restore PP-DocLayout model cache
+      uses: actions/cache@v5
+      with:
+        path: docstore/model
+        key: pp-doclayoutv3-${{ runner.os }}-${{ hashFiles('compute/core/src/pdf/assets/manifest.json') }}
+    - name: Prepare PP-DocLayout model
+      run: pnpm exec tsx scripts/prepare-pdf-layout-model.ts
     - name: Apply drizzle migrations (SQLite)
       run: pnpm migrate
     - name: Build app and enforce bundle guard
