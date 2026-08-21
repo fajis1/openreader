@@ -231,220 +231,20 @@ export async function GET(request: NextRequest) {
       await deleteAudiobookObject(bookId, storageUserId, manifestName, testNamespace).catch(() => {});
     }
 
-    workDir = await mkdtemp(join(tmpdir(), 'openreader-audiobook-combine-'));
-    const metadataPath = join(workDir, 'metadata.txt');
-    const listPath = join(workDir, 'list.txt');
-    const outputPath = join(workDir, completeName);
 
-    const localChapters: Array<{ index: number; title: string; localPath: string; duration: number }> = [];
-    for (const chapter of chapters) {
-      const localPath = join(workDir, chapter.fileName);
-      const bytes = await getAudiobookObjectBuffer(bookId, storageUserId, chapter.fileName, testNamespace);
-      await writeFile(localPath, bytes);
-
-      let duration = 0;
-      try {
-        const probe = await ffprobeAudio(localPath, request.signal);
-        if (probe.durationSec && probe.durationSec > 0) {
-          duration = probe.durationSec;
-        }
-      } catch {
-        duration = 0;
-      }
-      if (!duration || duration <= 0) {
-        duration = durationByIndex.get(chapter.index) ?? 0;
-      }
-
-      localChapters.push({
-        index: chapter.index,
-        title: chapter.title,
-        localPath,
-        duration,
-      });
-    }
-
-    const metadata: string[] = [];
-    let currentTime = 0;
-    let currentChapterTitle: string | null = null;
-    let currentChapterStartMs = 0;
-    const MAX_CHAPTER_DURATION_MS = 35 * 60 * 1000; // 35 minutes
-    let currentPartNumber = 1;
-
-    for (let i = 0; i < localChapters.length; i++) {
-      const chapter = localChapters[i];
-      const startMs = Math.floor(currentTime * 1000);
-
-      const titleChanged = currentChapterTitle !== chapter.title;
-      const chapterTooLong = currentChapterTitle !== null && !titleChanged && (startMs - currentChapterStartMs) >= MAX_CHAPTER_DURATION_MS;
-
-      if (titleChanged || chapterTooLong) {
-        if (currentChapterTitle !== null) {
-          let displayTitle = currentChapterTitle;
-          if (currentPartNumber > 1 || chapterTooLong) {
-            displayTitle = `${currentChapterTitle} (Part ${currentPartNumber})`;
-          }
-          metadata.push(
-            '[CHAPTER]',
-            'TIMEBASE=1/1000',
-            `START=${currentChapterStartMs}`,
-            `END=${startMs}`,
-            `title=${escapeFFMetadata(displayTitle)}`
-          );
-        }
-        if (titleChanged) {
-          currentChapterTitle = chapter.title;
-          currentPartNumber = 1;
-        } else if (chapterTooLong) {
-          currentPartNumber++;
-        }
-        currentChapterStartMs = startMs;
-      }
-
-      currentTime += chapter.duration;
-    }
-
-    if (currentChapterTitle !== null) {
-      const endMs = Math.floor(currentTime * 1000);
-      let displayTitle = currentChapterTitle;
-      if (currentPartNumber > 1) {
-        displayTitle = `${currentChapterTitle} (Part ${currentPartNumber})`;
-      }
-      metadata.push(
-        '[CHAPTER]',
-        'TIMEBASE=1/1000',
-        `START=${currentChapterStartMs}`,
-        `END=${endMs}`,
-        `title=${escapeFFMetadata(displayTitle)}`
-      );
-    }
-
-    await writeFile(metadataPath, ';FFMETADATA1\n' + metadata.join('\n'));
-    await writeFile(
-      listPath,
-      localChapters
-        .map((chapter) => `file '${chapter.localPath.replace(/'/g, "'\\''")}'`)
-        .join('\n'),
-    );
-
-    if (format === 'mp3') {
-      try {
-        await runFFmpeg(
-          ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-map_metadata', '-1', '-c:a', 'copy', outputPath]
-        );
-      } catch (copyError) {
-        if ((copyError as Error)?.message === 'ABORTED' || request.signal.aborted) {
-          throw copyError;
-        }
-        serverLogger.warn({
-          event: 'audiobook.concat_copy.mp3.failed',
-          degraded: true,
-          fallbackPath: 'reencode',
-          error: errorToLog(copyError),
-        }, 'MP3 concat copy failed; falling back to re-encode');
-        await runFFmpeg(
-          ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-b:a', '64k', outputPath]
-        );
-      }
-    } else {
-      try {
-        await runFFmpeg(
-          [
-            '-y',
-            '-f',
-            'concat',
-            '-safe',
-            '0',
-            '-i',
-            listPath,
-            '-i',
-            metadataPath,
-            '-map_metadata',
-            '1',
-            '-map_chapters',
-            '1',
-            '-c:a',
-            'copy',
-            '-f',
-            'mp4',
-            outputPath,
-          ]
-        );
-      } catch (copyError) {
-        if ((copyError as Error)?.message === 'ABORTED' || request.signal.aborted) {
-          throw copyError;
-        }
-        serverLogger.warn({
-          event: 'audiobook.concat_copy.m4b.failed',
-          degraded: true,
-          fallbackPath: 'reencode',
-          error: errorToLog(copyError),
-        }, 'M4B concat copy failed; falling back to re-encode');
-        await runFFmpeg(
-          [
-            '-y',
-            '-f',
-            'concat',
-            '-safe',
-            '0',
-            '-i',
-            listPath,
-            '-i',
-            metadataPath,
-            '-map_metadata',
-            '1',
-            '-map_chapters',
-            '1',
-            '-c:a',
-            'aac',
-            '-b:a',
-            '64k',
-            '-f',
-            'mp4',
-            outputPath,
-          ]
-        );
-      }
-    }
-    await ensurePositiveDuration(outputPath, request.signal);
-
-    const outputStreamForPut = createReadStream(outputPath);
-    await putAudiobookObject(bookId, storageUserId, completeName, outputStreamForPut, chapterFileMimeType(format), testNamespace);
-    await putAudiobookObject(
-      bookId,
-      storageUserId,
-      manifestName,
-      Buffer.from(JSON.stringify(signature, null, 2), 'utf8'),
-      'application/json; charset=utf-8',
-      testNamespace,
-    );
-
-    const fileStat = await stat(outputPath);
-    const readStream = createReadStream(outputPath);
-    const webStream = Readable.toWeb(readStream);
-
-    return new NextResponse(webStream as any, {
-      headers: {
-        'Content-Type': chapterFileMimeType(format),
-        'Content-Disposition': contentDispositionAttachment(downloadFilename),
-        'Cache-Control': 'no-cache',
-        'Accept-Ranges': 'bytes',
-        'Content-Length': fileStat.size.toString(),
-      },
-    });
+    return NextResponse.json({ error: 'Audiobook not fully assembled yet or requires regeneration' }, { status: 404 });
   } catch (error) {
     if ((error as Error)?.message === 'ABORTED' || request.signal.aborted) {
       return NextResponse.json({ error: 'cancelled' }, { status: 499 });
     }
     serverLogger.error({
-      event: 'audiobook.create.failed',
+      event: 'audiobook.download.failed',
       error: errorToLog(error),
-    }, 'Failed to create full audiobook');
+    }, 'Failed to download full audiobook');
     return errorResponse(error, {
-      apiErrorMessage: 'Failed to create full audiobook file',
-      normalize: { code: 'AUDIOBOOK_CREATE_FAILED', errorClass: 'upstream' },
+      apiErrorMessage: 'Failed to download audiobook file',
+      normalize: { code: 'AUDIOBOOK_DOWNLOAD_FAILED', errorClass: 'upstream' },
     });
-  } finally {
-    if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -474,7 +274,7 @@ export async function POST(request: NextRequest) {
 
     const objects = await listAudiobookObjects(bookId, storageUserId, testNamespace);
     const objectNames = objects.map((item) => item.fileName);
-    const { listChapterObjects } = await import('@/lib/server/audiobooks/chapters');
+    
     let chapters = listChapterObjects(objectNames);
     if (chapters.length === 0) {
       return NextResponse.json({ error: 'No chapters found' }, { status: 404 });

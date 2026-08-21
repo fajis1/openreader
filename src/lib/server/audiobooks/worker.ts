@@ -18,7 +18,7 @@ import { encodeChapterFileName } from '@/lib/server/audiobooks/chapters';
 import { createOrReuseCurrentPdfParseOperation } from '@/lib/server/pdf-parse/operation';
 import { extractPdfToc, computeTocBoundaries } from '@/lib/server/pdf-parse/toc';
 import type { ParsedPdfDocument } from '@/types/parsed-pdf';
-import { serverLogger } from '@/lib/server/logger';
+import { serverLogger, errorToLog } from '@/lib/server/logger';
 import { INTERNAL_WORKER_SECRET } from '@/lib/server/internal-secret';
 import {
   buildKokoroPronunciationInstructions,

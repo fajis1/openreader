@@ -6,12 +6,10 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { audiobooks, audiobookChapters } from '@/db/schema';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
-import { getAudiobookObjectBuffer, putAudiobookObject, listAudiobookObjects, chapterFileMimeType } from './blobstore';
+import { getAudiobookObjectBuffer, putAudiobookObject, listAudiobookObjects, } from './blobstore';
 import { escapeFFMetadata, ffprobeAudio } from './chapters';
 import { getFFmpegPath } from './ffmpeg-bin';
 import type { TTSAudiobookFormat } from '@/types/tts';
-import { listChapterObjects } from '@/lib/server/audiobooks/chapters';
-
 export async function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const ffmpeg = spawn(getFFmpegPath(), args);
@@ -202,7 +200,7 @@ export async function executeAudiobookCombine(
 
     const { createReadStream } = await import('fs');
     const outputStreamForPut = createReadStream(outputPath);
-    await putAudiobookObject(bookId, storageUserId, completeName, outputStreamForPut, chapterFileMimeType(format), testNamespace);
+    await putAudiobookObject(bookId, storageUserId, completeName, outputStreamForPut, (format), testNamespace);
     await putAudiobookObject(
       bookId,
       storageUserId,
@@ -214,4 +212,27 @@ export async function executeAudiobookCombine(
   } finally {
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+
+type ChapterObject = { index: number; fileName: string; format: TTSAudiobookFormat; title: string };
+
+function listChapterObjects(objectNames: string[]): ChapterObject[] {
+  const chapters: ChapterObject[] = [];
+  for (const name of objectNames) {
+    const match = name.match(/^chapter-(\d+)\.(mp3|m4b)$/);
+    if (match) {
+      chapters.push({
+        index: parseInt(match[1], 10),
+        fileName: name,
+        format: match[2] as TTSAudiobookFormat,
+        title: `Chapter ${match[1]}`,
+      });
+    }
+  }
+  return chapters.sort((a, b) => a.index - b.index);
+}
+
+function chapterFileMimeType(format: TTSAudiobookFormat): string {
+  return format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';
 }
