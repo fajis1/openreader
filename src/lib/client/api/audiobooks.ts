@@ -295,7 +295,13 @@ export const downloadAudiobookWithBackgroundPolling = async (bookId: string, for
   const { status } = await combineAudiobook(bookId, format);
   if (status === 'ready') {
     toast.success('Audiobook prepared. Starting download.', { id: toastId });
-    window.location.href = `/api/audiobook?bookId=${bookId}&format=${format}`;
+    const url = `/api/audiobook?bookId=${bookId}&format=${format}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
     return;
   }
   
@@ -307,7 +313,15 @@ export const downloadAudiobookWithBackgroundPolling = async (bookId: string, for
         if (st.status === 'completed' || st.status === 'ready') {
           clearInterval(interval);
           toast.success('Audiobook assembly complete! Starting download.', { id: toastId });
-          window.location.href = `/api/audiobook?bookId=${bookId}&format=${format}`;
+          
+          const url = `/api/audiobook?bookId=${bookId}&format=${format}`;
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = '';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          
           resolve();
         } else if (st.status === 'error') {
           clearInterval(interval);
