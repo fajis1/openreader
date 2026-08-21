@@ -34,7 +34,8 @@ import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, MenuRoot, M
 import { 
   getAudiobookStatus, 
   deleteAudiobookChapter, 
-  deleteAudiobook 
+  deleteAudiobook,
+  combineAudiobook
 } from '@/lib/client/api/audiobooks';
 import type { AudiobookGenerationSettings, SmartAudioProfile } from '@/types/client';
 interface AudiobookExportModalProps {
@@ -677,6 +678,7 @@ export function AudiobookExportModal({
 
     setIsCombining(true);
     try {
+      await combineAudiobook(bookId, format);
       const url = `/api/audiobook?bookId=${bookId}&format=${format}`;
       const a = document.createElement('a');
       a.href = url;

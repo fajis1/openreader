@@ -265,15 +265,24 @@ export function DocumentTile({
                 e.stopPropagation();
                 if (isDownloadingAudiobook) return;
                 setIsDownloadingAudiobook(true);
-                const url = `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`;
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = '';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                setIsDownloadingAudiobook(false);
+                try {
+                  const { combineAudiobook } = await import('@/lib/client/api/audiobooks');
+                  await combineAudiobook(doc.id, 'm4b');
+                  const url = `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`;
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = '';
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (err) {
+                  console.error('Error combining audiobook:', err);
+                  const { default: toast } = await import('react-hot-toast');
+                  toast.error('Failed to prepare audiobook for download.');
+                } finally {
+                  setIsDownloadingAudiobook(false);
+                }
               }}
               className={`${TRASH_BTN_CLASSES[iconSize]} flex items-center justify-center text-accent hover:bg-accent-wash transition-colors`}
               aria-label={`Download M4B Audiobook for ${doc.name}`}

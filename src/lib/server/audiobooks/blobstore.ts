@@ -194,11 +194,42 @@ export async function getAudiobookObjectStream(
   return res.Body as AudiobookBlobBody;
 }
 
+export async function getAudiobookObjectStreamWithMetadata(
+  bookId: string,
+  userId: string,
+  fileName: string,
+  namespace: string | null,
+  options?: { range?: string },
+): Promise<{
+  body: AudiobookBlobBody;
+  contentLength?: number;
+  contentRange?: string;
+  contentType?: string;
+  acceptRanges?: string;
+}> {
+  const cfg = getS3Config();
+  const client = getS3ProxyClient();
+  const key = audiobookKey(bookId, userId, fileName, namespace);
+  const cmd = new GetObjectCommand({
+    Bucket: cfg.bucket,
+    Key: key,
+    ...(options?.range ? { Range: options.range } : {}),
+  });
+  const res = await client.send(cmd);
+  return {
+    body: res.Body as AudiobookBlobBody,
+    contentLength: res.ContentLength,
+    contentRange: res.ContentRange,
+    contentType: res.ContentType,
+    acceptRanges: res.AcceptRanges,
+  };
+}
+
 export async function putAudiobookObject(
   bookId: string,
   userId: string,
   fileName: string,
-  body: Buffer,
+  body: Buffer | NodeJS.ReadableStream | Uint8Array,
   contentType: string,
   namespace: string | null,
   options?: { ifNoneMatch?: boolean },
@@ -210,7 +241,7 @@ export async function putAudiobookObject(
     new PutObjectCommand({
       Bucket: cfg.bucket,
       Key: key,
-      Body: body,
+      Body: body as any,
       ContentType: contentType,
       ServerSideEncryption: 'AES256',
       ...(options?.ifNoneMatch ? { IfNoneMatch: '*' } : {}),

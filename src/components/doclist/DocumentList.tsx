@@ -622,14 +622,36 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
 
   const handleDownloadSelected = useCallback(() => {
     const selectedDocs = selection.getSelectedDocs();
-    selectedDocs.forEach((doc, i) => {
-      setTimeout(() => {
-        const a = document.createElement('a');
-        a.href = `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`;
-        a.download = `${doc.name}.m4b`;
-        a.click();
-      }, i * 500);
-    });
+    if (selectedDocs.length === 0) return;
+    
+    (async () => {
+      const { combineAudiobook } = await import('@/lib/client/api/audiobooks');
+      let combinedCount = 0;
+      const toastId = 'batch-download';
+      toast.loading(`Preparing ${selectedDocs.length} audiobook${selectedDocs.length === 1 ? '' : 's'} for download...`, { id: toastId });
+      for (const doc of selectedDocs) {
+        try {
+          await combineAudiobook(doc.id, 'm4b');
+          const a = document.createElement('a');
+          a.href = `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b`;
+          a.download = `${doc.name}.m4b`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          combinedCount++;
+          await new Promise(r => setTimeout(r, 500));
+        } catch (err) {
+          console.error(`Failed to combine audiobook ${doc.name}:`, err);
+        }
+      }
+      if (combinedCount === selectedDocs.length) {
+        toast.success(`Started downloading ${combinedCount} audiobook${combinedCount === 1 ? '' : 's'}.`, { id: toastId });
+      } else if (combinedCount > 0) {
+        toast.error(`Started downloading ${combinedCount}/${selectedDocs.length} audiobooks. Some failed.`, { id: toastId });
+      } else {
+        toast.error(`Failed to prepare audiobooks for download.`, { id: toastId });
+      }
+    })();
   }, [selection]);
 
   const handleDownloadSelectedOriginals = useCallback(() => {

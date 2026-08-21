@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdtemp, rm, writeFile, stat } from 'fs/promises';
+import { createReadStream } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { and, eq } from 'drizzle-orm';
+import { Readable } from 'stream';
 import { db } from '@/db';
 import { audiobooks, audiobookChapters, audiobookJobs } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
@@ -14,6 +16,8 @@ import {
   deleteAudiobookObject,
   deleteAudiobookPrefix,
   getAudiobookObjectBuffer,
+  getAudiobookObjectStream,
+  getAudiobookObjectStreamWithMetadata,
   listAudiobookObjects,
   putAudiobookObject,
 } from '@/lib/server/audiobooks/blobstore';
@@ -244,13 +248,32 @@ export async function GET(request: NextRequest) {
       try {
         const manifest = JSON.parse((await getAudiobookObjectBuffer(bookId, storageUserId, manifestName, testNamespace)).toString('utf8'));
         if (JSON.stringify(manifest) === JSON.stringify(signature)) {
-          const cached = await getAudiobookObjectBuffer(bookId, storageUserId, completeName, testNamespace);
-          return new NextResponse(streamBuffer(cached), {
-            headers: {
-              'Content-Type': chapterFileMimeType(format),
-              'Content-Disposition': contentDispositionAttachment(downloadFilename),
-              'Cache-Control': 'no-cache',
-            },
+          const rangeHeader = request.headers.get('range') || undefined;
+          const { body, contentRange, contentLength, acceptRanges } = await getAudiobookObjectStreamWithMetadata(
+            bookId, 
+            storageUserId, 
+            completeName, 
+            testNamespace,
+            { range: rangeHeader }
+          );
+          
+          const webStream = typeof (body as any).transformToWebStream === 'function'
+            ? (body as any).transformToWebStream()
+            : Readable.toWeb(body as any);
+            
+          const headers: Record<string, string> = {
+            'Content-Type': chapterFileMimeType(format),
+            'Content-Disposition': contentDispositionAttachment(downloadFilename),
+            'Cache-Control': 'no-cache',
+          };
+          
+          if (acceptRanges) headers['Accept-Ranges'] = acceptRanges;
+          if (contentRange) headers['Content-Range'] = contentRange;
+          if (contentLength !== undefined) headers['Content-Length'] = contentLength.toString();
+
+          return new NextResponse(webStream as any, {
+            status: contentRange ? 206 : 200,
+            headers,
           });
         }
       } catch {
@@ -435,8 +458,8 @@ export async function GET(request: NextRequest) {
     }
     await ensurePositiveDuration(outputPath, request.signal);
 
-    const outputBytes = await readFile(outputPath);
-    await putAudiobookObject(bookId, storageUserId, completeName, outputBytes, chapterFileMimeType(format), testNamespace);
+    const outputStreamForPut = createReadStream(outputPath);
+    await putAudiobookObject(bookId, storageUserId, completeName, outputStreamForPut, chapterFileMimeType(format), testNamespace);
     await putAudiobookObject(
       bookId,
       storageUserId,
@@ -446,11 +469,17 @@ export async function GET(request: NextRequest) {
       testNamespace,
     );
 
-    return new NextResponse(streamBuffer(outputBytes), {
+    const fileStat = await stat(outputPath);
+    const readStream = createReadStream(outputPath);
+    const webStream = Readable.toWeb(readStream);
+
+    return new NextResponse(webStream as any, {
       headers: {
         'Content-Type': chapterFileMimeType(format),
         'Content-Disposition': contentDispositionAttachment(downloadFilename),
         'Cache-Control': 'no-cache',
+        'Accept-Ranges': 'bytes',
+        'Content-Length': fileStat.size.toString(),
       },
     });
   } catch (error) {
@@ -714,8 +743,8 @@ export async function POST(request: NextRequest) {
     }
     await ensurePositiveDuration(outputPath, request.signal);
 
-    const outputBytes = await readFile(outputPath);
-    await putAudiobookObject(bookId, storageUserId, completeName, outputBytes, chapterFileMimeType(format), testNamespace);
+    const outputStreamForPut = createReadStream(outputPath);
+    await putAudiobookObject(bookId, storageUserId, completeName, outputStreamForPut, chapterFileMimeType(format), testNamespace);
     await putAudiobookObject(
       bookId,
       storageUserId,
