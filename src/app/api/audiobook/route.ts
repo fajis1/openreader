@@ -382,10 +382,12 @@ export async function GET(request: NextRequest) {
     if (format === 'mp3') {
       try {
         await runFFmpeg(
-          ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-map_metadata', '-1', '-c:a', 'copy', outputPath],
-          request.signal,
+          ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-map_metadata', '-1', '-c:a', 'copy', outputPath]
         );
       } catch (copyError) {
+        if ((copyError as Error)?.message === 'ABORTED' || request.signal.aborted) {
+          throw copyError;
+        }
         serverLogger.warn({
           event: 'audiobook.concat_copy.mp3.failed',
           degraded: true,
@@ -393,8 +395,7 @@ export async function GET(request: NextRequest) {
           error: errorToLog(copyError),
         }, 'MP3 concat copy failed; falling back to re-encode');
         await runFFmpeg(
-          ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-b:a', '64k', outputPath],
-          request.signal,
+          ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-b:a', '64k', outputPath]
         );
       }
     } else {
@@ -419,10 +420,12 @@ export async function GET(request: NextRequest) {
             '-f',
             'mp4',
             outputPath,
-          ],
-          request.signal,
+          ]
         );
       } catch (copyError) {
+        if ((copyError as Error)?.message === 'ABORTED' || request.signal.aborted) {
+          throw copyError;
+        }
         serverLogger.warn({
           event: 'audiobook.concat_copy.m4b.failed',
           degraded: true,
@@ -451,8 +454,7 @@ export async function GET(request: NextRequest) {
             '-f',
             'mp4',
             outputPath,
-          ],
-          request.signal,
+          ]
         );
       }
     }
@@ -661,10 +663,12 @@ export async function POST(request: NextRequest) {
     if (format === 'mp3') {
       try {
         await runFFmpeg(
-          ['-f', 'concat', '-safe', '0', '-i', listPath, '-map_metadata', '-1', '-c:a', 'copy', outputPath],
-          request.signal,
+          ['-f', 'concat', '-safe', '0', '-i', listPath, '-map_metadata', '-1', '-c:a', 'copy', outputPath]
         );
       } catch (copyError) {
+        if ((copyError as Error)?.message === 'ABORTED' || request.signal.aborted) {
+          throw copyError;
+        }
         serverLogger.warn({
           event: 'audiobook.concat_copy.mp3.failed',
           degraded: true,
@@ -672,8 +676,7 @@ export async function POST(request: NextRequest) {
           error: errorToLog(copyError),
         }, 'MP3 concat copy failed; falling back to re-encode');
         await runFFmpeg(
-          ['-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-b:a', '64k', outputPath],
-          request.signal,
+          ['-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-b:a', '64k', outputPath]
         );
       }
     } else {
@@ -701,10 +704,12 @@ export async function POST(request: NextRequest) {
             '-f',
             'mp4',
             outputPath,
-          ],
-          request.signal,
+          ]
         );
       } catch (copyError) {
+        if ((copyError as Error)?.message === 'ABORTED' || request.signal.aborted) {
+          throw copyError;
+        }
         serverLogger.warn({
           event: 'audiobook.concat_copy.m4b.failed',
           degraded: true,
@@ -736,8 +741,7 @@ export async function POST(request: NextRequest) {
             '-f',
             'mp4',
             outputPath,
-          ],
-          request.signal,
+          ]
         );
       }
     }
