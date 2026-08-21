@@ -6,6 +6,7 @@ import {
   collectSmartAudioTermCandidates,
   enrichTextFromBookLexicon,
   isCompleteScholarScanScope,
+  pronunciationsFromBookLexicon,
   selectPronunciationsForText,
 } from '../../src/lib/server/smart-audio/book-lexicon';
 import { mergeDocumentSettings } from '../../src/lib/shared/document-settings';
@@ -171,6 +172,19 @@ describe('Smart Audio book lexicon', () => {
       λόγος: '/ˈlo.ɡos/',
       חֶסֶד: '/ˈxe.sed/',
     })).toEqual({ λόγος: '/ˈlo.ɡos/' });
+  });
+
+  test('makes compatible per-book pronunciations available to final validation', () => {
+    const compatibleLexicon = {
+      ...lexicon,
+      entries: {
+        ...lexicon.entries,
+        'λόγος': { ...lexicon.entries['λόγος'], pronunciation: '/lo.ɡos/' },
+      },
+    };
+    expect(pronunciationsFromBookLexicon(compatibleLexicon)).toEqual({
+      'λόγος': '/lo.ɡos/',
+    });
   });
 
   test('preserves a valid per-book lexicon in document settings', () => {

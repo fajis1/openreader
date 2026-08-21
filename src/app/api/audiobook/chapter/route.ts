@@ -49,16 +49,19 @@ import { errorResponse } from '@/lib/server/errors/next-response';
 import {
   findSmartAudioProfileById,
   readSmartAudioProfilesDocument,
-  writeSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
 import {
   buildKokoroPronunciationInstructions,
   filterKokoroCompatiblePronunciationRecord,
 } from '@/lib/shared/kokoro-pronunciation-policy';
-import { resolveCleanupAiModel } from '@/lib/shared/smart-audio-models';
+import {
+  resolveCleanupAiModel,
+  resolveSmartAudioValidationRepairModel,
+} from '@/lib/shared/smart-audio-models';
 import {
   collectSmartAudioTermCandidates,
   enrichTextFromBookLexicon,
+  pronunciationsFromBookLexicon,
   readBookLexicon,
   resolveSmartAudioBookLexicon,
   selectPronunciationsForText,
@@ -68,10 +71,10 @@ import { readGlobalDefinitions } from '@/lib/server/smart-audio/global-definitio
 import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
 import {
   buildSmartAudioCleanupPrompt,
+  extractNarratableSmartAudioSourceText,
   FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
   isScholarLikeSmartAudioMode,
   resolveSmartAudioWorkerResult,
-  selectUnknownSmartAudioPronunciations,
   validateSmartAudioOutput,
 } from '@/lib/shared/smart-audio-cleanup';
 import { mergeDocumentSettings } from '@/lib/shared/document-settings';
@@ -84,6 +87,10 @@ import {
 } from '@/lib/shared/multi-voice';
 import { DEFAULT_DOCUMENT_SETTINGS } from '@/types/document-settings';
 import { isKokoroModel } from '@/lib/shared/kokoro';
+import {
+  buildSmartAudioValidationRepairPayload,
+  resolveSmartAudioWithValidationRecovery,
+} from '@/lib/server/audiobooks/smart-audio-validation-recovery';
 
 const SMART_AUDIO_NATS_SUBJECT = 'audiobooks.gemini.clean';
 
@@ -835,6 +842,10 @@ export async function POST(request: NextRequest) {
               }
             }
           }
+          finalPronunciations = filterKokoroCompatiblePronunciationRecord({
+            ...pronunciationsFromBookLexicon(bookLexicon),
+            ...finalPronunciations,
+          });
 
           const enrichedText = enrichTextFromBookLexicon(
             data.text,
@@ -882,19 +893,95 @@ export async function POST(request: NextRequest) {
           const msg = await nc.request(targetSubject, sc.encode(payload), {
             timeout: resolveSmartAudioNatsTimeoutMs(selectedProfile?.workerMode),
           });
-          const workerResult = JSON.parse(sc.decode(msg.data));
+          const applyAuthoritativeBookTags = (value: unknown): unknown => {
+            if (
+              selectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
+              || !bookLexicon
+              || !value
+              || typeof value !== 'object'
+              || Array.isArray(value)
+            ) return value;
+            const result = value as Record<string, unknown>;
+            if (typeof result.cleaned_text !== 'string') return value;
+            return {
+              ...result,
+              cleaned_text: enrichTextFromBookLexicon(result.cleaned_text, bookLexicon, {
+                includeDefinitions: false,
+                pronunciationOverrides: authoritativePronunciations,
+              }),
+            };
+          };
+          let workerResult = applyAuthoritativeBookTags(JSON.parse(sc.decode(msg.data))) as Record<string, unknown>;
 
           if (workerResult.status === "success") {
-            const multiVoiceResult = selectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
-              ? resolveMultiVoiceWorkerResult(workerResult, multiVoiceCast, {
-                authoritativePronunciations,
-              })
-              : null;
-            const resolvedWorkerResult = multiVoiceResult
-              ? { outcome: 'cleaned' as const, text: multiVoiceResult.taggedText }
-              : resolveSmartAudioWorkerResult(workerResult, {
-                authoritativePronunciations,
-              });
+            const recovery = await resolveSmartAudioWithValidationRecovery({
+              initialResult: workerResult,
+              authoritativePronunciations,
+              resolve: (candidate) => {
+                const multiVoiceResult = selectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
+                  ? resolveMultiVoiceWorkerResult(candidate, multiVoiceCast, {
+                    authoritativePronunciations,
+                  })
+                  : null;
+                const resolvedWorkerResult = multiVoiceResult
+                  ? { outcome: 'cleaned' as const, text: multiVoiceResult.taggedText }
+                  : resolveSmartAudioWorkerResult(candidate, {
+                    authoritativePronunciations,
+                    sourceText: data.text,
+                  });
+                return { multiVoiceResult, resolvedWorkerResult };
+              },
+              requestRepair: async (rejectedResult, validationError) => {
+                const requestedModel = resolveCleanupAiModel(selectedProfile);
+                const repairModel = resolveSmartAudioValidationRepairModel(requestedModel);
+                serverLogger.warn({
+                  event: 'audiobook.chapter.smart_audio.validation_repair',
+                  bookId,
+                  chapter: chapterIndex,
+                  requestedModel,
+                  repairModel,
+                  error: errorToLog(validationError),
+                }, 'Smart Audio output failed validation; requesting one correction with the quality-repair model.');
+                const repairMessage = await nc.request(
+                  targetSubject,
+                  sc.encode(buildSmartAudioValidationRepairPayload(
+                    payload,
+                    rejectedResult,
+                    validationError,
+                  )),
+                  { timeout: resolveSmartAudioNatsTimeoutMs(selectedProfile?.workerMode) },
+                );
+                return applyAuthoritativeBookTags(JSON.parse(sc.decode(repairMessage.data)));
+              },
+              sourceFallback: (rejectedResult) => ({
+                ...(rejectedResult && typeof rejectedResult === 'object' && !Array.isArray(rejectedResult)
+                  ? rejectedResult as Record<string, unknown>
+                  : {}),
+                status: 'success',
+                outcome: 'cleaned',
+                cleaned_text: extractNarratableSmartAudioSourceText(data.text),
+                changelog: 'Smart Audio repeatedly omitted substantial source text; OpenReader preserved the original narratable text.',
+                source_fallback: true,
+              }),
+            });
+            workerResult = recovery.workerResult;
+            const { resolvedWorkerResult } = recovery.result;
+            if (recovery.sourceFallbackUsed) {
+              serverLogger.warn({
+                event: 'audiobook.chapter.smart_audio.source_fallback',
+                bookId,
+                chapter: chapterIndex,
+                validationErrors: recovery.validationErrors,
+              }, 'Smart Audio repeatedly omitted substantial source text; continuing with the original narratable text.');
+            } else if (recovery.fallbackUsed) {
+              serverLogger.warn({
+                event: 'audiobook.chapter.smart_audio.pronunciation_fallback',
+                bookId,
+                chapter: chapterIndex,
+                discardedTags: recovery.discardedTags,
+                validationErrors: recovery.validationErrors,
+              }, 'Discarded unsafe pronunciation markup after the correction pass; continuing with cleaned text.');
+            }
             processedTextForTts = resolvedWorkerResult.text;
             smartAudioOmitted = resolvedWorkerResult.outcome === 'omitted';
             serverLogger.info(
@@ -902,7 +989,10 @@ export async function POST(request: NextRequest) {
                 event: 'audiobook.chapter.smart_audio.cleaned',
                 bookId,
                 chapter: chapterIndex,
-                model: resolveCleanupAiModel(selectedProfile),
+                requestedModel: resolveCleanupAiModel(selectedProfile),
+                model: typeof workerResult.model_used === 'string'
+                  ? workerResult.model_used
+                  : resolveCleanupAiModel(selectedProfile),
                 pass: 'cleanup',
                 worker_mode: selectedProfile?.workerMode || 'standard',
                 nats_subject: targetSubject,
@@ -916,7 +1006,7 @@ export async function POST(request: NextRequest) {
             );
 
             // Save the changelog for UI viewing
-            if (workerResult.changelog) {
+            if (typeof workerResult.changelog === 'string' && workerResult.changelog) {
               const changelogName = `${String(chapterIndex + 1).padStart(4, '0')}__changelog.txt`;
               await putAudiobookObject(
                 bookId,
@@ -930,38 +1020,6 @@ export async function POST(request: NextRequest) {
               });
             }
 
-            // Sync new learned pronunciations back to the profile
-            const newPronuns = selectUnknownSmartAudioPronunciations(
-              filterKokoroCompatiblePronunciationRecord(workerResult.new_pronunciations),
-              authoritativePronunciations,
-            );
-            if (Object.keys(newPronuns).length > 0 && selectedProfile) {
-              const updatedProfiles = profilesDocument.profiles.map((p) => {
-                if (p.id === selectedProfile.id) {
-                  return {
-                    ...p,
-                    pronunciations: {
-                      ...p.pronunciations,
-                      ...newPronuns,
-                    },
-                  };
-                }
-                return p;
-              });
-              await writeSmartAudioProfilesDocument(storageUserId, {
-                selectedProfileId: profilesDocument.selectedProfileId,
-                profiles: updatedProfiles,
-              });
-              serverLogger.info(
-                {
-                  event: 'audiobook.chapter.smart_audio.sync_pronunciations',
-                  bookId,
-                  profileId: selectedProfile.id,
-                  count: Object.keys(newPronuns).length,
-                },
-                'Saved learned pronunciations back to smart audio profile.',
-              );
-            }
           } else {
             throw new Error(`Python worker returned error: ${workerResult.message || workerResult.status || 'unknown response'}`);
           }

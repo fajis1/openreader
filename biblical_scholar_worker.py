@@ -12,6 +12,7 @@ from gemini_rate_limiter import extract_gemini_usage, refresh_gemini_cooldown
 API_STATES = {}
 MAX_DELAY = 300            
 MIN_DELAY = 5              
+QUALITY_REPAIR_MODEL = "gemini-3.7-flash"
 
 def academic_pre_clean(text, user_abbreviations, biblical_books):
     """Phase 1: Regex & Structural Expansion"""
@@ -31,15 +32,6 @@ def academic_pre_clean(text, user_abbreviations, biblical_books):
             pt = re.sub(r'(?<!\w)' + re.escape(key) + r'(?!\w)', user_abbreviations[key], pt)
     return pt
 
-def extract_learned_words(cleaned_text, existing_dict):
-    """Phase 3: Scrape the output for new [Word](/IPA/) tags"""
-    new_words = {}
-    matches = re.findall(r'\[([^\]]+)\]\((/[^/]+/)\)', cleaned_text)
-    for name, ipa in matches:
-        if name not in existing_dict and name not in new_words:
-            new_words[name] = ipa
-    return new_words
-
 async def process_message(msg):
     data = json.loads(msg.data.decode())
     user_id = data.get("user_id", "Unknown")
@@ -48,6 +40,8 @@ async def process_message(msg):
     prompt = data.get("prompt")
     pronunciation_prompt = data.get("pronunciation_prompt", "")
     final_cleanup_rules = data.get("final_cleanup_rules", "")
+    validation_feedback = data.get("validation_feedback", "")
+    rejected_output = data.get("rejected_output", "")
     raw_text = data.get("raw_text")
     
     text_length = len(raw_text) if raw_text else 0
@@ -58,6 +52,7 @@ async def process_message(msg):
     abbreviations = data.get("abbreviations", {})
     books = data.get("books", {})
     ai_model = data.get("ai_model") or "gemini-3.5-flash"
+    empty_response_escalated = False
     
     print(f"\n[*] New job intercepted for User: {user_id}")
 
@@ -72,8 +67,8 @@ async def process_message(msg):
         pre_cleaned_text = academic_pre_clean(raw_text, abbreviations, books)
         
         # Definitions and pronunciations are resolved once during the book
-        # pre-scan and are already present in raw_text. Scholar cleanup must
-        # remain a single Gemini request per chunk.
+        # pre-scan and are already present in raw_text. Scholar cleanup uses
+        # one semantic request, plus at most one validation-driven correction.
         enriched_text = pre_cleaned_text
 
         # PHASE 2: Gemini Processing
@@ -84,7 +79,20 @@ async def process_message(msg):
         dynamic_constraints = f"CRITICAL CONTINUITY RULE: Use these exact phonetic spellings:\n{dict_string}\n\n"
         title_instruction = "CHAPTER TITLE GENERATION: For narratable text, you MUST summarize the provided text into a unique 3 to 5 word descriptive title based on its actual contents. DO NOT just copy the existing chapter title (e.g. 'Foreword' or 'Chapter 1'). At the very end of your response, after the cleaned text, you MUST add exactly one blank line and then output the title wrapped in tags exactly like this: [CHAPTER_TITLE: Three Word Summary]. Do not include the chapter number or 'continued'. If the correct result is [OMIT], return only [OMIT] and do not add a chapter title.\n\n"
         
-        full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\n{title_instruction}{final_cleanup_rules}\n\nText to clean:\n{enriched_text}"
+        if validation_feedback and rejected_output:
+            repair_instruction = (
+                "CORRECTION PASS: Reader rejected the previous cleaned output. Correct the complete output using "
+                "the exact validation feedback below. Preserve all valid cleanup decisions and change only what is "
+                "needed to satisfy the rules. Never explain the correction. Return the complete corrected audiobook "
+                "text, not a patch or excerpt. If a pronunciation cannot be made safe, remove only its [word](/IPA/) "
+                "markup and leave the corrected visible word as ordinary text. If validation says substantial source "
+                "text was omitted, do not return [OMIT]; preserve every narratable sentence.\n\n"
+                f"VALIDATION FEEDBACK:\n{validation_feedback}\n\n"
+                f"REJECTED CLEANED OUTPUT:\n{rejected_output}\n\n"
+            )
+        else:
+            repair_instruction = ""
+        full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\n{title_instruction}{final_cleanup_rules}\n\n{repair_instruction}Original text to clean:\n{enriched_text}"
         final_text = ""
         
         api_state = API_STATES.setdefault(api_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})
@@ -121,6 +129,11 @@ async def process_message(msg):
                     )
                     
                     if not response.text or not response.text.strip():
+                        if ai_model != QUALITY_REPAIR_MODEL and not empty_response_escalated:
+                            print(f"  -> [⬆️] Empty response from {ai_model}. Retrying once with {QUALITY_REPAIR_MODEL}...")
+                            ai_model = QUALITY_REPAIR_MODEL
+                            empty_response_escalated = True
+                            continue
                         raise RuntimeError("Gemini returned no text; expected cleaned text or [OMIT]")
                     final_text = response.text.strip()
                     
@@ -165,10 +178,6 @@ async def process_message(msg):
             final_text = ""
             chapter_title = ""
 
-        learned_words = extract_learned_words(final_text, pronunciations)
-        if learned_words:
-            print(f"  -> [LEARNED] Discovered {len(learned_words)} new phonetic overrides!")
-
         # Strip out the bypass exclamation mark from heteronym tags so TTS gets valid markup
         final_text = re.sub(r'\[([^\]]+)\]\(!(/[^/]+/)\)', r'[\1](\2)', final_text)
 
@@ -186,9 +195,9 @@ async def process_message(msg):
             "status": "success",
             "outcome": outcome,
             "cleaned_text": final_text,
-            "new_pronunciations": learned_words,
             "changelog": changelog,
             "chapter_title": chapter_title,
+            "model_used": ai_model,
             "usage": extract_gemini_usage(response),
         }
         

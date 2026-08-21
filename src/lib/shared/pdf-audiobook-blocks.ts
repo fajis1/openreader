@@ -2,6 +2,7 @@ import {
   CURRENT_AUDIOBOOK_BATCH_VERSION,
 } from '@/lib/shared/audiobook-batching';
 import {
+  AUDIOBOOK_END_MATTER_START_FRACTION,
   isAudiobookEndMatterHeading,
   removePdfTableOfContents,
 } from '@/lib/shared/audiobook-end-matter';
@@ -50,7 +51,7 @@ function removeConfirmedPdfEndMatter(
 
   const latePageNumbers = new Set(
     pages
-      .slice(Math.floor(pages.length * 0.7))
+      .slice(Math.floor(pages.length * AUDIOBOOK_END_MATTER_START_FRACTION))
       .map((page) => page.pageNumber),
   );
   const strongHeadingIndex = blocks.findIndex((block) => (

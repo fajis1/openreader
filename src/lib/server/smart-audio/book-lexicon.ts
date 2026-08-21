@@ -481,3 +481,14 @@ export function selectPronunciationsForText(
     Object.entries(pronunciations).filter(([term]) => normalizedText.includes(term.normalize('NFC'))),
   );
 }
+
+export function pronunciationsFromBookLexicon(
+  lexicon: SmartAudioBookLexicon | null | undefined,
+): Record<string, string> {
+  if (!lexicon) return {};
+  return Object.fromEntries(
+    Object.values(lexicon.entries)
+      .filter((entry) => isKokoroCompatiblePronunciation(entry.pronunciation))
+      .map((entry) => [entry.term, entry.pronunciation]),
+  );
+}

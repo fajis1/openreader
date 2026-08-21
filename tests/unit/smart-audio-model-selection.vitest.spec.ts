@@ -6,6 +6,7 @@ import {
   DEFAULT_PRONUNCIATION_AI_MODEL,
   resolveCleanupAiModel,
   resolvePronunciationAiModel,
+  resolveSmartAudioValidationRepairModel,
 } from '@/lib/shared/smart-audio-models';
 
 const readSource = (relativePath: string) =>
@@ -35,6 +36,17 @@ describe('Smart Audio model selection', () => {
 
     expect(resolveCleanupAiModel(splitProfile)).toBe('cleanup-model');
     expect(resolvePronunciationAiModel(splitProfile)).toBe('pronunciation-model');
+  });
+
+  it('fails validation retries upward to 3.7 Flash without overriding custom models', () => {
+    expect(resolveSmartAudioValidationRepairModel('gemini-3.5-flash-lite'))
+      .toBe('gemini-3.7-flash');
+    expect(resolveSmartAudioValidationRepairModel('gemini-3.6-flash'))
+      .toBe('gemini-3.7-flash');
+    expect(resolveSmartAudioValidationRepairModel('gemini-3.7-flash'))
+      .toBe('gemini-3.7-flash');
+    expect(resolveSmartAudioValidationRepairModel('private-cleanup-model'))
+      .toBe('private-cleanup-model');
   });
 
   it('routes pronunciation and cleanup call sites through the correct resolver', () => {

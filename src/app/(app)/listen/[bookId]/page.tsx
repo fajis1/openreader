@@ -19,6 +19,7 @@ interface Chapter {
   title: string;
   duration?: number;
   format: string;
+  isEmptyText?: boolean;
 }
 
 export default function ListenPage({ params }: { params: Promise<{ bookId: string }> }) {
@@ -28,7 +29,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
 
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
+  const [currentChapterPosition, setCurrentChapterPosition] = useState(0);
   
   const [showLeftPane, setShowLeftPane] = useState(true);
   const [showMiddlePane, setShowMiddlePane] = useState(true);
@@ -59,6 +60,8 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [playingSpeakerSegment, setPlayingSpeakerSegment] = useState<number | null>(null);
   const [speakerTextDrafts, setSpeakerTextDrafts] = useState<Record<number, string>>({});
   const [activeSpeakerSegment, setActiveSpeakerSegment] = useState<number | null>(null);
+  const currentChapter = chapters[currentChapterPosition];
+  const selectedChapterIndex = currentChapter?.index;
 
   const isMultiVoice = chapterText.includes('<voice');
   const speakerSegments = useMemo(() => {
@@ -80,11 +83,11 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     setSpeakerTextDrafts(Object.fromEntries(
       speakerSegments.map((segment, index) => [index, segment.text]),
     ));
-  }, [currentChapterIndex, speakerSegments]);
+  }, [currentChapterPosition, speakerSegments]);
 
   useEffect(() => {
     setActiveSpeakerSegment(null);
-  }, [currentChapterIndex]);
+  }, [currentChapterPosition]);
 
   useEffect(() => {
     if (activeSpeakerSegment === null) return;
@@ -114,6 +117,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       const res = await fetch(`/api/audiobook/status?bookId=${bookId}`);
       const data = await res.json();
       if (data.chapters && data.chapters.length > 0) {
+        setCurrentChapterPosition((position) => Math.min(position, data.chapters.length - 1));
         setChapters((prev) => {
           // Only update if something changed to avoid unnecessary re-renders
           if (JSON.stringify(prev) !== JSON.stringify(data.chapters)) {
@@ -189,21 +193,21 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   }, [bookId]);
 
   useEffect(() => {
-    if (chapters.length > 0) {
+    if (selectedChapterIndex !== undefined) {
       // Reset edit state when navigating to a new chapter
       setHasEditedText(false);
-      fetchChapterText(currentChapterIndex);
+      fetchChapterText(selectedChapterIndex);
     }
-  }, [currentChapterIndex]); // Removed 'chapters' from dependencies to prevent text wipe
+  }, [selectedChapterIndex]);
 
   // Poll for text updates if we haven't manually edited
   useEffect(() => {
-    if (hasEditedText || chapters.length === 0) return;
+    if (hasEditedText || selectedChapterIndex === undefined) return;
     const interval = setInterval(() => {
-      fetchChapterText(currentChapterIndex, true);
+      fetchChapterText(selectedChapterIndex, true);
     }, 5000);
     return () => clearInterval(interval);
-  }, [hasEditedText, chapters.length, currentChapterIndex]);
+  }, [hasEditedText, selectedChapterIndex]);
 
   const fetchChapterText = async (index: number, isBackgroundPoll = false) => {
     if (!isBackgroundPoll) setIsTextLoading(true);
@@ -279,9 +283,8 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
 
   const handleRegenerate = async (textOverride?: string) => {
     const textToRecord = textOverride || chapterText;
-    if (!textToRecord) return;
+    if (!textToRecord || !currentChapter) return;
     setIsRegenerating(true);
-    const currentChapter = chapters[currentChapterIndex];
     try {
       const res = await fetch(`/api/audiobook/chapter`, {
         method: "POST",
@@ -289,7 +292,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         body: JSON.stringify({
           bookId,
           documentId: bookId,
-          chapterIndex: currentChapterIndex,
+          chapterIndex: currentChapter.index,
           chapterTitle: currentChapter.title,
           text: textToRecord,
           useSmartAudio: false,
@@ -480,7 +483,9 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         toast.success(`Fixed abbreviations in ${data.modifiedCount} chunks!`);
         if (data.modifiedCount > 0) {
           // Refresh current chunk just in case it was modified
-          fetchChapterText(currentChapterIndex);
+          if (selectedChapterIndex !== undefined) {
+            fetchChapterText(selectedChapterIndex);
+          }
         }
       } else {
         const err = await res.json().catch(() => ({}));
@@ -510,14 +515,20 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     );
   }
 
-  const currentChapter = chapters[currentChapterIndex];
+  if (!currentChapter) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-slate-950 text-slate-200">
+        <div>Loading chapter...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-surface">
       <div className="flex-none p-4 bg-surface border-b border-line-soft flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-text-strong line-clamp-1">Review: {currentChapter.title}</h1>
-          <p className="text-text-soft text-sm">Chapter {currentChapterIndex + 1} of {chapters.length}</p>
+          <p className="text-text-soft text-sm">Chunk {currentChapter.index + 1} · Item {currentChapterPosition + 1} of {chapters.length}</p>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
           {/* View Toggles */}
@@ -570,15 +581,15 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           <div className="flex gap-1 ml-auto md:ml-2">
             <button
               className="px-3 py-1.5 border border-line-soft rounded text-sm disabled:opacity-50"
-              onClick={() => setCurrentChapterIndex(i => i - 1)}
-              disabled={currentChapterIndex === 0}
+              onClick={() => setCurrentChapterPosition(i => i - 1)}
+              disabled={currentChapterPosition === 0}
             >
               Prev Chapter
             </button>
             <button
               className="px-3 py-1.5 border border-line-soft rounded text-sm disabled:opacity-50"
-              onClick={() => setCurrentChapterIndex(i => i + 1)}
-              disabled={currentChapterIndex === chapters.length - 1}
+              onClick={() => setCurrentChapterPosition(i => i + 1)}
+              disabled={currentChapterPosition === chapters.length - 1}
             >
               Next Chapter
             </button>
@@ -589,7 +600,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       {/* Global Actions Toolbar */}
       <div className="flex-none p-2 bg-surface border-b border-line-soft flex items-center justify-between flex-wrap gap-2 shadow-sm relative z-10">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-semibold text-text-soft tracking-wider mr-2 uppercase">Chunk {currentChapterIndex + 1} Actions:</span>
+          <span className="text-xs font-semibold text-text-soft tracking-wider mr-2 uppercase">Chunk {currentChapter.index + 1} Actions:</span>
           
           <button
             onClick={() => setIsPronunciationModalOpen(true)}
@@ -662,12 +673,12 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                   body: JSON.stringify({
                     bookId,
                     documentId: bookId,
-                    chapterIndex: currentChapterIndex,
-                    chapterTitle: chapters[currentChapterIndex]?.title,
+                    chapterIndex: currentChapter.index,
+                    chapterTitle: currentChapter.title,
                     text: textToSend,
                     useSmartAudio: true,
                     settings: { smartAudioProfileId: selectedProfileId, scholarAutoScan: true },
-                    format: chapters[currentChapterIndex]?.format,
+                    format: currentChapter.format,
                   }),
               }).then(async res => {
                 if (!res.ok) {
@@ -708,11 +719,11 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               {chapters.map((chap, idx) => {
-                const selected = idx === currentChapterIndex;
+                const selected = idx === currentChapterPosition;
                 return (
                   <div key={chap.index} className="mb-1">
                     <button
-                      onClick={() => setCurrentChapterIndex(idx)}
+                      onClick={() => setCurrentChapterPosition(idx)}
                       className={`w-full text-left p-3 rounded text-sm transition-colors ${
                         selected
                           ? "bg-brand-500/20 text-brand-400 border border-brand-500/30"
@@ -721,7 +732,6 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                     >
                       <div className="flex justify-between items-start gap-2">
                         <div className="font-medium">Chunk {chap.index + 1}</div>
-                        {/* @ts-ignore */}
                         {chap.isEmptyText && (
                           <span className="text-red-500 shrink-0 text-base" title="Warning: AI returned empty text for this chunk!">
                             ⚠️
@@ -894,7 +904,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       <div className="p-4 bg-surface-raised border-t border-line-soft flex items-center justify-center">
         {!isTextLoading && chapterText.length > 0 ? (
           <audio 
-            key={`${bookId}-${currentChapterIndex}`}
+            key={`${bookId}-${currentChapter.index}`}
             controls 
             autoPlay
             onTimeUpdate={(event) => setActiveSpeakerSegment(activeSpeakerAtPlaybackTime(
@@ -903,7 +913,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
             ))}
             onEnded={() => setActiveSpeakerSegment(null)}
             className="w-full max-w-2xl"
-            src={`/api/audiobook/chapter?bookId=${bookId}&chapterIndex=${currentChapterIndex}`}
+            src={`/api/audiobook/chapter?bookId=${bookId}&chapterIndex=${currentChapter.index}`}
           />
         ) : (
           <div className="text-text-soft text-sm py-3">Loading audio...</div>
@@ -1014,7 +1024,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       {showMultiVoiceStudio && isMultiVoice && (
         <MultiVoiceReviewStudio
           bookId={bookId}
-          chapterIndex={currentChapterIndex}
+          chapterIndex={currentChapter.index}
           initialText={chapterText}
           onClose={() => setShowMultiVoiceStudio(false)}
           onRebuildAllModified={handleRebuildAllModified}
@@ -1030,7 +1040,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                 body: JSON.stringify({
                   bookId,
                   documentId: bookId,
-                  chapterIndex: currentChapterIndex,
+                  chapterIndex: currentChapter.index,
                   chapterTitle: currentChapter.title,
                   text: newXml,
                   useSmartAudio: false,
@@ -1055,16 +1065,16 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       {showMobilePlayer && (
         <MobileReviewPlayer
           bookId={bookId}
-          chapterIndex={currentChapterIndex}
+          chapterIndex={currentChapter.index}
           chapterTitle={currentChapter.title}
-          audioUrl={`/api/audiobook/chapter?bookId=${bookId}&chapterIndex=${currentChapterIndex}`}
+          audioUrl={`/api/audiobook/chapter?bookId=${bookId}&chapterIndex=${currentChapter.index}`}
           onFlagError={async (timeMs) => {
             const response = await fetch('/api/audiobook/review-flags', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 documentId: bookId,
-                chapterIndex: currentChapterIndex,
+                chapterIndex: currentChapter.index,
                 timestampMs: timeMs,
               }),
             });
@@ -1073,8 +1083,8 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
               throw new Error(body.error || 'Failed to save review flag.');
             }
           }}
-          onNextChapter={() => setCurrentChapterIndex(i => Math.min(chapters.length - 1, i + 1))}
-          onPrevChapter={() => setCurrentChapterIndex(i => Math.max(0, i - 1))}
+          onNextChapter={() => setCurrentChapterPosition(i => Math.min(chapters.length - 1, i + 1))}
+          onPrevChapter={() => setCurrentChapterPosition(i => Math.max(0, i - 1))}
           onExit={() => setShowMobilePlayer(false)}
         />
       )}

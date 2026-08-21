@@ -1,5 +1,7 @@
 const END_MATTER_HEADING = /^(?:(?:(?:author|name|subject|scripture|biblical|general)\s+)?(?:index|indexes|indices)|(?:select(?:ed)?|primary|secondary|brief)?\s*bibliography|works\s+cited|references?|notes?|abbreviations?)$/i;
 
+export const AUDIOBOOK_END_MATTER_START_FRACTION = 0.7;
+
 function normalizeHeading(value: string): string {
   return value
     .normalize('NFKC')
@@ -119,7 +121,7 @@ export function removePdfTableOfContents<T extends AudiobookPdfBlock>(
 
 export function truncateAudiobookEndMatter<T extends { title: string; text: string }>(
   chapters: readonly T[],
-  minimumProgress = 0.7,
+  minimumProgress = AUDIOBOOK_END_MATTER_START_FRACTION,
 ): T[] {
   const totalLength = chapters.reduce((sum, chapter) => sum + chapter.text.length, 0);
   if (totalLength === 0) return [...chapters];

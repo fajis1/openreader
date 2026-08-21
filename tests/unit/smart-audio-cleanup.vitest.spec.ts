@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'vitest';
 import {
   buildSmartAudioCleanupPrompt,
+  discardInvalidSmartAudioPronunciationTags,
+  extractNarratableSmartAudioSourceText,
   FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
+  hasConfirmedSmartAudioEndMatterHint,
+  hasSubstantialSmartAudioSourceText,
   isScholarLikeSmartAudioMode,
   normalizeSmartAudioPronunciationTags,
   reconcileSmartAudioPronunciations,
   resolveSmartAudioWorkerResult,
-  selectUnknownSmartAudioPronunciations,
   stripSmartAudioInputMarkers,
 } from '../../src/lib/shared/smart-audio-cleanup';
 
@@ -29,6 +32,9 @@ describe('Smart Audio cleanup contract', () => {
     expect(prompt).toContain('Repair contextually clear mixed-script OCR');
     expect(prompt).toContain('Never preserve mixed-script corruption inside a pronunciation tag');
     expect(prompt).toContain('Never evade that rule by wrapping an entire quotation');
+    expect(prompt).toContain('Apply omission rules block by block');
+    expect(prompt).toContain('only at or after 70% through the book');
+    expect(prompt).toContain('If uncertain, preserve the original text');
     expect(prompt.lastIndexOf('Pronunciation markup may wrap exactly one corrected lexical word')).toBeGreaterThan(
       prompt.indexOf('Old profile rule'),
     );
@@ -64,6 +70,23 @@ describe('Smart Audio cleanup contract', () => {
     );
   });
 
+  test('builds a deterministic source fallback from narratable layout blocks only', () => {
+    const source = [
+      '[LAYOUT_ENGINE_TAG: PARAGRAPH_TITLE]',
+      'Chapter Nine',
+      '[LAYOUT_ENGINE_TAG: TEXT]',
+      'A coherent theological paragraph remains for narration.',
+      '[LAYOUT_ENGINE_TAG: REFERENCE]',
+      'Smith 1999 42. Jones 2001 15.',
+      '[LAYOUT_ENGINE_TAG: TABLE]',
+      'Column A Column B 1 2 3',
+    ].join('\n');
+
+    expect(extractNarratableSmartAudioSourceText(source)).toBe(
+      'Chapter Nine\n\nA coherent theological paragraph remains for narration.',
+    );
+  });
+
   test('distinguishes explicit omission from cleaned text', () => {
     expect(resolveSmartAudioWorkerResult({
       status: 'success',
@@ -88,6 +111,41 @@ describe('Smart Audio cleanup contract', () => {
       status: 'success',
       cleaned_text: '',
     })).toThrow('returned empty text instead of [OMIT]');
+  });
+
+  test('rejects omission of a substantial source chunk but permits a short non-narrative omission', () => {
+    const substantialSource = 'This is a narratable sentence with meaningful book content. '.repeat(40);
+    expect(hasSubstantialSmartAudioSourceText(substantialSource)).toBe(true);
+    expect(() => resolveSmartAudioWorkerResult({
+      status: 'success',
+      outcome: 'omitted',
+      cleaned_text: '',
+    }, { sourceText: substantialSource })).toThrow(
+      'omitted a substantial source chunk',
+    );
+
+    expect(resolveSmartAudioWorkerResult({
+      status: 'success',
+      outcome: 'omitted',
+      cleaned_text: '',
+    }, { sourceText: 'Copyright page.' })).toEqual({ outcome: 'omitted', text: '' });
+  });
+
+  test('allows whole-section omission only when OpenReader confirmed end matter', () => {
+    const sourceText = [
+      '[SYSTEM HINT: The layout engine detected that this section is located in the end-matter of the book.]',
+      '[LAYOUT_ENGINE_TAG: TEXT]',
+      'Bibliography entry discussion. '.repeat(40),
+    ].join('\n');
+    expect(hasConfirmedSmartAudioEndMatterHint(sourceText)).toBe(true);
+    expect(resolveSmartAudioWorkerResult({
+      status: 'success',
+      outcome: 'omitted',
+      cleaned_text: '',
+    }, {
+      allowSubstantialOmission: true,
+      sourceText,
+    })).toEqual({ outcome: 'omitted', text: '' });
   });
 
   test('rejects leaked internal markers before TTS or storage', () => {
@@ -125,6 +183,36 @@ describe('Smart Audio cleanup contract', () => {
     expect(() => normalizeSmartAudioPronunciationTags(
       '[ἄγiov](/ɑɡioʊn/)',
     )).toThrow('mixed-script OCR text');
+  });
+
+  test('repairs mixed-script OCR only through a unique authoritative dictionary match', () => {
+    expect(reconcileSmartAudioPronunciations(
+      '[σεμnos](/wrong/) [σύμμορφον](/wrong-s/)',
+      {
+        'σεμνός': '/sɛmnos/',
+        'σύμμορφον': '/sɪmmɔːrfɒn/',
+      },
+    )).toBe('[σεμνός](/sɛmnos/) [σύμμορφον](/sɪmmɔːrfɒn/)');
+
+    expect(() => reconcileSmartAudioPronunciations(
+      '[σεμnos](/wrong/)',
+      {},
+    )).toThrow('mixed-script OCR text');
+    expect(() => reconcileSmartAudioPronunciations(
+      '[σεμnos](/wrong/)',
+      { 'σεμνός': '/first/', 'σεμνος': '/second/' },
+    )).toThrow('mixed-script OCR text');
+  });
+
+  test('discards only unsafe pronunciation markup as the final safe fallback', () => {
+    const fallback = discardInvalidSmartAudioPronunciationTags(
+      'Before [σεμnos](/wrong/) and [λόγος](/loɡos/) after.',
+      { 'λόγος': '/loɡos/' },
+    );
+
+    expect(fallback.text).toBe('Before σεμnos and [λόγος](/loɡos/) after.');
+    expect(fallback.discardedTags).toBe(1);
+    expect(fallback.errors[0]).toContain('mixed-script OCR text');
   });
 
   test('rejects obvious Greek inflection-ending mismatches', () => {
@@ -183,13 +271,6 @@ describe('Smart Audio cleanup contract', () => {
       '[WORD](/gemini/)',
       { Word: '/one/', word: '/two/' },
     )).toBe('[WORD](/gemini/)');
-  });
-
-  test('does not relearn known words but keeps compatible unknown discoveries', () => {
-    expect(selectUnknownSmartAudioPronunciations(
-      { 'ὑμῖν': '/wrong/', Logos: '/new/', novel: '/nɑvəl/' },
-      { 'ὑμῖν': '/hjumin/', logos: '/loɡos/' },
-    )).toEqual({ novel: '/nɑvəl/' });
   });
 
   test('treats Scholar and bibliography-catcher as the same structural mode', () => {

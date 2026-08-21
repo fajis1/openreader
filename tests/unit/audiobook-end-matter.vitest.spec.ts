@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  AUDIOBOOK_END_MATTER_START_FRACTION,
   chapterStartsWithEndMatter,
   extractEpubChapterHeading,
   isAudiobookEndMatterHeading,
@@ -31,6 +32,20 @@ describe('audiobook end-matter filtering', () => {
       { title: 'About the Author', text: 'Later metadata' },
     ];
     expect(truncateAudiobookEndMatter(chapters, 0.5)).toEqual(chapters.slice(0, 2));
+  });
+
+  test('does not treat a bibliography heading before 70% as end matter', () => {
+    const chapters = Array.from({ length: 10 }, (_, index) => ({
+      title: index === 5 ? 'Bibliography' : `Chapter ${index + 1}`,
+      text: String(index).repeat(100),
+    }));
+
+    expect(AUDIOBOOK_END_MATTER_START_FRACTION).toBe(0.7);
+    expect(truncateAudiobookEndMatter(chapters)).toEqual(chapters);
+    expect(truncateAudiobookEndMatter(chapters.map((chapter, index) => ({
+      ...chapter,
+      title: index === 7 ? 'Bibliography' : `Chapter ${index + 1}`,
+    })))).toHaveLength(7);
   });
 
   test('removes a PDF contents range while preserving surrounding prose', () => {

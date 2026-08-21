@@ -3,7 +3,6 @@ import {
   findSmartAudioProfileById,
   mergeGeneratedPronunciationsIntoLatestProfile,
   readSmartAudioProfilesDocument,
-  writeSmartAudioProfilesDocument,
 } from '@/lib/server/smart-audio-profiles';
 import { eq, and, asc, lt, inArray, sql, or } from 'drizzle-orm';
 import { db } from '@/db';
@@ -29,8 +28,12 @@ import {
   AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS,
   GEMINI_RATE_LIMIT_PAUSE_MESSAGE,
 } from '@/lib/shared/audiobook-job-status';
-import { resolveCleanupAiModel } from '@/lib/shared/smart-audio-models';
 import {
+  resolveCleanupAiModel,
+  resolveSmartAudioValidationRepairModel,
+} from '@/lib/shared/smart-audio-models';
+import {
+  AUDIOBOOK_END_MATTER_START_FRACTION,
   isAudiobookEndMatterHeading,
   truncateAudiobookEndMatter,
 } from '@/lib/shared/audiobook-end-matter';
@@ -47,6 +50,7 @@ import {
   collectSmartAudioTermCandidates,
   enrichTextFromBookLexicon,
   readBookLexicon,
+  pronunciationsFromBookLexicon,
   resolveSmartAudioBookLexicon,
   selectPronunciationsForText,
   writeBookLexicon,
@@ -54,20 +58,17 @@ import {
 import { normalizeGeminiTokenUsage } from '@/lib/server/smart-audio/gemini-usage';
 import { generateSegmentedAudiobookTtsBuffer } from '@/lib/server/audiobooks/segmented-tts';
 import { resolveSmartAudioNatsTimeoutMs } from '@/lib/server/audiobooks/smart-audio-timeout';
-import {
-  normalizeGlobalPronunciationLibrary,
-  recordLearnedGlobalPronunciation,
-} from '@/lib/server/tts/global-pronunciation-library';
 import { mergeGlobalDefinitions, readGlobalDefinitions } from '@/lib/server/smart-audio/global-definition-library';
 import { preparePdfAudiobookBlocks } from '@/lib/shared/pdf-audiobook-blocks';
 import { mergeDocumentSettings } from '@/lib/shared/document-settings';
 import { DEFAULT_DOCUMENT_SETTINGS } from '@/types/document-settings';
 import {
   buildSmartAudioCleanupPrompt,
+  extractNarratableSmartAudioSourceText,
   FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
+  hasConfirmedSmartAudioEndMatterHint,
   isScholarLikeSmartAudioMode,
   resolveSmartAudioWorkerResult,
-  selectUnknownSmartAudioPronunciations,
   stripSmartAudioInputMarkers,
   validateSmartAudioOutput,
 } from '@/lib/shared/smart-audio-cleanup';
@@ -79,6 +80,10 @@ import {
   type MultiVoiceCastMember,
   WAITING_FOR_VOICES_STATUS,
 } from '@/lib/shared/multi-voice';
+import {
+  buildSmartAudioValidationRepairPayload,
+  resolveSmartAudioWithValidationRecovery,
+} from '@/lib/server/audiobooks/smart-audio-validation-recovery';
 
 const SMART_AUDIO_NATS_SUBJECT = 'audiobooks.gemini.clean';
 // Scholar and bibliography-catcher both use the scholar Python worker,
@@ -87,61 +92,6 @@ const SCHOLAR_NATS_SUBJECT = 'audiobooks.scholar.clean';
 
 function isScholarLikeMode(mode: string | undefined): boolean {
   return isScholarLikeSmartAudioMode(mode);
-}
-
-async function recordLearnedGlobalPronunciations(
-  learned: Record<string, string>,
-): Promise<void> {
-  const applyLearned = (value: unknown) => {
-    const updatedGlobal = normalizeGlobalPronunciationLibrary(value || {});
-    for (const [word, pronunciation] of Object.entries(learned)) {
-      updatedGlobal[word] = recordLearnedGlobalPronunciation(
-        updatedGlobal[word] || [],
-        pronunciation,
-      );
-    }
-    return updatedGlobal;
-  };
-
-  if (process.env.POSTGRES_URL) {
-    await db.transaction(async (tx: typeof db) => {
-      await tx.execute(sql`
-        select pg_advisory_xact_lock(
-          hashtextextended('openreader:global_pronunciations', 0)
-        )
-      `);
-      const rows = await tx
-        .select({ valueJson: adminSettings.valueJson })
-        .from(adminSettings)
-        .where(eq(adminSettings.key, 'global_pronunciations'))
-        .limit(1);
-      const updatedGlobal = applyLearned(rows[0]?.valueJson);
-      await tx.insert(adminSettings).values({
-        key: 'global_pronunciations',
-        valueJson: JSON.stringify(updatedGlobal),
-      }).onConflictDoUpdate({
-        target: adminSettings.key,
-        set: { valueJson: JSON.stringify(updatedGlobal) },
-      });
-    });
-    return;
-  }
-  db.transaction((tx: typeof db) => {
-    const rows = tx
-      .select({ valueJson: adminSettings.valueJson })
-      .from(adminSettings)
-      .where(eq(adminSettings.key, 'global_pronunciations'))
-      .limit(1)
-      .all();
-    const updatedGlobal = applyLearned(rows[0]?.valueJson);
-    tx.insert(adminSettings).values({
-      key: 'global_pronunciations',
-      valueJson: JSON.stringify(updatedGlobal),
-    }).onConflictDoUpdate({
-      target: adminSettings.key,
-      set: { valueJson: JSON.stringify(updatedGlobal) },
-    }).run();
-  });
 }
 
 async function readGlobalPronunciationDefaults(): Promise<Record<string, string>> {
@@ -434,7 +384,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         // --- 2. Find End Matter (scan last 30% backwards) ---
         let fallbackEndPage = boundaries.endPage;
         const endMatterRegex = /^(bibliography|index|indexes|works cited|notes|appendix)/i;
-        const endLimit = Math.floor(parsedPdf.pages.length * 0.7);
+        const endLimit = Math.floor(
+          parsedPdf.pages.length * AUDIOBOOK_END_MATTER_START_FRACTION,
+        );
         for (let i = parsedPdf.pages.length - 1; i >= endLimit; i--) {
           const page = parsedPdf.pages[i];
           const hasEndMatterTitle = page.blocks.some(b => 
@@ -519,15 +471,17 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         }
         
         if (chapterBoundaryKinds.has(block.kind)) {
-          if (
-            usesCurrentBatching
-            &&
-            blockIndex / Math.max(allBlocks.length, 1) >= 0.7
-            && isAudiobookEndMatterHeading(blockText)
-          ) {
-            isInEndMatter = true;
-          }
-          if (block.pageNumber > boundaries.endPage) {
+          const blockProgress = blockIndex / Math.max(allBlocks.length, 1);
+          const startsConfirmedEndMatter = blockProgress >= AUDIOBOOK_END_MATTER_START_FRACTION
+            && (
+              (usesCurrentBatching && isAudiobookEndMatterHeading(blockText))
+              || block.pageNumber > boundaries.endPage
+            );
+          if (startsConfirmedEndMatter && !isInEndMatter) {
+            // Finish the preceding narrative chunk before enabling the end-
+            // matter hint. Otherwise a bibliography heading could cause the
+            // prior chapter's prose to be included in the omission request.
+            if (currentText.length > 0) flush();
             isInEndMatter = true;
           }
           
@@ -824,10 +778,11 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           const geminiApiKey = (currentSelectedProfile?.geminiApiKey || '').trim();
 
           const backupGeminiApiKey = (currentSelectedProfile?.backupGeminiApiKey || '').trim();
-          const currentPronunciations = {
+          const currentPronunciations = filterKokoroCompatiblePronunciationRecord({
             ...globalPronunciations,
+            ...pronunciationsFromBookLexicon(bookLexicon),
             ...(currentSelectedProfile?.pronunciations || {}),
-          };
+          });
           const enrichedChapterText = enrichTextFromBookLexicon(
             chapter.cleanupText ?? chapter.text,
             bookLexicon,
@@ -842,6 +797,8 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             enrichedChapterText,
             currentPronunciations,
           );
+          const cleanupSourceText = chapter.cleanupText ?? chapter.text;
+          const confirmedEndMatter = hasConfirmedSmartAudioEndMatterHint(cleanupSourceText);
 
           let payload: string;
           let natsSubject: string;
@@ -883,7 +840,25 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             timeout: resolveSmartAudioNatsTimeoutMs(currentSelectedProfile?.workerMode),
           });
           if (!await workerStillOwnsAudiobookJob(job.id)) throw new AudiobookJobStoppedError();
-          const workerResult = JSON.parse(sc.decode(msg.data));
+          const applyAuthoritativeBookTags = (value: unknown): unknown => {
+            if (
+              currentSelectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
+              || !bookLexicon
+              || !value
+              || typeof value !== 'object'
+              || Array.isArray(value)
+            ) return value;
+            const result = value as Record<string, unknown>;
+            if (typeof result.cleaned_text !== 'string') return value;
+            return {
+              ...result,
+              cleaned_text: enrichTextFromBookLexicon(result.cleaned_text, bookLexicon, {
+                includeDefinitions: false,
+                pronunciationOverrides: currentPronunciations,
+              }),
+            };
+          };
+          let workerResult = applyAuthoritativeBookTags(JSON.parse(sc.decode(msg.data))) as Record<string, unknown>;
 
           if (workerResult.status === "rate_limit") {
             serverLogger.warn({ event: 'audiobook.queue.smart_audio.rate_limit', bookId }, 'Python worker reported rate limit. Moving job to back of queue.');
@@ -898,16 +873,79 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           }
 
           if (workerResult.status === "success") {
-            const multiVoiceResult = currentSelectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
-              ? resolveMultiVoiceWorkerResult(workerResult, multiVoiceCharacters, {
-                authoritativePronunciations: currentPronunciations,
-              })
-              : null;
-            const resolvedWorkerResult = multiVoiceResult
-              ? { outcome: 'cleaned' as const, text: multiVoiceResult.taggedText }
-              : resolveSmartAudioWorkerResult(workerResult, {
-                authoritativePronunciations: currentPronunciations,
-              });
+            const recovery = await resolveSmartAudioWithValidationRecovery({
+              initialResult: workerResult,
+              authoritativePronunciations: currentPronunciations,
+              resolve: (candidate) => {
+                const multiVoiceResult = currentSelectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
+                  ? resolveMultiVoiceWorkerResult(candidate, multiVoiceCharacters, {
+                    authoritativePronunciations: currentPronunciations,
+                  })
+                  : null;
+                const resolvedWorkerResult = multiVoiceResult
+                  ? { outcome: 'cleaned' as const, text: multiVoiceResult.taggedText }
+                  : resolveSmartAudioWorkerResult(candidate, {
+                    authoritativePronunciations: currentPronunciations,
+                    allowSubstantialOmission: confirmedEndMatter,
+                    sourceText: cleanupSourceText,
+                  });
+                return { multiVoiceResult, resolvedWorkerResult };
+              },
+              requestRepair: async (rejectedResult, validationError) => {
+                const requestedModel = resolveCleanupAiModel(currentSelectedProfile);
+                const repairModel = resolveSmartAudioValidationRepairModel(requestedModel);
+                serverLogger.warn({
+                  event: 'audiobook.queue.smart_audio.validation_repair',
+                  jobId: job.id,
+                  bookId,
+                  chapter: chapter.index,
+                  requestedModel,
+                  repairModel,
+                  error: validationError,
+                }, 'Smart Audio output failed validation; requesting one correction with the quality-repair model.');
+                const repairMessage = await nc.request(
+                  natsSubject,
+                  sc.encode(buildSmartAudioValidationRepairPayload(
+                    payload,
+                    rejectedResult,
+                    validationError,
+                  )),
+                  { timeout: resolveSmartAudioNatsTimeoutMs(currentSelectedProfile?.workerMode) },
+                );
+                return applyAuthoritativeBookTags(JSON.parse(sc.decode(repairMessage.data)));
+              },
+              sourceFallback: (rejectedResult) => ({
+                ...(rejectedResult && typeof rejectedResult === 'object' && !Array.isArray(rejectedResult)
+                  ? rejectedResult as Record<string, unknown>
+                  : {}),
+                status: 'success',
+                outcome: 'cleaned',
+                cleaned_text: extractNarratableSmartAudioSourceText(cleanupSourceText),
+                changelog: 'Smart Audio repeatedly omitted substantial source text; OpenReader preserved the original narratable text.',
+                source_fallback: true,
+              }),
+            });
+            if (!await workerStillOwnsAudiobookJob(job.id)) throw new AudiobookJobStoppedError();
+            workerResult = recovery.workerResult;
+            const { multiVoiceResult, resolvedWorkerResult } = recovery.result;
+            if (recovery.sourceFallbackUsed) {
+              serverLogger.warn({
+                event: 'audiobook.queue.smart_audio.source_fallback',
+                jobId: job.id,
+                bookId,
+                chapter: chapter.index,
+                validationErrors: recovery.validationErrors,
+              }, 'Smart Audio repeatedly omitted substantial source text; continuing with the original narratable text.');
+            } else if (recovery.fallbackUsed) {
+              serverLogger.warn({
+                event: 'audiobook.queue.smart_audio.pronunciation_fallback',
+                jobId: job.id,
+                bookId,
+                chapter: chapter.index,
+                discardedTags: recovery.discardedTags,
+                validationErrors: recovery.validationErrors,
+              }, 'Discarded unsafe pronunciation markup after the correction pass; continuing with cleaned text.');
+            }
             processedTextForTts = resolvedWorkerResult.text;
             if (multiVoiceResult?.continuityState) {
               continuityState = multiVoiceResult.continuityState;
@@ -927,7 +965,10 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               jobId: job.id,
               bookId,
               chapter: chapter.index,
-              model: resolveCleanupAiModel(currentSelectedProfile),
+              requestedModel: resolveCleanupAiModel(currentSelectedProfile),
+              model: typeof workerResult.model_used === 'string'
+                ? workerResult.model_used
+                : resolveCleanupAiModel(currentSelectedProfile),
               pass: 'cleanup',
               worker_mode: currentSelectedProfile?.workerMode || 'standard',
               nats_subject: natsSubject,
@@ -938,36 +979,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               tokens: normalizeGeminiTokenUsage(workerResult.usage),
             }, 'Recorded Gemini cleanup token usage.');
             
-            // Save newly discovered pronunciations back to the profile AND the global registry!
-            const compatibleNewPronunciations = selectUnknownSmartAudioPronunciations(
-              filterKokoroCompatiblePronunciationRecord(workerResult.new_pronunciations),
-              currentPronunciations,
-            );
-            if (Object.keys(compatibleNewPronunciations).length > 0 && currentSelectedProfile) {
-              try {
-                // Must read fresh just in case it was updated during generation
-                const updatedDoc = await readSmartAudioProfilesDocument(userId);
-                const profileToUpdate = updatedDoc.profiles.find(p => p.id === currentSelectedProfile.id);
-                if (profileToUpdate) {
-                  profileToUpdate.pronunciations = { ...profileToUpdate.pronunciations, ...compatibleNewPronunciations };
-                  await writeSmartAudioProfilesDocument(userId, updatedDoc);
-                  serverLogger.info({ event: 'audiobook.queue.smart_audio.learned_pronunciations', count: Object.keys(compatibleNewPronunciations).length }, 'Saved new learned pronunciations to smart audio profile');
-                }
-                
-                // Save to Global Pronunciations
-                try {
-                  await recordLearnedGlobalPronunciations(compatibleNewPronunciations);
-                  serverLogger.info({ event: 'audiobook.queue.smart_audio.global_learned', count: Object.keys(compatibleNewPronunciations).length }, 'Appended learned pronunciations to global registry');
-                } catch (globalErr) {
-                  serverLogger.warn({ event: 'audiobook.queue.smart_audio.global_learned_failed', error: globalErr }, 'Failed to save to global pronunciations registry');
-                }
-                
-              } catch (saveErr) {
-                serverLogger.warn({ event: 'audiobook.queue.smart_audio.learned_pronunciations_failed', error: saveErr }, 'Failed to save learned pronunciations');
-              }
-            }
-            
-            if (workerResult.changelog) {
+            if (typeof workerResult.changelog === 'string' && workerResult.changelog) {
               const changelogName = `${String(chapter.index + 1).padStart(4, '0')}__changelog.txt`;
               await putAudiobookObject(bookId, userId, changelogName, Buffer.from(workerResult.changelog, 'utf8'), 'text/plain; charset=utf-8', testNamespace).catch(() => {});
             }

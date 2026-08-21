@@ -24,11 +24,13 @@ export const REQUIRED_SMART_AUDIO_CLEANUP_INSTRUCTIONS = `
 OPENREADER REQUIRED OUTPUT AND STRUCTURE RULES (these rules override conflicting instructions above):
 - Layout markers such as [LAYOUT_ENGINE_TAG: ...], [SYSTEM HINT: ...], and <openreader-layout ...> are private processing metadata. Never repeat, paraphrase, explain, or otherwise include them in the edited text.
 - A LAYOUT_ENGINE_TAG describes the content immediately following it, up to the next layout marker. Omit non-narrative headers, footers, footnotes, vision footnotes, reference entries, tables, formulas, page numbers, images, and seals. Preserve ordinary narrative prose.
+- Apply omission rules block by block. Never discard a mixed chunk merely because some blocks resemble an index, bibliography, table of contents, list, or reference section. If any coherent narrative prose or its associated heading remains, preserve it.
+- Treat a bibliography or index as whole-section end matter only when a [SYSTEM HINT: ... end-matter ...] marker explicitly confirms its location. OpenReader emits that hint only at or after 70% through the book. Before that point, never infer whole-section end matter from formatting or a heading alone.
 - Reconstruct OCR-damaged words when context, grammar, spelling, and surrounding text support a likely correction. Restore missing letters, replace visually confused characters, join incorrectly split words, and remove duplicated characters. This applies to English and foreign-language words. Always output the reconstructed complete word, never a surviving OCR fragment. If the intended reconstruction is genuinely ambiguous, make the most contextually defensible correction without inventing surrounding prose.
 - Pronunciation markup may wrap exactly one corrected lexical word. The displayed word must match that pronunciation; never wrap a phrase, clause, or multiple space-separated words in one tag. Correct: [τὴν](/teɪn/) [θέσιν](/θɛsɪn/). Incorrect: [τὴν θέσιν](/teɪn θɛsɪn/).
 - Repair contextually clear mixed-script OCR before adding pronunciation markup. For example, reconstruct a Greek word contaminated with visually similar Latin letters as the intended complete Greek word, then tag that corrected word individually. Never preserve mixed-script corruption inside a pronunciation tag or create a pronunciation for an incomplete fragment.
 - Long foreign quotations must still be omitted according to the active foreign-quotation rule. Never evade that rule by wrapping an entire quotation in one pronunciation tag.
-- If the input contains no narratable body text after cleanup, return exactly [OMIT] and nothing else. Never signal omission with an empty response.
+- Only when every substantive block is non-narrative after block-level cleanup, return exactly [OMIT]. If uncertain, preserve the original text. Never signal omission with an empty response.
 - For narratable content, return only the cleaned audiobook text plus any separately requested chapter-title tag. Do not add commentary about your edits.
 `.trim();
 
@@ -43,44 +45,84 @@ export function isScholarLikeSmartAudioMode(mode: string | null | undefined): bo
 }
 
 const INTERNAL_INPUT_MARKER_LINE = /^[\t ]*\[(?:LAYOUT_ENGINE_TAG|SYSTEM HINT)\s*:[^\r\n]*\][\t ]*(?:\r?\n|$)/gimu;
+const LAYOUT_INPUT_MARKER_LINE = /^[\t ]*\[LAYOUT_ENGINE_TAG\s*:\s*([^\]\r\n]+)\][\t ]*(?:\r?\n|$)/gimu;
 const INTERNAL_LAYOUT_ELEMENT = /<\/?openreader-layout\b[^>]*>/gimu;
 const INTERNAL_OUTPUT_MARKER = /\[\s*(?:LAYOUT_ENGINE_TAG|SYSTEM HINT|CHAPTER_TITLE)\s*:|\[\s*OMIT(?:TED)?\s*\]|<\/?openreader-layout\b/iu;
 const KOKORO_PRONUNCIATION_TAG = /\[([^\]\r\n]+)\]\(\/([^/\r\n]+)\/\)/gu;
+const CONFIRMED_END_MATTER_HINT = /\[SYSTEM HINT:[^\]\r\n]*\bend-matter\b[^\]\r\n]*\]/iu;
+const NON_NARRATIVE_LAYOUT_KINDS = new Set([
+  'chart',
+  'footer',
+  'footnote',
+  'formula',
+  'formula_number',
+  'header',
+  'image',
+  'number',
+  'reference',
+  'reference_content',
+  'seal',
+  'table',
+  'vision_footnote',
+]);
 
 type PronunciationLookup = {
   exact: Map<string, string | null>;
   folded: Map<string, string | null>;
+  accentFolded: Map<string, string | null>;
+  canonicalAccentFolded: Map<string, { word: string; pronunciation: string } | null>;
 };
+
+function accentFoldedWord(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/\p{Mark}/gu, '')
+    .toLocaleLowerCase();
+}
+
+function setUniquePronunciation(
+  target: Map<string, string | null>,
+  key: string,
+  pronunciation: string,
+): void {
+  const previous = target.get(key);
+  if (previous === undefined) target.set(key, pronunciation);
+  else if (previous !== pronunciation) target.set(key, null);
+}
 
 function buildPronunciationLookup(pronunciations: Record<string, string>): PronunciationLookup {
   const exact = new Map<string, string | null>();
   const folded = new Map<string, string | null>();
+  const accentFolded = new Map<string, string | null>();
+  const canonicalAccentFolded = new Map<string, { word: string; pronunciation: string } | null>();
   for (const [rawWord, rawPronunciation] of Object.entries(pronunciations)) {
     const word = rawWord.trim().normalize('NFC');
     const pronunciation = typeof rawPronunciation === 'string' ? rawPronunciation.trim() : '';
     if (!word || /\s/u.test(word) || !/^\/[^/\r\n]+\/$/u.test(pronunciation)) continue;
-    const previousExact = exact.get(word);
-    if (previousExact === undefined) exact.set(word, pronunciation);
-    else if (previousExact !== pronunciation) exact.set(word, null);
+    setUniquePronunciation(exact, word, pronunciation);
     const foldedWord = word.toLocaleLowerCase();
-    const previous = folded.get(foldedWord);
-    if (previous === undefined) folded.set(foldedWord, pronunciation);
-    else if (previous !== pronunciation) folded.set(foldedWord, null);
+    setUniquePronunciation(folded, foldedWord, pronunciation);
+    const accentFoldedKey = accentFoldedWord(word);
+    setUniquePronunciation(accentFolded, accentFoldedKey, pronunciation);
+    const previousCanonical = canonicalAccentFolded.get(accentFoldedKey);
+    if (previousCanonical === undefined) {
+      canonicalAccentFolded.set(accentFoldedKey, { word, pronunciation });
+    } else if (
+      previousCanonical
+      && (previousCanonical.word !== word || previousCanonical.pronunciation !== pronunciation)
+    ) {
+      canonicalAccentFolded.set(accentFoldedKey, null);
+    }
   }
-  return { exact, folded };
+  return { exact, folded, accentFolded, canonicalAccentFolded };
 }
 
 function lookupPronunciation(word: string, lookup: PronunciationLookup): string | null {
   const normalizedWord = word.normalize('NFC');
   return lookup.exact.get(normalizedWord)
     ?? lookup.folded.get(normalizedWord.toLocaleLowerCase())
+    ?? lookup.accentFolded.get(accentFoldedWord(normalizedWord))
     ?? null;
-}
-
-function hasPronunciationWord(word: string, lookup: PronunciationLookup): boolean {
-  const normalizedWord = word.normalize('NFC');
-  return lookup.exact.has(normalizedWord)
-    || lookup.folded.has(normalizedWord.toLocaleLowerCase());
 }
 
 function scriptCount(value: string): number {
@@ -102,6 +144,49 @@ function repairUnambiguousGreekOcrSubstitution(word: string): string {
       : null;
   if (!replacement) return word;
   return word.replace(/\p{Script=Latin}/u, replacement);
+}
+
+const LATIN_TO_GREEK_OCR: Readonly<Record<string, string>> = {
+  a: 'α', b: 'β', d: 'δ', e: 'ε', g: 'γ', h: 'η',
+  i: 'ι', k: 'κ', l: 'λ', m: 'μ', n: 'ν', o: 'ο', p: 'π',
+  r: 'ρ', s: 'σ', t: 'τ', u: 'υ', v: 'ν', w: 'ω', x: 'χ', y: 'υ',
+};
+
+/**
+ * Converts a mixed Greek/Latin OCR token only to look it up in an
+ * authoritative dictionary. The converted text is never accepted by itself:
+ * a unique reviewed dictionary spelling and pronunciation must exist.
+ */
+function greekDictionaryCandidate(word: string): string | null {
+  if (!/\p{Script=Greek}/u.test(word) || !/\p{Script=Latin}/u.test(word)) return null;
+  const characters = [...word];
+  const converted = characters.map((character, index) => {
+    if (!/\p{Script=Latin}/u.test(character)) return character;
+    const lower = character.toLocaleLowerCase();
+    let replacement = LATIN_TO_GREEK_OCR[lower];
+    if (!replacement) return null;
+    if (lower === 's' && index === characters.length - 1) replacement = 'ς';
+    return character === character.toLocaleUpperCase()
+      ? replacement.toLocaleUpperCase()
+      : replacement;
+  });
+  return converted.includes(null) ? null : converted.join('');
+}
+
+function resolveAuthoritativeWord(
+  word: string,
+  lookup?: PronunciationLookup,
+): { word: string; pronunciation: string | null } {
+  const repairedWord = repairUnambiguousGreekOcrSubstitution(word);
+  if (!lookup) return { word: repairedWord, pronunciation: null };
+  const directPronunciation = lookupPronunciation(repairedWord, lookup);
+  if (directPronunciation) return { word: repairedWord, pronunciation: directPronunciation };
+
+  const dictionaryCandidate = greekDictionaryCandidate(word);
+  const authoritative = dictionaryCandidate
+    ? lookup.canonicalAccentFolded.get(accentFoldedWord(dictionaryCandidate))
+    : null;
+  return authoritative || { word: repairedWord, pronunciation: null };
 }
 
 function assertSingleScriptWord(word: string): void {
@@ -143,7 +228,7 @@ function rewriteSmartAudioPronunciationTags(
     const termWords = term
       .split(/\s+/u)
       .filter(Boolean)
-      .map(repairUnambiguousGreekOcrSubstitution);
+      .map((word) => resolveAuthoritativeWord(word, pronunciationLookup));
     const ipaWords = ipa.split(/\s+/u).filter(Boolean);
 
     if (termWords.length !== ipaWords.length) {
@@ -153,18 +238,15 @@ function rewriteSmartAudioPronunciationTags(
     }
 
     const resolvedIpaWords = termWords.map((word, index) => {
-      const authoritative = pronunciationLookup
-        ? lookupPronunciation(word, pronunciationLookup)
-        : null;
-      return authoritative ? authoritative.slice(1, -1) : ipaWords[index];
+      return word.pronunciation ? word.pronunciation.slice(1, -1) : ipaWords[index];
     });
 
     for (const [index, word] of termWords.entries()) {
-      assertSingleScriptWord(word);
-      assertGreekInflectionEnding(word, resolvedIpaWords[index]);
+      assertSingleScriptWord(word.word);
+      assertGreekInflectionEnding(word.word, resolvedIpaWords[index]);
     }
     return termWords
-      .map((word, index) => `[${word}](/${resolvedIpaWords[index]}/)`)
+      .map((word, index) => `[${word.word}](/${resolvedIpaWords[index]}/)`)
       .join(' ');
   });
 }
@@ -184,15 +266,35 @@ export function reconcileSmartAudioPronunciations(
   return rewriteSmartAudioPronunciationTags(text, buildPronunciationLookup(pronunciations));
 }
 
-/** Prevents Gemini from re-learning a conflicting value for a known word. */
-export function selectUnknownSmartAudioPronunciations(
-  learned: Record<string, string>,
-  authoritative: Record<string, string>,
-): Record<string, string> {
-  const lookup = buildPronunciationLookup(authoritative);
-  return Object.fromEntries(
-    Object.entries(learned).filter(([word]) => !hasPronunciationWord(word, lookup)),
+export type SmartAudioPronunciationFallback = {
+  text: string;
+  discardedTags: number;
+  errors: string[];
+};
+
+/**
+ * Keeps valid/reconcilable tags and unwraps only invalid pronunciation tags.
+ * Structural output errors are still rejected later by validateSmartAudioOutput.
+ */
+export function discardInvalidSmartAudioPronunciationTags(
+  text: string,
+  pronunciations: Record<string, string> = {},
+): SmartAudioPronunciationFallback {
+  const lookup = buildPronunciationLookup(pronunciations);
+  const errors: string[] = [];
+  const fallbackText = text.replace(
+    KOKORO_PRONUNCIATION_TAG,
+    (tag, rawTerm: string) => {
+      try {
+        return rewriteSmartAudioPronunciationTags(tag, lookup);
+      } catch (error) {
+        if (!(error instanceof SmartAudioOutputValidationError)) throw error;
+        errors.push(error.message);
+        return rawTerm.trim();
+      }
+    },
   );
+  return { text: fallbackText, discardedTags: errors.length, errors };
 }
 
 export function stripSmartAudioInputMarkers(text: string): string {
@@ -203,11 +305,45 @@ export function stripSmartAudioInputMarkers(text: string): string {
     .trim();
 }
 
+export function extractNarratableSmartAudioSourceText(text: string): string {
+  const markers = [...text.matchAll(LAYOUT_INPUT_MARKER_LINE)];
+  if (markers.length === 0) return stripSmartAudioInputMarkers(text);
+
+  const narratableBlocks: string[] = [];
+  for (const [index, marker] of markers.entries()) {
+    const kind = marker[1].trim().toLocaleLowerCase().replaceAll('-', '_');
+    if (NON_NARRATIVE_LAYOUT_KINDS.has(kind)) continue;
+    const contentStart = (marker.index || 0) + marker[0].length;
+    const contentEnd = markers[index + 1]?.index ?? text.length;
+    const content = text.slice(contentStart, contentEnd).trim();
+    if (content) narratableBlocks.push(content);
+  }
+  return stripSmartAudioInputMarkers(narratableBlocks.join('\n\n'));
+}
+
+export function hasConfirmedSmartAudioEndMatterHint(text: string): boolean {
+  return CONFIRMED_END_MATTER_HINT.test(text);
+}
+
 export class SmartAudioOutputValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SmartAudioOutputValidationError';
   }
+}
+
+export class SmartAudioSuspiciousOmissionError extends SmartAudioOutputValidationError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SmartAudioSuspiciousOmissionError';
+  }
+}
+
+export function hasSubstantialSmartAudioSourceText(text: string): boolean {
+  const source = extractNarratableSmartAudioSourceText(text);
+  const letterCount = source.match(/\p{Letter}/gu)?.length || 0;
+  const wordCount = source.match(/[\p{Letter}\p{Number}][\p{Letter}\p{Mark}\p{Number}'’.-]*/gu)?.length || 0;
+  return letterCount >= 200 && wordCount >= 30;
 }
 
 export function validateSmartAudioOutput(text: string): string {
@@ -236,6 +372,8 @@ export function resolveSmartAudioWorkerResult(
   options: {
     allowTaggedText?: boolean;
     authoritativePronunciations?: Record<string, string>;
+    allowSubstantialOmission?: boolean;
+    sourceText?: string;
   } = {},
 ): ResolvedSmartAudioWorkerResult {
   if (!value || typeof value !== 'object') {
@@ -268,6 +406,15 @@ export function resolveSmartAudioWorkerResult(
     if (declaredOutcome === 'omitted' && normalizedCandidate && !sentinelOmission) {
       throw new SmartAudioOutputValidationError(
         'Smart Audio worker returned text with an omitted outcome.',
+      );
+    }
+    if (
+      !options.allowSubstantialOmission
+      && options.sourceText
+      && hasSubstantialSmartAudioSourceText(options.sourceText)
+    ) {
+      throw new SmartAudioSuspiciousOmissionError(
+        'Smart Audio omitted a substantial source chunk that still contains narratable text.',
       );
     }
     return { outcome: 'omitted', text: '' };

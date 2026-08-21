@@ -12,6 +12,7 @@ from gemini_rate_limiter import extract_gemini_usage, refresh_gemini_cooldown
 API_STATES = {}
 MAX_DELAY = 300            # 5 minutes (in seconds)
 MIN_DELAY = 5              # The starting penalty
+QUALITY_REPAIR_MODEL = "gemini-3.7-flash"
 
 def academic_pre_clean(text, user_abbreviations, biblical_books):
     """Phase 1: Regex & Structural Expansion"""
@@ -43,17 +44,6 @@ def academic_pre_clean(text, user_abbreviations, biblical_books):
             
     return pt
 
-def extract_learned_words(cleaned_text, existing_dict):
-    """Phase 3: Scrape the output for new [Word](/IPA/) tags"""
-    new_words = {}
-    matches = re.findall(r'\[([^\]]+)\]\((/[^/]+/)\)', cleaned_text)
-    
-    for name, ipa in matches:
-        if name not in existing_dict and name not in new_words:
-            new_words[name] = ipa
-            
-    return new_words
-
 async def process_message(msg):
     """Triggered when a NATS job arrives"""
     data = json.loads(msg.data.decode())
@@ -63,6 +53,8 @@ async def process_message(msg):
     prompt = data.get("prompt")
     pronunciation_prompt = data.get("pronunciation_prompt", "")
     final_cleanup_rules = data.get("final_cleanup_rules", "")
+    validation_feedback = data.get("validation_feedback", "")
+    rejected_output = data.get("rejected_output", "")
     raw_text = data.get("raw_text")
     
     # --- ADD THESE 3 LINES RIGHT HERE ---
@@ -76,6 +68,7 @@ async def process_message(msg):
     abbreviations = data.get("abbreviations", {})
     books = data.get("books", {})
     ai_model = data.get("ai_model") or "gemini-3.5-flash"
+    empty_response_escalated = False
     
     print(f"\n[*] New job intercepted for User: {user_id}")
 
@@ -98,7 +91,20 @@ async def process_message(msg):
         
         title_instruction = "CHAPTER TITLE GENERATION: For narratable text, you MUST summarize the provided text into a unique 3 to 5 word descriptive title based on its actual contents. DO NOT just copy the existing chapter title (e.g. 'Foreword' or 'Chapter 1'). At the very end of your response, after the cleaned text, you MUST add exactly one blank line and then output the title wrapped in tags exactly like this: [CHAPTER_TITLE: Three Word Summary]. Do not include the chapter number or 'continued'. If the correct result is [OMIT], return only [OMIT] and do not add a chapter title.\n\n"
         
-        full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\n{title_instruction}{final_cleanup_rules}\n\nText to clean:\n{pre_cleaned_text}"
+        if validation_feedback and rejected_output:
+            repair_instruction = (
+                "CORRECTION PASS: Reader rejected the previous cleaned output. Correct the complete output using "
+                "the exact validation feedback below. Preserve all valid cleanup decisions and change only what is "
+                "needed to satisfy the rules. Never explain the correction. Return the complete corrected audiobook "
+                "text, not a patch or excerpt. If a pronunciation cannot be made safe, remove only its [word](/IPA/) "
+                "markup and leave the corrected visible word as ordinary text. If validation says substantial source "
+                "text was omitted, do not return [OMIT]; preserve every narratable sentence.\n\n"
+                f"VALIDATION FEEDBACK:\n{validation_feedback}\n\n"
+                f"REJECTED CLEANED OUTPUT:\n{rejected_output}\n\n"
+            )
+        else:
+            repair_instruction = ""
+        full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\n{title_instruction}{final_cleanup_rules}\n\n{repair_instruction}Original text to clean:\n{pre_cleaned_text}"
         final_text = ""
         
         api_state = API_STATES.setdefault(api_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})
@@ -138,6 +144,11 @@ async def process_message(msg):
                     )
                     
                     if not response.text or not response.text.strip():
+                        if ai_model != QUALITY_REPAIR_MODEL and not empty_response_escalated:
+                            print(f"  -> [⬆️] Empty response from {ai_model}. Retrying once with {QUALITY_REPAIR_MODEL}...")
+                            ai_model = QUALITY_REPAIR_MODEL
+                            empty_response_escalated = True
+                            continue
                         raise RuntimeError("Gemini returned no text; expected cleaned text or [OMIT]")
                     final_text = response.text.strip()
                     
@@ -186,10 +197,6 @@ async def process_message(msg):
             final_text = ""
             chapter_title = ""
 
-        learned_words = extract_learned_words(final_text, pronunciations)
-        if learned_words:
-            print(f"  -> [LEARNED] Discovered {len(learned_words)} new phonetic overrides!")
-
         # Strip out the bypass exclamation mark from heteronym tags so TTS gets valid markup
         final_text = re.sub(r'\[([^\]]+)\]\(!(/[^/]+/)\)', r'[\1](\2)', final_text)
 
@@ -209,9 +216,9 @@ async def process_message(msg):
             "status": "success",
             "outcome": outcome,
             "cleaned_text": final_text,
-            "new_pronunciations": learned_words,
             "changelog": changelog,
             "chapter_title": chapter_title,
+            "model_used": ai_model,
             "usage": extract_gemini_usage(response),
         }
         
@@ -250,6 +257,8 @@ async def generate_multivoice_content(msg, api_key, backup_api_key, model, conte
     """Use the standard worker's per-key cooldown state for Audio Drama calls."""
     active_key = api_key
     remaining_backup_key = backup_api_key
+    active_model = model
+    empty_response_escalated = False
     while True:
         api_state = API_STATES.setdefault(active_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})
         cooldown_remaining = refresh_gemini_cooldown(api_state)
@@ -279,7 +288,7 @@ async def generate_multivoice_content(msg, api_key, backup_api_key, model, conte
                     return None
             try:
                 response = await client.aio.models.generate_content(
-                    model=model,
+                    model=active_model,
                     contents=contents,
                     config=genai.types.GenerateContentConfig(
                         response_mime_type="application/json",
@@ -287,13 +296,18 @@ async def generate_multivoice_content(msg, api_key, backup_api_key, model, conte
                     ),
                 )
                 if not response.text or not response.text.strip():
+                    if active_model != QUALITY_REPAIR_MODEL and not empty_response_escalated:
+                        print(f"  -> [⬆️] Empty structured response from {active_model}. Retrying once with {QUALITY_REPAIR_MODEL}...")
+                        active_model = QUALITY_REPAIR_MODEL
+                        empty_response_escalated = True
+                        continue
                     raise RuntimeError("Gemini returned an empty structured Audio Drama response")
                 if api_state["current_delay"] > 0:
                     api_state["current_delay"] //= 2
                     if api_state["current_delay"] < MIN_DELAY:
                         api_state["current_delay"] = 0
                     api_state["resume_at"] = 0
-                return response
+                return response, active_model
             except Exception as error:
                 error_message = str(error).lower()
                 if any(token in error_message for token in ("429", "quota", "rate limit", "503")):
@@ -323,7 +337,7 @@ async def process_multivoice_extract(msg):
             "or publishers as speakers. Preserve exact character-name spelling and provide one real short quote when available.\n\n"
             f"BOOK EXCERPTS:\n{raw_text}"
         )
-        response = await generate_multivoice_content(
+        generated = await generate_multivoice_content(
             msg,
             api_key,
             data.get("backup_api_key") or "",
@@ -331,12 +345,14 @@ async def process_multivoice_extract(msg):
             prompt,
             CharacterExtractionResult,
         )
-        if response is None:
+        if generated is None:
             return
+        response, model_used = generated
         parsed = json.loads(response.text)
         await msg.respond(json.dumps({
             "status": "success",
             "characters": parsed.get("characters", []),
+            "model_used": model_used,
             "usage": extract_gemini_usage(response),
         }, ensure_ascii=False).encode())
     except Exception as error:
@@ -356,6 +372,19 @@ async def process_multivoice_assign(msg):
             return
         cast_json = json.dumps(characters, indent=2, ensure_ascii=False)
         pronunciations = json.dumps(data.get("pronunciations") or {}, indent=2, ensure_ascii=False)
+        validation_feedback = data.get("validation_feedback") or ""
+        rejected_output = data.get("rejected_output") or ""
+        repair_context = ""
+        if validation_feedback and rejected_output:
+            repair_context = (
+                "\n\nCORRECTION PASS: Reader rejected the previous structured response. Return the complete corrected "
+                "response using the same schema. Preserve valid speaker assignments and text; change only what the "
+                "validation feedback requires. If pronunciation markup cannot be made safe, remove only that markup "
+                "and keep the corrected visible word as ordinary text. If validation says substantial source text "
+                "was omitted, preserve every narratable sentence.\n\n"
+                f"VALIDATION FEEDBACK:\n{validation_feedback}\n\n"
+                f"REJECTED STRUCTURED OUTPUT:\n{rejected_output}\n"
+            )
         prompt = (
             "You are assigning speakers for a LitRPG audiobook. Return structured JSON only. Split the supplied text "
             "into consecutive speaker segments. Use only exact primary names or aliases from REVIEWED CAST, and copy "
@@ -385,9 +414,10 @@ async def process_multivoice_assign(msg):
             f"PRONUNCIATION OVERRIDES:\n{pronunciations}\n"
             f"{data.get('pronunciation_prompt') or ''}\n\n"
             f"{data.get('final_cleanup_rules') or ''}\n\n"
+            f"{repair_context}"
             f"TEXT TO ASSIGN:\n{raw_text}"
         )
-        response = await generate_multivoice_content(
+        generated = await generate_multivoice_content(
             msg,
             api_key,
             data.get("backup_api_key") or "",
@@ -395,14 +425,16 @@ async def process_multivoice_assign(msg):
             prompt,
             VoiceAssignmentResult,
         )
-        if response is None:
+        if generated is None:
             return
+        response, model_used = generated
         parsed = json.loads(response.text)
         await msg.respond(json.dumps({
             "status": "success",
             "segments": parsed.get("segments", []),
             "continuity_state": parsed.get("continuity_state", ""),
             "chapter_title": parsed.get("chapter_title", ""),
+            "model_used": model_used,
             "usage": extract_gemini_usage(response),
         }, ensure_ascii=False).encode())
     except Exception as error:

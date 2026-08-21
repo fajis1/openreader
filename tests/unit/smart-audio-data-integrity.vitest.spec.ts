@@ -201,9 +201,6 @@ describe('Smart Audio data-integrity guards', () => {
     expect(route).toContain('.limit(1)\n            .all();');
     expect(route).toContain('}).run();');
 
-    const worker = source('src/lib/server/audiobooks/worker.ts');
-    expect(worker).toContain('.limit(1)\n      .all();');
-    expect(worker).toContain('}).run();');
   });
 
   test('audits both global and selected-profile pronunciation libraries before repair', () => {
@@ -228,7 +225,9 @@ describe('Smart Audio data-integrity guards', () => {
     for (const workerPath of ['audiobook_worker.py', 'biblical_scholar_worker.py']) {
       const worker = source(workerPath);
       expect(worker).toContain('final_cleanup_rules = data.get("final_cleanup_rules", "")');
-      expect(worker).toContain('{title_instruction}{final_cleanup_rules}\\n\\nText to clean:');
+      expect(worker).toContain(
+        '{title_instruction}{final_cleanup_rules}\\n\\n{repair_instruction}Original text to clean:',
+      );
     }
 
     const backgroundWorker = source('src/lib/server/audiobooks/worker.ts');
@@ -246,10 +245,28 @@ describe('Smart Audio data-integrity guards', () => {
     );
   });
 
+  test('requires confirmed positional end matter before allowing a large omission', () => {
+    const worker = source('src/lib/server/audiobooks/worker.ts');
+    const endMatter = source('src/lib/shared/audiobook-end-matter.ts');
+    const cleanup = source('src/lib/shared/smart-audio-cleanup.ts');
+
+    expect(endMatter).toContain('AUDIOBOOK_END_MATTER_START_FRACTION = 0.7');
+    expect(worker).toContain('allowSubstantialOmission: confirmedEndMatter');
+    expect(worker).toContain('>= AUDIOBOOK_END_MATTER_START_FRACTION');
+    const endMatterTransition = worker.slice(
+      worker.indexOf('if (startsConfirmedEndMatter && !isInEndMatter)'),
+      worker.indexOf('if (currentLength >= cleanupTargetCharacters)', worker.indexOf('if (startsConfirmedEndMatter && !isInEndMatter)')),
+    );
+    expect(endMatterTransition.indexOf('flush();')).toBeLessThan(
+      endMatterTransition.indexOf('isInEndMatter = true'),
+    );
+    expect(cleanup).toContain('OpenReader emits that hint only at or after 70% through the book');
+  });
+
   test('fails closed instead of sending raw text when direct cleanup fails', () => {
     const route = source('src/app/api/audiobook/chapter/route.ts');
     const worker = source('src/lib/server/audiobooks/worker.ts');
-    expect(route).toContain('resolveSmartAudioWorkerResult(workerResult, {');
+    expect(route).toContain('resolveSmartAudioWorkerResult(candidate, {');
     expect(route).toContain('Refusing to synthesize uncleaned text.');
     expect(route).not.toContain('NATS failed. Falling back to raw text.');
     expect(route).toContain('processedTextForTts = validateSmartAudioOutput(processedTextForTts)');
@@ -270,6 +287,21 @@ describe('Smart Audio data-integrity guards', () => {
       expect(worker).toContain('raise RuntimeError("Gemini returned no text; expected cleaned text or [OMIT]")');
       expect(worker).toContain('"outcome": outcome');
       expect(worker).toContain('outcome = "omitted"');
+      expect(worker).toContain('QUALITY_REPAIR_MODEL = "gemini-3.7-flash"');
+      expect(worker).toContain('"model_used": ai_model');
+    }
+  });
+
+  test('escalates rejected cleanup output and preserves substantial source text after a repeated omission', () => {
+    const recovery = source('src/lib/server/audiobooks/smart-audio-validation-recovery.ts');
+    const backgroundWorker = source('src/lib/server/audiobooks/worker.ts');
+    const directRoute = source('src/app/api/audiobook/chapter/route.ts');
+
+    expect(recovery).toContain('resolveSmartAudioValidationRepairModel(requestedModel)');
+    for (const caller of [backgroundWorker, directRoute]) {
+      expect(caller).toContain('sourceFallback: (rejectedResult) => ({');
+      expect(caller).toContain('sourceFallbackUsed');
+      expect(caller).toContain('source_fallback: true');
     }
   });
 
@@ -281,14 +313,36 @@ describe('Smart Audio data-integrity guards', () => {
     expect(pipeline).toContain('documentId: sourceDocumentId');
   });
 
-  test('reconciles known pronunciations and only learns unknown words in both generation paths', () => {
+  test('reconciles known pronunciations without learning cleanup output in both generation paths', () => {
     for (const path of [
       'src/lib/server/audiobooks/worker.ts',
       'src/app/api/audiobook/chapter/route.ts',
     ]) {
       const implementation = source(path);
       expect(implementation).toContain('authoritativePronunciations');
-      expect(implementation).toContain('selectUnknownSmartAudioPronunciations(');
+      expect(implementation).toContain('resolveSmartAudioWithValidationRecovery({');
+      expect(implementation).not.toContain('selectUnknownSmartAudioPronunciations(');
+      expect(implementation).not.toContain('workerResult.new_pronunciations');
+    }
+  });
+
+  test('gives validation failures one correction before discarding only unsafe tags', () => {
+    for (const path of [
+      'src/lib/server/audiobooks/worker.ts',
+      'src/app/api/audiobook/chapter/route.ts',
+    ]) {
+      const implementation = source(path);
+      expect(implementation).toContain('buildSmartAudioValidationRepairPayload(');
+      expect(implementation).toContain('smart_audio.validation_repair');
+      expect(implementation).toContain('smart_audio.pronunciation_fallback');
+    }
+    for (const workerPath of ['audiobook_worker.py', 'biblical_scholar_worker.py']) {
+      const worker = source(workerPath);
+      expect(worker).toContain('VALIDATION FEEDBACK:');
+      expect(worker).toContain('REJECTED CLEANED OUTPUT:');
+      expect(worker).toContain('remove only its [word](/IPA/)');
+      expect(worker).not.toContain('new_pronunciations');
+      expect(worker).not.toContain('extract_learned_words');
     }
   });
 
