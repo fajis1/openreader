@@ -481,8 +481,8 @@ export async function POST(request: NextRequest) {
     }
     
     const format: TTSAudiobookFormat = requestedFormat ?? chapters[0].format;
-    const completeName = ;
-    const manifestName = ;
+    const completeName = `complete.${format}`;
+    const manifestName = `${completeName}.manifest.json`;
     const signature = chapters.map((chapter) => ({
       index: chapter.index,
       fileName: chapter.fileName,
