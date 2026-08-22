@@ -460,8 +460,15 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
          body: JSON.stringify({ bookId: bookId, rule: batchRefineRule.trim() })
       });
       if (res.ok) {
-         setShowBatchRefineModal(false);
-         toast.success('Background batch refine started! Text will be updated shortly.');
+        const body = await res.json().catch(() => ({}));
+        setActiveJob({
+          id: body.jobId || 'temp-id',
+          status: 'queued',
+          progress: 0,
+          settingsJson: { jobType: 'batch-refine' }
+        });
+        setShowBatchRefineModal(false);
+        toast.success('Background batch refine started! Text will be updated shortly.');
       } else {
          const err = await res.json().catch(() => ({}));
          toast.error(err.error || 'Failed to start batch refine');
