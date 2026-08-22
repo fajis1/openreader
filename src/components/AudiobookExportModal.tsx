@@ -101,6 +101,7 @@ export function AudiobookExportModal({
   const [pendingDramaReplacementScholarConfirm, setPendingDramaReplacementScholarConfirm] = useState(false);
   const [showCharacterCasting, setShowCharacterCasting] = useState(false);
   const [castingJobId, setCastingJobId] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [startAfterCasting, setStartAfterCasting] = useState(false);
   const [dramaNarratorVoice, setDramaNarratorVoice] = useState<string | null>(null);
   const [isLoadingDramaNarrator, setIsLoadingDramaNarrator] = useState(false);
@@ -276,6 +277,7 @@ export function AudiobookExportModal({
           || j.status === WAITING_FOR_VOICES_STATUS
         ));
         if (activeJob) {
+          setActiveJobId(activeJob.id);
           if (activeJob.status === WAITING_FOR_VOICES_STATUS) {
             setCastingJobId(activeJob.id);
             setStartAfterCasting(false);
@@ -293,6 +295,8 @@ export function AudiobookExportModal({
           else if (activeJob.status === 'waiting_for_pdf') setCurrentChapter('Waiting for PDF parsing...');
           else setCurrentChapter('Generating on server...');
           }
+        } else {
+          setActiveJobId(null);
         }
       }
     } catch {
@@ -301,6 +305,7 @@ export function AudiobookExportModal({
 
     try {
       const data = await getAudiobookStatus(documentId);
+      console.log('DEBUG_FETCH_CHAPTERS_RESULT:', data);
       if (data.exists) {
         setChapters(data.chapters || []);
         setBookId(data.bookId);
@@ -515,11 +520,24 @@ export function AudiobookExportModal({
     }
   }, [autoGenerate, isGenerating, isLoadingExisting, effectiveSettings, bookId, handleStartGeneration, showCharacterCasting]);
 
-  const handleCancel = useCallback(() => {
+  const handleCancel = useCallback(async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-  }, []);
+    
+    if (activeJobId) {
+      try {
+        await fetch(`/api/audiobooks/queue?id=${activeJobId}`, { method: 'DELETE' });
+        // Update local state to reflect cancellation immediately
+        setIsGenerating(false);
+        setActiveJobId(null);
+      } catch (error) {
+        console.error('Failed to cancel background audiobook job', error);
+      }
+    } else {
+      setIsGenerating(false);
+    }
+  }, [activeJobId]);
 
   const handleSmartAudioProfileChange = useCallback((profileId: string) => {
     setSelectedSmartAudioProfileId(profileId);

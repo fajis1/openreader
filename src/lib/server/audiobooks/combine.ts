@@ -196,11 +196,15 @@ export async function executeAudiobookCombine(
 
     if (onProgress) await onProgress(90);
 
+    serverLogger.info({ event: 'audiobook.combine.debug' }, 'Checking duration...');
     await ensurePositiveDuration(outputPath);
 
+    serverLogger.info({ event: 'audiobook.combine.debug' }, 'Uploading audio file to S3...');
     const { createReadStream } = await import('fs');
     const outputStreamForPut = createReadStream(outputPath);
     await putAudiobookObject(bookId, storageUserId, completeName, outputStreamForPut, (format), testNamespace);
+    
+    serverLogger.info({ event: 'audiobook.combine.debug' }, 'Uploading manifest file to S3...');
     await putAudiobookObject(
       bookId,
       storageUserId,
@@ -209,6 +213,7 @@ export async function executeAudiobookCombine(
       'application/json; charset=utf-8',
       testNamespace,
     );
+    serverLogger.info({ event: 'audiobook.combine.debug' }, 'Finished uploading to S3!');
   } finally {
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }

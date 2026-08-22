@@ -161,8 +161,33 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     };
     fetchProfiles();
 
+    const checkJob = async () => {
+      try {
+        const res = await fetch(`/api/audiobooks/batch-refine?bookId=${bookId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.job) {
+            setActiveJob(data.job);
+            if (data.job.status === 'running' || data.job.status === 'queued') {
+               setIsBatchRefining(true);
+            } else {
+               setIsBatchRefining(false);
+            }
+          } else {
+            setActiveJob(null);
+            setIsBatchRefining(false);
+          }
+        }
+      } catch(e) {}
+    };
+    
+    checkJob();
+
     // Poll every 5 seconds to get live updates for background tasks
-    const interval = setInterval(fetchStatus, 5000);
+    const interval = setInterval(() => {
+       fetchStatus();
+       checkJob();
+    }, 5000);
     return () => clearInterval(interval);
   }, [bookId]);
 
@@ -470,6 +495,15 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     } catch(e) {}
   };
 
+  const handleCancelBatchRefine = async () => {
+    if (!activeJob?.id) return;
+    try {
+      await fetch(`/api/audiobooks/queue?id=${activeJob.id}`, { method: 'DELETE' });
+      setIsBatchRefining(false);
+      setActiveJob(null);
+    } catch(e) {}
+  };
+
   const handleBatchRefine = async () => {
     if (!batchRefineRule.trim()) return toast.error("Please enter a rule.");
     setIsBatchRefining(true);
@@ -580,42 +614,36 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   return (
     <div className="flex flex-col h-screen bg-surface">
       <div className="flex-none p-4 bg-surface border-b border-line-soft flex items-center justify-between">
-        {activeJob && (
-          <div className="absolute top-0 left-0 w-full h-1 bg-surface-raised z-50 overflow-hidden">
-            <div 
-              className="h-full bg-indigo-500 transition-all duration-1000 ease-in-out relative"
-              style={{ width: `${activeJob.progress || 0}%` }}
-            >
-              <div className="absolute top-0 left-0 w-full h-full bg-white/20 animate-[pulse_2s_ease-in-out_infinite]" />
-            </div>
-            <div className="absolute top-1 left-4 text-[10px] font-bold text-indigo-500 bg-surface px-2 rounded-b-md shadow-sm border border-t-0 border-line-soft flex items-center gap-2">
-              <span>
-                {activeJob.settingsJson?.jobType === 'batch-refine' 
-                  ? `AI Batch Refine in progress (${Math.round(activeJob.progress || 0)}%)` 
-                  : `Background job running (${Math.round(activeJob.progress || 0)}%)`
-                }
-              </span>
-              <button 
-                onClick={async () => {
-                  try {
-                    await fetch(`/api/audiobooks/queue?id=${activeJob.id}`, { method: 'DELETE' });
-                    setActiveJob(null);
-                    toast.success('Background job cancelled');
-                  } catch (e) {
-                    toast.error('Failed to cancel job');
-                  }
-                }}
-                className="text-rose-500 hover:text-rose-600 underline font-semibold cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
+        
         <div>
           <h1 className="text-xl font-bold text-text-strong line-clamp-1">Review: {currentChapter.title}</h1>
           <p className="text-text-soft text-sm">Chunk {currentChapter.index + 1} · Item {currentChapterPosition + 1} of {chapters.length}</p>
         </div>
+        {activeJob && (activeJob.status === 'running' || activeJob.status === 'queued') && (
+          <div className="mt-2 flex items-center gap-4 bg-indigo-50 border border-indigo-200 rounded-md px-3 py-1.5 shadow-sm">
+            <div className="flex-1 flex items-center gap-3">
+              <span className="text-indigo-900 font-bold text-sm shrink-0">
+                {activeJob.settingsJson?.jobType === 'batch-refine' ? 'AI Batch Refine' : 'Background Job'}
+              </span>
+              <div className="flex-1 max-w-sm bg-indigo-200 rounded-full h-2">
+                <div className="bg-indigo-600 h-2 rounded-full transition-all duration-500" style={{ width: `${activeJob.progress || 0}%` }}></div>
+              </div>
+              <span className="text-indigo-800 font-mono text-sm font-semibold w-10">{Math.round(activeJob.progress || 0)}%</span>
+            </div>
+            <button 
+              onClick={async () => {
+                try {
+                  await fetch(`/api/audiobooks/queue?id=${activeJob.id}`, { method: 'DELETE' });
+                  setActiveJob(null);
+                  setIsBatchRefining(false);
+                } catch (e) {}
+              }}
+              className="text-xs text-rose-600 hover:text-rose-700 bg-white border border-rose-200 hover:border-rose-300 font-semibold px-2 py-1 rounded shadow-sm transition-colors shrink-0"
+            >
+              Stop & Cancel
+            </button>
+          </div>
+        )}
         <div className="flex gap-2 items-center flex-wrap">
           {/* View Toggles */}
           <div className="flex bg-surface-raised border border-line-soft rounded overflow-hidden">
@@ -1291,6 +1319,13 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
+              <a
+                href={`/api/audiobooks/batch-refine/changelog?bookId=${bookId}`}
+                target="_blank"
+                className="px-4 py-2 bg-surface-sunken hover:bg-surface-raised text-text-strong rounded text-sm transition-colors border border-line-soft mr-auto"
+              >
+                View Changelog
+              </a>
               <button
                 className="px-4 py-2 border border-line-soft rounded text-sm hover:bg-surface-raised transition-colors"
                 onClick={() => setShowBatchRefineModal(false)}

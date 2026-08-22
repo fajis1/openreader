@@ -99,7 +99,10 @@ export async function GET(request: Request) {
         masked: maskKey(p.geminiApiKey || "")
       }));
 
+    const activeJobs = await db.select().from(audiobookJobs).where(and(eq(audiobookJobs.documentId, bookId), eq(audiobookJobs.userId, userId))).limit(1);
+    
     return NextResponse.json({
+      job: activeJobs.length > 0 ? activeJobs[0] : null,
       primaryKeyMasked: maskKey(primaryKey),
       backupKeyMasked: maskKey(backupKey),
       defaultModel: resolvedModel,

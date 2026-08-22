@@ -335,6 +335,6 @@ export const downloadAudiobookWithBackgroundPolling = async (bookId: string, for
         toast.error('Lost connection to background job', { id: toastId });
         reject(e);
       }
-    }, 5000);
+    }, 3000);
   });
 };

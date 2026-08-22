@@ -3,6 +3,7 @@ import { audiobookJobs, documents, documentSettings } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { userPreferences } from '@/db/schema';
 import { serverLogger } from '@/lib/server/logger';
+import * as Diff from 'diff';
 import { listAudiobookObjects, getAudiobookObjectBuffer, putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
 import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemini-failover';
 import { findSmartAudioProfileById, readSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
@@ -123,6 +124,26 @@ TEXT TO REFINE:
       // Only overwrite the blob (and thus trigger an audio re-record) if Gemini ACTUALLY changed something!
       if (refinedText !== originalText.trim()) {
         serverLogger.info({ event: 'audiobook.batch_refine.chapter_changed', bookId, chapter: txtFile.fileName }, `Chapter ${txtFile.fileName} was modified by the rule.`);
+        
+        // Generate diff
+        const diffPatch = Diff.createTwoFilesPatch(
+          txtFile.fileName,
+          txtFile.fileName,
+          originalText.trim(),
+          refinedText,
+          'Original',
+          'AI Refined'
+        );
+        
+        // Append to global changelog
+        let existingDiff = '';
+        try {
+          existingDiff = (await getAudiobookObjectBuffer(bookId, userId, 'batch_refine_changelog.diff', null)).toString('utf8');
+        } catch(e) {}
+        
+        const updatedDiff = existingDiff + (existingDiff ? '\n\n' : '') + diffPatch;
+        await putAudiobookObject(bookId, userId, 'batch_refine_changelog.diff', Buffer.from(updatedDiff, 'utf-8'), 'text/plain', null);
+
         await putAudiobookObject(bookId, userId, txtFile.fileName, Buffer.from(refinedText, 'utf-8'), 'text/plain', null);
       } else {
         serverLogger.info({ event: 'audiobook.batch_refine.chapter_unchanged', bookId, chapter: txtFile.fileName }, `Chapter ${txtFile.fileName} was unchanged.`);
