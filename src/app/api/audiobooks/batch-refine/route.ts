@@ -85,10 +85,20 @@ export async function GET(request: Request) {
     
     const maskKey = (key: string) => key.length > 4 ? `...${key.slice(-4)}` : (key ? '***' : 'Not Set');
 
+    const availableKeys = profilesDoc.profiles
+      .filter(p => p.geminiApiKey && p.geminiApiKey.trim().length > 0)
+      .map(p => ({
+        id: p.id,
+        name: p.name || 'Unnamed Profile',
+        key: p.geminiApiKey,
+        masked: maskKey(p.geminiApiKey)
+      }));
+
     return NextResponse.json({
       primaryKeyMasked: maskKey(primaryKey),
       backupKeyMasked: maskKey(backupKey),
-      defaultModel: resolvedModel
+      defaultModel: resolvedModel,
+      availableKeys
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

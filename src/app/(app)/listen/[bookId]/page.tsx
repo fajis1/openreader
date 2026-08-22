@@ -44,6 +44,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [batchRefineKeys, setBatchRefineKeys] = useState({ primary: '', backup: '' });
   const [newApiKey, setNewApiKey] = useState('');
   const [newBackupKey, setNewBackupKey] = useState('');
+  const [availableKeys, setAvailableKeys] = useState<any[]>([]);
   const [isBatchRefining, setIsBatchRefining] = useState(false);
   const [activeJob, setActiveJob] = useState<any>(null);
   const [isTextLoading, setIsTextLoading] = useState(false);
@@ -462,6 +463,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         const data = await res.json();
         if (data.defaultModel) setBatchRefineModel(data.defaultModel);
         setBatchRefineKeys({ primary: data.primaryKeyMasked || 'Not Set', backup: data.backupKeyMasked || 'Not Set' });
+        if (data.availableKeys) setAvailableKeys(data.availableKeys);
         setNewApiKey('');
         setNewBackupKey('');
       }
@@ -1228,13 +1230,30 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
               <div className="flex items-center gap-2">
                 <span className="font-semibold w-24 shrink-0">Primary Key:</span>
                 {!batchRefineKeys.primary || batchRefineKeys.primary === 'Not Set' ? (
-                  <input
-                    type="password"
-                    placeholder="Paste Gemini API Key..."
-                    value={newApiKey}
-                    onChange={(e) => setNewApiKey(e.target.value)}
-                    className="bg-surface border border-line-soft rounded px-2 py-1 flex-1 text-text-strong text-xs w-full"
-                  />
+                  <div className="flex-1 flex flex-col gap-1">
+                    {availableKeys.length > 0 && (
+                      <select
+                        className="bg-surface border border-line-soft rounded px-2 py-1 text-text-strong text-xs w-full"
+                        onChange={(e) => {
+                          if (e.target.value !== 'custom') {
+                            setNewApiKey(e.target.value);
+                          }
+                        }}
+                      >
+                        <option value="custom">Select a key from another profile...</option>
+                        {availableKeys.map(ak => (
+                          <option key={ak.id} value={ak.key}>{ak.name} ({ak.masked})</option>
+                        ))}
+                      </select>
+                    )}
+                    <input
+                      type="password"
+                      placeholder="Or paste a new Gemini API Key here..."
+                      value={newApiKey}
+                      onChange={(e) => setNewApiKey(e.target.value)}
+                      className="bg-surface border border-line-soft rounded px-2 py-1 text-text-strong text-xs w-full"
+                    />
+                  </div>
                 ) : (
                   <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.primary}</code>
                 )}
@@ -1242,13 +1261,30 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
               <div className="flex items-center gap-2 mt-1">
                 <span className="font-semibold w-24 shrink-0">Backup Key:</span>
                 {!batchRefineKeys.backup || batchRefineKeys.backup === 'Not Set' ? (
-                  <input
-                    type="password"
-                    placeholder="Paste Backup API Key (Optional)..."
-                    value={newBackupKey}
-                    onChange={(e) => setNewBackupKey(e.target.value)}
-                    className="bg-surface border border-line-soft rounded px-2 py-1 flex-1 text-text-strong text-xs w-full"
-                  />
+                  <div className="flex-1 flex flex-col gap-1">
+                    {availableKeys.length > 0 && (
+                      <select
+                        className="bg-surface border border-line-soft rounded px-2 py-1 text-text-strong text-xs w-full"
+                        onChange={(e) => {
+                          if (e.target.value !== 'custom') {
+                            setNewBackupKey(e.target.value);
+                          }
+                        }}
+                      >
+                        <option value="custom">Select a key from another profile...</option>
+                        {availableKeys.map(ak => (
+                          <option key={ak.id} value={ak.key}>{ak.name} ({ak.masked})</option>
+                        ))}
+                      </select>
+                    )}
+                    <input
+                      type="password"
+                      placeholder="Or paste a new Backup API Key here..."
+                      value={newBackupKey}
+                      onChange={(e) => setNewBackupKey(e.target.value)}
+                      className="bg-surface border border-line-soft rounded px-2 py-1 text-text-strong text-xs w-full"
+                    />
+                  </div>
                 ) : (
                   <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.backup}</code>
                 )}
