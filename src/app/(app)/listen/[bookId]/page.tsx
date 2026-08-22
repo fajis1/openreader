@@ -7,7 +7,7 @@ import { parseHtmlBlocks } from "@/lib/client/html/blocks";
 import { BookPronunciationInspectorModal } from "@/components/doclist/BookPronunciationInspectorModal";
 import { MultiVoiceReviewStudio } from "@/components/audiobooks/MultiVoiceReviewStudio";
 import { MobileReviewPlayer } from "@/components/audiobooks/MobileReviewPlayer";
-import { BASE_BOOKS } from "@/components/constants";
+import { BASE_BOOKS, PRESET_MODELS } from "@/components/constants";
 import { toast } from "react-hot-toast";
 import { ModalFrame } from "@/components/ui";
 import { SmartAudioSettings } from "@/components/SmartAudioSettings";
@@ -1216,9 +1216,9 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                   value={batchRefineModel}
                   onChange={(e) => setBatchRefineModel(e.target.value)}
                 >
-                  <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b (Fastest, Cheapest)</option>
-                  <option value="gemini-2.5-flash">gemini-2.5-flash (Balanced)</option>
-                  <option value="gemini-2.5-pro">gemini-2.5-pro (Smartest)</option>
+                  {PRESET_MODELS.filter(m => m.id !== 'custom').map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
                 </select>
               </div>
               <div className="flex items-center gap-2">
