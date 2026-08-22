@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db';
-import { audiobookJobs, documents } from '@/db/schema';
+import { audiobookJobs, documents, userPreferences, documentSettings } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { randomUUID } from 'node:crypto';
+import { readSmartAudioProfilesDocument, findSmartAudioProfileById } from '@/lib/server/smart-audio-profiles';
 
 export async function POST(request: Request) {
   try {
@@ -30,7 +31,6 @@ export async function POST(request: Request) {
 
     
     if (newApiKey) {
-      const { userPreferences } = await import('@/db/schema');
       await db.update(userPreferences).set({ geminiApiKey: newApiKey }).where(eq(userPreferences.userId, userId));
     }
     const jobId = randomUUID();
@@ -64,13 +64,12 @@ export async function GET(request: Request) {
     const bookId = url.searchParams.get('bookId');
     if (!bookId) return NextResponse.json({ error: 'bookId is required' }, { status: 400 });
 
-    const { userPreferences, documentSettings } = await import('@/db/schema');
     const userRows = await db.select().from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
     
     const settingsRows = await db.select().from(documentSettings).where(eq(documentSettings.documentId, bookId)).limit(1);
     const selectedProfileId = (settingsRows[0]?.settingsJson as any)?.audiobookProfileId || 'default';
     
-    const { readSmartAudioProfilesDocument, findSmartAudioProfileById } = await import('@/lib/server/smart-audio-profiles');
+    
     const profilesDoc = await readSmartAudioProfilesDocument(userId);
     const profile = await findSmartAudioProfileById(profilesDoc, selectedProfileId);
     

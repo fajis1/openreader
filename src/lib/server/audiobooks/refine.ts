@@ -41,7 +41,7 @@ export async function processBatchRefineJob(
     const profile = await findSmartAudioProfileById(profilesDoc, selectedProfileId);
     
     // We try to use the primary key, or fallback key, or system key
-    const { userPreferences } = await import('@/db/schema');
+    
     const userRows = await db.select().from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
     const globalKey = userRows[0]?.geminiApiKey || process.env.GEMINI_API_KEY || '';
     const globalBackupKey = userRows[0]?.backupGeminiApiKey || process.env.BACKUP_GEMINI_API_KEY || '';

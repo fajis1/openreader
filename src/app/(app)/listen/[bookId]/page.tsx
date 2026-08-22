@@ -1225,7 +1225,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-semibold w-24 shrink-0">Primary Key:</span>
-                {batchRefineKeys.primary === 'Not Set' ? (
+                {!batchRefineKeys.primary || batchRefineKeys.primary === 'Not Set' ? (
                   <input
                     type="password"
                     placeholder="Paste Gemini API Key..."
