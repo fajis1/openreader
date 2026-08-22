@@ -567,7 +567,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           {isMultiVoice && (
             <button
               onClick={() => setShowMultiVoiceStudio(true)}
-              className="hidden md:flex px-4 py-1.5 bg-accent hover:bg-secondary-accent text-background rounded font-medium text-sm gap-2"
+              className="hidden md:flex px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium text-sm gap-2"
             >
               🎬 Open Audio-Drama Studio
             </button>
@@ -590,14 +590,14 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
             <button 
               onClick={handleRebuildAllModified} 
               disabled={isRebuildingAll || chapters.length === 0}
-              className="px-3 py-1.5 bg-accent hover:bg-secondary-accent text-background rounded-md shadow font-bold text-xs disabled:opacity-50 transition-all"
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md shadow font-bold text-xs disabled:opacity-50 transition-all"
               title="Re-record MP3s for any chunk where the text was modified"
             >
               {isRebuildingAll ? "Scanning..." : "Re-Record All Modified chunks"}
             </button>
             <button
               onClick={() => setShowBatchRefineModal(true)}
-              className="px-3 py-1.5 bg-accent hover:bg-secondary-accent text-background rounded font-medium text-xs transition-colors flex items-center gap-1"
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium text-xs transition-colors flex items-center gap-1"
               title="Apply a custom AI rule to all chapters"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1048,7 +1048,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                   toast.error(e.message || 'Failed to save abbreviation');
                 }
               }}
-              className="mt-2 w-full py-2 bg-accent hover:bg-secondary-accent text-background rounded font-semibold transition-colors disabled:opacity-50"
+              className="mt-2 w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-semibold transition-colors disabled:opacity-50"
             >
               Save Abbreviation
             </button>
