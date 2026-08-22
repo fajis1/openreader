@@ -37,7 +37,7 @@ describe('Smart Audio validation recovery', () => {
       initialResult: {
         status: 'success',
         outcome: 'cleaned',
-        cleaned_text: '[σεμnos](/wrong/)',
+        cleaned_text: '[hello world](/hɛloʊ/)',
       },
       resolve,
       requestRepair,
@@ -55,18 +55,18 @@ describe('Smart Audio validation recovery', () => {
       initialResult: {
         status: 'success',
         outcome: 'cleaned',
-        cleaned_text: 'Before [σεμnos](/wrong/) after.',
+        cleaned_text: 'Before [hello world](/hɛloʊ/) after.',
       },
       resolve,
       requestRepair: async () => ({
         status: 'success',
         outcome: 'cleaned',
-        cleaned_text: 'Before [σεμnos](/still-wrong/) after.',
+        cleaned_text: 'Before [hello world](/still-wrong/) after.',
       }),
       authoritativePronunciations: { 'λόγος': '/loɡos/' },
     });
 
-    expect(recovered.result.text).toBe('Before σεμnos after.');
+    expect(recovered.result.text).toBe('Before hello world after.');
     expect(recovered.fallbackUsed).toBe(true);
     expect(recovered.discardedTags).toBe(1);
   });
@@ -76,7 +76,7 @@ describe('Smart Audio validation recovery', () => {
       initialResult: {
         status: 'success',
         outcome: 'cleaned',
-        cleaned_text: 'Before [σεμnos](/wrong/) after.',
+        cleaned_text: 'Before [hello world](/hɛloʊ/) after.',
       },
       resolve,
       requestRepair: async () => ({
@@ -87,7 +87,7 @@ describe('Smart Audio validation recovery', () => {
       authoritativePronunciations: {},
     });
 
-    expect(recovered.result.text).toBe('Before σεμnos after.');
+    expect(recovered.result.text).toBe('Before hello world after.');
     expect(recovered.fallbackUsed).toBe(true);
   });
 
@@ -144,7 +144,7 @@ describe('Smart Audio validation recovery', () => {
       }),
       {
         status: 'success',
-        cleaned_text: '[σεμnos](/wrong/)',
+        cleaned_text: '[hello world](/hɛloʊ/)',
         changelog: 'large response metadata',
       },
       new SmartAudioOutputValidationError('mixed-script OCR text'),
@@ -155,7 +155,7 @@ describe('Smart Audio validation recovery', () => {
       ai_model: 'gemini-3.7-flash',
       repair_attempt: 1,
       validation_feedback: 'mixed-script OCR text',
-      rejected_output: '[σεμnos](/wrong/)',
+      rejected_output: '[hello world](/hɛloʊ/)',
     });
     expect(payload).not.toHaveProperty('changelog');
   });

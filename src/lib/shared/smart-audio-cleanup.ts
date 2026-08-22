@@ -358,6 +358,14 @@ export function validateSmartAudioOutput(text: string): string {
       'Smart Audio output contained an internal control marker.',
     );
   }
+
+  const nakedText = normalized.replace(KOKORO_PRONUNCIATION_TAG, '');
+  if (/[\p{Script=Greek}\p{Script=Hebrew}]/u.test(nakedText)) {
+    throw new SmartAudioOutputValidationError(
+      'Smart Audio output contained bare Greek or Hebrew characters without pronunciation markup. You must either omit foreign text completely according to the omission rules, or individually tag each foreign word you keep.',
+    );
+  }
+
   return normalized;
 }
 
