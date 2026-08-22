@@ -1131,8 +1131,12 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         />
       )}
 
-      {showBatchRefineModal && (
-        <ModalFrame title="AI Batch Refine" onClose={() => setShowBatchRefineModal(false)} className="max-w-xl">
+      <ModalFrame open={showBatchRefineModal} onClose={() => setShowBatchRefineModal(false)} size="xl">
+        <div className="bg-surface rounded-xl border border-line-soft overflow-hidden">
+          <div className="flex justify-between items-center p-4 border-b border-line-soft bg-surface-raised">
+            <h2 className="font-bold text-text-strong">✨ AI Batch Refine</h2>
+            <button onClick={() => setShowBatchRefineModal(false)} className="text-text-soft hover:text-text-strong text-2xl px-2 leading-none">&times;</button>
+          </div>
           <div className="p-4 space-y-4">
             <p className="text-sm text-text-soft">
               This will queue a background job to run over EVERY text chapter in this book.
@@ -1164,8 +1168,8 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
               </button>
             </div>
           </div>
-        </ModalFrame>
-      )}
+        </div>
+      </ModalFrame>
 
     </div>
   );
