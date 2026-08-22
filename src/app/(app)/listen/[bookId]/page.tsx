@@ -1124,6 +1124,43 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           onExit={() => setShowMobilePlayer(false)}
         />
       )}
+
+      {showBatchRefineModal && (
+        <ModalFrame title="AI Batch Refine" onClose={() => setShowBatchRefineModal(false)} className="max-w-xl">
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-text-soft">
+              This will queue a background job to run over EVERY text chapter in this book.
+              It will instruct the AI to surgically apply ONLY this specific rule and preserve all other formatting and text.
+              After refining the text, it will automatically trigger the background audio regenerator.
+            </p>
+            <div>
+              <label className="block text-sm font-medium mb-1">Refinement Rule / Instruction</label>
+              <textarea
+                className="w-full bg-surface border border-line-soft rounded p-2 h-32 text-sm"
+                placeholder="e.g. Delete any full sentence or long quotation (5 or more words total) that is predominantly in a foreign language..."
+                value={batchRefineRule}
+                onChange={e => setBatchRefineRule(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                className="px-4 py-2 border border-line-soft rounded text-sm hover:bg-surface-raised transition-colors"
+                onClick={() => setShowBatchRefineModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm transition-colors flex items-center gap-2"
+                onClick={handleBatchRefine}
+                disabled={isBatchRefining}
+              >
+                {isBatchRefining ? 'Queueing...' : 'Start Batch Refine'}
+              </button>
+            </div>
+          </div>
+        </ModalFrame>
+      )}
+
     </div>
   );
 }
