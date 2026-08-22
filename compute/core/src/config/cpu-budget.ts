@@ -13,6 +13,12 @@ export function getComputeJobConcurrency(): number {
 }
 
 export function getAvailableCpuCores(): number {
+  const envOverride = process.env.COMPUTE_AVAILABLE_CORES?.trim();
+  if (envOverride) {
+    const parsed = Number(envOverride);
+    if (Number.isFinite(parsed) && parsed >= 1) return Math.floor(parsed);
+  }
+
   if (typeof os.availableParallelism === 'function') {
     const value = os.availableParallelism();
     if (Number.isFinite(value) && value >= 1) return Math.floor(value);

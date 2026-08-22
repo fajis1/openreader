@@ -47,7 +47,7 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://127.0.0.1:3005',
+    baseURL: 'http://localhost:3005',
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'retain-on-first-failure',
@@ -61,8 +61,8 @@ export default defineConfig({
     // x-openreader-test-namespace header (ignored on real prod deployments).
     // `exec` replaces Playwright's shell wrapper so its shutdown signal reaches
     // the entrypoint, which then stops Next.js and every embedded test service.
-    command: `export BETTER_AUTH_URL=http://127.0.0.1:3005 API_KEY=test API_BASE=http://127.0.0.1:3005 BASE_URL=http://127.0.0.1:3005 USE_ANONYMOUS_AUTH_SESSIONS=true S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test S3_REGION=us-east-1 COMPUTE_WORKER_TOKEN=local-compute-token PORT=3005 S3_ENDPOINT=http://127.0.0.1:8335 EMBEDDED_NATS_PORT=4224 NATS_URL=nats://127.0.0.1:4224 EMBEDDED_NATS_MONITOR_PORT=8224 EMBEDDED_COMPUTE_WORKER_PORT=8083 WEED_MINI_DIR=docstore/test-seaweedfs EMBEDDED_NATS_STORE_DIR=docstore/test-nats SQLITE_DB_PATH="${playwrightSqliteDbPath}" DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true && mkdir -p docstore .next/standalone/.next/static .next/standalone/public && cp -R .next/static/. .next/standalone/.next/static/ && cp -R public/. .next/standalone/public/ && exec node scripts/openreader-entrypoint.mjs -- node .next/standalone/server.js`,
-    url: 'http://127.0.0.1:3005',
+    command: `export BETTER_AUTH_URL=http://localhost:3005 API_KEY=test API_BASE=http://localhost:3005 BASE_URL=http://localhost:3005 USE_ANONYMOUS_AUTH_SESSIONS=true S3_ACCESS_KEY_ID=test S3_SECRET_ACCESS_KEY=test S3_REGION=us-east-1 COMPUTE_WORKER_TOKEN=local-compute-token PORT=3005 S3_ENDPOINT=http://127.0.0.1:8335 EMBEDDED_NATS_PORT=4224 NATS_URL=nats://127.0.0.1:4224 EMBEDDED_NATS_MONITOR_PORT=8224 EMBEDDED_COMPUTE_WORKER_PORT=8083 WEED_MINI_DIR=docstore/test-seaweedfs EMBEDDED_NATS_STORE_DIR=docstore/test-nats SQLITE_DB_PATH="${playwrightSqliteDbPath}" DISABLE_AUTH_RATE_LIMIT=true ENABLE_TEST_NAMESPACE=true && mkdir -p docstore .next/standalone/.next/static .next/standalone/public && cp -R .next/static/. .next/standalone/.next/static/ && cp -R public/. .next/standalone/public/ && exec node scripts/openreader-entrypoint.mjs -- node .next/standalone/server.js`,
+    url: 'http://localhost:3005',
     reuseExistingServer: !process.env.CI,
     timeout: 600 * 1000,
     // Playwright defaults to SIGKILL, which bypasses the entrypoint cleanup and

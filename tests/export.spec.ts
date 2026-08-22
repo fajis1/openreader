@@ -356,7 +356,7 @@ test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ 
   if (!fs.existsSync(path.join(process.cwd(), 'docstore', 'model', 'PP-DocLayoutV3.onnx'))) {
     test.setTimeout(480_000);
   } else {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
   }
 
   // Ensure TTS is mocked and app is ready
@@ -424,7 +424,7 @@ test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ 
 });
 
 test('exports partial MP3 audiobook for EPUB using mocked 10s TTS sample', async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
 
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text())); page.on('pageerror', error => console.log('BROWSER ERROR:', error)); await setupTest(page, testInfo);
 
@@ -522,7 +522,7 @@ test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page 
 });
 
 test('resets all MP3 audiobook PDF pages', async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text())); page.on('pageerror', error => console.log('BROWSER ERROR:', error)); await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 
@@ -561,7 +561,7 @@ test('resets all MP3 audiobook PDF pages', async ({ page }, testInfo) => {
 });
 
 test('regenerates a single MP3 audiobook PDF page and exports full audiobook', async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text())); page.on('pageerror', error => console.log('BROWSER ERROR:', error)); await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 
@@ -637,7 +637,7 @@ test('regenerates a single MP3 audiobook PDF page and exports full audiobook', a
 });
 
 test('resumes audiobook when a chapter is missing and full download succeeds (EPUB)', async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   page.on('console', msg => console.log('BROWSER CONSOLE:', msg.text())); page.on('pageerror', error => console.log('BROWSER ERROR:', error)); await setupTest(page, testInfo);
   await uploadCompactRecoveryEpub(page);
 

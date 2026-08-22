@@ -249,7 +249,7 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
     await page.context().addCookies([{
       name: 'x-openreader-test-namespace',
       value: namespace,
-      domain: '127.0.0.1',
+      domain: 'localhost',
       path: '/'
     }]);
   }
