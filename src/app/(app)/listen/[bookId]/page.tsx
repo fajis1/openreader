@@ -1208,6 +1208,28 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                 onChange={e => setBatchRefineRule(e.target.value)}
               />
             </div>
+            <div className="bg-surface-raised p-3 border border-line-soft rounded text-sm text-text-soft">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="font-semibold w-24">AI Model:</span>
+                <select 
+                  className="bg-surface border border-line-soft rounded px-2 py-1 flex-1 text-text-strong"
+                  value={batchRefineModel}
+                  onChange={(e) => setBatchRefineModel(e.target.value)}
+                >
+                  <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b (Fastest, Cheapest)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash (Balanced)</option>
+                  <option value="gemini-2.5-pro">gemini-2.5-pro (Smartest)</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold w-24">Primary Key:</span>
+                <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.primary}</code>
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="font-semibold w-24">Backup Key:</span>
+                <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.backup}</code>
+              </div>
+            </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 className="px-4 py-2 border border-line-soft rounded text-sm hover:bg-surface-raised transition-colors"
