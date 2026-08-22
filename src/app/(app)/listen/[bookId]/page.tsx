@@ -597,7 +597,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
             </button>
             <button
               onClick={() => setShowBatchRefineModal(true)}
-              className="px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded font-medium text-xs transition-colors flex items-center gap-1"
+              className="px-3 py-1.5 bg-accent hover:bg-secondary-accent text-background rounded font-medium text-xs transition-colors flex items-center gap-1"
               title="Apply a custom AI rule to all chapters"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
