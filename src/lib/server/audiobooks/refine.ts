@@ -48,7 +48,7 @@ export async function processBatchRefineJob(
     
     const primaryKey = (profile?.geminiApiKey || globalKey).trim();
     const backupKey = (profile?.backupGeminiApiKey || globalBackupKey).trim();
-    const resolvedModel = profile?.pronunciationAiModel || 'gemini-2.5-flash';
+    const resolvedModel = jobSettings.aiModel || profile?.pronunciationAiModel || 'gemini-2.5-flash';
 
     serverLogger.info({ event: 'audiobook.batch_refine.start', bookId, jobId: job.id }, 'Starting batch refine job');
 

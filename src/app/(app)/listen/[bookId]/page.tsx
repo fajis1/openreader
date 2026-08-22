@@ -40,6 +40,8 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [hasEditedText, setHasEditedText] = useState(false);
   const [showBatchRefineModal, setShowBatchRefineModal] = useState(false);
   const [batchRefineRule, setBatchRefineRule] = useState('');
+  const [batchRefineModel, setBatchRefineModel] = useState('gemini-2.5-flash');
+  const [batchRefineKeys, setBatchRefineKeys] = useState({ primary: '', backup: '' });
   const [isBatchRefining, setIsBatchRefining] = useState(false);
   const [activeJob, setActiveJob] = useState<any>(null);
   const [isTextLoading, setIsTextLoading] = useState(false);
@@ -450,6 +452,18 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     }
   };
 
+  const handleOpenBatchRefine = async () => {
+    setShowBatchRefineModal(true);
+    try {
+      const res = await fetch(`/api/audiobooks/batch-refine?bookId=${bookId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.defaultModel) setBatchRefineModel(data.defaultModel);
+        setBatchRefineKeys({ primary: data.primaryKeyMasked || 'Not Set', backup: data.backupKeyMasked || 'Not Set' });
+      }
+    } catch(e) {}
+  };
+
   const handleBatchRefine = async () => {
     if (!batchRefineRule.trim()) return toast.error("Please enter a rule.");
     setIsBatchRefining(true);
@@ -457,7 +471,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       const res = await fetch('/api/audiobooks/batch-refine', {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ bookId: bookId, rule: batchRefineRule.trim() })
+         body: JSON.stringify({ bookId: bookId, rule: batchRefineRule.trim(), aiModel: batchRefineModel })
       });
       if (res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -636,7 +650,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
               {isRebuildingAll ? "Scanning..." : "Re-Record All Modified chunks"}
             </button>
             <button
-              onClick={() => setShowBatchRefineModal(true)}
+              onClick={handleOpenBatchRefine}
               className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium text-xs transition-colors flex items-center gap-1"
               title="Apply a custom AI rule to all chapters"
             >
