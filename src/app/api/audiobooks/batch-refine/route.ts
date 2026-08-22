@@ -30,8 +30,8 @@ export async function POST(request: Request) {
 
     
     if (newApiKey) {
-      const { user } = await import('@/db/schema');
-      await db.update(user).set({ geminiApiKey: newApiKey }).where(eq(user.id, userId));
+      const { userPreferences } = await import('@/db/schema');
+      await db.update(userPreferences).set({ geminiApiKey: newApiKey }).where(eq(userPreferences.userId, userId));
     }
     const jobId = randomUUID();
 
@@ -64,8 +64,8 @@ export async function GET(request: Request) {
     const bookId = url.searchParams.get('bookId');
     if (!bookId) return NextResponse.json({ error: 'bookId is required' }, { status: 400 });
 
-    const { user, documentSettings } = await import('@/db/schema');
-    const userRows = await db.select().from(user).where(eq(user.id, userId)).limit(1);
+    const { userPreferences, documentSettings } = await import('@/db/schema');
+    const userRows = await db.select().from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
     
     const settingsRows = await db.select().from(documentSettings).where(eq(documentSettings.documentId, bookId)).limit(1);
     const selectedProfileId = (settingsRows[0]?.settingsJson as any)?.audiobookProfileId || 'default';
@@ -81,14 +81,14 @@ export async function GET(request: Request) {
     const backupKey = (profile?.backupGeminiApiKey || globalBackupKey).trim();
     const resolvedModel = profile?.pronunciationAiModel || 'gemini-2.5-flash';
     
-    const maskKey = (key) => key.length > 4 ? `...${key.slice(-4)}` : (key ? '***' : 'Not Set');
+    const maskKey = (key: string) => key.length > 4 ? `...${key.slice(-4)}` : (key ? '***' : 'Not Set');
 
     return NextResponse.json({
       primaryKeyMasked: maskKey(primaryKey),
       backupKeyMasked: maskKey(backupKey),
       defaultModel: resolvedModel
     });
-  } catch (err) {
+  } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
