@@ -1,10 +1,11 @@
 import { db } from '@/db';
-import { audiobookJobs, documents } from '@/db/schema';
+import { audiobookJobs, documents, documentSettings } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { userPreferences } from '@/db/schema';
 import { serverLogger } from '@/lib/server/logger';
 import { listAudiobookObjects, getAudiobookObjectBuffer, putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
 import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemini-failover';
-import { findSmartAudioProfileById } from '@/lib/server/smart-audio-profiles';
+import { findSmartAudioProfileById, readSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
 import { INTERNAL_WORKER_SECRET } from '@/lib/server/internal-secret';
 
 export async function processBatchRefineJob(
@@ -32,11 +33,9 @@ export async function processBatchRefineJob(
 
     // We must import documentSettings here if we want to query it, but wait!
     // We didn't import documentSettings in refine.ts! Let's just require it.
-    const { documentSettings } = await import('@/db/schema');
     const settingsRows = await db.select().from(documentSettings).where(eq(documentSettings.documentId, bookId)).limit(1);
     
     const selectedProfileId = (settingsRows[0]?.settingsJson as any)?.audiobookProfileId || 'default';
-    const { readSmartAudioProfilesDocument } = await import('@/lib/server/smart-audio-profiles');
     const profilesDoc = await readSmartAudioProfilesDocument(userId);
     const profile = await findSmartAudioProfileById(profilesDoc, selectedProfileId);
     
