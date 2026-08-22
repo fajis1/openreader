@@ -41,6 +41,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [showBatchRefineModal, setShowBatchRefineModal] = useState(false);
   const [batchRefineRule, setBatchRefineRule] = useState('');
   const [isBatchRefining, setIsBatchRefining] = useState(false);
+  const [activeJob, setActiveJob] = useState<any>(null);
   const [isTextLoading, setIsTextLoading] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isRebuildingAll, setIsRebuildingAll] = useState(false);
@@ -552,6 +553,22 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   return (
     <div className="flex flex-col h-screen bg-surface">
       <div className="flex-none p-4 bg-surface border-b border-line-soft flex items-center justify-between">
+        {activeJob && (
+          <div className="absolute top-0 left-0 w-full h-1 bg-surface-raised z-50 overflow-hidden">
+            <div 
+              className="h-full bg-indigo-500 transition-all duration-1000 ease-in-out relative"
+              style={{ width: `${activeJob.progress || 0}%` }}
+            >
+              <div className="absolute top-0 left-0 w-full h-full bg-white/20 animate-[pulse_2s_ease-in-out_infinite]" />
+            </div>
+            <div className="absolute top-1 left-4 text-[10px] font-bold text-indigo-500 bg-surface px-2 rounded-b-md shadow-sm border border-t-0 border-line-soft">
+              {activeJob.settingsJson?.jobType === 'batch-refine' 
+                ? `AI Batch Refine in progress (${Math.round(activeJob.progress || 0)}%)` 
+                : `Background job running (${Math.round(activeJob.progress || 0)}%)`
+              }
+            </div>
+          </div>
+        )}
         <div>
           <h1 className="text-xl font-bold text-text-strong line-clamp-1">Review: {currentChapter.title}</h1>
           <p className="text-text-soft text-sm">Chunk {currentChapter.index + 1} · Item {currentChapterPosition + 1} of {chapters.length}</p>
@@ -698,7 +715,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                 type="checkbox" 
                 checked={cleanTarget === 'edited'}
                 onChange={(e) => setCleanTarget(e.target.checked ? 'edited' : 'original')}
-                className="rounded border-line-soft text-brand-500 focus:ring-brand-500 cursor-pointer"
+                className="rounded border-line-soft text-indigo-500 focus:ring-indigo-500 cursor-pointer"
               />
               Clean Edited
             </label>
@@ -770,7 +787,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                       onClick={() => setCurrentChapterPosition(idx)}
                       className={`w-full text-left p-3 rounded text-sm transition-colors ${
                         selected
-                          ? "bg-brand-500/20 text-brand-400 border border-brand-500/30"
+                          ? "bg-indigo-500/20 text-brand-400 border border-indigo-500/30"
                           : "text-text-soft hover:bg-surface-raised border border-transparent"
                       }`}
                     >
@@ -785,7 +802,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                       <div className="text-xs mt-1 line-clamp-2 opacity-80">{chap.title}</div>
                     </button>
                     {selected && isMultiVoice && (
-                      <div className="ml-3 border-l border-brand-500/30 py-1 pl-2" aria-label="Speaker segments for selected chapter">
+                      <div className="ml-3 border-l border-indigo-500/30 py-1 pl-2" aria-label="Speaker segments for selected chapter">
                         {speakerSegments.length > 0 ? speakerSegments.map((segment, segmentIndex) => (
                           <div
                             key={segment.id}
