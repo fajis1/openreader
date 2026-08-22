@@ -104,7 +104,8 @@ TEXT TO REFINE:
       const textResponse = jsonBody?.candidates?.[0]?.content?.parts?.[0]?.text;
 
       if (!textResponse) {
-        throw new Error(`Gemini returned empty text for chapter ${txtFile.fileName}`);
+        const errorMsg = jsonBody?.error?.message || jsonBody?.candidates?.[0]?.finishReason || JSON.stringify(jsonBody);
+        throw new Error(`Gemini returned empty text for chapter ${txtFile.fileName}. Gemini Response: ${errorMsg}`);
       }
 
       const refinedText = textResponse.trim();
