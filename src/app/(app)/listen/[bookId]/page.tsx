@@ -42,6 +42,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [batchRefineRule, setBatchRefineRule] = useState('');
   const [batchRefineModel, setBatchRefineModel] = useState('gemini-2.5-flash');
   const [batchRefineKeys, setBatchRefineKeys] = useState({ primary: '', backup: '' });
+  const [newApiKey, setNewApiKey] = useState('');
   const [isBatchRefining, setIsBatchRefining] = useState(false);
   const [activeJob, setActiveJob] = useState<any>(null);
   const [isTextLoading, setIsTextLoading] = useState(false);
@@ -460,6 +461,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         const data = await res.json();
         if (data.defaultModel) setBatchRefineModel(data.defaultModel);
         setBatchRefineKeys({ primary: data.primaryKeyMasked || 'Not Set', backup: data.backupKeyMasked || 'Not Set' });
+        setNewApiKey('');
       }
     } catch(e) {}
   };
@@ -471,7 +473,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       const res = await fetch('/api/audiobooks/batch-refine', {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ bookId: bookId, rule: batchRefineRule.trim(), aiModel: batchRefineModel })
+         body: JSON.stringify({ bookId: bookId, rule: batchRefineRule.trim(), aiModel: batchRefineModel, newApiKey: newApiKey.trim() })
       });
       if (res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -1222,8 +1224,18 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                 </select>
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-semibold w-24">Primary Key:</span>
-                <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.primary}</code>
+                <span className="font-semibold w-24 shrink-0">Primary Key:</span>
+                {batchRefineKeys.primary === 'Not Set' ? (
+                  <input
+                    type="password"
+                    placeholder="Paste Gemini API Key..."
+                    value={newApiKey}
+                    onChange={(e) => setNewApiKey(e.target.value)}
+                    className="bg-surface border border-line-soft rounded px-2 py-1 flex-1 text-text-strong text-xs w-full"
+                  />
+                ) : (
+                  <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.primary}</code>
+                )}
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <span className="font-semibold w-24">Backup Key:</span>

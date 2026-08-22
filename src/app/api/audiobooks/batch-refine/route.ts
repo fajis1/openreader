@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await request.json();
-    const { bookId, rule, aiModel } = body;
+    const { bookId, rule, aiModel, newApiKey } = body;
 
     if (!bookId || !rule) {
       return NextResponse.json({ error: 'bookId and rule are required' }, { status: 400 });
@@ -28,6 +28,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 });
     }
 
+    
+    if (newApiKey) {
+      const { user } = await import('@/db/schema');
+      await db.update(user).set({ geminiApiKey: newApiKey }).where(eq(user.id, userId));
+    }
     const jobId = randomUUID();
 
     await db.insert(audiobookJobs).values({
