@@ -96,7 +96,7 @@ export async function GET(request: Request) {
         id: p.id,
         name: p.name || 'Unnamed Profile',
         key: p.geminiApiKey,
-        masked: maskKey(p.geminiApiKey)
+        masked: maskKey(p.geminiApiKey || "")
       }));
 
     return NextResponse.json({
