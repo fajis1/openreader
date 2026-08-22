@@ -41,8 +41,13 @@ export async function processBatchRefineJob(
     const profile = await findSmartAudioProfileById(profilesDoc, selectedProfileId);
     
     // We try to use the primary key, or fallback key, or system key
-    const primaryKey = (profile?.geminiApiKey || '').trim();
-    const backupKey = (profile?.backupGeminiApiKey || '').trim();
+    const { userPreferences } = await import('@/db/schema');
+    const userPrefs = await db.select().from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
+    const globalKey = userPrefs[0]?.geminiApiKey || process.env.GEMINI_API_KEY || '';
+    const globalBackupKey = userPrefs[0]?.backupGeminiApiKey || process.env.BACKUP_GEMINI_API_KEY || '';
+    
+    const primaryKey = (profile?.geminiApiKey || globalKey).trim();
+    const backupKey = (profile?.backupGeminiApiKey || globalBackupKey).trim();
     const resolvedModel = profile?.pronunciationAiModel || 'gemini-2.5-flash';
 
     serverLogger.info({ event: 'audiobook.batch_refine.start', bookId, jobId: job.id }, 'Starting batch refine job');
