@@ -1,3 +1,4 @@
+import { processBatchRefineJob } from './refine';
 
 import {
   findSmartAudioProfileById,
@@ -259,11 +260,20 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     const userId = job.userId;
     const jobSettings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
 
+    if (jobSettings.jobType === 'batch-refine') {
+      await processBatchRefineJob(job, updateProgress, markError);
+      await updateClaimedAudiobookJob(job.id, 'running', { status: 'completed', progress: 100, completedAt: Date.now() });
+      return;
+    }
+
     if (jobSettings.jobType === 'combine') {
       const { executeAudiobookCombine } = await import('./combine');
       try {
+        serverLogger.info({ event: 'audiobook.combine.debug' }, 'Calling executeAudiobookCombine...');
         await executeAudiobookCombine(bookId, userId, jobSettings.format, jobSettings.testNamespace, updateProgress);
+        serverLogger.info({ event: 'audiobook.combine.debug' }, 'Updating combine job status to completed...');
         await updateClaimedAudiobookJob(job.id, 'running', { status: 'completed', progress: 100, completedAt: Date.now() });
+        serverLogger.info({ event: 'audiobook.queue.complete', jobId: job.id, documentId: job.documentId }, `Successfully completed audiobook combine job ${job.id}`);
       } catch (combineError) {
         serverLogger.error({ event: 'audiobook.combine.failed', jobId: job.id, error: errorToLog(combineError) }, 'Audiobook background combine failed');
         await markError((combineError as Error)?.message || 'Combine failed');

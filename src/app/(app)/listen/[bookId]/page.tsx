@@ -38,6 +38,9 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [chapterText, setChapterText] = useState("");
   const [originalText, setOriginalText] = useState("");
   const [hasEditedText, setHasEditedText] = useState(false);
+  const [showBatchRefineModal, setShowBatchRefineModal] = useState(false);
+  const [batchRefineRule, setBatchRefineRule] = useState('');
+  const [isBatchRefining, setIsBatchRefining] = useState(false);
   const [isTextLoading, setIsTextLoading] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isRebuildingAll, setIsRebuildingAll] = useState(false);
@@ -446,6 +449,29 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     }
   };
 
+  const handleBatchRefine = async () => {
+    if (!batchRefineRule.trim()) return toast.error("Please enter a rule.");
+    setIsBatchRefining(true);
+    try {
+      const res = await fetch('/api/audiobooks/batch-refine', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ bookId: bookId, rule: batchRefineRule.trim() })
+      });
+      if (res.ok) {
+         setShowBatchRefineModal(false);
+         toast.success('Background batch refine started! Text will be updated shortly.');
+      } else {
+         const err = await res.json().catch(() => ({}));
+         toast.error(err.error || 'Failed to start batch refine');
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Error starting batch refine');
+    } finally {
+      setIsBatchRefining(false);
+    }
+  };
+
   const handleForceRebuildAll = async () => {
     if (!window.confirm("Are you sure you want to re-record every single chunk? This will replace all existing audio for this book!")) {
       return;
@@ -568,6 +594,16 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
               title="Re-record MP3s for any chunk where the text was modified"
             >
               {isRebuildingAll ? "Scanning..." : "Re-Record All Modified chunks"}
+            </button>
+            <button
+              onClick={() => setShowBatchRefineModal(true)}
+              className="px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded font-medium text-xs transition-colors flex items-center gap-1"
+              title="Apply a custom AI rule to all chapters"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+              </svg>
+              AI Batch Refine
             </button>
             <button
               onClick={handleForceRebuildAll}

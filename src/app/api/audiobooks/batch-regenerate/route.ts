@@ -3,6 +3,7 @@ import { db } from '@/db';
 import { audiobooks, audiobookJobs } from '@/db/schema';
 import { randomUUID } from 'crypto';
 import { eq, inArray, and } from 'drizzle-orm';
+import { INTERNAL_WORKER_SECRET } from '@/lib/server/internal-secret';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import {
   listAudiobookObjects,
@@ -19,12 +20,22 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const ctx = await requireAuthContext(request);
-    if (ctx instanceof Response) return ctx;
     
-    const userId = ctx.userId;
-    if (!userId) return new Response("Unauthorized", { status: 401 });
+    
+    const internalSecret = request.headers.get('x-internal-secret');
+    let userId = null;
+    
     const body = await request.json().catch(() => ({}));
+    
+    if (internalSecret === INTERNAL_WORKER_SECRET) {
+      userId = body.userId;
+    } else {
+      const ctx = await requireAuthContext(request);
+      if (ctx instanceof Response) return ctx;
+      userId = ctx.userId;
+    }
+    
+    if (!userId) return new Response("Unauthorized", { status: 401 });
     const { bookId, bookIds, dryRun, forceAll } = body;
 
     let booksToProcess: { id: string, name?: string | null }[] = [];
