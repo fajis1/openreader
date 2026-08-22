@@ -49,6 +49,7 @@ Runtime site features are seeded with `RUNTIME_SEED_JSON` / `RUNTIME_SEED_JSON_P
 | `NATS_URL` | Compute | `nats://127.0.0.1:4222` in embedded startup | Override embedded startup or set standalone worker URL |
 | `COMPUTE_LOG_LEVEL` | Compute | `info` | Compute worker log level |
 | `COMPUTE_JOB_CONCURRENCY` | Compute | `1` | Shared compute concurrency cap |
+| `COMPUTE_AVAILABLE_CORES` | Compute | Auto-detected | Override physical CPU core limit for ONNX threading |
 | `COMPUTE_ONNX_EXECUTION_PROVIDER` | Compute | `cpu` | Default ONNX provider: `cpu`, required `cuda`, or `auto` with optional fallback |
 | `PDF_LAYOUT_ONNX_EXECUTION_PROVIDER` | Compute | inherited | Override the ONNX provider for PP-DocLayoutV3 |
 | `WHISPER_ONNX_EXECUTION_PROVIDER` | Compute | inherited | Override the ONNX provider for Whisper alignment |
@@ -310,6 +311,12 @@ Compute worker log level.
 Max concurrent compute jobs per worker.
 
 - Default: `1`
+
+### COMPUTE_AVAILABLE_CORES
+
+Overrides the number of physical CPU cores detected by the compute worker. This is used to partition ONNX multi-threading when `COMPUTE_JOB_CONCURRENCY` is 1 or greater. In restricted environments (like LXC or Docker) where `os.cpus()` reports the full host core count but only a few cores are actually allocated, this prevents ONNX from over-subscribing threads and crashing with `SIGABRT`.
+
+- Default: Auto-detected from `os.availableParallelism()` or `os.cpus().length`
 
 ### COMPUTE_WHISPER_TIMEOUT_MS
 

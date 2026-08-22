@@ -185,6 +185,22 @@ nvidia-smi
 docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
 ```
 
+
+:::tip LXC and Resource-Constrained Environments
+When running the CUDA image inside a resource-constrained container (like Proxmox LXC), the host's full CPU core count (e.g., 48 cores) is exposed to the container. ONNX Runtime will aggressively attempt to spawn 48 threads for layout analysis, which can lead to memory exhaustion or `SIGABRT` crashes if you only assigned a few cores to the LXC.
+
+To fix this, limit ONNX by overriding the visible core count and enabling CPU fallback if CUDA initialization fails:
+```yaml
+services:
+  openreader:
+    image: ghcr.io/richardr1126/openreader-cuda:latest
+    gpus: all
+    environment:
+      - COMPUTE_AVAILABLE_CORES=12 # Set to the actual core limit of your container
+      - COMPUTE_ONNX_EXECUTION_PROVIDER=auto # Safely fallback to CPU if GPU driver fails
+```
+:::
+
 The CUDA image accelerates document layout analysis. It does not move Gemini,
 Kokoro, or FFmpeg audio work into this container.
 
