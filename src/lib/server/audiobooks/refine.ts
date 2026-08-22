@@ -23,17 +23,19 @@ export async function processBatchRefineJob(
   }
 
   try {
-    const docRow = await db.query.documents.findFirst({
-      where: and(eq(documents.id, bookId), eq(documents.userId, userId)),
-      with: { settings: true }
-    });
-
-    if (!docRow) {
+    const docRows = await db.select().from(documents).where(and(eq(documents.id, bookId), eq(documents.userId, userId))).limit(1);
+    
+    if (docRows.length === 0) {
       await markError('Document not found');
       return;
     }
 
-    const selectedProfileId = (docRow.settings as any)?.audiobookProfileId || 'default';
+    // We must import documentSettings here if we want to query it, but wait!
+    // We didn't import documentSettings in refine.ts! Let's just require it.
+    const { documentSettings } = await import('@/db/schema');
+    const settingsRows = await db.select().from(documentSettings).where(eq(documentSettings.documentId, bookId)).limit(1);
+    
+    const selectedProfileId = (settingsRows[0]?.settingsJson as any)?.audiobookProfileId || 'default';
     const { readSmartAudioProfilesDocument } = await import('@/lib/server/smart-audio-profiles');
     const profilesDoc = await readSmartAudioProfilesDocument(userId);
     const profile = await findSmartAudioProfileById(profilesDoc, selectedProfileId);
