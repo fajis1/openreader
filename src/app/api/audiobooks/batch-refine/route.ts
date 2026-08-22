@@ -4,6 +4,7 @@ import { audiobookJobs, documents, userPreferences, documentSettings } from '@/d
 import { eq, and } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { randomUUID } from 'node:crypto';
+import { runTaskNow } from '@/lib/server/tasks/engine';
 import { readSmartAudioProfilesDocument, findSmartAudioProfileById } from '@/lib/server/smart-audio-profiles';
 
 export async function POST(request: Request) {
@@ -49,6 +50,10 @@ export async function POST(request: Request) {
       updatedAt: Date.now()
     });
 
+    // Immediately trigger the background worker instead of waiting for the 1-minute cron
+    void runTaskNow('process-audiobook-queue').catch((err) => {
+      console.error('Failed to wake background worker immediately:', err);
+    });
     return NextResponse.json({ success: true, jobId, message: 'Batch refine job queued successfully.' });
   } catch (err: any) {
     console.error('Batch refine start failed:', err);
