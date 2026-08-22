@@ -100,8 +100,13 @@ TEXT TO REFINE:
 
       const refinedText = textResponse.trim();
 
-      // Overwrite the blob
-      await putAudiobookObject(bookId, userId, txtFile.fileName, Buffer.from(refinedText, 'utf-8'), 'text/plain', null);
+      // Only overwrite the blob (and thus trigger an audio re-record) if Gemini ACTUALLY changed something!
+      if (refinedText !== originalText.trim()) {
+        serverLogger.info({ event: 'audiobook.batch_refine.chapter_changed', bookId, chapter: txtFile.fileName }, `Chapter ${txtFile.fileName} was modified by the rule.`);
+        await putAudiobookObject(bookId, userId, txtFile.fileName, Buffer.from(refinedText, 'utf-8'), 'text/plain', null);
+      } else {
+        serverLogger.info({ event: 'audiobook.batch_refine.chapter_unchanged', bookId, chapter: txtFile.fileName }, `Chapter ${txtFile.fileName} was unchanged.`);
+      }
 
       await updateProgress(Math.floor(((i + 1) / txtFiles.length) * 100));
     }
