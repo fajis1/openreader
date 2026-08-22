@@ -67,6 +67,13 @@ TEXT TO REFINE:
 `;
 
     for (let i = 0; i < txtFiles.length; i++) {
+      // Check for cancellation
+      const currentJobRows = await db.select().from(audiobookJobs).where(eq(audiobookJobs.id, job.id)).limit(1);
+      if (currentJobRows.length === 0 || currentJobRows[0].status !== 'running') {
+        serverLogger.info({ event: 'audiobook.batch_refine.cancelled', bookId, jobId: job.id }, 'Job was cancelled or stopped, aborting refine loop');
+        return; // Abort
+      }
+
       const txtFile = txtFiles[i];
       const buf = await getAudiobookObjectBuffer(bookId, userId, txtFile.fileName, null);
       const originalText = buf.toString('utf-8');

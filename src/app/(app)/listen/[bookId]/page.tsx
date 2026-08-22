@@ -561,11 +561,27 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
             >
               <div className="absolute top-0 left-0 w-full h-full bg-white/20 animate-[pulse_2s_ease-in-out_infinite]" />
             </div>
-            <div className="absolute top-1 left-4 text-[10px] font-bold text-indigo-500 bg-surface px-2 rounded-b-md shadow-sm border border-t-0 border-line-soft">
-              {activeJob.settingsJson?.jobType === 'batch-refine' 
-                ? `AI Batch Refine in progress (${Math.round(activeJob.progress || 0)}%)` 
-                : `Background job running (${Math.round(activeJob.progress || 0)}%)`
-              }
+            <div className="absolute top-1 left-4 text-[10px] font-bold text-indigo-500 bg-surface px-2 rounded-b-md shadow-sm border border-t-0 border-line-soft flex items-center gap-2">
+              <span>
+                {activeJob.settingsJson?.jobType === 'batch-refine' 
+                  ? `AI Batch Refine in progress (${Math.round(activeJob.progress || 0)}%)` 
+                  : `Background job running (${Math.round(activeJob.progress || 0)}%)`
+                }
+              </span>
+              <button 
+                onClick={async () => {
+                  try {
+                    await fetch(`/api/audiobooks/queue?id=${activeJob.id}`, { method: 'DELETE' });
+                    setActiveJob(null);
+                    toast.success('Background job cancelled');
+                  } catch (e) {
+                    toast.error('Failed to cancel job');
+                  }
+                }}
+                className="text-rose-500 hover:text-rose-600 underline font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         )}
