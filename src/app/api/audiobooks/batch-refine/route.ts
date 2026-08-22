@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await request.json();
-    const { bookId, rule, aiModel, newApiKey } = body;
+    const { bookId, rule, aiModel, newApiKey, newBackupKey } = body;
 
     if (!bookId || !rule) {
       return NextResponse.json({ error: 'bookId and rule are required' }, { status: 400 });
@@ -30,8 +30,11 @@ export async function POST(request: Request) {
     }
 
     
-    if (newApiKey) {
-      await db.update(userPreferences).set({ geminiApiKey: newApiKey }).where(eq(userPreferences.userId, userId));
+    if (newApiKey || newBackupKey) {
+      const updates: any = {};
+      if (newApiKey) updates.geminiApiKey = newApiKey;
+      if (newBackupKey) updates.backupGeminiApiKey = newBackupKey;
+      await db.update(userPreferences).set(updates).where(eq(userPreferences.userId, userId));
     }
     const jobId = randomUUID();
 

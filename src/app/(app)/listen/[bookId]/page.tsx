@@ -43,6 +43,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [batchRefineModel, setBatchRefineModel] = useState('gemini-2.5-flash');
   const [batchRefineKeys, setBatchRefineKeys] = useState({ primary: '', backup: '' });
   const [newApiKey, setNewApiKey] = useState('');
+  const [newBackupKey, setNewBackupKey] = useState('');
   const [isBatchRefining, setIsBatchRefining] = useState(false);
   const [activeJob, setActiveJob] = useState<any>(null);
   const [isTextLoading, setIsTextLoading] = useState(false);
@@ -462,6 +463,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         if (data.defaultModel) setBatchRefineModel(data.defaultModel);
         setBatchRefineKeys({ primary: data.primaryKeyMasked || 'Not Set', backup: data.backupKeyMasked || 'Not Set' });
         setNewApiKey('');
+        setNewBackupKey('');
       }
     } catch(e) {}
   };
@@ -473,7 +475,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       const res = await fetch('/api/audiobooks/batch-refine', {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ bookId: bookId, rule: batchRefineRule.trim(), aiModel: batchRefineModel, newApiKey: newApiKey.trim() })
+         body: JSON.stringify({ bookId: bookId, rule: batchRefineRule.trim(), aiModel: batchRefineModel, newApiKey: newApiKey.trim(), newBackupKey: newBackupKey.trim() })
       });
       if (res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -1238,8 +1240,18 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                 )}
               </div>
               <div className="flex items-center gap-2 mt-1">
-                <span className="font-semibold w-24">Backup Key:</span>
-                <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.backup}</code>
+                <span className="font-semibold w-24 shrink-0">Backup Key:</span>
+                {!batchRefineKeys.backup || batchRefineKeys.backup === 'Not Set' ? (
+                  <input
+                    type="password"
+                    placeholder="Paste Backup API Key (Optional)..."
+                    value={newBackupKey}
+                    onChange={(e) => setNewBackupKey(e.target.value)}
+                    className="bg-surface border border-line-soft rounded px-2 py-1 flex-1 text-text-strong text-xs w-full"
+                  />
+                ) : (
+                  <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.backup}</code>
+                )}
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
