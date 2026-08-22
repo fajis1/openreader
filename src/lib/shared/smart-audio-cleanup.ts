@@ -3,7 +3,8 @@ export const SMART_AUDIO_OMIT_SENTINEL = '[OMIT]';
 export const FINAL_SMART_AUDIO_PRONUNCIATION_CHECK = `FINAL PRONUNCIATION-MARKUP CHECK (REQUIRED):
 - Each pronunciation tag must contain exactly one corrected lexical word. Never put spaces inside the visible text or IPA of one tag.
 - Split adjacent foreign words into separate tags. A phrase-level tag is invalid even when its combined IPA is accurate.
-- First repair OCR corruption, then pronounce the corrected individual word. Long foreign quotations must be removed, not hidden inside pronunciation markup.
+- First repair OCR corruption, then pronounce the corrected individual word.
+- CRITICAL: Never output bare Greek or Hebrew text. You must either completely remove the foreign text according to your active omission rules (e.g. 5+ consecutive words), or wrap EVERY single kept foreign word in its own [word](/ipa/) tag. Long foreign quotations must be removed, not hidden inside pronunciation markup or left as bare text.
 - INVALID: [καθ' υἱοθεσίαν δὲ](/kɑθ huioʊθɛsiɑn dɛ/)
   VALID: [καθ'](/kɑθ/) [υἱοθεσίαν](/huioʊθɛsiɑn/) [δὲ](/dɛ/)
 - INVALID: [καὶ τὸ ἄγιον βάπτισμα](/kaɪ toʊ ɑɡioʊn bɑptɪsmɑ/)
@@ -29,7 +30,7 @@ OPENREADER REQUIRED OUTPUT AND STRUCTURE RULES (these rules override conflicting
 - Reconstruct OCR-damaged words when context, grammar, spelling, and surrounding text support a likely correction. Restore missing letters, replace visually confused characters, join incorrectly split words, and remove duplicated characters. This applies to English and foreign-language words. Always output the reconstructed complete word, never a surviving OCR fragment. If the intended reconstruction is genuinely ambiguous, make the most contextually defensible correction without inventing surrounding prose.
 - Pronunciation markup may wrap exactly one corrected lexical word. The displayed word must match that pronunciation; never wrap a phrase, clause, or multiple space-separated words in one tag. Correct: [τὴν](/teɪn/) [θέσιν](/θɛsɪn/). Incorrect: [τὴν θέσιν](/teɪn θɛsɪn/).
 - Repair contextually clear mixed-script OCR before adding pronunciation markup. For example, reconstruct a Greek word contaminated with visually similar Latin letters as the intended complete Greek word, then tag that corrected word individually. Never preserve mixed-script corruption inside a pronunciation tag or create a pronunciation for an incomplete fragment.
-- Long foreign quotations must still be omitted according to the active foreign-quotation rule. Never evade that rule by wrapping an entire quotation in one pronunciation tag.
+- Long foreign quotations MUST be completely omitted according to your active foreign-quotation rule (e.g., if instructed to remove 5+ consecutive foreign words, you MUST completely delete them from the output). Never evade your own rules by wrapping an entire quotation in pronunciation tags, and NEVER leave long blocks of foreign text as untagged bare letters.
 - Only when every substantive block is non-narrative after block-level cleanup, return exactly [OMIT]. If uncertain, preserve the original text. Never signal omission with an empty response.
 - For narratable content, return only the cleaned audiobook text plus any separately requested chapter-title tag. Do not add commentary about your edits.
 `.trim();

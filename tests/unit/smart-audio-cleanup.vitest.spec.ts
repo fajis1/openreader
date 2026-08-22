@@ -31,7 +31,7 @@ describe('Smart Audio cleanup contract', () => {
     expect(prompt).toContain('never wrap a phrase, clause, or multiple space-separated words');
     expect(prompt).toContain('Repair contextually clear mixed-script OCR');
     expect(prompt).toContain('Never preserve mixed-script corruption inside a pronunciation tag');
-    expect(prompt).toContain('Never evade that rule by wrapping an entire quotation');
+    expect(prompt).toContain('Never evade your own rules by wrapping an entire quotation');
     expect(prompt).toContain('Apply omission rules block by block');
     expect(prompt).toContain('only at or after 70% through the book');
     expect(prompt).toContain('If uncertain, preserve the original text');
