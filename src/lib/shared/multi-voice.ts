@@ -41,6 +41,7 @@ export type ResolvedMultiVoiceWorkerResult = {
   segments: MultiVoiceSegment[];
   continuityState: string;
   chapterTitle: string | null;
+  unknownSpeakers?: string[];
 };
 
 function normalizedName(value: unknown): string {
@@ -313,7 +314,7 @@ export function renderVoiceSegments(segments: readonly MultiVoiceSegment[]): str
 export function resolveMultiVoiceWorkerResult(
   value: unknown,
   cast: readonly MultiVoiceCastMember[],
-  options: { authoritativePronunciations?: Record<string, string> } = {},
+  options: { authoritativePronunciations?: Record<string, string>; allowUnknownSpeakers?: boolean } = {},
 ): ResolvedMultiVoiceWorkerResult {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new SmartAudioOutputValidationError('Multi-voice worker returned an invalid response.');
@@ -329,6 +330,7 @@ export function resolveMultiVoiceWorkerResult(
     throw new SmartAudioOutputValidationError('Multi-voice worker returned no valid speaker segments.');
   }
 
+  const unknownSpeakers: string[] = [];
   const speakerMap = new Map<string, MultiVoiceCastMember>();
   for (const member of cast) {
     speakerMap.set(member.name.toLocaleLowerCase(), member);
@@ -343,6 +345,12 @@ export function resolveMultiVoiceWorkerResult(
     const speaker = normalizedName(segment.speaker);
     const member = speakerMap.get(speaker.toLocaleLowerCase());
     if (!speaker || !member) {
+      if (options.allowUnknownSpeakers) {
+         unknownSpeakers.push(speaker || 'blank');
+         const narrator = cast.find(c => c.name.toLocaleLowerCase() === 'narrator') || cast[0];
+         segments.push({ speaker: speaker || 'blank', voiceId: narrator ? narrator.voiceId : KOKORO_CHARACTER_VOICES[0], text: safeSegmentText(segment.text, options.authoritativePronunciations) });
+         continue;
+      }
       throw new SmartAudioOutputValidationError(`Multi-voice worker used an unknown speaker: ${speaker || 'blank'}.`);
     }
     const suppliedVoice = typeof segment.voice_id === 'string'
@@ -382,6 +390,7 @@ export function resolveMultiVoiceWorkerResult(
     segments,
     continuityState,
     chapterTitle,
+    unknownSpeakers,
   };
 }
 

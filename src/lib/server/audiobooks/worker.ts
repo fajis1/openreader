@@ -902,6 +902,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
                 const multiVoiceResult = currentSelectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
                   ? resolveMultiVoiceWorkerResult(candidate, multiVoiceCharacters, {
                     authoritativePronunciations: currentPronunciations,
+                    allowUnknownSpeakers: true,
                   })
                   : null;
                 const resolvedWorkerResult = multiVoiceResult
@@ -951,6 +952,48 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             if (!await workerStillOwnsAudiobookJob(job.id)) throw new AudiobookJobStoppedError();
             workerResult = recovery.workerResult;
             const { multiVoiceResult, resolvedWorkerResult } = recovery.result;
+            
+            if (multiVoiceResult?.unknownSpeakers?.length) {
+              serverLogger.warn({ event: 'audiobook.queue.multivoice.unknown_speakers', bookId, speakers: multiVoiceResult.unknownSpeakers }, 'Defaulted unknown speakers to Narrator');
+              const [currentDocSettings] = await db
+                .select({ dataJson: documentSettings.dataJson })
+                .from(documentSettings)
+                .where(and(eq(documentSettings.documentId, job.documentId), eq(documentSettings.userId, userId)))
+                .limit(1);
+              if (currentDocSettings) {
+                const currentSettings = typeof currentDocSettings.dataJson === 'string' ? JSON.parse(currentDocSettings.dataJson) : (currentDocSettings.dataJson || {});
+                
+                const currentMap = currentSettings.smartAudioCharacters || { schemaVersion: 1, status: 'partial', scannedAt: Date.now(), entries: {} };
+                let modifiedMap = false;
+                for (const unknownName of multiVoiceResult.unknownSpeakers) {
+                  if (!currentMap.entries[unknownName]) {
+                    currentMap.entries[unknownName] = {
+                      name: unknownName,
+                      description: `Auto-detected missing speaker: ${unknownName}`,
+                      sampleText: '',
+                    };
+                    modifiedMap = true;
+                  }
+                }
+                
+                if (modifiedMap) {
+                  currentMap.status = 'partial';
+                  currentSettings.smartAudioCharacters = currentMap;
+                }
+                
+                const newFlags = [...(currentSettings.smartAudioReviewFlags || [])];
+                newFlags.push({
+                  id: randomUUID(),
+                  chapterIndex: chapter.index,
+                  timestampMs: 0,
+                  createdAt: Date.now(),
+                });
+                currentSettings.smartAudioReviewFlags = newFlags;
+                
+                await db.update(documentSettings).set({ dataJson: JSON.stringify(currentSettings) }).where(and(eq(documentSettings.documentId, job.documentId), eq(documentSettings.userId, userId)));
+              }
+            }
+
             if (recovery.sourceFallbackUsed) {
               serverLogger.warn({
                 event: 'audiobook.queue.smart_audio.source_fallback',
@@ -1011,74 +1054,6 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           }
         } catch (e) {
           if (e instanceof AudiobookJobStoppedError) throw e;
-
-          const errorMessage = e instanceof Error ? e.message : String(e);
-          const unknownSpeakerMatch = errorMessage.match(/Multi-voice worker used an unknown speaker:\s*(.*?)\./i);
-          if (unknownSpeakerMatch && unknownSpeakerMatch[1]) {
-            const unknownName = unknownSpeakerMatch[1].trim();
-            serverLogger.warn({ event: 'audiobook.queue.multivoice.unknown_speaker', bookId, speaker: unknownName }, 'Intercepted unknown speaker error, pausing job for voices.');
-            
-            const [currentDocSettings] = await db
-              .select({ dataJson: documentSettings.dataJson })
-              .from(documentSettings)
-              .where(and(eq(documentSettings.documentId, job.documentId), eq(documentSettings.userId, userId)))
-              .limit(1);
-            
-            if (currentDocSettings) {
-              const currentSettings = typeof currentDocSettings.dataJson === 'string' 
-                ? JSON.parse(currentDocSettings.dataJson) 
-                : (currentDocSettings.dataJson || {});
-              const currentMap = currentSettings.smartAudioCharacters || {
-                schemaVersion: 1,
-                status: 'partial',
-                scannedAt: Date.now(),
-                entries: {},
-              };
-              
-              if (!currentMap.entries[unknownName]) {
-                currentMap.entries[unknownName] = {
-                  name: unknownName,
-                  description: `Auto-detected missing speaker: ${unknownName}`,
-                  sampleText: '',
-                };
-              }
-              currentMap.status = 'partial';
-              currentSettings.smartAudioCharacters = currentMap;
-              
-              await db
-                .update(documentSettings)
-                .set({ dataJson: JSON.stringify(currentSettings) })
-                .where(and(eq(documentSettings.documentId, job.documentId), eq(documentSettings.userId, userId)));
-            } else {
-               const newMap = {
-                schemaVersion: 1,
-                status: 'partial',
-                scannedAt: Date.now(),
-                entries: {
-                  [unknownName]: {
-                    name: unknownName,
-                    description: `Auto-detected missing speaker: ${unknownName}`,
-                    sampleText: '',
-                  }
-                },
-              };
-              await db.insert(documentSettings).values({
-                 documentId: job.documentId,
-                 userId: userId,
-                 dataJson: JSON.stringify({ smartAudioCharacters: newMap }),
-                 createdAt: Date.now(),
-                 updatedAt: Date.now(),
-              });
-            }
-            
-            if (nc) await nc.close();
-            await updateClaimedAudiobookJob(job.id, 'running', {
-              status: WAITING_FOR_VOICES_STATUS,
-              error: `Missing voice for character: "${unknownName}". Please map this character to continue.`,
-              updatedAt: Date.now(),
-            });
-            return;
-          }
 
           serverLogger.error({ event: 'audiobook.queue.smart_audio.failed', error: e }, 'Smart audio processing failed. Aborting generation.');
           if (nc) await nc.close();
