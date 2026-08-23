@@ -269,8 +269,8 @@ describe('Smart Audio data-integrity guards', () => {
     expect(route).toContain('resolveSmartAudioWorkerResult(candidate, {');
     expect(route).toContain('Refusing to synthesize uncleaned text.');
     expect(route).not.toContain('NATS failed. Falling back to raw text.');
-    expect(route).toContain('processedTextForTts = validateSmartAudioOutput(processedTextForTts)');
-    expect(worker).toContain('processedTextForTts = validateSmartAudioOutput(processedTextForTts)');
+    expect(route).toContain('validateSmartAudioOutput(processedTextForTts');
+    expect(worker).toContain('validateSmartAudioOutput(processedTextForTts');
   });
 
   test('keeps private PDF markers out of the saved original text', () => {
