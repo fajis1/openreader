@@ -910,6 +910,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
                     authoritativePronunciations: currentPronunciations,
                     allowSubstantialOmission: confirmedEndMatter,
                     sourceText: cleanupSourceText,
+                    requirePronunciationTagsForForeignScripts: isScholarLikeSmartAudioMode(currentSelectedProfile?.workerMode),
                   });
                 return { multiVoiceResult, resolvedWorkerResult };
               },
@@ -1058,8 +1059,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       if (!cleanedTrimmed) {
           continue;
       }
-
-      processedTextForTts = validateSmartAudioOutput(processedTextForTts);
+      processedTextForTts = validateSmartAudioOutput(processedTextForTts, {
+        requirePronunciationTagsForForeignScripts: isScholarLikeSmartAudioMode(selectedProfile?.workerMode),
+      });
 
       // Smart Audio may replace the inherited layout heading with a concise
       // title for this cleanup batch. Encode the file only after that title is

@@ -296,9 +296,12 @@ function safeSegmentText(value: unknown, authoritativePronunciations?: Record<st
   if (/<[^>]+>/u.test(text) || PRIVATE_MULTI_VOICE_MARKER.test(text)) {
     throw new SmartAudioOutputValidationError('Multi-voice output contained markup or private control markers.');
   }
-  return validateSmartAudioOutput(authoritativePronunciations
-    ? reconcileSmartAudioPronunciations(text, authoritativePronunciations)
-    : text);
+  return validateSmartAudioOutput(
+    authoritativePronunciations
+      ? reconcileSmartAudioPronunciations(text, authoritativePronunciations)
+      : text,
+    { requirePronunciationTagsForForeignScripts: false }
+  );
 }
 
 export function renderVoiceSegments(segments: readonly MultiVoiceSegment[]): string {

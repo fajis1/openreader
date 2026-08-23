@@ -347,7 +347,10 @@ export function hasSubstantialSmartAudioSourceText(text: string): boolean {
   return letterCount >= 200 && wordCount >= 30;
 }
 
-export function validateSmartAudioOutput(text: string): string {
+export function validateSmartAudioOutput(
+  text: string,
+  options: { requirePronunciationTagsForForeignScripts?: boolean } = {}
+): string {
   const normalized = normalizeSmartAudioPronunciationTags(text.trim());
   if (!normalized) {
     throw new SmartAudioOutputValidationError(
@@ -360,11 +363,14 @@ export function validateSmartAudioOutput(text: string): string {
     );
   }
 
-  const nakedText = normalized.replace(KOKORO_PRONUNCIATION_TAG, '');
-  if (/[\p{Script=Greek}\p{Script=Hebrew}]/u.test(nakedText)) {
-    throw new SmartAudioOutputValidationError(
-      'Smart Audio output contained bare Greek or Hebrew characters without pronunciation markup. You must either omit foreign text completely according to the omission rules, or individually tag each foreign word you keep.',
-    );
+  const requireTags = options.requirePronunciationTagsForForeignScripts ?? true;
+  if (requireTags) {
+    const nakedText = normalized.replace(KOKORO_PRONUNCIATION_TAG, '');
+    if (/[\p{Script=Greek}\p{Script=Hebrew}]/u.test(nakedText)) {
+      throw new SmartAudioOutputValidationError(
+        'Smart Audio output contained bare Greek or Hebrew characters without pronunciation markup. You must either omit foreign text completely according to the omission rules, or individually tag each foreign word you keep.',
+      );
+    }
   }
 
   return normalized;
@@ -383,6 +389,7 @@ export function resolveSmartAudioWorkerResult(
     authoritativePronunciations?: Record<string, string>;
     allowSubstantialOmission?: boolean;
     sourceText?: string;
+    requirePronunciationTagsForForeignScripts?: boolean;
   } = {},
 ): ResolvedSmartAudioWorkerResult {
   if (!value || typeof value !== 'object') {
@@ -431,8 +438,11 @@ export function resolveSmartAudioWorkerResult(
 
   return {
     outcome: 'cleaned',
-    text: validateSmartAudioOutput(options.authoritativePronunciations
-      ? reconcileSmartAudioPronunciations(normalizedCandidate, options.authoritativePronunciations)
-      : normalizedCandidate),
+    text: validateSmartAudioOutput(
+      options.authoritativePronunciations
+        ? reconcileSmartAudioPronunciations(normalizedCandidate, options.authoritativePronunciations)
+        : normalizedCandidate,
+      { requirePronunciationTagsForForeignScripts: options.requirePronunciationTagsForForeignScripts }
+    ),
   };
 }

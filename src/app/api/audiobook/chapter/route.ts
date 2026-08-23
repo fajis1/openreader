@@ -928,6 +928,7 @@ export async function POST(request: NextRequest) {
                   : resolveSmartAudioWorkerResult(candidate, {
                     authoritativePronunciations,
                     sourceText: data.text,
+                    requirePronunciationTagsForForeignScripts: isScholarLikeSmartAudioMode(selectedProfile?.workerMode),
                   });
                 return { multiVoiceResult, resolvedWorkerResult };
               },
@@ -1075,7 +1076,9 @@ export async function POST(request: NextRequest) {
       return response;
     }
 
-    processedTextForTts = validateSmartAudioOutput(processedTextForTts);
+    processedTextForTts = validateSmartAudioOutput(processedTextForTts, {
+      requirePronunciationTagsForForeignScripts: isScholarLikeSmartAudioMode(selectedProfile?.workerMode),
+    });
 
     const ttsBuffer = await generateSegmentedAudiobookTtsBuffer(
       {
