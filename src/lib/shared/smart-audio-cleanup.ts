@@ -347,6 +347,44 @@ export function hasSubstantialSmartAudioSourceText(text: string): boolean {
   return letterCount >= 200 && wordCount >= 30;
 }
 
+
+const GREEK_LETTERS_MAP: Record<string, string> = {
+  α: 'a', β: 'b', γ: 'g', δ: 'd', ε: 'e', ζ: 'z', η: 'e', θ: 'th',
+  ι: 'i', κ: 'k', λ: 'l', μ: 'm', ν: 'n', ξ: 'x', ο: 'o', π: 'p',
+  ρ: 'r', σ: 's', ς: 's', τ: 't', υ: 'y', φ: 'ph', χ: 'ch', ψ: 'ps', ω: 'o',
+};
+
+const HEBREW_LETTERS_MAP: Record<string, string> = {
+  א: '', ב: 'b', ג: 'g', ד: 'd', ה: 'h', ו: 'w', ז: 'z', ח: 'ch', ט: 't',
+  י: 'y', כ: 'k', ך: 'k', ל: 'l', מ: 'm', ם: 'm', נ: 'n', ן: 'n', ס: 's',
+  ע: '', פ: 'p', ף: 'p', צ: 'ts', ץ: 'ts', ק: 'q', ר: 'r', ש: 'sh', ת: 't',
+};
+
+function transliterateForeignText(text: string): string {
+  return [...text.normalize('NFD')].map(char => {
+    const lower = char.toLocaleLowerCase('en-US');
+    if (GREEK_LETTERS_MAP[lower] !== undefined) return GREEK_LETTERS_MAP[lower];
+    if (HEBREW_LETTERS_MAP[lower] !== undefined) return HEBREW_LETTERS_MAP[lower];
+    return char;
+  }).join('').replace(/[\u0300-\u036f]/g, ''); // Remove combining diacritical marks
+}
+
+export function forcefullyTransliterateUntaggedForeignText(text: string): string {
+  let result = '';
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  KOKORO_PRONUNCIATION_TAG.lastIndex = 0;
+  
+  while ((match = KOKORO_PRONUNCIATION_TAG.exec(text)) !== null) {
+    const untagged = text.slice(lastIndex, match.index);
+    result += transliterateForeignText(untagged);
+    result += match[0]; // keep the tag intact
+    lastIndex = KOKORO_PRONUNCIATION_TAG.lastIndex;
+  }
+  result += transliterateForeignText(text.slice(lastIndex));
+  return result;
+}
+
 export function validateSmartAudioOutput(
   text: string,
   options: { requirePronunciationTagsForForeignScripts?: boolean } = {}

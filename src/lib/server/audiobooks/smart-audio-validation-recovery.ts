@@ -2,6 +2,7 @@ import {
   discardInvalidSmartAudioPronunciationTags,
   SmartAudioOutputValidationError,
   SmartAudioSuspiciousOmissionError,
+  forcefullyTransliterateUntaggedForeignText,
 } from '@/lib/shared/smart-audio-cleanup';
 import { resolveSmartAudioValidationRepairModel } from '@/lib/shared/smart-audio-models';
 
@@ -95,6 +96,30 @@ export function discardInvalidPronunciationsFromWorkerResult(
   };
 }
 
+
+function transliterateUntaggedForeignTextInWorkerResult(value: unknown): WorkerRecord {
+  const result = workerRecord(value);
+  if (!result) throw new SmartAudioOutputValidationError('Invalid response.');
+  
+  const sanitize = (text: unknown): unknown => {
+    if (typeof text !== 'string') return text;
+    return forcefullyTransliterateUntaggedForeignText(text);
+  };
+
+  if (Array.isArray(result.segments)) {
+    return {
+      ...result,
+      segments: result.segments.map((segment) => (
+        segment && typeof segment === 'object' && !Array.isArray(segment)
+          ? { ...segment as WorkerRecord, text: sanitize((segment as WorkerRecord).text) }
+          : segment
+      )),
+    };
+  }
+
+  return { ...result, cleaned_text: sanitize(result.cleaned_text), tagged_text: sanitize(result.tagged_text) };
+}
+
 export async function resolveSmartAudioWithValidationRecovery<T>(input: {
   initialResult: unknown;
   resolve: (result: unknown) => T;
@@ -184,6 +209,24 @@ export async function resolveSmartAudioWithValidationRecovery<T>(input: {
         validationErrors.push(fallbackValidationError.message);
       }
     }
+    
+    for (const candidate of fallbackCandidates) {
+      try {
+        const transliteratedResult = transliterateUntaggedForeignTextInWorkerResult(candidate);
+        return {
+          result: input.resolve(transliteratedResult),
+          workerResult: transliteratedResult,
+          repairAttempted: true,
+          fallbackUsed: true,
+          sourceFallbackUsed: false,
+          validationErrors: [...validationErrors, "Forcefully transliterated untagged foreign text as a final fallback."],
+          discardedTags: 0,
+        };
+      } catch (e) {
+        // ignore
+      }
+    }
+    
     if (shouldPreserveSource && input.sourceFallback) {
       const sourceFallback = input.sourceFallback(fallbackCandidate);
       const sourceFallbackRecord = workerRecord(sourceFallback);
