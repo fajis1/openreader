@@ -439,6 +439,20 @@ async function main() {
   });
 
   try {
+    try {
+      const coreFiles = fs.readdirSync(process.cwd()).filter(f => f.startsWith('core.'));
+      for (const file of coreFiles) {
+        try { fs.unlinkSync(path.join(process.cwd(), file)); } catch {}
+      }
+      const workerDir = path.join(process.cwd(), 'embedded-compute-worker');
+      if (fs.existsSync(workerDir)) {
+        const workerCores = fs.readdirSync(workerDir).filter(f => f.startsWith('core.'));
+        for (const file of workerCores) {
+          try { fs.unlinkSync(path.join(workerDir, file)); } catch {}
+        }
+      }
+    } catch {}
+
     const shouldRunDbMigrations = resolveBooleanEnv(runtimeEnv, 'RUN_DRIZZLE_MIGRATIONS', true);
     if (shouldRunDbMigrations) {
       runDbMigrations(runtimeEnv);

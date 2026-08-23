@@ -27,6 +27,8 @@ services:
       COMPUTE_PREWARM_MODELS: ${COMPUTE_PREWARM_MODELS:-false}
     ports:
       - "8081:8081"
+    ulimits:
+      core: 0
     develop:
       watch:
         - action: sync+restart

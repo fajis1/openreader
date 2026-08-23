@@ -18,6 +18,13 @@ export async function ensureComputeModels(): Promise<void> {
   await Promise.all([ensureWhisperModel(), ensurePdfLayoutModel()]);
 }
 
+export async function releaseComputeSessions(): Promise<void> {
+  await Promise.all([
+    releaseWhisperRuntime(),
+    releaseLayoutModelSession()
+  ]);
+}
+
 export async function runWhisperAlignmentFromAudioBuffer(input: {
   audioBuffer: ArrayBuffer;
   text: string;

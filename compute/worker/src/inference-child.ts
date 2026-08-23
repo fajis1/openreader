@@ -1,6 +1,7 @@
 import {
   runPdfLayoutFromPdfBuffer,
   runWhisperAlignmentFromAudioBuffer,
+  releaseComputeSessions,
 } from '@openreader/compute-core/local-runtime';
 import { runWithOnnxProviderObserver } from '@openreader/compute-core/onnx-runtime';
 
@@ -53,9 +54,11 @@ process.on('message', (rawEnvelope) => {
       const normalized = error instanceof Error ? error : new Error(String(error));
       send(requestId, { type: 'error', message: normalized.message, stack: normalized.stack });
     },
-  ).finally(() => {
-    if (!keepAlive) process.disconnect?.();
-  });
+  );
 });
 
-process.once('disconnect', () => process.exit(0));
+process.once('disconnect', () => {
+  releaseComputeSessions().finally(() => {
+    process.exit(0);
+  });
+});
