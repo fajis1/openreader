@@ -5,6 +5,7 @@ import {
   DEFAULT_CLEANUP_AI_MODEL,
   DEFAULT_PRONUNCIATION_AI_MODEL,
   resolveCleanupAiModel,
+  resolveCleanupAiModels,
   resolvePronunciationAiModel,
   resolveSmartAudioValidationRepairModel,
 } from '@/lib/shared/smart-audio-models';
@@ -38,6 +39,15 @@ describe('Smart Audio model selection', () => {
     expect(resolvePronunciationAiModel(splitProfile)).toBe('pronunciation-model');
   });
 
+  it('uses at most two unique cleanup fallbacks in profile order', () => {
+    expect(resolveCleanupAiModels({
+      aiModel: 'gemini-3.7-flash',
+      aiModelFallbacks: ['gemini-3.6-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'],
+    })).toEqual(['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash']);
+    expect(resolveCleanupAiModels({ aiModel: 'only-model', aiModelFallbacks: [] }))
+      .toEqual(['only-model']);
+  });
+
   it('fails validation retries upward to 3.7 Flash without overriding custom models', () => {
     expect(resolveSmartAudioValidationRepairModel('gemini-3.5-flash-lite'))
       .toBe('gemini-3.7-flash');
@@ -56,8 +66,12 @@ describe('Smart Audio model selection', () => {
       .toContain('resolvePronunciationAiModel(activeProfile)');
     expect(readSource('src/lib/server/audiobooks/worker.ts'))
       .toContain('resolveCleanupAiModel(currentSelectedProfile)');
+    expect(readSource('src/lib/server/audiobooks/worker.ts'))
+      .toContain('ai_model_fallbacks: resolveCleanupAiModels(currentSelectedProfile).slice(1)');
     expect(readSource('src/app/api/audiobook/chapter/route.ts'))
       .toContain('resolveCleanupAiModel(selectedProfile)');
+    expect(readSource('src/app/api/audiobook/characters/scan/route.ts'))
+      .toContain('ai_model_fallbacks: resolveCleanupAiModels(scope.profile).slice(1)');
   });
 
   it('shows both selectors and the active pronunciation model to users', () => {
@@ -66,6 +80,8 @@ describe('Smart Audio model selection', () => {
 
     expect(settings).toContain('PDF & Audiobook Cleanup Model');
     expect(settings).toContain('Pronunciation Model');
+    expect(settings).toContain('Optional cleanup fallbacks');
+    expect(settings).toContain('If every selected model fails, the book pauses for 24 hours.');
     expect(scanner).toContain('Pronunciation model:');
   });
 

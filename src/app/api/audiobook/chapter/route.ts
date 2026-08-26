@@ -56,6 +56,7 @@ import {
 } from '@/lib/shared/kokoro-pronunciation-policy';
 import {
   resolveCleanupAiModel,
+  resolveCleanupAiModels,
   resolveSmartAudioValidationRepairModel,
 } from '@/lib/shared/smart-audio-models';
 import {
@@ -864,6 +865,7 @@ export async function POST(request: NextRequest) {
               api_key: geminiApiKey,
               backup_api_key: (selectedProfile.backupGeminiApiKey || '').trim(),
               ai_model: resolveCleanupAiModel(selectedProfile),
+              ai_model_fallbacks: resolveCleanupAiModels(selectedProfile).slice(1),
               raw_text: enrichedText,
               characters: multiVoiceCast,
               continuity_state: 'Beginning of selected chapter.',
@@ -875,6 +877,7 @@ export async function POST(request: NextRequest) {
               user_id: storageUserId,
               api_key: geminiApiKey,
               ai_model: resolveCleanupAiModel(selectedProfile),
+              ai_model_fallbacks: resolveCleanupAiModels(selectedProfile).slice(1),
               prompt: buildSmartAudioCleanupPrompt(selectedProfile?.customTtsPrompt),
               final_cleanup_rules: FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
               pronunciation_prompt: buildKokoroPronunciationInstructions(selectedProfile),

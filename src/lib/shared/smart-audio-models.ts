@@ -13,6 +13,7 @@ const SMART_AUDIO_REPAIR_ESCALATION_MODELS = new Set([
 
 type SmartAudioModelProfile = {
   aiModel?: string | null;
+  aiModelFallbacks?: readonly (string | null | undefined)[] | null;
   pronunciationAiModel?: string | null;
 };
 
@@ -23,6 +24,20 @@ function normalizedModel(value: string | null | undefined): string | null {
 
 export function resolveCleanupAiModel(profile: SmartAudioModelProfile | null | undefined): string {
   return normalizedModel(profile?.aiModel) || DEFAULT_CLEANUP_AI_MODEL;
+}
+
+export function resolveCleanupAiModels(profile: SmartAudioModelProfile | null | undefined): string[] {
+  const primary = resolveCleanupAiModel(profile);
+  const seen = new Set([primary]);
+  const fallbacks: string[] = [];
+  for (const value of profile?.aiModelFallbacks || []) {
+    const model = normalizedModel(value);
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    fallbacks.push(model);
+    if (fallbacks.length === 2) break;
+  }
+  return [primary, ...fallbacks];
 }
 
 export function resolvePronunciationAiModel(

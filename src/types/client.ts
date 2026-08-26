@@ -78,6 +78,8 @@ export interface SmartAudioProfile {
   name: string;
   /** Gemini model used for high-volume text cleanup. */
   aiModel: string;
+  /** Optional ordered Gemini cleanup fallbacks used before pausing for quota. */
+  aiModelFallbacks?: string[];
   /** Gemini model used only for pronunciation scanning and refinement. */
   pronunciationAiModel?: string;
   customTtsPrompt: string;

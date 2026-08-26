@@ -25,7 +25,7 @@ import {
   MULTI_VOICE_WORKER_MODE,
   WAITING_FOR_VOICES_STATUS,
 } from '@/lib/shared/multi-voice';
-import { resolveCleanupAiModel } from '@/lib/shared/smart-audio-models';
+import { resolveCleanupAiModel, resolveCleanupAiModels } from '@/lib/shared/smart-audio-models';
 import { DEFAULT_DOCUMENT_SETTINGS, type SmartAudioCharacterMap } from '@/types/document-settings';
 
 export const dynamic = 'force-dynamic';
@@ -191,6 +191,7 @@ export async function POST(request: NextRequest) {
           backup_api_key: (scope.profile.backupGeminiApiKey || '').trim(),
           raw_text: source.text,
           ai_model: resolveCleanupAiModel(scope.profile),
+          ai_model_fallbacks: resolveCleanupAiModels(scope.profile).slice(1),
         })),
         { timeout: 300_000 },
       );

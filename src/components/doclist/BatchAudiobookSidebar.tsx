@@ -412,7 +412,7 @@ export function BatchAudiobookSidebar({ isOpen, setIsOpen, selectedDocs }: Batch
                   {selectedSmartAudioProfile && (
                     <div className="text-xs text-soft">
                       <p>Pronunciation: {selectedSmartAudioProfile.pronunciationAiModel || selectedSmartAudioProfile.aiModel}</p>
-                      <p>Cleanup: {selectedSmartAudioProfile.aiModel} · {Object.keys(selectedSmartAudioProfile.abbreviations || {}).length} abbreviations · {Object.keys(selectedSmartAudioProfile.pronunciations || {}).length} pronunciations</p>
+                      <p>Cleanup: {[selectedSmartAudioProfile.aiModel, ...(selectedSmartAudioProfile.aiModelFallbacks || [])].join(' → ')} · {Object.keys(selectedSmartAudioProfile.abbreviations || {}).length} abbreviations · {Object.keys(selectedSmartAudioProfile.pronunciations || {}).length} pronunciations</p>
                     </div>
                   )}
                 </>

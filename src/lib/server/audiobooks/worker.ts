@@ -31,6 +31,7 @@ import {
 } from '@/lib/shared/audiobook-job-status';
 import {
   resolveCleanupAiModel,
+  resolveCleanupAiModels,
   resolveSmartAudioValidationRepairModel,
 } from '@/lib/shared/smart-audio-models';
 import {
@@ -831,6 +832,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               user_id: userId,
               api_key: geminiApiKey,
               ai_model: resolveCleanupAiModel(currentSelectedProfile),
+              ai_model_fallbacks: resolveCleanupAiModels(currentSelectedProfile).slice(1),
               raw_text: enrichedChapterText,
               characters: multiVoiceCharacters,
               continuity_state: continuityState,
@@ -845,6 +847,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               user_id: userId,
               api_key: geminiApiKey,
               ai_model: resolveCleanupAiModel(currentSelectedProfile),
+              ai_model_fallbacks: resolveCleanupAiModels(currentSelectedProfile).slice(1),
               prompt: buildSmartAudioCleanupPrompt(currentSelectedProfile?.customTtsPrompt),
               final_cleanup_rules: FINAL_SMART_AUDIO_PRONUNCIATION_CHECK,
               pronunciation_prompt: buildKokoroPronunciationInstructions(currentSelectedProfile),

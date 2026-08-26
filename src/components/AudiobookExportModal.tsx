@@ -1035,7 +1035,7 @@ export function AudiobookExportModal({
                                               {selectedSmartAudioProfile && (
                                                 <div className="space-y-0.5 text-xs text-soft">
                                                   <p>Pronunciation: {selectedSmartAudioProfile.pronunciationAiModel || selectedSmartAudioProfile.aiModel}</p>
-                                                  <p>Cleanup: {selectedSmartAudioProfile.aiModel} · {Object.keys(selectedSmartAudioProfile.abbreviations || {}).length} abbreviations · {Object.keys(selectedSmartAudioProfile.pronunciations || {}).length} pronunciations</p>
+                                                  <p>Cleanup: {[selectedSmartAudioProfile.aiModel, ...(selectedSmartAudioProfile.aiModelFallbacks || [])].join(' → ')} · {Object.keys(selectedSmartAudioProfile.abbreviations || {}).length} abbreviations · {Object.keys(selectedSmartAudioProfile.pronunciations || {}).length} pronunciations</p>
                                                 </div>
                                               )}
                                             </div>

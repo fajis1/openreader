@@ -2,13 +2,16 @@ import asyncio
 import json
 import re
 import os
-import time
 import difflib
 from nats.aio.client import Client as NATS
 from google import genai
-from gemini_rate_limiter import extract_gemini_usage, refresh_gemini_cooldown
+from gemini_rate_limiter import (
+    call_gemini_with_capacity_fallback,
+    extract_gemini_usage,
+    ordered_gemini_models,
+)
 
-# --- PER-KEY RATE LIMITER STATE ---
+# --- PER-KEY/MODEL RATE LIMITER STATE ---
 API_STATES = {}
 MAX_DELAY = 300            
 MIN_DELAY = 5              
@@ -52,6 +55,7 @@ async def process_message(msg):
     abbreviations = data.get("abbreviations", {})
     books = data.get("books", {})
     ai_model = data.get("ai_model") or "gemini-3.5-flash"
+    ai_models = ordered_gemini_models(ai_model, data.get("ai_model_fallbacks"))
     empty_response_escalated = False
     
     print(f"\n[*] New job intercepted for User: {user_id}")
@@ -73,8 +77,6 @@ async def process_message(msg):
 
         # PHASE 2: Gemini Processing
         print("  -> Initializing Gemini SDK...")
-        client = genai.Client(api_key=api_key)
-        
         dict_string = json.dumps(pronunciations, indent=2, ensure_ascii=False)
         dynamic_constraints = f"CRITICAL CONTINUITY RULE: Use these exact phonetic spellings:\n{dict_string}\n\n"
         title_instruction = "CHAPTER TITLE GENERATION: For narratable text, you MUST summarize the provided text into a unique 3 to 5 word descriptive title based on its actual contents. DO NOT just copy the existing chapter title (e.g. 'Foreword' or 'Chapter 1'). At the very end of your response, after the cleaned text, you MUST add exactly one blank line and then output the title wrapped in tags exactly like this: [CHAPTER_TITLE: Three Word Summary]. Do not include the chapter number or 'continued'. If the correct result is [OMIT], return only [OMIT] and do not add a chapter title.\n\n"
@@ -95,76 +97,49 @@ async def process_message(msg):
         full_prompt = f"{prompt}\n\n{dynamic_constraints}{pronunciation_prompt}\n\n{title_instruction}{final_cleanup_rules}\n\n{repair_instruction}Original text to clean:\n{enriched_text}"
         final_text = ""
         
-        api_state = API_STATES.setdefault(api_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})
-        
-        cooldown_remaining = refresh_gemini_cooldown(api_state)
-        if cooldown_remaining > 0:
-            print(f"  -> [⏳] API Key is in penalty box. Rejecting so Node can re-queue.")
+        async def request_content(active_key, active_model):
+            print(f"  -> Processing text with Gemini model {active_model}...")
+            return await genai.Client(api_key=active_key).aio.models.generate_content(
+                model=active_model,
+                contents=full_prompt,
+            )
+
+        generated = await call_gemini_with_capacity_fallback(
+            api_states=API_STATES,
+            api_keys=[api_key, backup_api_key],
+            models=ai_models,
+            request=request_content,
+            min_delay=MIN_DELAY,
+            max_delay=MAX_DELAY,
+        )
+        if generated is None:
             await msg.respond(json.dumps({
-                "status": "rate_limit", 
-                "message": f"API is ratelimited. Resumes in {cooldown_remaining}s"
+                "status": "rate_limit",
+                "message": "All configured Gemini cleanup models are rate limited.",
             }).encode())
             return
-        
-        async with api_state["lock"]:
-            while True:
-                if api_state["current_delay"] > 0:
-                    if api_state["current_delay"] <= 30:
-                        print(f"  -> [⏳] Rate Limiter Active: Pausing for {api_state['current_delay']} seconds...")
-                        await asyncio.sleep(api_state["current_delay"])
-                    else:
-                        api_state["resume_at"] = time.time() + api_state["current_delay"]
-                        print(f"  -> [🛑] API Limit is {api_state['current_delay']}s. Rejecting back to Node.js queue...")
-                        await msg.respond(json.dumps({
-                            "status": "rate_limit", 
-                            "message": f"API is ratelimited. Resumes in {api_state['current_delay']}s"
-                        }).encode())
-                        return
-                    
-                try:
-                    print("  -> Processing text with AI (Gemini)...")
-                    response = await client.aio.models.generate_content(
-                        model=ai_model,
-                        contents=full_prompt
-                    )
-                    
-                    if not response.text or not response.text.strip():
-                        if ai_model != QUALITY_REPAIR_MODEL and not empty_response_escalated:
-                            print(f"  -> [⬆️] Empty response from {ai_model}. Retrying once with {QUALITY_REPAIR_MODEL}...")
-                            ai_model = QUALITY_REPAIR_MODEL
-                            empty_response_escalated = True
-                            continue
-                        raise RuntimeError("Gemini returned no text; expected cleaned text or [OMIT]")
-                    final_text = response.text.strip()
-                    
-                    if api_state["current_delay"] > 0:
-                        api_state["current_delay"] = api_state["current_delay"] // 2
-                        if api_state["current_delay"] < MIN_DELAY:
-                            api_state["current_delay"] = 0
-                        api_state["resume_at"] = 0
-                        print(f"  -> [✅] API Recovering: Cooldown reduced to {api_state['current_delay']} seconds.")
-                    
-                    break
-                    
-                except Exception as e:
-                    error_msg = str(e).lower()
-                    if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg or "503" in error_msg:
-                        if backup_api_key and backup_api_key != api_key:
-                            print(f"  -> [🔄] Primary API Limit Hit! Falling back to backup key...")
-                            api_key = backup_api_key
-                            client = genai.Client(api_key=api_key)
-                            api_state = API_STATES.setdefault(api_key, {"lock": asyncio.Lock(), "current_delay": 0, "resume_at": 0})
-                            continue
-
-                        if api_state["current_delay"] == 0:
-                            api_state["current_delay"] = MIN_DELAY
-                        else:
-                            api_state["current_delay"] = min(api_state["current_delay"] * 2, MAX_DELAY)
-                        
-                        print(f"  -> [🛑] API Limit Hit! Spiking cooldown to {api_state['current_delay']} seconds.")
-                        continue
-                        
-                    raise e
+        response, ai_model = generated
+        if not response.text or not response.text.strip():
+            if ai_model != QUALITY_REPAIR_MODEL and not empty_response_escalated:
+                empty_response_escalated = True
+                repaired = await call_gemini_with_capacity_fallback(
+                    api_states=API_STATES,
+                    api_keys=[api_key, backup_api_key],
+                    models=[QUALITY_REPAIR_MODEL],
+                    request=request_content,
+                    min_delay=MIN_DELAY,
+                    max_delay=MAX_DELAY,
+                )
+                if repaired is None:
+                    await msg.respond(json.dumps({
+                        "status": "rate_limit",
+                        "message": "The Gemini quality-repair model is rate limited.",
+                    }).encode())
+                    return
+                response, ai_model = repaired
+            if not response.text or not response.text.strip():
+                raise RuntimeError("Gemini returned no text; expected cleaned text or [OMIT]")
+        final_text = response.text.strip()
 
         # PHASE 3: Two-Way Sync Extraction & Title
         title_match = re.search(r'\[\s*CHAPTER_TITLE\s*:\s*(.*?)\]', final_text, re.IGNORECASE)

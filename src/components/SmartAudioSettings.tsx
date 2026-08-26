@@ -24,6 +24,7 @@ const EMPTY_PROFILE = (): SmartAudioProfile => ({
   id: `profile-${Date.now()}`,
   name: 'New Profile',
   aiModel: DEFAULT_CLEANUP_AI_MODEL,
+  aiModelFallbacks: [],
   pronunciationAiModel: DEFAULT_PRONUNCIATION_AI_MODEL,
   customTtsPrompt: '',
   abbreviations: {},
@@ -119,6 +120,8 @@ export function SmartAudioSettings() {
   const [profileName, setProfileName] = useState('');
   const [aiModel, setAiModel] = useState(DEFAULT_CLEANUP_AI_MODEL);
   const [customModelId, setCustomModelId] = useState('');
+  const [fallbackAiModels, setFallbackAiModels] = useState<[string, string]>(['', '']);
+  const [customFallbackModelIds, setCustomFallbackModelIds] = useState<[string, string]>(['', '']);
   const [pronunciationAiModel, setPronunciationAiModel] = useState(DEFAULT_PRONUNCIATION_AI_MODEL);
   const [customPronunciationModelId, setCustomPronunciationModelId] = useState('');
   const [promptMode, setPromptMode] = useState<'preset' | 'custom'>('preset');
@@ -768,9 +771,18 @@ export function SmartAudioSettings() {
     setPronunciationPromptMode(activeProfile.pronunciationPromptMode === 'custom' ? 'custom' : 'default');
     setCustomPronunciationPrompt(activeProfile.customPronunciationPrompt || '');
     const cleanupModel = activeProfile.aiModel || DEFAULT_CLEANUP_AI_MODEL;
+    const cleanupFallbacks = activeProfile.aiModelFallbacks || [];
     const pronunciationModel = activeProfile.pronunciationAiModel || cleanupModel;
     setAiModel(PRESET_MODELS.some((model) => model.id === cleanupModel) ? cleanupModel : 'custom');
     setCustomModelId(PRESET_MODELS.some((model) => model.id === cleanupModel) ? '' : cleanupModel);
+    setFallbackAiModels([0, 1].map((index) => {
+      const model = cleanupFallbacks[index] || '';
+      return !model || PRESET_MODELS.some((preset) => preset.id === model) ? model : 'custom';
+    }) as [string, string]);
+    setCustomFallbackModelIds([0, 1].map((index) => {
+      const model = cleanupFallbacks[index] || '';
+      return model && !PRESET_MODELS.some((preset) => preset.id === model) ? model : '';
+    }) as [string, string]);
     setPronunciationAiModel(
       PRESET_MODELS.some((model) => model.id === pronunciationModel) ? pronunciationModel : 'custom',
     );
@@ -824,6 +836,9 @@ export function SmartAudioSettings() {
 
   const buildCurrentProfile = useCallback((): SmartAudioProfile | null => {
     const finalModel = aiModel === 'custom' ? customModelId.trim() : aiModel;
+    const finalFallbackModels = fallbackAiModels.map((model, index) => (
+      model === 'custom' ? customFallbackModelIds[index].trim() : model.trim()
+    )).filter((model, index, models) => model && model !== finalModel && models.indexOf(model) === index);
     const finalPronunciationModel = pronunciationAiModel === 'custom'
       ? customPronunciationModelId.trim()
       : pronunciationAiModel;
@@ -834,6 +849,7 @@ export function SmartAudioSettings() {
       id: selectedProfileId || EMPTY_PROFILE().id,
       name: profileName.trim(),
       aiModel: finalModel || DEFAULT_CLEANUP_AI_MODEL,
+      aiModelFallbacks: finalFallbackModels,
       pronunciationAiModel: finalPronunciationModel || DEFAULT_PRONUNCIATION_AI_MODEL,
       customTtsPrompt: prompt,
       abbreviations: entriesToObject(abbreviations),
@@ -853,7 +869,7 @@ export function SmartAudioSettings() {
       ...(apiKey.trim() ? { geminiApiKey: apiKey.trim() } : {}),
       ...(backupApiKey.trim() ? { backupGeminiApiKey: backupApiKey.trim() } : {}),
     };
-  }, [apiKey, backupApiKey, aiModel, customModelId, pronunciationAiModel, customPronunciationModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, useGlobalPronunciations, pronunciationPromptMode, customPronunciationPrompt, workerMode, activeProfile]);
+  }, [apiKey, backupApiKey, aiModel, customModelId, fallbackAiModels, customFallbackModelIds, pronunciationAiModel, customPronunciationModelId, profileName, selectedProfileId, prompt, abbreviations, pronunciations, books, useGlobalPronunciations, pronunciationPromptMode, customPronunciationPrompt, workerMode, activeProfile]);
 
   // When the user clicks a worker mode card, always switch to the matching
   // preset for that engine. This ensures clicking a card is always a clean
@@ -876,6 +892,8 @@ export function SmartAudioSettings() {
     setProfileName(profile.name);
     setAiModel(profile.aiModel);
     setCustomModelId('');
+    setFallbackAiModels(['', '']);
+    setCustomFallbackModelIds(['', '']);
     setPronunciationAiModel(profile.pronunciationAiModel || DEFAULT_PRONUNCIATION_AI_MODEL);
     setCustomPronunciationModelId('');
     setPrompt(profile.customTtsPrompt);
@@ -1403,6 +1421,50 @@ export function SmartAudioSettings() {
               <p className="text-xs text-gray-400">
                 Used for high-volume OCR and manuscript cleanup. Flash-Lite is recommended to reduce cost.
               </p>
+              <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <div>
+                  <div className="text-sm font-semibold">Optional cleanup fallbacks</div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Tried in order when the active model reaches a quota or remains overloaded. If every selected model fails, the book pauses for 24 hours. Leave blank to disable.
+                  </p>
+                </div>
+                {fallbackAiModels.map((model, index) => (
+                  <div key={index} className="space-y-2">
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+                      Backup model {index + 1}
+                    </label>
+                    <select
+                      aria-label={`Cleanup backup model ${index + 1}`}
+                      className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-800 dark:border-gray-700 text-gray-900 dark:text-gray-100 cursor-pointer"
+                      value={model}
+                      onChange={(event) => setFallbackAiModels((current) => {
+                        const next: [string, string] = [current[0], current[1]];
+                        next[index] = event.target.value;
+                        return next;
+                      })}
+                    >
+                      <option value="">No backup model</option>
+                      {PRESET_MODELS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>{preset.name}</option>
+                      ))}
+                    </select>
+                    {model === 'custom' && (
+                      <input
+                        type="text"
+                        aria-label={`Custom cleanup backup model ${index + 1}`}
+                        className="w-full p-2 border rounded bg-white dark:bg-gray-900 border-blue-400 dark:border-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 text-sm font-mono shadow-inner"
+                        placeholder="Custom Gemini model identifier"
+                        value={customFallbackModelIds[index]}
+                        onChange={(event) => setCustomFallbackModelIds((current) => {
+                          const next: [string, string] = [current[0], current[1]];
+                          next[index] = event.target.value;
+                          return next;
+                        })}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -1435,6 +1497,7 @@ export function SmartAudioSettings() {
               <div className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 text-sm text-gray-600 dark:text-gray-300 space-y-1">
                 <div><span className="font-medium text-gray-900 dark:text-gray-100">Profile id:</span> {selectedProfileId || 'unset'}</div>
                 <div><span className="font-medium text-gray-900 dark:text-gray-100">Cleanup model:</span> {finalModel || 'unset'}</div>
+                <div><span className="font-medium text-gray-900 dark:text-gray-100">Cleanup fallbacks:</span> {fallbackAiModels.map((model, index) => model === 'custom' ? customFallbackModelIds[index].trim() : model).filter(Boolean).join(' → ') || 'none'}</div>
                 <div><span className="font-medium text-gray-900 dark:text-gray-100">Pronunciation model:</span> {finalPronunciationModel || 'unset'}</div>
                 <div><span className="font-medium text-gray-900 dark:text-gray-100">Abbreviations:</span> {abbreviations.length}</div>
                 <div><span className="font-medium text-gray-900 dark:text-gray-100">Pronunciations:</span> {pronunciations.length}</div>

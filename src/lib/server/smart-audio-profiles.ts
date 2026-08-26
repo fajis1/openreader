@@ -6,6 +6,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { SmartAudioProfile } from '@/types/client';
 import {
   DEFAULT_CLEANUP_AI_MODEL,
+  resolveCleanupAiModels,
   resolvePronunciationAiModel,
 } from '@/lib/shared/smart-audio-models';
 import defaultProfilesData from './default_smart_audio_profiles.json';
@@ -145,6 +146,7 @@ function sanitizeProfile(profile: Partial<SmartAudioProfile> & { id?: string; na
     id,
     name,
     aiModel: (profile.aiModel || DEFAULT_CLEANUP_AI_MODEL).trim(),
+    aiModelFallbacks: resolveCleanupAiModels(profile).slice(1),
     pronunciationAiModel: resolvePronunciationAiModel(profile),
     customTtsPrompt: profile.customTtsPrompt || '',
     abbreviations: profile.abbreviations || {},
