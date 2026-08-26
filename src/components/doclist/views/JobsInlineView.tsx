@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharacterModal';
 import { AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS } from '@/lib/shared/audiobook-job-status';
 import { WAITING_FOR_VOICES_STATUS } from '@/lib/shared/multi-voice';
+import { AUDIOBOOK_WAITING_FOR_GPU_PHASE } from '@/lib/shared/audiobook-runtime-phase';
 
 interface Job {
   id: string;
@@ -17,6 +18,8 @@ interface Job {
   documentTitle?: string;
   settingsJson?: unknown;
   globalQueuePosition?: number;
+  phase?: string | null;
+  gpuQueueState?: string | null;
 }
 
 function jobProfileId(job: Job): string {
@@ -122,6 +125,7 @@ export function JobsInlineView() {
               const isPauseRequested = job.status === AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS;
               const isWaitingForVoices = job.status === WAITING_FOR_VOICES_STATUS
                 || (job.status === 'queued' && job.error === 'waiting_for_voices');
+              const isWaitingForGpu = job.phase === AUDIOBOOK_WAITING_FOR_GPU_PHASE;
               const globalPosition = job.globalQueuePosition;
               
               let queueEtaStr = '';
@@ -142,6 +146,9 @@ export function JobsInlineView() {
                     <div className="text-sm text-soft mt-2 flex flex-col gap-2">
                       <div className="flex items-center">
                         Status: <span className="uppercase font-semibold text-accent ml-1">{job.status}</span>
+                        {isWaitingForGpu && (
+                          <span className="ml-2 uppercase font-semibold text-warning">· Waiting for GPU</span>
+                        )}
                         {isQueued && globalPosition ? (
                           <span className="ml-3 px-2 py-0.5 rounded-full bg-surface-sunken border border-line text-xs">Queue Position: #{globalPosition}</span>
                         ) : null}
@@ -150,7 +157,7 @@ export function JobsInlineView() {
                             (~{queueEtaStr} remaining before processing)
                           </span>
                         ) : null}
-                        {(job.status === 'running' || isPauseRequested) && job.startedAt && typeof job.progress === 'number' ? (
+                        {!isWaitingForGpu && (job.status === 'running' || isPauseRequested) && job.startedAt && typeof job.progress === 'number' ? (
                           <span className="ml-3 text-faint">
                             ({Math.round(job.progress || 0)}% done &bull; ~{formatMs(getRemainingMs(now, job.startedAt, job.updatedAt || job.startedAt, job.progress))} remaining)
                           </span>
@@ -164,6 +171,11 @@ export function JobsInlineView() {
                             style={{ width: `${Math.round(job.progress || 0)}%`, transition: 'width 1000ms linear' }}
                           />
                         </div>
+                      )}
+                      {isWaitingForGpu && (
+                        <p className="max-w-xl text-warning">
+                          Your audiobook progress is preserved. Kokoro will continue automatically when the shared GPU is ready.
+                        </p>
                       )}
                     </div>
                   </div>

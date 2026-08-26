@@ -10,7 +10,17 @@ import {
   type ServerTTSRequest,
   type TtsUpstreamRuntimeSettings,
 } from '@/lib/server/tts/generate';
+import {
+  runWithGpuQueueStatus,
+  type GpuArbiterStatus,
+  type GpuQueueRequestIdentity,
+} from '@/lib/server/tts/gpu-arbiter';
 import { parseVoiceTaggedText } from '@/lib/shared/multi-voice';
+
+export interface AudiobookGpuQueueObserver {
+  onStatus: (status: GpuArbiterStatus | null) => void | Promise<void>;
+  requestIdentity?: GpuQueueRequestIdentity;
+}
 
 async function concatenateMp3Segments(
   segments: readonly Buffer[],
@@ -96,6 +106,7 @@ export async function generateSegmentedAudiobookTtsBuffer(
   request: ServerTTSRequest,
   signal?: AbortSignal,
   runtimeSettings?: TtsUpstreamRuntimeSettings,
+  gpuQueueObserver?: AudiobookGpuQueueObserver,
 ): Promise<Buffer> {
   const audioSegments: Buffer[] = [];
   
@@ -114,11 +125,17 @@ export async function generateSegmentedAudiobookTtsBuffer(
   for (const chunk of parsedChunks) {
     const subSegments = splitAudiobookTextForTts(chunk.text, request.language);
     for (const text of subSegments) {
-      audioSegments.push(await generateTTSBuffer(
-        { ...request, text, voice: chunk.voice, format: 'mp3' },
+      const segmentRequest = { ...request, text, voice: chunk.voice, format: 'mp3' };
+      audioSegments.push(await runWithGpuQueueStatus({
+        request: gpuQueueObserver?.requestIdentity || segmentRequest,
         signal,
-        runtimeSettings,
-      ));
+        onStatus: gpuQueueObserver?.onStatus,
+        operation: (operationSignal) => generateTTSBuffer(
+          segmentRequest,
+          operationSignal,
+          runtimeSettings,
+        ),
+      }));
     }
   }
 

@@ -13,6 +13,7 @@ import { ModalFrame } from "@/components/ui";
 import { SmartAudioSettings } from "@/components/SmartAudioSettings";
 import { estimateSpeakerSegmentAtTime, parseVoiceTaggedText, renderVoiceSegments } from "@/lib/shared/multi-voice";
 import type { SmartAudioCharacterMap } from "@/types/document-settings";
+import { AUDIOBOOK_WAITING_FOR_GPU_PHASE } from "@/lib/shared/audiobook-runtime-phase";
 
 interface Chapter {
   index: number;
@@ -73,6 +74,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const selectedChapterIndex = currentChapter?.index;
 
   const isMultiVoice = chapterText.includes('<voice');
+  const isWaitingForGpu = activeJob?.phase === AUDIOBOOK_WAITING_FOR_GPU_PHASE;
   const speakerSegments = useMemo(() => {
     if (!isMultiVoice) return [];
     try {
@@ -163,12 +165,16 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
 
     const checkJob = async () => {
       try {
-        const res = await fetch(`/api/audiobooks/batch-refine?bookId=${bookId}`);
+        const res = await fetch('/api/audiobooks/queue');
         if (res.ok) {
           const data = await res.json();
-          if (data.job) {
-            setActiveJob(data.job);
-            if (data.job.status === 'running' || data.job.status === 'queued') {
+          const job = data.jobs?.find((candidate: { documentId?: string; status?: string }) => (
+            candidate.documentId === bookId
+            && ['queued', 'running', 'waiting_for_pdf', 'pausing'].includes(candidate.status || '')
+          ));
+          if (job) {
+            setActiveJob(job);
+            if (job.status === 'running' || job.status === 'queued') {
                setIsBatchRefining(true);
             } else {
                setIsBatchRefining(false);
@@ -623,12 +629,21 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           <div className="mt-2 flex items-center gap-4 bg-indigo-50 border border-indigo-200 rounded-md px-3 py-1.5 shadow-sm">
             <div className="flex-1 flex items-center gap-3">
               <span className="text-indigo-900 font-bold text-sm shrink-0">
-                {activeJob.settingsJson?.jobType === 'batch-refine' ? 'AI Batch Refine' : 'Background Job'}
+                {isWaitingForGpu
+                  ? 'Generating audiobook · Waiting for GPU'
+                  : activeJob.settingsJson?.jobType === 'batch-refine'
+                    ? 'AI Batch Refine'
+                    : 'Background Job'}
               </span>
               <div className="flex-1 max-w-sm bg-indigo-200 rounded-full h-2">
                 <div className="bg-indigo-600 h-2 rounded-full transition-all duration-500" style={{ width: `${activeJob.progress || 0}%` }}></div>
               </div>
               <span className="text-indigo-800 font-mono text-sm font-semibold w-10">{Math.round(activeJob.progress || 0)}%</span>
+              {isWaitingForGpu && (
+                <span className="max-w-sm text-xs text-indigo-800">
+                  Kokoro will start automatically when the shared GPU is ready.
+                </span>
+              )}
             </div>
             <button 
               onClick={async () => {

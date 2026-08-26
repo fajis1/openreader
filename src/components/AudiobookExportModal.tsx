@@ -30,6 +30,7 @@ import {
 } from '@/lib/shared/multi-voice';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 import type { SmartAudioCharacterMap } from '@/types/document-settings';
+import { AUDIOBOOK_WAITING_FOR_GPU_PHASE } from '@/lib/shared/audiobook-runtime-phase';
 import { Button, Card, IconButton, MenuActionItem, MenuItemsSurface, MenuRoot, MenuTransition, MenuTrigger, RangeInput, Select } from '@/components/ui';
 import { 
   getAudiobookStatus, 
@@ -269,6 +270,8 @@ export function AudiobookExportModal({
           status: string;
           progress?: number;
           error?: string | null;
+          phase?: string | null;
+          gpuQueueState?: string | null;
         }) => j.documentId === documentId && (
           j.status === 'queued'
           || j.status === 'running'
@@ -285,15 +288,17 @@ export function AudiobookExportModal({
             setIsGenerating(false);
             setCurrentChapter('Waiting for character voice review…');
           } else {
-          serverIsGenerating = true;
-          setIsGenerating(true);
-          if (activeJob.progress !== undefined) setProgress(activeJob.progress);
-          if (activeJob.status === 'queued' && isGeminiRateLimitPause(activeJob.error)) {
-            setCurrentChapter(activeJob.error);
-          } else if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
-          else if (activeJob.status === AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS) setCurrentChapter('Pause requested. Waiting for the current step to finish...');
-          else if (activeJob.status === 'waiting_for_pdf') setCurrentChapter('Waiting for PDF parsing...');
-          else setCurrentChapter('Generating on server...');
+            serverIsGenerating = true;
+            setIsGenerating(true);
+            if (activeJob.progress !== undefined) setProgress(activeJob.progress);
+            if (activeJob.phase === AUDIOBOOK_WAITING_FOR_GPU_PHASE) {
+              setCurrentChapter('Waiting for the shared GPU. Kokoro has priority and will start automatically when the shared GPU is ready.');
+            } else if (activeJob.status === 'queued' && isGeminiRateLimitPause(activeJob.error)) {
+              setCurrentChapter(activeJob.error);
+            } else if (activeJob.status === 'queued') setCurrentChapter('Queued on server...');
+            else if (activeJob.status === AUDIOBOOK_ADMIN_PAUSE_REQUESTED_STATUS) setCurrentChapter('Pause requested. Waiting for the current step to finish...');
+            else if (activeJob.status === 'waiting_for_pdf') setCurrentChapter('Waiting for PDF parsing...');
+            else setCurrentChapter('Generating on server...');
           }
         } else {
           setActiveJobId(null);

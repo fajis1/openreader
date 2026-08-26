@@ -31,6 +31,7 @@ import {
 import { isKokoroModel } from '@/lib/shared/kokoro';
 import { DEFAULT_DOCUMENT_SETTINGS } from '@/types/document-settings';
 import { audiobookPrefix, deleteAudiobookPrefix } from '@/lib/server/audiobooks/blobstore';
+import { readAudiobookRuntimeStatus } from '@/lib/shared/audiobook-runtime-phase';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
 
 export const dynamic = 'force-dynamic';
@@ -313,6 +314,7 @@ export async function GET(req: NextRequest) {
       }
 
       const job = jobRows[0];
+      const runtimeStatus = readAudiobookRuntimeStatus(job.settingsJson, job.status);
       let queuePosition = 0;
 
       if (job.status === 'queued') {
@@ -323,7 +325,15 @@ export async function GET(req: NextRequest) {
         queuePosition = olderJobs.length + 1;
       }
 
-      return NextResponse.json({ job, queuePosition });
+      return NextResponse.json({
+        job: {
+          ...job,
+          phase: runtimeStatus.phase,
+          gpuQueueState: runtimeStatus.gpuQueueState,
+          runtimePhaseUpdatedAt: runtimeStatus.updatedAt,
+        },
+        queuePosition,
+      });
     }
 
     // List all active jobs for the user
@@ -337,11 +347,17 @@ export async function GET(req: NextRequest) {
       .where(eq(audiobookJobs.userId, userId))
       .orderBy(asc(audiobookJobs.createdAt));
 
-    const userJobs = userJobsRaw.map((row: typeof userJobsRaw[0]) => ({
-      ...row.job,
-      documentTitle: row.documentTitle,
-      globalQueuePosition: 0
-    }));
+    const userJobs = userJobsRaw.map((row: typeof userJobsRaw[0]) => {
+      const runtimeStatus = readAudiobookRuntimeStatus(row.job.settingsJson, row.job.status);
+      return {
+        ...row.job,
+        documentTitle: row.documentTitle,
+        globalQueuePosition: 0,
+        phase: runtimeStatus.phase,
+        gpuQueueState: runtimeStatus.gpuQueueState,
+        runtimePhaseUpdatedAt: runtimeStatus.updatedAt,
+      };
+    });
 
     const runningJobs = await db
       .select({ startedAt: audiobookJobs.startedAt, updatedAt: audiobookJobs.updatedAt, progress: audiobookJobs.progress })

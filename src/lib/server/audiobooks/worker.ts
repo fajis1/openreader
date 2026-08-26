@@ -86,6 +86,14 @@ import {
   buildSmartAudioValidationRepairPayload,
   resolveSmartAudioWithValidationRecovery,
 } from '@/lib/server/audiobooks/smart-audio-validation-recovery';
+import {
+  writeAudiobookGpuRuntimeStatus,
+  type GpuArbiterState,
+} from '@/lib/shared/audiobook-runtime-phase';
+import type {
+  GpuArbiterStatus,
+  GpuQueueRequestIdentity,
+} from '@/lib/server/tts/gpu-arbiter';
 
 const SMART_AUDIO_NATS_SUBJECT = 'audiobooks.gemini.clean';
 // Scholar and bibliography-catcher both use the scholar Python worker,
@@ -180,6 +188,104 @@ async function workerStillOwnsAudiobookJob(jobId: string): Promise<boolean> {
   return false;
 }
 
+async function publishAudiobookGpuStatus(
+  jobId: string,
+  status: GpuArbiterStatus | null,
+): Promise<void> {
+  const rows = await db.select({
+    status: audiobookJobs.status,
+    settingsJson: audiobookJobs.settingsJson,
+  })
+    .from(audiobookJobs)
+    .where(eq(audiobookJobs.id, jobId))
+    .limit(1);
+
+  if (rows[0]?.status !== 'running') {
+    await acknowledgeAudiobookPause(jobId);
+    if (status) throw new AudiobookJobStoppedError();
+    return;
+  }
+
+  const now = Date.now();
+  const updated = await updateAudiobookJobIfStatus(jobId, 'running', {
+    settingsJson: writeAudiobookGpuRuntimeStatus(
+      rows[0].settingsJson,
+      status?.state ?? null,
+      now,
+    ),
+    updatedAt: now,
+  });
+  if (!updated && status) throw new AudiobookJobStoppedError();
+}
+
+async function generateQueuedAudiobookTts(
+  jobId: string,
+  request: Parameters<typeof generateSegmentedAudiobookTtsBuffer>[0],
+  requestIdentity: GpuQueueRequestIdentity,
+  runtimeSettings: Parameters<typeof generateSegmentedAudiobookTtsBuffer>[2],
+): Promise<Buffer> {
+  const controller = new AbortController();
+  let cancellationCheckInFlight = false;
+  const cancellationTimer = setInterval(() => {
+    if (cancellationCheckInFlight || controller.signal.aborted) return;
+    cancellationCheckInFlight = true;
+    void workerStillOwnsAudiobookJob(jobId)
+      .then((owned) => {
+        if (!owned) controller.abort();
+      })
+      .catch((error) => {
+        serverLogger.warn({
+          event: 'audiobook.queue.cancel_check_failed',
+          jobId,
+          error: errorToLog(error),
+        }, 'Could not check audiobook cancellation while TTS was active.');
+      })
+      .finally(() => { cancellationCheckInFlight = false; });
+  }, 1_000);
+
+  let lastLoggedState: GpuArbiterState | null = null;
+  try {
+    return await generateSegmentedAudiobookTtsBuffer(
+      request,
+      controller.signal,
+      runtimeSettings,
+      {
+        requestIdentity,
+        onStatus: async (status) => {
+          try {
+            await publishAudiobookGpuStatus(jobId, status);
+          } catch (error) {
+            if (error instanceof AudiobookJobStoppedError) throw error;
+            serverLogger.warn({
+              event: 'audiobook.queue.gpu_status_publish_failed',
+              jobId,
+              error: errorToLog(error),
+            }, 'GPU queue status could not be published; TTS will continue.');
+            return;
+          }
+          const nextState = status?.state ?? null;
+          if (nextState !== lastLoggedState) {
+            serverLogger.info({
+              event: 'audiobook.queue.gpu_status',
+              jobId,
+              state: nextState || 'unavailable',
+            }, 'Audiobook GPU queue status changed.');
+            lastLoggedState = nextState;
+          }
+        },
+      },
+    );
+  } catch (error) {
+    if (controller.signal.aborted && !await workerStillOwnsAudiobookJob(jobId)) {
+      throw new AudiobookJobStoppedError();
+    }
+    throw error;
+  } finally {
+    clearInterval(cancellationTimer);
+    await publishAudiobookGpuStatus(jobId, null).catch(() => {});
+  }
+}
+
 export async function processAudiobookQueue() {
   if (!globalWorkerState.__worker_booted) {
     globalWorkerState.__worker_booted = true;
@@ -253,6 +359,13 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
   try {
     serverLogger.info({ event: 'audiobook.queue.start', jobId: job.id, documentId: job.documentId }, `Starting background audiobook generation job ${job.id}`);
     if (!await workerStillOwnsAudiobookJob(job.id)) return;
+    await publishAudiobookGpuStatus(job.id, null).catch((error) => {
+      serverLogger.warn({
+        event: 'audiobook.queue.gpu_status_cleanup_failed',
+        jobId: job.id,
+        error: errorToLog(error),
+      }, 'A stale GPU queue phase could not be cleared; audiobook generation will continue.');
+    });
     const docRows = await db.select().from(documents).where(eq(documents.id, job.documentId));
     if (docRows.length === 0) throw new Error('Document not found');
     const doc = docRows[0];
@@ -1115,16 +1228,31 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       // known so blob discovery and the chapter database agree.
       const chapterFileName = encodeChapterFileName(chapter.index, chapter.title, format);
 
-      const ttsBuffer = await generateSegmentedAudiobookTtsBuffer({
-        text: processedTextForTts,
-        voice: settings.voice || 'alloy',
-        speed: settings.speed || 1,
-        format: 'mp3',
-        provider: creds.provider,
-        apiKey: creds.apiKey,
-        baseUrl: creds.baseUrl,
-        testNamespace: testNamespace,
-      });
+      const ttsBuffer = await generateQueuedAudiobookTts(
+        job.id,
+        {
+          text: processedTextForTts,
+          voice: settings.voice || 'alloy',
+          speed: settings.speed || 1,
+          format: 'mp3',
+          provider: creds.provider,
+          apiKey: creds.apiKey,
+          baseUrl: creds.baseUrl,
+          testNamespace: testNamespace,
+        },
+        {
+          provider: creds.provider,
+          model: typeof settings.ttsModel === 'string'
+            ? settings.ttsModel
+            : creds.adminRecord?.defaultModel,
+        },
+        {
+          ttsCacheMaxSizeBytes: runtimeConfig.ttsCacheMaxSizeBytes,
+          ttsCacheTtlMs: runtimeConfig.ttsCacheTtlMs,
+          ttsUpstreamMaxRetries: runtimeConfig.ttsUpstreamMaxRetries,
+          ttsUpstreamTimeoutMs: runtimeConfig.ttsUpstreamTimeoutMs,
+        },
+      );
       if (!await workerStillOwnsAudiobookJob(job.id)) throw new AudiobookJobStoppedError();
 
       const contentType = format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';

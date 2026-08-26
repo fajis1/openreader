@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui';
 import { isGeminiRateLimitPause } from '@/lib/shared/audiobook-job-status';
+import { AUDIOBOOK_WAITING_FOR_GPU_PHASE } from '@/lib/shared/audiobook-runtime-phase';
 
 interface Job {
   id: string;
@@ -12,6 +13,7 @@ interface Job {
   createdAt: number;
   progress?: number;
   error?: string;
+  phase?: string | null;
 }
 
 export function JobsClientPage() {
@@ -57,6 +59,7 @@ export function JobsClientPage() {
           {jobs.map((job) => {
             const isQueued = job.status === 'queued';
             const isGeminiPaused = isQueued && isGeminiRateLimitPause(job.error);
+            const isWaitingForGpu = job.phase === AUDIOBOOK_WAITING_FOR_GPU_PHASE;
             const position = isQueued ? jobs.filter(j => j.status === 'queued' && j.createdAt <= job.createdAt).length : null;
 
             return (
@@ -65,6 +68,9 @@ export function JobsClientPage() {
                   <h3 className="font-medium">Document ID: {job.documentId.substring(0, 8)}...</h3>
                   <div className="text-sm text-soft mt-1">
                     Status: <span className="uppercase font-semibold text-accent">{job.status}</span>
+                    {isWaitingForGpu && (
+                      <span className="ml-2 uppercase font-semibold text-warning">· Waiting for GPU</span>
+                    )}
                     {isQueued && position && (
                       <span className="ml-3">Queue Position: #{position}</span>
                     )}
@@ -78,6 +84,11 @@ export function JobsClientPage() {
                   {isGeminiPaused && (
                     <p className="max-w-md text-warning mt-1">
                       {job.error}
+                    </p>
+                  )}
+                  {isWaitingForGpu && (
+                    <p className="max-w-md text-warning mt-1">
+                      Progress is preserved. Kokoro will continue automatically when the shared GPU is ready.
                     </p>
                   )}
                   {job.error && !isGeminiPaused && (
