@@ -7,6 +7,7 @@ import { parseHtmlBlocks } from "@/lib/client/html/blocks";
 import { BookPronunciationInspectorModal } from "@/components/doclist/BookPronunciationInspectorModal";
 import { MultiVoiceReviewStudio } from "@/components/audiobooks/MultiVoiceReviewStudio";
 import { MobileReviewPlayer } from "@/components/audiobooks/MobileReviewPlayer";
+import { BatchRefineReviewModal } from "@/components/audiobooks/BatchRefineReviewModal";
 import { BASE_BOOKS, PRESET_MODELS } from "@/components/constants";
 import { toast } from "react-hot-toast";
 import { ModalFrame } from "@/components/ui";
@@ -14,6 +15,10 @@ import { SmartAudioSettings } from "@/components/SmartAudioSettings";
 import { estimateSpeakerSegmentAtTime, parseVoiceTaggedText, renderVoiceSegments } from "@/lib/shared/multi-voice";
 import type { SmartAudioCharacterMap } from "@/types/document-settings";
 import { AUDIOBOOK_WAITING_FOR_GPU_PHASE } from "@/lib/shared/audiobook-runtime-phase";
+import {
+  BATCH_REFINE_RECORDING_OPTION_HELP,
+  type BatchRefineRecordingMode,
+} from "@/lib/shared/batch-refine-review";
 
 interface Chapter {
   index: number;
@@ -40,12 +45,16 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [originalText, setOriginalText] = useState("");
   const [hasEditedText, setHasEditedText] = useState(false);
   const [showBatchRefineModal, setShowBatchRefineModal] = useState(false);
+  const [showBatchRefineReview, setShowBatchRefineReview] = useState(false);
+  const [batchRefineRunId, setBatchRefineRunId] = useState<string | null>(null);
   const [batchRefineRule, setBatchRefineRule] = useState('');
   const [batchRefineModel, setBatchRefineModel] = useState('gemini-2.5-flash');
   const [batchRefineKeys, setBatchRefineKeys] = useState({ primary: '', backup: '' });
-  const [newApiKey, setNewApiKey] = useState('');
-  const [newBackupKey, setNewBackupKey] = useState('');
-  const [availableKeys, setAvailableKeys] = useState<any[]>([]);
+  const [batchRefineProfileName, setBatchRefineProfileName] = useState('');
+  const [batchRefineProfileCategory, setBatchRefineProfileCategory] = useState('standard');
+  const [batchRefineRecordingMode, setBatchRefineRecordingMode] = useState<BatchRefineRecordingMode>('review');
+  const [batchRefineHoldHighPriority, setBatchRefineHoldHighPriority] = useState(true);
+  const [batchRefineOptionHelp, setBatchRefineOptionHelp] = useState<BatchRefineRecordingMode | null>(null);
   const [isBatchRefining, setIsBatchRefining] = useState(false);
   const [activeJob, setActiveJob] = useState<any>(null);
   const [isTextLoading, setIsTextLoading] = useState(false);
@@ -75,6 +84,20 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
 
   const isMultiVoice = chapterText.includes('<voice');
   const isWaitingForGpu = activeJob?.phase === AUDIOBOOK_WAITING_FOR_GPU_PHASE;
+  const activeJobSettings = useMemo(() => {
+    if (!activeJob?.settingsJson) return {} as Record<string, unknown>;
+    if (typeof activeJob.settingsJson === 'string') {
+      try {
+        return JSON.parse(activeJob.settingsJson) as Record<string, unknown>;
+      } catch {
+        return {} as Record<string, unknown>;
+      }
+    }
+    return activeJob.settingsJson as Record<string, unknown>;
+  }, [activeJob]);
+  const activeBatchRefineRunId = typeof activeJobSettings.batchRefineRunId === 'string'
+    ? activeJobSettings.batchRefineRunId
+    : batchRefineRunId;
   const speakerSegments = useMemo(() => {
     if (!isMultiVoice) return [];
     try {
@@ -489,14 +512,15 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const handleOpenBatchRefine = async () => {
     setShowBatchRefineModal(true);
     try {
-      const res = await fetch(`/api/audiobooks/batch-refine?bookId=${bookId}`);
+      const query = new URLSearchParams({ bookId });
+      if (selectedProfileId) query.set('smartAudioProfileId', selectedProfileId);
+      const res = await fetch(`/api/audiobooks/batch-refine?${query.toString()}`);
       if (res.ok) {
         const data = await res.json();
         if (data.defaultModel) setBatchRefineModel(data.defaultModel);
         setBatchRefineKeys({ primary: data.primaryKeyMasked || 'Not Set', backup: data.backupKeyMasked || 'Not Set' });
-        if (data.availableKeys) setAvailableKeys(data.availableKeys);
-        setNewApiKey('');
-        setNewBackupKey('');
+        setBatchRefineProfileName(data.selectedProfileName || 'Standard audiobook');
+        setBatchRefineProfileCategory(data.profileCategory || 'standard');
       }
     } catch(e) {}
   };
@@ -517,18 +541,32 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       const res = await fetch('/api/audiobooks/batch-refine', {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ bookId: bookId, rule: batchRefineRule.trim(), aiModel: batchRefineModel, newApiKey: newApiKey.trim(), newBackupKey: newBackupKey.trim() })
+         body: JSON.stringify({
+           bookId,
+           rule: batchRefineRule.trim(),
+           aiModel: batchRefineModel,
+           smartAudioProfileId: selectedProfileId,
+           recordingMode: batchRefineRecordingMode,
+           holdHighPriority: batchRefineHoldHighPriority,
+         })
       });
       if (res.ok) {
         const body = await res.json().catch(() => ({}));
+        setBatchRefineRunId(typeof body.runId === 'string' ? body.runId : null);
         setActiveJob({
           id: body.jobId || 'temp-id',
           status: 'queued',
           progress: 0,
-          settingsJson: { jobType: 'batch-refine' }
+          settingsJson: {
+            jobType: 'batch-refine',
+            batchRefineRunId: body.runId,
+            recordingMode: batchRefineRecordingMode,
+          }
         });
         setShowBatchRefineModal(false);
-        toast.success('Background batch refine started! Text will be updated shortly.');
+        toast.success(batchRefineRecordingMode === 'review'
+          ? 'Batch Refine started. Changed chapters will wait for your review.'
+          : 'Batch Refine started. Eligible changes will record as they are made.');
       } else {
          const err = await res.json().catch(() => ({}));
          toast.error(err.error || 'Failed to start batch refine');
@@ -631,7 +669,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
               <span className="text-indigo-900 font-bold text-sm shrink-0">
                 {isWaitingForGpu
                   ? 'Generating audiobook · Waiting for GPU'
-                  : activeJob.settingsJson?.jobType === 'batch-refine'
+                  : activeJobSettings.jobType === 'batch-refine'
                     ? 'AI Batch Refine'
                     : 'Background Job'}
               </span>
@@ -643,6 +681,25 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                 <span className="max-w-sm text-xs text-indigo-800">
                   Kokoro will start automatically when the shared GPU is ready.
                 </span>
+              )}
+              {activeJobSettings.jobType === 'batch-refine' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowBatchRefineReview(true)}
+                    className="shrink-0 rounded bg-accent px-2.5 py-1 text-xs font-semibold text-background hover:bg-secondary-accent"
+                  >
+                    Review Changes
+                  </button>
+                  <a
+                    href={`/api/audiobooks/batch-refine/changelog?bookId=${encodeURIComponent(bookId)}${activeBatchRefineRunId ? `&runId=${encodeURIComponent(activeBatchRefineRunId)}` : ''}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 text-xs font-semibold text-accent hover:text-accent-strong hover:underline"
+                  >
+                    Raw Changelog
+                  </a>
+                </>
               )}
             </div>
             <button 
@@ -711,6 +768,13 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                 <title>Apply a specific, surgical instruction (like removing specific words or fixing a recurring typo) to every single chapter in the entire book.</title>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
+            </button>
+            <button
+              onClick={() => setShowBatchRefineReview(true)}
+              className="px-3 py-1.5 bg-surface-raised hover:bg-surface-sunken text-text-strong border border-line-soft rounded font-medium text-xs transition-colors"
+              title="Review only the chapters changed by the latest AI Batch Refine run"
+            >
+              Review AI Changes
             </button>
             <button
               onClick={handleForceRebuildAll}
@@ -1244,9 +1308,9 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           </div>
           <div className="p-4 space-y-4">
             <p className="text-sm text-text-soft">
-              This will queue a background job to run over EVERY text chapter in this book.
-              It will instruct the AI to surgically apply ONLY this specific rule and preserve all other formatting and text.
-              After refining the text, it will automatically trigger the background audio regenerator.
+              This scans every canonical audiobook text chapter while preserving the extracted original files.
+              Only chapters Gemini changes appear in the review. The active {batchRefineProfileName || 'Smart Audio'} profile
+              uses the <span className="font-semibold">{batchRefineProfileCategory}</span> review flags.
             </p>
             <div>
               <label className="block text-sm font-medium mb-1">Refinement Rule / Instruction</label>
@@ -1257,6 +1321,55 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                 onChange={e => setBatchRefineRule(e.target.value)}
               />
             </div>
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-semibold text-text-strong">What should happen when Gemini makes a change?</legend>
+              {(Object.keys(BATCH_REFINE_RECORDING_OPTION_HELP) as BatchRefineRecordingMode[]).map((mode) => {
+                const option = BATCH_REFINE_RECORDING_OPTION_HELP[mode];
+                const selected = batchRefineRecordingMode === mode;
+                return (
+                  <div key={mode} className={`rounded border p-3 ${selected ? 'border-accent-line bg-accent-wash' : 'border-line-soft bg-surface-raised'}`}>
+                    <div className="flex items-center gap-3">
+                      <input
+                        id={`batch-refine-mode-${mode}`}
+                        type="radio"
+                        name="batch-refine-recording-mode"
+                        checked={selected}
+                        onChange={() => setBatchRefineRecordingMode(mode)}
+                      />
+                      <label htmlFor={`batch-refine-mode-${mode}`} className="flex-1 cursor-pointer text-sm font-semibold text-text-strong">
+                        {option.label}{mode === 'review' ? ' (recommended)' : ' (opt in)'}
+                      </label>
+                      <button
+                        type="button"
+                        aria-label={`Explain ${option.label}`}
+                        aria-expanded={batchRefineOptionHelp === mode}
+                        onClick={() => setBatchRefineOptionHelp((current) => current === mode ? null : mode)}
+                        className="rounded-full border border-accent-line bg-accent-wash px-2.5 py-1 text-xs font-semibold text-accent hover:bg-surface-sunken"
+                      >
+                        ⚑ What happens?
+                      </button>
+                    </div>
+                    {batchRefineOptionHelp === mode && (
+                      <p className="mt-2 rounded border border-line-soft bg-surface p-2 text-xs text-text-soft">{option.description}</p>
+                    )}
+                  </div>
+                );
+              })}
+              {batchRefineRecordingMode === 'immediate' && (
+                <label className="flex items-start gap-2 rounded border border-danger bg-danger-wash p-3 text-sm text-text-strong">
+                  <input
+                    type="checkbox"
+                    checked={batchRefineHoldHighPriority}
+                    onChange={(event) => setBatchRefineHoldHighPriority(event.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block font-semibold">Hold high-concern changes for review</span>
+                    <span className="text-xs text-text-soft">Low- and medium-concern changes record immediately; high-concern changes wait for approval.</span>
+                  </span>
+                </label>
+              )}
+            </fieldset>
             <div className="bg-surface-raised p-3 border border-line-soft rounded text-sm text-text-soft">
               <div className="flex items-center gap-2 mb-2">
                 <span className="font-semibold w-24">AI Model:</span>
@@ -1271,76 +1384,44 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
                 </select>
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-semibold w-24 shrink-0">Primary Key:</span>
-                {!batchRefineKeys.primary || batchRefineKeys.primary === 'Not Set' ? (
-                  <div className="flex-1 flex flex-col gap-1">
-                    {availableKeys.length > 0 && (
-                      <select
-                        className="bg-surface border border-line-soft rounded px-2 py-1 text-text-strong text-xs w-full"
-                        onChange={(e) => {
-                          if (e.target.value !== 'custom') {
-                            setNewApiKey(e.target.value);
-                          }
-                        }}
-                      >
-                        <option value="custom">Select a key from another profile...</option>
-                        {availableKeys.map(ak => (
-                          <option key={ak.id} value={ak.key}>{ak.name} ({ak.masked})</option>
-                        ))}
-                      </select>
-                    )}
-                    <input
-                      type="password"
-                      placeholder="Or paste a new Gemini API Key here..."
-                      value={newApiKey}
-                      onChange={(e) => setNewApiKey(e.target.value)}
-                      className="bg-surface border border-line-soft rounded px-2 py-1 text-text-strong text-xs w-full"
-                    />
-                  </div>
-                ) : (
-                  <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.primary}</code>
-                )}
+                <span className="font-semibold w-24 shrink-0">Profile:</span>
+                <span className="text-text-strong">{batchRefineProfileName || 'Selected Smart Audio profile'}</span>
               </div>
               <div className="flex items-center gap-2 mt-1">
-                <span className="font-semibold w-24 shrink-0">Backup Key:</span>
-                {!batchRefineKeys.backup || batchRefineKeys.backup === 'Not Set' ? (
-                  <div className="flex-1 flex flex-col gap-1">
-                    {availableKeys.length > 0 && (
-                      <select
-                        className="bg-surface border border-line-soft rounded px-2 py-1 text-text-strong text-xs w-full"
-                        onChange={(e) => {
-                          if (e.target.value !== 'custom') {
-                            setNewBackupKey(e.target.value);
-                          }
-                        }}
-                      >
-                        <option value="custom">Select a key from another profile...</option>
-                        {availableKeys.map(ak => (
-                          <option key={ak.id} value={ak.key}>{ak.name} ({ak.masked})</option>
-                        ))}
-                      </select>
-                    )}
-                    <input
-                      type="password"
-                      placeholder="Or paste a new Backup API Key here..."
-                      value={newBackupKey}
-                      onChange={(e) => setNewBackupKey(e.target.value)}
-                      className="bg-surface border border-line-soft rounded px-2 py-1 text-text-strong text-xs w-full"
-                    />
-                  </div>
-                ) : (
-                  <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.backup}</code>
-                )}
+                <span className="font-semibold w-24 shrink-0">Gemini keys:</span>
+                <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.primary}</code>
+                <span>/</span>
+                <code className="bg-surface px-2 py-0.5 rounded text-xs text-text-strong">{batchRefineKeys.backup}</code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBatchRefineModal(false);
+                    setIsSettingsModalOpen(true);
+                  }}
+                  className="ml-auto text-xs font-semibold text-accent hover:underline"
+                >
+                  Manage in AI Settings
+                </button>
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <a
-                href={`/api/audiobooks/batch-refine/changelog?bookId=${bookId}`}
+                href={`/api/audiobooks/batch-refine/changelog?bookId=${encodeURIComponent(bookId)}${batchRefineRunId ? `&runId=${encodeURIComponent(batchRefineRunId)}` : ''}`}
                 target="_blank"
                 className="px-4 py-2 bg-surface-sunken hover:bg-surface-raised text-text-strong rounded text-sm transition-colors border border-line-soft mr-auto"
               >
-                View Changelog
+                Raw Changelog
               </a>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBatchRefineModal(false);
+                  setShowBatchRefineReview(true);
+                }}
+                className="px-4 py-2 border border-line-soft rounded text-sm hover:bg-surface-raised transition-colors"
+              >
+                Review Existing Changes
+              </button>
               <button
                 className="px-4 py-2 border border-line-soft rounded text-sm hover:bg-surface-raised transition-colors"
                 onClick={() => setShowBatchRefineModal(false)}
@@ -1358,6 +1439,17 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           </div>
         </div>
       </ModalFrame>
+
+      <BatchRefineReviewModal
+        open={showBatchRefineReview}
+        onClose={() => setShowBatchRefineReview(false)}
+        bookId={bookId}
+        runId={activeBatchRefineRunId}
+        onRecordingQueued={() => {
+          void fetchStatus();
+          if (selectedChapterIndex !== undefined) void fetchChapterText(selectedChapterIndex, true);
+        }}
+      />
 
     </div>
   );

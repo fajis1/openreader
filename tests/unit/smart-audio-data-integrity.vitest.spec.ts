@@ -164,6 +164,20 @@ describe('Smart Audio data-integrity guards', () => {
     expect(wizard).not.toContain('>5 words');
   });
 
+  test('exposes the Batch Refine changelog beside the active Review progress banner', () => {
+    const listener = source('src/app/(app)/listen/[bookId]/page.tsx');
+    const banner = listener.slice(
+      listener.indexOf("activeJob && (activeJob.status === 'running'"),
+      listener.indexOf('<div className="flex gap-2 items-center flex-wrap">'),
+    );
+
+    expect(banner).toContain("activeJobSettings.jobType === 'batch-refine'");
+    expect(banner).toContain('/api/audiobooks/batch-refine/changelog?bookId=');
+    expect(banner).toContain('Review Changes');
+    expect(banner).toContain('Raw Changelog');
+    expect(banner).toContain('Stop & Cancel');
+  });
+
   test('versions 12K chapter maps and retains legacy resume behavior', () => {
     const queueRoute = source('src/app/api/audiobooks/queue/route.ts');
     const worker = source('src/lib/server/audiobooks/worker.ts');

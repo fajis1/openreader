@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import {
+  globalPronunciationDefaults,
   isMachineGeneratedGlobalPronunciationChoice,
   replaceGlobalPronunciationChoices,
   recordLearnedGlobalPronunciation,
@@ -20,6 +21,13 @@ describe('global pronunciation administration', () => {
       { phonetic: '/stixia/', usageCount: 1 },
     ],
   };
+
+  test('returns only each library word’s safe effective default', () => {
+    expect(globalPronunciationDefaults({
+      'τοὺς': [{ phonetic: '/tus/' }, { phonetic: '/tuːs/' }],
+      unsafe: [{ phonetic: '' }, { phonetic: '/safe-but-not-default/' }],
+    })).toEqual({ 'τοὺς': '/tus/' });
+  });
 
   test('distinguishes scanner-generated choices from human and legacy choices', () => {
     expect(isMachineGeneratedGlobalPronunciationChoice({

@@ -300,11 +300,11 @@ describe('LitRPG source and production wiring', () => {
     expect(worker).toContain('await nc.subscribe("audiobooks.multivoice.assign"');
     expect(worker).toContain('VoiceAssignmentResult,');
     expect(worker).toContain('redundant speech attribution');
-    expect(worker).toContain('Dominic replied as he squirmed');
-    expect(worker).toContain('any action/reaction clause is narrative prose and must remain');
-    expect(worker).toContain('he softly muttered');
-    expect(worker).toContain('preserve the entire segment');
-    expect(worker).toContain('Petra shouted as a ball of water');
+    expect(worker).toContain('EXACT SAME character');
+    expect(worker).toContain('ZERO action, setting description, or internal thoughts');
+    expect(worker).toContain('NEVER omit attributions when transitioning between different characters');
+    expect(worker).toContain('NEVER omit attributions that contain narrative action');
+    expect(worker).toContain('MUST remain intact and be spoken by the TTS');
     expect(entrypoint).toContain('audiobook_worker.py');
     expect(legacyWorker).toContain('Start audiobook_worker.py instead.');
   });

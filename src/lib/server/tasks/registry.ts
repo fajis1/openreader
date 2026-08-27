@@ -4,6 +4,7 @@ import { cleanupTempUploads } from './handlers/cleanup-temp-uploads';
 import { pruneJobEvents } from './handlers/prune-job-events';
 import { pruneTtsUsage } from './handlers/prune-tts-usage';
 import { processAudiobookQueue } from '../audiobooks/worker';
+import { processBatchRefineRecordingQueue } from '../audiobooks/batch-refine-recordings';
 
 /**
  * The catalog of scheduled tasks. Each key is the stable task id stored in the
@@ -41,5 +42,12 @@ export const TASK_REGISTRY: TaskRegistry = {
     defaultIntervalMs: 60 * 1000, // 1 minute checks
     maxRunMs: 12 * 60 * 60 * 1000, // 12 hours max run time
     run: processAudiobookQueue,
+  },
+  'process-batch-refine-recordings': {
+    name: 'Process approved Batch Refine recordings',
+    description: 'Record approved per-chapter Batch Refine proposals without waiting for the text refinement run to finish.',
+    defaultIntervalMs: 15 * 1000,
+    maxRunMs: 12 * 60 * 60 * 1000,
+    run: processBatchRefineRecordingQueue,
   },
 };

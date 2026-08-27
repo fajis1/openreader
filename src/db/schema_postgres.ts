@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, real, date, bigint, boolean, primaryKey, index, jsonb, foreignKey, check } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, real, date, bigint, boolean, primaryKey, index, uniqueIndex, jsonb, foreignKey, check } from 'drizzle-orm/pg-core';
 import { user } from './schema_auth_postgres';
 
 const PG_NOW_MS = sql`(extract(epoch from now()) * 1000)::bigint`;
@@ -49,6 +49,66 @@ export const audiobookJobs = pgTable('audiobook_jobs', {
 }, (table) => [
   index('idx_audiobook_jobs_status').on(table.status),
   index('idx_audiobook_jobs_user_id').on(table.userId),
+]);
+
+export const batchRefineRuns = pgTable('batch_refine_runs', {
+  id: text('id').primaryKey(),
+  jobId: text('job_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  documentId: text('document_id').notNull(),
+  profileId: text('profile_id'),
+  profileCategory: text('profile_category').notNull().default('standard'),
+  rule: text('rule').notNull(),
+  recordingMode: text('recording_mode').notNull().default('review'),
+  holdHighPriority: boolean('hold_high_priority').notNull().default(true),
+  status: text('status').notNull().default('queued'),
+  totalChapters: integer('total_chapters').notNull().default(0),
+  processedChapters: integer('processed_chapters').notNull().default(0),
+  changedChapters: integer('changed_chapters').notNull().default(0),
+  unchangedChapters: integer('unchanged_chapters').notNull().default(0),
+  failedChapters: integer('failed_chapters').notNull().default(0),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull().default(PG_NOW_MS),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull().default(PG_NOW_MS),
+  completedAt: bigint('completed_at', { mode: 'number' }),
+}, (table) => [
+  index('idx_batch_refine_runs_user_document_created').on(table.userId, table.documentId, table.createdAt),
+  index('idx_batch_refine_runs_status_updated').on(table.status, table.updatedAt),
+  uniqueIndex('idx_batch_refine_runs_job').on(table.jobId),
+]);
+
+export const batchRefineChanges = pgTable('batch_refine_changes', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => batchRefineRuns.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  documentId: text('document_id').notNull(),
+  chapterIndex: integer('chapter_index').notNull(),
+  chapterTitle: text('chapter_title').notNull(),
+  textFileName: text('text_file_name').notNull(),
+  previousText: text('previous_text').notNull(),
+  proposedText: text('proposed_text').notNull(),
+  sourceTextHash: text('source_text_hash').notNull(),
+  proposedTextHash: text('proposed_text_hash').notNull(),
+  diffText: text('diff_text').notNull(),
+  changedCharacters: integer('changed_characters').notNull().default(0),
+  addedCharacters: integer('added_characters').notNull().default(0),
+  removedCharacters: integer('removed_characters').notNull().default(0),
+  changePercent: real('change_percent').notNull().default(0),
+  reviewPriority: text('review_priority').notNull().default('low'),
+  priorityScore: integer('priority_score').notNull().default(0),
+  flagsJson: jsonb('flags_json').notNull().default([]),
+  reviewNote: text('review_note'),
+  decision: text('decision').notNull().default('pending'),
+  edited: boolean('edited').notNull().default(false),
+  audioStatus: text('audio_status').notNull().default('not_requested'),
+  audioError: text('audio_error'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull().default(PG_NOW_MS),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull().default(PG_NOW_MS),
+  decidedAt: bigint('decided_at', { mode: 'number' }),
+  audioCompletedAt: bigint('audio_completed_at', { mode: 'number' }),
+}, (table) => [
+  uniqueIndex('idx_batch_refine_changes_run_chapter').on(table.runId, table.chapterIndex),
+  index('idx_batch_refine_changes_run_decision').on(table.runId, table.decision, table.chapterIndex),
+  index('idx_batch_refine_changes_audio_status').on(table.audioStatus, table.updatedAt),
 ]);
 
 export const audiobookChapters = pgTable('audiobook_chapters', {

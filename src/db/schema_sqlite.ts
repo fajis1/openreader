@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, primaryKey, index, foreignKey, check } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, primaryKey, index, uniqueIndex, foreignKey, check } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import { user } from './schema_auth_sqlite';
 
@@ -49,6 +49,66 @@ export const audiobookJobs = sqliteTable('audiobook_jobs', {
 }, (table) => [
   index('idx_audiobook_jobs_status').on(table.status),
   index('idx_audiobook_jobs_user_id').on(table.userId),
+]);
+
+export const batchRefineRuns = sqliteTable('batch_refine_runs', {
+  id: text('id').primaryKey(),
+  jobId: text('job_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  documentId: text('document_id').notNull(),
+  profileId: text('profile_id'),
+  profileCategory: text('profile_category').notNull().default('standard'),
+  rule: text('rule').notNull(),
+  recordingMode: text('recording_mode').notNull().default('review'),
+  holdHighPriority: integer('hold_high_priority', { mode: 'boolean' }).notNull().default(true),
+  status: text('status').notNull().default('queued'),
+  totalChapters: integer('total_chapters').notNull().default(0),
+  processedChapters: integer('processed_chapters').notNull().default(0),
+  changedChapters: integer('changed_chapters').notNull().default(0),
+  unchangedChapters: integer('unchanged_chapters').notNull().default(0),
+  failedChapters: integer('failed_chapters').notNull().default(0),
+  createdAt: integer('created_at').notNull().default(SQLITE_NOW_MS),
+  updatedAt: integer('updated_at').notNull().default(SQLITE_NOW_MS),
+  completedAt: integer('completed_at'),
+}, (table) => [
+  index('idx_batch_refine_runs_user_document_created').on(table.userId, table.documentId, table.createdAt),
+  index('idx_batch_refine_runs_status_updated').on(table.status, table.updatedAt),
+  uniqueIndex('idx_batch_refine_runs_job').on(table.jobId),
+]);
+
+export const batchRefineChanges = sqliteTable('batch_refine_changes', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => batchRefineRuns.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  documentId: text('document_id').notNull(),
+  chapterIndex: integer('chapter_index').notNull(),
+  chapterTitle: text('chapter_title').notNull(),
+  textFileName: text('text_file_name').notNull(),
+  previousText: text('previous_text').notNull(),
+  proposedText: text('proposed_text').notNull(),
+  sourceTextHash: text('source_text_hash').notNull(),
+  proposedTextHash: text('proposed_text_hash').notNull(),
+  diffText: text('diff_text').notNull(),
+  changedCharacters: integer('changed_characters').notNull().default(0),
+  addedCharacters: integer('added_characters').notNull().default(0),
+  removedCharacters: integer('removed_characters').notNull().default(0),
+  changePercent: real('change_percent').notNull().default(0),
+  reviewPriority: text('review_priority').notNull().default('low'),
+  priorityScore: integer('priority_score').notNull().default(0),
+  flagsJson: text('flags_json', { mode: 'json' }).notNull().default([]),
+  reviewNote: text('review_note'),
+  decision: text('decision').notNull().default('pending'),
+  edited: integer('edited', { mode: 'boolean' }).notNull().default(false),
+  audioStatus: text('audio_status').notNull().default('not_requested'),
+  audioError: text('audio_error'),
+  createdAt: integer('created_at').notNull().default(SQLITE_NOW_MS),
+  updatedAt: integer('updated_at').notNull().default(SQLITE_NOW_MS),
+  decidedAt: integer('decided_at'),
+  audioCompletedAt: integer('audio_completed_at'),
+}, (table) => [
+  uniqueIndex('idx_batch_refine_changes_run_chapter').on(table.runId, table.chapterIndex),
+  index('idx_batch_refine_changes_run_decision').on(table.runId, table.decision, table.chapterIndex),
+  index('idx_batch_refine_changes_audio_status').on(table.audioStatus, table.updatedAt),
 ]);
 
 export const audiobookChapters = sqliteTable('audiobook_chapters', {

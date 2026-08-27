@@ -1,175 +1,411 @@
-import { db } from '@/db';
-import { audiobookJobs, documents, documentSettings } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { userPreferences } from '@/db/schema';
-import { serverLogger } from '@/lib/server/logger';
+import { randomUUID } from 'node:crypto';
+
+import { and, eq } from 'drizzle-orm';
 import * as Diff from 'diff';
-import { listAudiobookObjects, getAudiobookObjectBuffer, putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
+
+import { db } from '@/db';
+import { adminSettings, audiobookChapters, audiobookJobs, documents } from '@/db/schema';
+import {
+  calculateBatchRefineMetrics,
+  parseBatchRefineAssessment,
+} from '@/lib/server/audiobooks/batch-refine-assessment';
+import { prepareScholarBatchRefineText } from '@/lib/server/audiobooks/batch-refine-scholar-safety';
+import {
+  approveBatchRefineChange,
+  createBatchRefineRun,
+  finishBatchRefineRun,
+  getBatchRefineProposalForChapter,
+  getBatchRefineRunState,
+  insertBatchRefineProposal,
+  markBatchRefineRunStarted,
+  updateBatchRefineRunProgress,
+} from '@/lib/server/audiobooks/batch-refine-review-store';
+import {
+  getAudiobookObjectBuffer,
+  listAudiobookObjects,
+  putAudiobookObject,
+} from '@/lib/server/audiobooks/blobstore';
 import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemini-failover';
-import { findSmartAudioProfileById, readSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
-import { INTERNAL_WORKER_SECRET } from '@/lib/server/internal-secret';
+import {
+  findSmartAudioProfileById,
+  readSmartAudioProfilesDocument,
+} from '@/lib/server/smart-audio-profiles';
+import { globalPronunciationDefaults } from '@/lib/server/tts/global-pronunciation-library';
+import { runTaskNow } from '@/lib/server/tasks/engine';
+import { errorToLog, serverLogger } from '@/lib/server/logger';
+import {
+  batchRefineAssessmentPrompt,
+  normalizeBatchRefineRecordingMode,
+  resolveBatchRefineProfileCategory,
+  type BatchRefineProfileCategory,
+} from '@/lib/shared/batch-refine-review';
+import { filterKokoroCompatiblePronunciationRecord } from '@/lib/shared/kokoro-pronunciation-policy';
+
+type BatchRefineJobSettings = {
+  jobType?: string;
+  rule?: string;
+  aiModel?: string;
+  batchRefineRunId?: string;
+  smartAudioProfileId?: string;
+  profileCategory?: BatchRefineProfileCategory;
+  recordingMode?: unknown;
+  holdHighPriority?: boolean;
+};
+
+function parseJobSettings(value: unknown): BatchRefineJobSettings {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed as BatchRefineJobSettings : {};
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === 'object' ? value as BatchRefineJobSettings : {};
+}
+
+function chapterIndexFromTextFile(fileName: string): number | null {
+  const match = /^(\d{1,6})__text\.txt$/u.exec(fileName);
+  if (!match) return null;
+  const oneBased = Number(match[1]);
+  return Number.isInteger(oneBased) && oneBased > 0 ? oneBased - 1 : null;
+}
+
+async function readOptionalChangelog(bookId: string, userId: string, fileName: string): Promise<string> {
+  try {
+    return (await getAudiobookObjectBuffer(bookId, userId, fileName, null)).toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+async function writeChangelog(bookId: string, userId: string, fileName: string, text: string): Promise<void> {
+  await putAudiobookObject(
+    bookId,
+    userId,
+    fileName,
+    Buffer.from(text, 'utf8'),
+    'text/plain; charset=utf-8',
+    null,
+  );
+}
 
 export async function processBatchRefineJob(
   job: typeof audiobookJobs.$inferSelect,
   updateProgress: (progress: number) => Promise<void>,
-  markError: (err: string) => Promise<void>
+  markError: (err: string) => Promise<void>,
 ) {
   const bookId = job.documentId;
   const userId = job.userId;
-  const jobSettings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
-  const refineRule = jobSettings.rule;
+  const jobSettings = parseJobSettings(job.settingsJson);
+  const refineRule = typeof jobSettings.rule === 'string' ? jobSettings.rule.trim() : '';
 
   if (!refineRule) {
     await markError('Refine rule is missing in job settings');
     return;
   }
 
-  try {
-    const docRows = await db.select().from(documents).where(and(eq(documents.id, bookId), eq(documents.userId, userId))).limit(1);
-    
-    if (docRows.length === 0) {
-      await markError('Document not found');
-      return;
+  const profilesDocument = await readSmartAudioProfilesDocument(userId);
+  const selectedProfileId = jobSettings.smartAudioProfileId || profilesDocument.selectedProfileId;
+  const profile = findSmartAudioProfileById(profilesDocument, selectedProfileId);
+  const profileCategory = jobSettings.profileCategory
+    || resolveBatchRefineProfileCategory(profile);
+  const recordingMode = normalizeBatchRefineRecordingMode(jobSettings.recordingMode);
+  const holdHighPriority = jobSettings.holdHighPriority !== false;
+  const primaryKey = (profile?.geminiApiKey || process.env.GEMINI_API_KEY || '').trim();
+  const backupKey = (profile?.backupGeminiApiKey || process.env.BACKUP_GEMINI_API_KEY || '').trim();
+  const resolvedModel = jobSettings.aiModel || profile?.pronunciationAiModel || 'gemini-2.5-flash';
+  const runId = jobSettings.batchRefineRunId || randomUUID();
+  let scholarPronunciations: Record<string, string> = {};
+  if (profileCategory === 'scholar') {
+    const globalRows = await db.select({ valueJson: adminSettings.valueJson })
+      .from(adminSettings)
+      .where(eq(adminSettings.key, 'global_pronunciations'))
+      .limit(1);
+    try {
+      scholarPronunciations = filterKokoroCompatiblePronunciationRecord({
+        ...globalPronunciationDefaults(globalRows[0]?.valueJson || {}),
+        ...(profile?.pronunciations || {}),
+      });
+    } catch (error) {
+      serverLogger.warn({
+        event: 'audiobook.batch_refine.pronunciation_library_invalid',
+        bookId,
+        runId,
+        error: errorToLog(error),
+      }, 'Batch Refine could not read the Scholar pronunciation library; unresolved bare foreign script will be removed.');
+      scholarPronunciations = filterKokoroCompatiblePronunciationRecord(profile?.pronunciations || {});
     }
+  }
 
-    // We must import documentSettings here if we want to query it, but wait!
-    // We didn't import documentSettings in refine.ts! Let's just require it.
-    const settingsRows = await db.select().from(documentSettings).where(eq(documentSettings.documentId, bookId)).limit(1);
-    
-    const selectedProfileId = (settingsRows[0]?.settingsJson as any)?.audiobookProfileId || 'default';
-    const profilesDoc = await readSmartAudioProfilesDocument(userId);
-    const profile = await findSmartAudioProfileById(profilesDoc, selectedProfileId);
-    
-    // We try to use the primary key, or fallback key, or system key
-    
-    const userRows = await db.select().from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1);
-    const globalKey = userRows[0]?.geminiApiKey || process.env.GEMINI_API_KEY || '';
-    const globalBackupKey = userRows[0]?.backupGeminiApiKey || process.env.BACKUP_GEMINI_API_KEY || '';
-    
-    const primaryKey = (profile?.geminiApiKey || globalKey).trim();
-    const backupKey = (profile?.backupGeminiApiKey || globalBackupKey).trim();
-    const resolvedModel = jobSettings.aiModel || profile?.pronunciationAiModel || 'gemini-2.5-flash';
+  if (!jobSettings.batchRefineRunId) {
+    await createBatchRefineRun({
+      id: runId,
+      jobId: job.id,
+      userId,
+      documentId: bookId,
+      profileId: profile?.id || null,
+      profileCategory,
+      rule: refineRule,
+      recordingMode,
+      holdHighPriority,
+    });
+  }
 
-    serverLogger.info({ event: 'audiobook.batch_refine.start', bookId, jobId: job.id }, 'Starting batch refine job');
+  let runFinished = false;
+  try {
+    const docRows = await db.select({ id: documents.id }).from(documents).where(and(
+      eq(documents.id, bookId),
+      eq(documents.userId, userId),
+    )).limit(1);
+    if (docRows.length === 0) throw new Error('Document not found');
+    if (!primaryKey && !backupKey) throw new Error('No Gemini API key is configured for the selected Smart Audio profile.');
 
     const objects = await listAudiobookObjects(bookId, userId, null);
-    // Find all the .txt chapter files
-    const txtFiles = objects.filter(o => o.fileName.endsWith('.txt') && !o.fileName.includes('__changelog')).sort((a, b) => a.fileName.localeCompare(b.fileName));
+    // Batch Refine changes only the canonical audiobook text. The immutable
+    // `__original.txt` extraction is never submitted to Gemini or overwritten.
+    const txtFiles = objects
+      .filter((object) => chapterIndexFromTextFile(object.fileName) !== null)
+      .sort((left, right) => left.fileName.localeCompare(right.fileName));
 
+    await markBatchRefineRunStarted(runId, txtFiles.length);
     if (txtFiles.length === 0) {
       await updateProgress(100);
+      await finishBatchRefineRun(runId, 'completed');
+      runFinished = true;
       return;
     }
 
-    const promptTemplate = `You are a surgical text refinement assistant.
-Your task is to apply a SINGLE specific cleanup rule to the provided audiobook text.
-You MUST NOT change anything else in the text. Preserve all existing formatting, punctuation, and pronunciation tags (like [word](/ipa/)) exactly as they are, EXCEPT where the rule explicitly requires you to modify or delete them. Do not add commentary or conversational filler. Return ONLY the refined text.
+    const chapterRows = await db.select({
+      chapterIndex: audiobookChapters.chapterIndex,
+      title: audiobookChapters.title,
+    }).from(audiobookChapters).where(and(
+      eq(audiobookChapters.bookId, bookId),
+      eq(audiobookChapters.userId, userId),
+    ));
+    const chapterTitles = new Map<number, string>(chapterRows.map((chapter: {
+      chapterIndex: number;
+      title: string;
+    }) => [chapter.chapterIndex, chapter.title]));
 
-RULE TO APPLY:
-${refineRule}
+    const promptTemplate = [
+      'You are a surgical text refinement assistant.',
+      'Apply exactly one user-provided cleanup rule to the audiobook text.',
+      'Do not proofread, polish, rewrite, summarize, translate, normalize encoding, or change anything outside that rule.',
+      'If the rule does not apply, refinedText must match the input text exactly, including leading/trailing whitespace and line breaks.',
+      'Return valid JSON matching the supplied schema. Put the complete resulting chapter in refinedText without Markdown fences.',
+      '',
+      'RULE TO APPLY:',
+      refineRule,
+      '',
+      batchRefineAssessmentPrompt(profileCategory),
+      '',
+      'TEXT TO REFINE:',
+    ].join('\n');
 
-TEXT TO REFINE:
-`;
+    const runChangelogFileName = `batch_refine_${runId}.diff`;
+    let cumulativeChangelog = await readOptionalChangelog(bookId, userId, 'batch_refine_changelog.diff');
+    let runChangelog = '';
+    const runState = await getBatchRefineRunState(runId, userId);
+    let changedChapters = Number(runState?.changedChapters || 0);
+    let unchangedChapters = Number(runState?.unchangedChapters || 0);
+    let failedChapters = Number(runState?.failedChapters || 0);
+    const resumeAtChapter = Math.min(txtFiles.length, Math.max(0, Number(runState?.processedChapters || 0)));
 
-    for (let i = 0; i < txtFiles.length; i++) {
-      // Check for cancellation
-      const currentJobRows = await db.select().from(audiobookJobs).where(eq(audiobookJobs.id, job.id)).limit(1);
+    serverLogger.info({
+      event: 'audiobook.batch_refine.start',
+      bookId,
+      jobId: job.id,
+      runId,
+      profileCategory,
+      recordingMode,
+      chapterCount: txtFiles.length,
+    }, 'Starting Batch Refine proposal run');
+
+    for (let i = resumeAtChapter; i < txtFiles.length; i += 1) {
+      const currentJobRows = await db.select({ status: audiobookJobs.status })
+        .from(audiobookJobs)
+        .where(eq(audiobookJobs.id, job.id))
+        .limit(1);
       if (currentJobRows.length === 0 || currentJobRows[0].status !== 'running') {
-        serverLogger.info({ event: 'audiobook.batch_refine.cancelled', bookId, jobId: job.id }, 'Job was cancelled or stopped, aborting refine loop');
-        return; // Abort
+        await finishBatchRefineRun(runId, 'cancelled');
+        runFinished = true;
+        serverLogger.info({
+          event: 'audiobook.batch_refine.cancelled',
+          bookId,
+          jobId: job.id,
+          runId,
+        }, 'Batch Refine was cancelled');
+        return;
       }
 
       const txtFile = txtFiles[i];
-      const buf = await getAudiobookObjectBuffer(bookId, userId, txtFile.fileName, null);
-      const originalText = buf.toString('utf-8');
+      const chapterIndex = chapterIndexFromTextFile(txtFile.fileName);
+      if (chapterIndex === null) continue;
 
-      serverLogger.info({ event: 'audiobook.batch_refine.chapter', bookId, chapter: txtFile.fileName }, `Refining chapter ${txtFile.fileName}`);
+      const existingProposal = await getBatchRefineProposalForChapter({ runId, userId, chapterIndex });
+      if (existingProposal) {
+        // Recover the narrow crash window where the proposal was saved before
+        // the run counter. Never ask Gemini to rewrite an already-saved review.
+        changedChapters += 1;
+      } else try {
+        const previousText = (await getAudiobookObjectBuffer(
+          bookId,
+          userId,
+          txtFile.fileName,
+          null,
+        )).toString('utf8');
+        const preparedInput = profileCategory === 'scholar'
+          ? prepareScholarBatchRefineText(previousText, scholarPronunciations)
+          : { text: previousText, taggedTerms: [], removedTerms: [] };
 
-      const fullPrompt = promptTemplate + originalText;
+        const result = await fetchGeminiWithRateLimitFallback({
+          primaryApiKey: primaryKey,
+          backupApiKey: backupKey,
+          requestedModel: resolvedModel,
+          request: (apiKey, requestModel) => fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(requestModel || resolvedModel)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: `${promptTemplate}\n${preparedInput.text}` }] }],
+                systemInstruction: {
+                  parts: [{
+                    text: 'You are a precise deletion and replacement editor. Preserve every character outside the explicit rule and report concise review metadata.',
+                  }],
+                },
+                generationConfig: {
+                  temperature: 0.1,
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                    type: 'OBJECT',
+                    required: ['refinedText', 'reviewPriority', 'reviewFlags', 'reviewNote'],
+                    properties: {
+                      refinedText: { type: 'STRING' },
+                      reviewPriority: { type: 'STRING', enum: ['low', 'medium', 'high'] },
+                      reviewFlags: { type: 'ARRAY', items: { type: 'STRING' } },
+                      reviewNote: { type: 'STRING' },
+                    },
+                  },
+                },
+                safetySettings: [
+                  { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                  { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                  { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                  { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+                ],
+              }),
+            },
+          ),
+        });
 
-      const result = await fetchGeminiWithRateLimitFallback({
-        primaryApiKey: primaryKey,
-        backupApiKey: backupKey,
-        requestedModel: resolvedModel,
-        request: (apiKey, requestModel) => fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(requestModel || resolvedModel)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
-              systemInstruction: { parts: [{ text: "You are a precise text editor. Only apply the user's rule. Do not summarize or alter text outside the rule's scope." }] },
-              generationConfig: { temperature: 0.1 },
-              safetySettings: [
-                { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-                { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-                { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-                { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-              ],
-            }),
+        const jsonBody = await result.response.json().catch(() => ({}));
+        const responseText = jsonBody?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (typeof responseText !== 'string') {
+          const detail = jsonBody?.error?.message || jsonBody?.candidates?.[0]?.finishReason || 'empty response';
+          throw new Error(`Gemini returned no text (${String(detail)}).`);
+        }
+
+        const assessment = parseBatchRefineAssessment(profileCategory, responseText);
+        const safeProposal = profileCategory === 'scholar'
+          ? prepareScholarBatchRefineText(assessment.refinedText, scholarPronunciations)
+          : { text: assessment.refinedText, taggedTerms: [], removedTerms: [] };
+        if (safeProposal.text === previousText) {
+          unchangedChapters += 1;
+        } else {
+          const metrics = calculateBatchRefineMetrics({
+            category: profileCategory,
+            previousText,
+            proposedText: safeProposal.text,
+            aiPriority: assessment.reviewPriority,
+            aiFlags: assessment.reviewFlags,
+            aiNote: assessment.reviewNote,
+          });
+          const changeId = await insertBatchRefineProposal({
+            runId,
+            userId,
+            documentId: bookId,
+            chapterIndex,
+            chapterTitle: chapterTitles.get(chapterIndex) || `Chapter ${chapterIndex + 1}`,
+            textFileName: txtFile.fileName,
+            previousText,
+            proposedText: safeProposal.text,
+            metrics,
+          });
+          changedChapters += 1;
+
+          const patch = Diff.createTwoFilesPatch(
+            txtFile.fileName,
+            txtFile.fileName,
+            previousText,
+            safeProposal.text,
+            'Previous approved text',
+            'AI proposal',
+          );
+          cumulativeChangelog += `${cumulativeChangelog ? '\n\n' : ''}${patch}`;
+          runChangelog += `${runChangelog ? '\n\n' : ''}${patch}`;
+          await Promise.all([
+            writeChangelog(bookId, userId, 'batch_refine_changelog.diff', cumulativeChangelog),
+            writeChangelog(bookId, userId, runChangelogFileName, runChangelog),
+          ]);
+
+          const shouldApproveImmediately = recordingMode === 'immediate'
+            && !(holdHighPriority && metrics.reviewPriority === 'high');
+          if (shouldApproveImmediately) {
+            await approveBatchRefineChange({ changeId, userId });
+            void runTaskNow('process-batch-refine-recordings').catch((error) => {
+              serverLogger.warn({
+                event: 'audiobook.batch_refine.recording_wake_failed',
+                changeId,
+                error: errorToLog(error),
+              }, 'Could not wake the approved recording queue immediately');
+            });
           }
-        ),
+        }
+      } catch (error) {
+        failedChapters += 1;
+        serverLogger.error({
+          event: 'audiobook.batch_refine.chapter_failed',
+          bookId,
+          jobId: job.id,
+          runId,
+          chapter: txtFile.fileName,
+          error: errorToLog(error),
+        }, 'Batch Refine could not process one chapter; its approved text was preserved');
+      }
+
+      const processedChapters = i + 1;
+      await updateBatchRefineRunProgress({
+        runId,
+        processedChapters,
+        changedChapters,
+        unchangedChapters,
+        failedChapters,
       });
-
-      const jsonBody = await result.response.json().catch(() => ({}));
-      const textResponse = jsonBody?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!textResponse) {
-        const errorMsg = jsonBody?.error?.message || jsonBody?.candidates?.[0]?.finishReason || JSON.stringify(jsonBody);
-        throw new Error(`Gemini returned empty text for chapter ${txtFile.fileName}. Gemini Response: ${errorMsg}`);
-      }
-
-      const refinedText = textResponse.trim();
-
-      // Only overwrite the blob (and thus trigger an audio re-record) if Gemini ACTUALLY changed something!
-      if (refinedText !== originalText.trim()) {
-        serverLogger.info({ event: 'audiobook.batch_refine.chapter_changed', bookId, chapter: txtFile.fileName }, `Chapter ${txtFile.fileName} was modified by the rule.`);
-        
-        // Generate diff
-        const diffPatch = Diff.createTwoFilesPatch(
-          txtFile.fileName,
-          txtFile.fileName,
-          originalText.trim(),
-          refinedText,
-          'Original',
-          'AI Refined'
-        );
-        
-        // Append to global changelog
-        let existingDiff = '';
-        try {
-          existingDiff = (await getAudiobookObjectBuffer(bookId, userId, 'batch_refine_changelog.diff', null)).toString('utf8');
-        } catch(e) {}
-        
-        const updatedDiff = existingDiff + (existingDiff ? '\n\n' : '') + diffPatch;
-        await putAudiobookObject(bookId, userId, 'batch_refine_changelog.diff', Buffer.from(updatedDiff, 'utf-8'), 'text/plain', null);
-
-        await putAudiobookObject(bookId, userId, txtFile.fileName, Buffer.from(refinedText, 'utf-8'), 'text/plain', null);
-      } else {
-        serverLogger.info({ event: 'audiobook.batch_refine.chapter_unchanged', bookId, chapter: txtFile.fileName }, `Chapter ${txtFile.fileName} was unchanged.`);
-      }
-
-      await updateProgress(Math.floor(((i + 1) / txtFiles.length) * 100));
+      await updateProgress(Math.floor((processedChapters / txtFiles.length) * 100));
     }
 
-    serverLogger.info({ event: 'audiobook.batch_refine.complete', bookId, jobId: job.id }, 'Completed batch refine job');
-    
-    // Now that the text is refined, we need to trigger an audio rebuild.
-    // We can do this by just calling the Next.js API route directly to queue a batch-regenerate
-    const baseUrl = `http://127.0.0.1:${process.env.PORT || 3003}`;
-    await fetch(`${baseUrl}/api/audiobooks/batch-regenerate`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-internal-secret': INTERNAL_WORKER_SECRET
-      },
-      body: JSON.stringify({ bookId: bookId, forceAll: false, userId: userId })
-    }).catch(e => {
-        serverLogger.warn({ event: 'audiobook.batch_refine.trigger_audio_error', error: String(e) }, 'Failed to trigger batch audio regeneration');
-    });
-
-  } catch (err: any) {
-    serverLogger.error({ event: 'audiobook.batch_refine.error', error: err.stack }, 'Error in batch refine job');
-    throw err;
+    await finishBatchRefineRun(runId, 'completed');
+    runFinished = true;
+    serverLogger.info({
+      event: 'audiobook.batch_refine.complete',
+      bookId,
+      jobId: job.id,
+      runId,
+      changedChapters,
+      unchangedChapters,
+      failedChapters,
+    }, 'Completed Batch Refine proposal run');
+  } catch (error) {
+    if (!runFinished) await finishBatchRefineRun(runId, 'error').catch(() => {});
+    serverLogger.error({
+      event: 'audiobook.batch_refine.error',
+      bookId,
+      jobId: job.id,
+      runId,
+      error: errorToLog(error),
+    }, 'Batch Refine job failed');
+    throw error;
   }
 }

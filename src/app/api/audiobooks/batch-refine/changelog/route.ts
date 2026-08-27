@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { getAudiobookObjectBuffer } from '@/lib/server/audiobooks/blobstore';
+import { errorResponse } from '@/lib/server/errors/next-response';
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,15 +14,29 @@ export async function GET(request: NextRequest) {
     const bookId = url.searchParams.get('bookId');
     if (!bookId) return NextResponse.json({ error: 'bookId is required' }, { status: 400 });
 
-    try {
-      const diffBuffer = await getAudiobookObjectBuffer(bookId, userId, 'batch_refine_changelog.diff', null);
-      return new NextResponse(diffBuffer.toString('utf-8'), {
-        headers: { 'Content-Type': 'text/plain' },
-      });
-    } catch (e) {
-      return new NextResponse('', { headers: { 'Content-Type': 'text/plain' } }); // Empty if none exists
+    const runId = url.searchParams.get('runId');
+    if (runId && !/^[a-zA-Z0-9_-]+$/.test(runId)) {
+      return NextResponse.json({ error: 'Invalid runId' }, { status: 400 });
     }
-  } catch (e) {
-    return NextResponse.json({ error: 'Failed to fetch changelog' }, { status: 500 });
+
+    const changelogFileName = runId
+      ? `batch_refine_${runId}.diff`
+      : 'batch_refine_changelog.diff';
+
+    try {
+      const diffBuffer = await getAudiobookObjectBuffer(bookId, userId, changelogFileName, null);
+      return new NextResponse(diffBuffer.toString('utf-8'), {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    } catch {
+      return new NextResponse('', {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      }); // Empty if none exists
+    }
+  } catch (error) {
+    return errorResponse(error, {
+      apiErrorMessage: 'Failed to fetch changelog',
+      normalize: { code: 'BATCH_REFINE_CHANGELOG_FAILED', errorClass: 'storage' },
+    });
   }
 }

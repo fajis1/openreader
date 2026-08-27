@@ -142,6 +142,16 @@ export function normalizeGlobalPronunciationLibrary(value: unknown): GlobalPronu
   return normalized;
 }
 
+export function globalPronunciationDefaults(value: unknown): Record<string, string> {
+  const library = normalizeGlobalPronunciationLibrary(value);
+  const defaults: Record<string, string> = {};
+  for (const [term, choices] of Object.entries(library)) {
+    const pronunciation = normalizeGlobalPronunciation(choices[0]?.phonetic);
+    if (pronunciation) defaults[term] = pronunciation;
+  }
+  return defaults;
+}
+
 /**
  * Accept both an exported library envelope and the legacy raw dictionary
  * shape, while rejecting entries that Kokoro cannot safely pronounce.
