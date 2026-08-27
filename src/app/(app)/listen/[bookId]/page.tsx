@@ -484,13 +484,14 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
       if (res.ok) {
         const data = await res.json();
         if (data.needsRegeneration && data.needsRegeneration.length > 0) {
+           const chunkCount = data.needsRegeneration[0].modifiedChunks;
            const startRes = await fetch('/api/audiobooks/batch-regenerate', { 
              method: 'POST', 
              headers: { 'Content-Type': 'application/json' },
              body: JSON.stringify({ bookId: bookId }) 
            });
            if (startRes.ok) {
-             toast.success('Background rebuild started for modified chunks!');
+             toast.success(`Background rebuild started for ${chunkCount} modified chunk${chunkCount === 1 ? '' : 's'}!`);
            } else {
              const err = await startRes.json().catch(() => ({}));
              toast.error(err.error || 'Failed to start rebuild');
