@@ -4,7 +4,7 @@ import { db } from '@/db';
 import { audiobooks, audiobookChapters, audiobookJobs } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { getAudiobookObjectBuffer, isMissingBlobError, listAudiobookObjects } from '@/lib/server/audiobooks/blobstore';
-import { decodeChapterFileName } from '@/lib/server/audiobooks/chapters';
+import { decodeChapterFileName, listChapterObjects } from '@/lib/server/audiobooks/chapters';
 import { pruneAudiobookChaptersNotOnDisk } from '@/lib/server/audiobooks/prune';
 import { isS3Configured } from '@/lib/server/storage/s3';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
@@ -26,39 +26,6 @@ function s3NotConfiguredResponse(): NextResponse {
     { error: 'Audiobooks storage is not configured. Set S3_* environment variables.' },
     { status: 503 },
   );
-}
-
-type ChapterObject = {
-  index: number;
-  title: string;
-  format: TTSAudiobookFormat;
-  fileName: string;
-};
-
-function listChapterObjects(fileNames: string[]): ChapterObject[] {
-  const chapters = fileNames
-    .map((fileName) => {
-      const decoded = decodeChapterFileName(fileName);
-      if (!decoded) return null;
-      return {
-        index: decoded.index,
-        title: decoded.title,
-        format: decoded.format,
-        fileName,
-      } satisfies ChapterObject;
-    })
-    .filter((value): value is ChapterObject => Boolean(value))
-    .sort((a, b) => a.index - b.index);
-
-  const deduped = new Map<number, ChapterObject>();
-  for (const chapter of chapters) {
-    const current = deduped.get(chapter.index);
-    if (!current || chapter.fileName > current.fileName) {
-      deduped.set(chapter.index, chapter);
-    }
-  }
-
-  return Array.from(deduped.values()).sort((a, b) => a.index - b.index);
 }
 
 export async function GET(request: NextRequest) {

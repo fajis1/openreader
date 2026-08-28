@@ -7,7 +7,7 @@ import { db } from '@/db';
 import { audiobooks, audiobookChapters } from '@/db/schema';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
 import { getAudiobookObjectBuffer, putAudiobookObject, listAudiobookObjects, } from './blobstore';
-import { escapeFFMetadata, ffprobeAudio, decodeChapterFileName } from './chapters';
+import { escapeFFMetadata, ffprobeAudio, decodeChapterFileName, listChapterObjects } from './chapters';
 import { getFFmpegPath } from './ffmpeg-bin';
 import type { TTSAudiobookFormat } from '@/types/tts';
 export async function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
@@ -245,26 +245,7 @@ export async function executeAudiobookCombine(
 }
 
 
-type ChapterObject = { index: number; fileName: string; format: TTSAudiobookFormat; title: string };
 
-function listChapterObjects(objectNames: string[]): ChapterObject[] {
-  const chapters = objectNames
-    .filter((name) => !name.startsWith('complete.'))
-    .map((fileName) => {
-      const decoded = decodeChapterFileName(fileName);
-      if (!decoded) return null;
-      return {
-        index: decoded.index,
-        title: decoded.title,
-        format: decoded.format as TTSAudiobookFormat,
-        fileName,
-      } satisfies ChapterObject;
-    })
-    .filter((value): value is ChapterObject => Boolean(value))
-    .sort((a, b) => a.index - b.index);
-
-  return chapters;
-}
 
 function chapterFileMimeType(format: TTSAudiobookFormat): string {
   return format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';

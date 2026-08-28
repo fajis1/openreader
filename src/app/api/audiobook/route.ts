@@ -26,6 +26,7 @@ import {
   decodeChapterFileName,
   escapeFFMetadata,
   ffprobeAudio,
+  listChapterObjects,
 } from '@/lib/server/audiobooks/chapters';
 import { isS3Configured } from '@/lib/server/storage/s3';
 import { getOpenReaderTestNamespace } from '@/lib/server/testing/test-namespace';
@@ -34,13 +35,6 @@ import { getFFmpegPath } from '@/lib/server/audiobooks/ffmpeg-bin';
 import type { TTSAudiobookFormat } from '@/types/tts';
 
 export const dynamic = 'force-dynamic';
-
-type ChapterObject = {
-  index: number;
-  title: string;
-  format: TTSAudiobookFormat;
-  fileName: string;
-};
 
 const SAFE_ID_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
 
@@ -63,37 +57,6 @@ function contentDispositionAttachment(filename: string): string {
 
 function chapterFileMimeType(format: TTSAudiobookFormat): string {
   return format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';
-}
-
-function listChapterObjects(objectNames: string[]): ChapterObject[] {
-  const chapters = objectNames
-    .filter((name) => !name.startsWith('complete.'))
-    .map((fileName) => {
-      const decoded = decodeChapterFileName(fileName);
-      if (!decoded) return null;
-      return {
-        index: decoded.index,
-        title: decoded.title,
-        format: decoded.format,
-        fileName,
-      } satisfies ChapterObject;
-    })
-    .filter((value): value is ChapterObject => Boolean(value))
-    .sort((a, b) => a.index - b.index);
-
-  const deduped = new Map<number, ChapterObject>();
-  for (const chapter of chapters) {
-    const existing = deduped.get(chapter.index);
-    if (!existing) {
-      deduped.set(chapter.index, chapter);
-      continue;
-    }
-    if (chapter.fileName > existing.fileName) {
-      deduped.set(chapter.index, chapter);
-    }
-  }
-
-  return Array.from(deduped.values()).sort((a, b) => a.index - b.index);
 }
 
 function streamBuffer(buffer: Buffer): ReadableStream<Uint8Array> {
