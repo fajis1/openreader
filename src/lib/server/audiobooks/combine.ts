@@ -186,7 +186,17 @@ export async function executeAudiobookCombine(
       } catch (copyError) {
         if ((copyError as Error)?.message === 'ABORTED') throw copyError;
         serverLogger.warn({ event: 'audiobook.concat_copy.mp3.failed', degraded: true, fallbackPath: 'reencode', error: errorToLog(copyError) }, 'MP3 concat copy failed; falling back to re-encode');
-        await runFFmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-b:a', '64k', outputPath]);
+        for (const chap of localChapters) {
+          const normalizedPath = `${chap.localPath}.normalized.mp3`;
+          await runFFmpeg(['-y', '-i', chap.localPath, '-c:a', 'libmp3lame', '-b:a', '64k', normalizedPath]);
+          chap.localPath = normalizedPath;
+        }
+        await writeFile(
+          listPath,
+          localChapters.map((chapter) => `file '${chapter.localPath.replace(/'/g, "'\\''")}'`).join('\n')
+        );
+        await runFFmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-map_metadata', '-1', '-c:a', 'copy', outputPath]);
+        await validateOutputDuration(outputPath, currentTime);
       }
     } else {
       try {
@@ -195,7 +205,17 @@ export async function executeAudiobookCombine(
       } catch (copyError) {
         if ((copyError as Error)?.message === 'ABORTED') throw copyError;
         serverLogger.warn({ event: 'audiobook.concat_copy.m4b.failed', degraded: true, fallbackPath: 'reencode', error: errorToLog(copyError) }, 'M4B concat copy failed; falling back to re-encode');
-        await runFFmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-i', metadataPath, '-map', '0:a', '-map_metadata', '1', '-map_chapters', '1', '-c:a', 'aac', '-b:a', '64k', '-movflags', 'use_metadata_tags', '-f', 'mp4', outputPath]);
+        for (const chap of localChapters) {
+          const normalizedPath = `${chap.localPath}.normalized.m4a`;
+          await runFFmpeg(['-y', '-i', chap.localPath, '-c:a', 'aac', '-b:a', '64k', normalizedPath]);
+          chap.localPath = normalizedPath;
+        }
+        await writeFile(
+          listPath,
+          localChapters.map((chapter) => `file '${chapter.localPath.replace(/'/g, "'\\''")}'`).join('\n')
+        );
+        await runFFmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-i', metadataPath, '-map', '0:a', '-map_metadata', '1', '-map_chapters', '1', '-c:a', 'copy', '-movflags', 'use_metadata_tags', '-f', 'mp4', outputPath]);
+        await validateOutputDuration(outputPath, currentTime);
       }
     }
 
