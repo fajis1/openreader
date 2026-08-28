@@ -279,35 +279,19 @@ function chapterEncodeArgs(
   postSpeed: number,
   titleTag: string,
 ): string[] {
-  if (format === 'mp3') {
-    return [
-      '-y',
-      '-i',
-      inputPath,
-      ...(postSpeed !== 1 ? ['-filter:a', buildAtempoFilter(postSpeed)] : []),
-      '-c:a',
-      'libmp3lame',
-      '-b:a',
-      '64k',
-      '-metadata',
-      `title=${titleTag}`,
-      outputPath,
-    ];
-  }
-
   return [
     '-y',
     '-i',
     inputPath,
     ...(postSpeed !== 1 ? ['-filter:a', buildAtempoFilter(postSpeed)] : []),
     '-c:a',
-    'aac',
+    'libmp3lame',
     '-b:a',
     '64k',
     '-metadata',
     `title=${titleTag}`,
     '-f',
-    'mp4',
+    'mp3',
     outputPath,
   ];
 }
@@ -1113,7 +1097,7 @@ export async function POST(request: NextRequest) {
 
     await writeFile(inputPath, ttsBuffer);
 
-    const canCopyMp3WithoutReencode = format === 'mp3' && postSpeed === 1;
+    const canCopyMp3WithoutReencode = postSpeed === 1;
     if (canCopyMp3WithoutReencode) {
       try {
         await runFFmpeg(
@@ -1129,6 +1113,8 @@ export async function POST(request: NextRequest) {
             '3',
             '-metadata',
             `title=${titleTag}`,
+            '-f',
+            'mp3',
             chapterOutputTempPath,
           ],
           request.signal,

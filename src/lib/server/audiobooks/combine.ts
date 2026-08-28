@@ -206,8 +206,8 @@ export async function executeAudiobookCombine(
         if ((copyError as Error)?.message === 'ABORTED') throw copyError;
         serverLogger.warn({ event: 'audiobook.concat_copy.m4b.failed', degraded: true, fallbackPath: 'reencode', error: errorToLog(copyError) }, 'M4B concat copy failed; falling back to re-encode');
         for (const chap of localChapters) {
-          const normalizedPath = `${chap.localPath}.normalized.m4a`;
-          await runFFmpeg(['-y', '-i', chap.localPath, '-c:a', 'aac', '-b:a', '64k', normalizedPath]);
+          const normalizedPath = `${chap.localPath}.normalized.mp3`;
+          await runFFmpeg(['-y', '-i', chap.localPath, '-c:a', 'libmp3lame', '-b:a', '64k', normalizedPath]);
           chap.localPath = normalizedPath;
         }
         await writeFile(
