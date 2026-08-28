@@ -21,6 +21,7 @@ import {
   getAudiobookObjectStreamWithMetadata,
   listAudiobookObjects,
   putAudiobookObject,
+  presignAudiobookDownload,
 } from '@/lib/server/audiobooks/blobstore';
 import {
   decodeChapterFileName,
@@ -158,33 +159,17 @@ export async function GET(request: NextRequest) {
       try {
         const manifest = JSON.parse((await getAudiobookObjectBuffer(bookId, storageUserId, manifestName, testNamespace)).toString('utf8'));
         if (JSON.stringify(manifest) === JSON.stringify(signature)) {
-          const rangeHeader = request.headers.get('range') || undefined;
-          const { body, contentRange, contentLength, acceptRanges } = await getAudiobookObjectStreamWithMetadata(
-            bookId, 
-            storageUserId, 
-            completeName, 
+          const downloadUrl = await presignAudiobookDownload(
+            bookId,
+            storageUserId,
+            completeName,
             testNamespace,
-            { range: rangeHeader }
+            86400,
+            contentDispositionAttachment(downloadFilename),
+            chapterFileMimeType(format),
           );
-          
-          const webStream = typeof (body as any).transformToWebStream === 'function'
-            ? (body as any).transformToWebStream()
-            : Readable.toWeb(body as any);
-            
-          const headers: Record<string, string> = {
-            'Content-Type': chapterFileMimeType(format),
-            'Content-Disposition': contentDispositionAttachment(downloadFilename),
-            'Cache-Control': 'no-cache',
-          };
-          
-          if (acceptRanges) headers['Accept-Ranges'] = acceptRanges;
-          if (contentRange) headers['Content-Range'] = contentRange;
-          if (contentLength !== undefined) headers['Content-Length'] = contentLength.toString();
 
-          return new NextResponse(webStream as any, {
-            status: contentRange ? 206 : 200,
-            headers,
-          });
+          return NextResponse.redirect(downloadUrl, 302);
         }
       } catch {
         // Force regeneration below.

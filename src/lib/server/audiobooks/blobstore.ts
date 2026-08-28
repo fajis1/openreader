@@ -6,7 +6,8 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
-import { getS3Config, getS3ProxyClient } from '@/lib/server/storage/s3';
+import { getS3Config, getS3ProxyClient, getS3Client } from '@/lib/server/storage/s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const SAFE_NAMESPACE_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
 const SAFE_BOOK_ID_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
@@ -297,4 +298,25 @@ export async function deleteAudiobookPrefix(prefix: string): Promise<number> {
   } while (continuationToken);
 
   return deleted;
+}
+
+export async function presignAudiobookDownload(
+  bookId: string,
+  userId: string,
+  fileName: string,
+  namespace: string | null,
+  expiresInSec: number = 86400,
+  responseContentDisposition?: string,
+  responseContentType?: string,
+): Promise<string> {
+  const cfg = getS3Config();
+  const client = getS3Client(); // use external client for browser access
+  const key = audiobookKey(bookId, userId, fileName, namespace);
+  const cmd = new GetObjectCommand({
+    Bucket: cfg.bucket,
+    Key: key,
+    ...(responseContentDisposition ? { ResponseContentDisposition: responseContentDisposition } : {}),
+    ...(responseContentType ? { ResponseContentType: responseContentType } : {}),
+  });
+  return getSignedUrl(client, cmd, { expiresIn: expiresInSec });
 }
