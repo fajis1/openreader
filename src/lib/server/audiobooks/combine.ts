@@ -48,7 +48,7 @@ export async function runFFmpeg(args: string[], signal?: AbortSignal): Promise<v
   });
 }
 
-export async function ensurePositiveDuration(outputPath: string, signal?: AbortSignal): Promise<void> {
+export async function validateOutputDuration(outputPath: string, expectedDurationSec: number, signal?: AbortSignal): Promise<void> {
   let probe;
   try {
     probe = await ffprobeAudio(outputPath, signal);
@@ -57,6 +57,9 @@ export async function ensurePositiveDuration(outputPath: string, signal?: AbortS
   }
   if (!probe.durationSec || probe.durationSec <= 0) {
     throw new Error(`FFmpeg completed but output duration is ${probe.durationSec}s`);
+  }
+  if (Math.abs(probe.durationSec - expectedDurationSec) > Math.max(60, expectedDurationSec * 0.1)) {
+    throw new Error(`Corrupted output duration: ${probe.durationSec}s (expected ~${expectedDurationSec}s)`);
   }
 }
 
@@ -179,6 +182,7 @@ export async function executeAudiobookCombine(
     if (format === 'mp3') {
       try {
         await runFFmpeg(['-f', 'concat', '-safe', '0', '-i', listPath, '-map_metadata', '-1', '-c:a', 'copy', outputPath]);
+        await validateOutputDuration(outputPath, currentTime);
       } catch (copyError) {
         if ((copyError as Error)?.message === 'ABORTED') throw copyError;
         serverLogger.warn({ event: 'audiobook.concat_copy.mp3.failed', degraded: true, fallbackPath: 'reencode', error: errorToLog(copyError) }, 'MP3 concat copy failed; falling back to re-encode');
@@ -187,6 +191,7 @@ export async function executeAudiobookCombine(
     } else {
       try {
         await runFFmpeg(['-f', 'concat', '-safe', '0', '-i', listPath, '-i', metadataPath, '-map', '0:a', '-map_metadata', '1', '-map_chapters', '1', '-c:a', 'copy', '-movflags', 'use_metadata_tags', '-f', 'mp4', outputPath]);
+        await validateOutputDuration(outputPath, currentTime);
       } catch (copyError) {
         if ((copyError as Error)?.message === 'ABORTED') throw copyError;
         serverLogger.warn({ event: 'audiobook.concat_copy.m4b.failed', degraded: true, fallbackPath: 'reencode', error: errorToLog(copyError) }, 'M4B concat copy failed; falling back to re-encode');
@@ -197,7 +202,7 @@ export async function executeAudiobookCombine(
     if (onProgress) await onProgress(90);
 
     serverLogger.info({ event: 'audiobook.combine.debug' }, 'Checking duration...');
-    await ensurePositiveDuration(outputPath);
+    await validateOutputDuration(outputPath, currentTime);
 
     serverLogger.info({ event: 'audiobook.combine.debug' }, 'Uploading audio file to S3...');
     const { createReadStream } = await import('fs');

@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile, stat } from 'fs/promises';
 import { createReadStream } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { Readable } from 'stream';
 import { db } from '@/db';
 import { audiobooks, audiobookChapters, audiobookJobs } from '@/db/schema';
@@ -318,7 +318,11 @@ export async function POST(request: NextRequest) {
 
     // Insert or update combine job
     const existingJobs = await db.select().from(audiobookJobs)
-      .where(and(eq(audiobookJobs.documentId, bookId), eq(audiobookJobs.userId, storageUserId), eq(audiobookJobs.status, 'queued')));
+      .where(and(
+        eq(audiobookJobs.documentId, bookId),
+        eq(audiobookJobs.userId, storageUserId),
+        inArray(audiobookJobs.status, ['queued', 'running'])
+      ));
       
     let isCombining = false;
     for (const job of existingJobs) {
