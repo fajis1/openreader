@@ -298,3 +298,50 @@ export async function deleteAudiobookPrefix(prefix: string): Promise<number> {
 
   return deleted;
 }
+
+import { RobustS3Stream } from './robust-stream';
+
+export async function getAudiobookRobustStreamWithMetadata(
+  bookId: string,
+  userId: string,
+  fileName: string,
+  namespace: string | null,
+  options?: { range?: string },
+): Promise<{
+  body: NodeJS.ReadableStream;
+  contentLength?: number;
+  contentRange?: string;
+  contentType?: string;
+  acceptRanges?: string;
+}> {
+  const cfg = getS3Config();
+  const client = getS3ProxyClient();
+  const key = audiobookKey(bookId, userId, fileName, namespace);
+  
+  const headRes = await client.send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: key }));
+  const totalSize = headRes.ContentLength || 0;
+  
+  let startOffset = 0;
+  let endOffset = totalSize - 1;
+  let isRange = false;
+  
+  if (options?.range) {
+    const match = options.range.match(/bytes=(\d*)-(\d*)/);
+    if (match) {
+      if (match[1]) startOffset = parseInt(match[1], 10);
+      if (match[2]) endOffset = parseInt(match[2], 10);
+      isRange = true;
+    }
+  }
+  
+  const stream = new RobustS3Stream(cfg.bucket, key, startOffset, totalSize, endOffset);
+  const streamLength = endOffset - startOffset + 1;
+  
+  return {
+    body: stream,
+    contentLength: streamLength,
+    contentRange: isRange ? `bytes ${startOffset}-${endOffset}/${totalSize}` : undefined,
+    contentType: headRes.ContentType,
+    acceptRanges: 'bytes',
+  };
+}

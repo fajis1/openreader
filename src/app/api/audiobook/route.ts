@@ -18,7 +18,7 @@ import {
   deleteAudiobookPrefix,
   getAudiobookObjectBuffer,
   getAudiobookObjectStream,
-  getAudiobookObjectStreamWithMetadata,
+  getAudiobookRobustStreamWithMetadata,
   listAudiobookObjects,
   putAudiobookObject,
 } from '@/lib/server/audiobooks/blobstore';
@@ -159,7 +159,7 @@ export async function GET(request: NextRequest) {
         const manifest = JSON.parse((await getAudiobookObjectBuffer(bookId, storageUserId, manifestName, testNamespace)).toString('utf8'));
         if (JSON.stringify(manifest) === JSON.stringify(signature)) {
           const rangeHeader = request.headers.get('range') || undefined;
-          const { body, contentRange, contentLength, acceptRanges } = await getAudiobookObjectStreamWithMetadata(
+          const { body, contentRange, contentLength, acceptRanges } = await getAudiobookRobustStreamWithMetadata(
             bookId, 
             storageUserId, 
             completeName, 
