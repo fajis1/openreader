@@ -201,7 +201,7 @@ async function recordApprovedChange(
     runRows[0]?.profileCategory === 'scholar'
     && hasUntaggedScholarForeignScript(currentText)
   ) {
-    throw new Error('Scholar recording blocked because the approved text contains untagged Greek or Hebrew.');
+    throw new Error('Scholar recording blocked: the approved text contains untagged Greek or Hebrew, or an editorial word split across pronunciation tags.');
   }
 
   const objects = await listAudiobookObjects(change.documentId, change.userId, null);

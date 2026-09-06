@@ -178,7 +178,7 @@ export async function approveBatchRefineChange(input: {
     && hasUntaggedScholarForeignScript(proposedText)
   ) {
     throw new BatchRefineReviewConflictError(
-      'This Scholar text still contains untagged Greek or Hebrew. Add a Kokoro pronunciation tag or remove the term before recording.',
+      'This Scholar text contains untagged Greek or Hebrew, or an editorial word split across pronunciation tags. Give each complete word one pronunciation tag or remove the term before recording.',
     );
   }
   const currentText = (await getAudiobookObjectBuffer(

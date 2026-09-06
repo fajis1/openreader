@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
           if (!Array.isArray(words)) {
             throw new Error('PDF foreign-word scanner returned an invalid candidate list.');
           }
-          const cachedCandidates = JSON.stringify({ version: 9, words });
+          const cachedCandidates = JSON.stringify({ version: 10, words });
           await db.insert(adminSettings).values({
             key: candidateCacheKey,
             valueJson: cachedCandidates,
@@ -493,12 +493,14 @@ export async function POST(req: NextRequest) {
             currentPronunciation: storedPronunciation || null,
             ocrSuspect: scanned?.ocrSuspect === true,
             ocrEvidence: Array.isArray(scanned?.ocrEvidence) ? scanned.ocrEvidence.slice(0, 2) : [],
+            editorialSpellings: Array.isArray(scanned?.editorialSpellings) ? scanned.editorialSpellings.slice(0, 2) : [],
             latinTransliterationCandidate: scanned?.latinTransliterationCandidate === true,
           };
         });
         const prompt = `${buildKokoroPronunciationInstructions(activeProfile)}
 
 Create pronunciation choices and short audiobook definitions for these terms.
+Internal Greek/Hebrew editorial parentheses have been expanded for lookup: θε(οῦ) requests θεοῦ as one word. editorialSpellings preserves the printed notation. Include those letters in the complete pronunciation; this is a narration convention, not a manuscript judgment. Never pronounce only the prefix or suffix.
 For each term without currentPronunciation, return 5 distinct, plausible Kokoro IPA pronunciation variations and put the best first, except for a rejected Latin transliteration candidate as described below.
 If currentPronunciation is supplied, preserve it exactly and return it as the only pronunciation; do not generate extra variations.
 For Koine Greek or Biblical Hebrew, use the supplied contexts to return a contextual English definition of one to four words.

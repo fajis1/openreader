@@ -10,6 +10,7 @@ import {
   parseBatchRefineAssessment,
 } from '@/lib/server/audiobooks/batch-refine-assessment';
 import { prepareScholarBatchRefineText } from '@/lib/server/audiobooks/batch-refine-scholar-safety';
+import { SCHOLAR_EDITORIAL_WORD_INSTRUCTIONS } from '@/lib/shared/scholar-editorial-words';
 import {
   approveBatchRefineChange,
   createBatchRefineRun,
@@ -199,6 +200,7 @@ export async function processBatchRefineJob(
       refineRule,
       '',
       batchRefineAssessmentPrompt(profileCategory),
+      ...(profileCategory === 'scholar' ? [SCHOLAR_EDITORIAL_WORD_INSTRUCTIONS] : []),
       '',
       'TEXT TO REFINE:',
     ].join('\n');
@@ -256,7 +258,7 @@ export async function processBatchRefineJob(
           null,
         )).toString('utf8');
         const preparedInput = profileCategory === 'scholar'
-          ? prepareScholarBatchRefineText(previousText, scholarPronunciations)
+          ? prepareScholarBatchRefineText(previousText, scholarPronunciations, { preserveUnresolvedEditorialWords: true })
           : { text: previousText, taggedTerms: [], removedTerms: [] };
 
         const result = await fetchGeminiWithRateLimitFallback({

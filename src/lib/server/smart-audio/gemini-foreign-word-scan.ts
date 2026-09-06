@@ -230,7 +230,7 @@ export function foreignWordCandidateCacheKey(input: {
   const scopeHash = createHash('sha256')
     .update(JSON.stringify(input))
     .digest('hex');
-  return `foreign_word_candidates:v9:${scopeHash}`;
+  return `foreign_word_candidates:v10:${scopeHash}`;
 }
 
 export function parseForeignWordCandidateCache(value: unknown): unknown[] | null {
@@ -239,7 +239,7 @@ export function parseForeignWordCandidateCache(value: unknown): unknown[] | null
     if (
       !parsed
       || typeof parsed !== 'object'
-      || (parsed as { version?: unknown }).version !== 9
+      || (parsed as { version?: unknown }).version !== 10
       || !Array.isArray((parsed as { words?: unknown }).words)
     ) {
       return null;

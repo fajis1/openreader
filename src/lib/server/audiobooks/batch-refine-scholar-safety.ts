@@ -1,5 +1,7 @@
+import { expandScholarEditorialWords, hasSplitScholarEditorialWord } from '@/lib/shared/scholar-editorial-words';
+
 const KOKORO_TAG_GLOBAL = /\[[^\]\r\n]+\]\(\/[^/\r\n]+\/\)/gu;
-const UNTAGGED_FOREIGN_WORD = /([\p{Script=Greek}\p{Script=Hebrew}][\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’ʼ᾽]*)([\t ]?)/gu;
+const UNTAGGED_FOREIGN_WORD = /([\p{Script=Greek}\p{Mark}]+(?:\([\p{Script=Greek}\p{Mark}]+\)[\p{Script=Greek}\p{Mark}]*)+|[\p{Script=Hebrew}\p{Mark}]+(?:\([\p{Script=Hebrew}\p{Mark}]+\)[\p{Script=Hebrew}\p{Mark}]*)+|[\p{Script=Greek}\p{Script=Hebrew}][\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’ʼ᾽]*)([\t ]?)/gu;
 const FOREIGN_SCRIPT = /[\p{Script=Greek}\p{Script=Hebrew}]/u;
 
 type PronunciationLookup = {
@@ -61,15 +63,18 @@ function processUntaggedText(
   lookup: PronunciationLookup,
   taggedTerms: string[],
   removedTerms: string[],
+  preserveUnresolvedEditorialWords: boolean,
 ): string {
   return text.replace(
     UNTAGGED_FOREIGN_WORD,
     (_match, rawTerm: string, followingSpace: string) => {
-      const pronunciation = findPronunciation(rawTerm, lookup);
+      const expanded = expandScholarEditorialWords(rawTerm);
+      const pronunciation = findPronunciation(expanded, lookup);
       if (pronunciation) {
         taggedTerms.push(rawTerm);
         return `[${rawTerm}](${pronunciation})${followingSpace}`;
       }
+      if (preserveUnresolvedEditorialWords && expanded !== rawTerm) return rawTerm + followingSpace;
       removedTerms.push(rawTerm);
       return '';
     },
@@ -85,10 +90,32 @@ function processUntaggedText(
 export function prepareScholarBatchRefineText(
   text: string,
   pronunciations: Record<string, string>,
+  options: { preserveUnresolvedEditorialWords?: boolean } = {},
 ): ScholarBatchRefineSafetyResult {
   const lookup = pronunciationLookup(pronunciations);
   const taggedTerms: string[] = [];
   const removedTerms: string[] = [];
+  // Discard partial IPA only when the visible form proves an internal
+  // editorial continuation. The expanded word must get a complete lookup.
+  text = text.replace(/\[([^\]\r\n]+)\]\(\/[^/\r\n]+\/\)(\([\p{Script=Greek}\p{Script=Hebrew}\p{Mark}]+\)[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}]*)/gu,
+    (match, word: string, suffix: string) => {
+      const printed = word + suffix;
+      const expanded = expandScholarEditorialWords(printed);
+      if (expanded === printed) return match;
+      const pronunciation = findPronunciation(expanded, lookup);
+      if (pronunciation) {
+        taggedTerms.push(expanded);
+        return `[${printed}](${pronunciation})`;
+      }
+      // Preserve the complete unresolved word for review instead of silently
+      // deleting its ending and retaining a confidently tagged fragment.
+      return printed;
+    });
+  // Reject separately tagged editorial fragments; their IPA cannot be safely
+  // combined. Keep the chapter intact for a context-aware cleanup/review pass.
+  if (hasSplitScholarEditorialWord(text)) {
+    throw new Error('Split Scholar editorial word requires complete-word pronunciation repair.');
+  }
   let result = '';
   let lastIndex = 0;
 
@@ -100,6 +127,7 @@ export function prepareScholarBatchRefineText(
       lookup,
       taggedTerms,
       removedTerms,
+      options.preserveUnresolvedEditorialWords === true,
     );
     result += match[0];
     lastIndex = index + match[0].length;
@@ -109,11 +137,12 @@ export function prepareScholarBatchRefineText(
     lookup,
     taggedTerms,
     removedTerms,
+    options.preserveUnresolvedEditorialWords === true,
   );
 
   return { text: result, taggedTerms, removedTerms };
 }
 
 export function hasUntaggedScholarForeignScript(text: string): boolean {
-  return FOREIGN_SCRIPT.test(text.replace(KOKORO_TAG_GLOBAL, ''));
+  return hasSplitScholarEditorialWord(text) || FOREIGN_SCRIPT.test(text.replace(KOKORO_TAG_GLOBAL, ''));
 }

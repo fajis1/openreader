@@ -162,12 +162,39 @@ def get_ocr_suspect_evidence(full_text, start, end):
 def collect_foreign_matches(full_text, regex):
     """Collect matches plus any raw mixed-script OCR evidence around them."""
     matches = []
+    editorial = collect_editorial_words(full_text)
+    matches.extend((expanded, None) for _start, _end, _printed, expanded in editorial)
     for match in regex.finditer(full_text):
+        if any(start <= match.start() < end for start, end, _printed, _expanded in editorial):
+            continue
         word = match.group(0).strip('.,;:!?··\'"()[]{}«»')
         if not word:
             continue
         matches.append((word, get_ocr_suspect_evidence(full_text, match.start(), match.end())))
     return matches
+
+
+def collect_editorial_words(text):
+    """Keep same-script internal editorial letters in one pronunciation candidate.
+
+    Retain original offsets/spelling for context; do not alter the source PDF.
+    Whole phrases, alternatives and mixed-script expansions are not joined.
+    """
+    results = []
+    for script in (r"\u0370-\u03FF\u1F00-\u1FFF", r"\u0590-\u05FF"):
+        letters = f"[{script}\\u0300-\\u036F]"
+        pattern = re.compile(rf"{letters}+(?:\({letters}+\){letters}*)+")
+        for match in pattern.finditer(text):
+            if (
+                (match.start() > 0 and text[match.start() - 1].isalpha())
+                or (match.end() < len(text) and text[match.end()].isalpha())
+            ):
+                continue
+            printed = match.group(0)
+            if any(character not in '()' and unicodedata.category(character)[0] not in 'LM' for character in printed):
+                continue
+            results.append((match.start(), match.end(), printed, printed.replace('(', '').replace(')', '')))
+    return results
 
 
 def classify_automatic_ocr_ignore(word):
@@ -232,6 +259,7 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
     if not quiet:
         print(f"Reading PDF text from: {pdf_path} (Mode: {mode}, Target: {target_percentile}%)...")
     full_text = load_pdf_text(pdf_path)
+    editorial_words = collect_editorial_words(full_text)
 
     ocr_suspect_evidence = {}
     latin_transliteration_candidates = set()
@@ -385,8 +413,13 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
             term_chars = ALL_FOREIGN_TERM_CHARS
         else:
             term_chars = r"\w"
+        editorial_spellings = sorted({
+            printed for _start, _end, printed, expanded in editorial_words
+            if expanded.casefold() == word.casefold()
+        })
+        spellings = '|'.join(re.escape(spelling) for spelling in [word, *editorial_spellings])
         complete_term_pattern = re.compile(
-            rf"(?<![{term_chars}]){re.escape(word)}(?![{term_chars}])",
+            rf"(?<![{term_chars}])(?:{spellings})(?![{term_chars}])",
             re.IGNORECASE,
         )
         for match in complete_term_pattern.finditer(full_text):
@@ -418,6 +451,8 @@ def scan_pdf_foreign_words(pdf_path, db_path="drizzle/sqlite.db", target_percent
             "pronunciations": pronunciations,
             "contexts": contexts,
         }
+        if editorial_spellings:
+            result["editorialSpellings"] = sorted(set(editorial_spellings))
         automatic_ignore_reason = classify_automatic_ocr_ignore(word)
         if automatic_ignore_reason:
             result["ocrFragment"] = True

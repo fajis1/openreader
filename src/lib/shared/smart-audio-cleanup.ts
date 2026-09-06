@@ -1,6 +1,9 @@
+import { expandScholarEditorialWords, hasSplitScholarEditorialWord, SCHOLAR_EDITORIAL_WORD_INSTRUCTIONS } from './scholar-editorial-words';
+
 export const SMART_AUDIO_OMIT_SENTINEL = '[OMIT]';
 
 export const FINAL_SMART_AUDIO_PRONUNCIATION_CHECK = `FINAL PRONUNCIATION-MARKUP CHECK (REQUIRED):
+${SCHOLAR_EDITORIAL_WORD_INSTRUCTIONS}
 - Each pronunciation tag must contain exactly one corrected lexical word. Never put spaces inside the visible text or IPA of one tag.
 - Split adjacent foreign words into separate tags. A phrase-level tag is invalid even when its combined IPA is accurate.
 - First repair OCR corruption, then pronounce the corrected individual word.
@@ -180,7 +183,7 @@ function resolveAuthoritativeWord(
 ): { word: string; pronunciation: string | null } {
   const repairedWord = repairUnambiguousGreekOcrSubstitution(word);
   if (!lookup) return { word: repairedWord, pronunciation: null };
-  const directPronunciation = lookupPronunciation(repairedWord, lookup);
+  const directPronunciation = lookupPronunciation(expandScholarEditorialWords(repairedWord), lookup);
   if (directPronunciation) return { word: repairedWord, pronunciation: directPronunciation };
 
   const dictionaryCandidate = greekDictionaryCandidate(word);
@@ -200,7 +203,7 @@ function assertSingleScriptWord(word: string): void {
 
 function assertGreekInflectionEnding(word: string, ipa: string): void {
   if (!/\p{Script=Greek}/u.test(word)) return;
-  const normalizedWord = word.normalize('NFD').replace(/\p{Mark}/gu, '');
+  const normalizedWord = expandScholarEditorialWords(word).normalize('NFD').replace(/\p{Mark}/gu, '');
   const normalizedIpa = ipa.normalize('NFD').replace(/\p{Mark}/gu, '').trim().toLowerCase();
   if (/^υι/u.test(normalizedWord.toLowerCase()) && !/^h/u.test(normalizedIpa)) {
     throw new SmartAudioOutputValidationError(
@@ -370,6 +373,9 @@ function transliterateForeignText(text: string): string {
 }
 
 export function forcefullyTransliterateUntaggedForeignText(text: string): string {
+  if (hasSplitScholarEditorialWord(text)) {
+    throw new SmartAudioOutputValidationError('Cannot transliterate only the untagged ending of a split Scholar editorial word. Repair the complete pronunciation first.');
+  }
   let result = '';
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -377,11 +383,11 @@ export function forcefullyTransliterateUntaggedForeignText(text: string): string
   
   while ((match = KOKORO_PRONUNCIATION_TAG.exec(text)) !== null) {
     const untagged = text.slice(lastIndex, match.index);
-    result += transliterateForeignText(untagged);
+    result += transliterateForeignText(expandScholarEditorialWords(untagged));
     result += match[0]; // keep the tag intact
     lastIndex = KOKORO_PRONUNCIATION_TAG.lastIndex;
   }
-  result += transliterateForeignText(text.slice(lastIndex));
+  result += transliterateForeignText(expandScholarEditorialWords(text.slice(lastIndex)));
   return result;
 }
 
@@ -403,6 +409,9 @@ export function validateSmartAudioOutput(
 
   const requireTags = options.requirePronunciationTagsForForeignScripts ?? true;
   if (requireTags) {
+    if (hasSplitScholarEditorialWord(normalized)) {
+      throw new SmartAudioOutputValidationError('A Greek or Hebrew editorial word was split across pronunciation tags. Rebuild the complete word, including internal parenthesized letters, and replace its partial IPA.');
+    }
     const nakedText = normalized.replace(KOKORO_PRONUNCIATION_TAG, '');
     if (/[\p{Script=Greek}\p{Script=Hebrew}]/u.test(nakedText)) {
       throw new SmartAudioOutputValidationError(

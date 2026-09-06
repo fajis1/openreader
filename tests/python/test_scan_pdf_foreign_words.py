@@ -5,6 +5,28 @@ import scan_pdf_foreign_words
 
 
 class ForeignWordContextTests(unittest.TestCase):
+    def test_internal_editorial_letters_remain_one_candidate_with_original_context(self):
+        text = 'The gifts of God (ἐκ τῶν τοῦ θε(οῦ) δωρεῶν). Hebrew של(ו)ם remains.'
+        for mode in ('greek_hebrew', 'all_foreign'):
+            with (
+                patch.object(scan_pdf_foreign_words, 'load_pdf_text', return_value=text),
+                patch.object(scan_pdf_foreign_words, 'fetch_global_pronunciations', return_value={}),
+                patch.object(scan_pdf_foreign_words, 'zipf_frequency', return_value=6.0),
+            ):
+                rows = scan_pdf_foreign_words.scan_pdf_foreign_words('unused.pdf', target_percentile=100, mode=mode, quiet=True)
+            by_word = {row['word']: row for row in rows}
+            self.assertIn('θεοῦ', by_word)
+            self.assertIn('שלום', by_word)
+            self.assertNotIn('θε', by_word)
+            self.assertNotIn('οῦ', by_word)
+            self.assertEqual(by_word['θεοῦ']['editorialSpellings'], ['θε(οῦ)'])
+            self.assertIn('θε(οῦ)', by_word['θεοῦ']['contexts'][0])
+
+    def test_editorial_expansion_does_not_join_phrases_or_alternatives(self):
+        for text in ('(θεοῦ)', 'θε (οῦ)', 'θε(οῦ λόγος)', 'θε(οῦ/ός)', 'θε(אב)', 'the(o)', 'aθε(οῦ)'):
+            self.assertEqual(scan_pdf_foreign_words.collect_editorial_words(text), [], text)
+        self.assertEqual(scan_pdf_foreign_words.collect_editorial_words('θ(ε)ο(ῦ)')[0][3], 'θεοῦ')
+
     def test_classifies_only_frequent_english_dictionary_words(self):
         scores = {"the": 7.7, "dungeon": 4.1, "aethrian": 0.0, "don't": 6.2}
         with patch.object(
