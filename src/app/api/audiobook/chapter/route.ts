@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { savePronunciationFailure } from '@/lib/server/audiobooks/pronunciation-failures';
 import { spawn } from 'child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
@@ -904,6 +905,12 @@ export async function POST(request: NextRequest) {
             const recovery = await resolveSmartAudioWithValidationRecovery({
               initialResult: workerResult,
               authoritativePronunciations,
+              onUnrecoverable: async (rejected, errors) => {
+                await savePronunciationFailure({ bookId, userId: storageUserId, chapterIndex, chapterTitle: `Chapter ${chapterIndex + 1}`,
+                  sourceText: data.text, rejected, errors: errors.slice(0, 1), profileId: selectedProfile?.id,
+                  cast: multiVoiceCast, namespace: testNamespace,
+                }).catch(() => serverLogger.warn({ event: 'audiobook.pronunciation_failure.save_failed', bookId, chapter: chapterIndex }, 'Could not retain rejected chapter for pronunciation review.'));
+              },
               resolve: (candidate) => {
                 const multiVoiceResult = selectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
                   ? resolveMultiVoiceWorkerResult(candidate, multiVoiceCast, {

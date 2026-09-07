@@ -8,6 +8,7 @@ import { BookPronunciationInspectorModal } from "@/components/doclist/BookPronun
 import { MultiVoiceReviewStudio } from "@/components/audiobooks/MultiVoiceReviewStudio";
 import { MobileReviewPlayer } from "@/components/audiobooks/MobileReviewPlayer";
 import { BatchRefineReviewModal } from "@/components/audiobooks/BatchRefineReviewModal";
+import { PronunciationIssuesModal } from "@/components/audiobooks/PronunciationIssuesModal";
 import { BASE_BOOKS, PRESET_MODELS } from "@/components/constants";
 import { toast } from "react-hot-toast";
 import { ModalFrame } from "@/components/ui";
@@ -46,6 +47,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [hasEditedText, setHasEditedText] = useState(false);
   const [showBatchRefineModal, setShowBatchRefineModal] = useState(false);
   const [showBatchRefineReview, setShowBatchRefineReview] = useState(false);
+  const [showPronunciationIssues, setShowPronunciationIssues] = useState(false);
   const [batchRefineRunId, setBatchRefineRunId] = useState<string | null>(null);
   const [batchRefineRule, setBatchRefineRule] = useState('');
   const [batchRefineModel, setBatchRefineModel] = useState('gemini-2.5-flash');
@@ -643,6 +645,8 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-200">
         <h1 className="text-2xl font-bold mb-4">No Audiobook Available</h1>
+        <button className="mb-3 rounded border border-line-soft px-4 py-2" onClick={() => setShowPronunciationIssues(true)}>Scan Pronunciation Issues</button>
+        <PronunciationIssuesModal open={showPronunciationIssues} onClose={() => setShowPronunciationIssues(false)} bookId={bookId} profileId={selectedProfileId} onRecordingQueued={() => void fetchStatus()} />
         <button className="px-4 py-2 bg-blue-600 rounded" onClick={() => router.push("/app")}>Return to Dashboard</button>
       </div>
     );
@@ -739,6 +743,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           >
             📱 Mobile Player
           </button>
+          <button onClick={() => setShowPronunciationIssues(true)} className="rounded border border-line-soft bg-surface-raised px-3 py-1.5 text-xs font-medium text-text-strong">Scan Pronunciation Issues</button>
           <div className="hidden md:flex gap-2 items-center border-l border-line-soft pl-2 ml-1">
             <button
               onClick={handleFixAllAbbreviations}
@@ -1451,6 +1456,11 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
           if (selectedChapterIndex !== undefined) void fetchChapterText(selectedChapterIndex, true);
         }}
       />
+
+      <PronunciationIssuesModal open={showPronunciationIssues} onClose={() => setShowPronunciationIssues(false)} bookId={bookId} profileId={selectedProfileId} onRecordingQueued={() => {
+        void fetchStatus();
+        if (selectedChapterIndex !== undefined) void fetchChapterText(selectedChapterIndex, true);
+      }} />
 
     </div>
   );

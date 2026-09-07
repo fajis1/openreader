@@ -13,6 +13,13 @@ const resolve = (value: unknown) => resolveSmartAudioWorkerResult(value, {
 });
 
 describe('Smart Audio validation recovery', () => {
+  test('retains rejected output only after repair and fallback fail', async () => {
+    const rejected = { status: 'success', cleaned_text: '[θε](/θɛ/)(οῦ)' };
+    const retained = vi.fn().mockResolvedValue(undefined);
+    await expect(resolveSmartAudioWithValidationRecovery({ initialResult: rejected, resolve, requestRepair: async () => rejected,
+      authoritativePronunciations: {}, onUnrecoverable: retained })).rejects.toThrow();
+    expect(retained).toHaveBeenCalledWith(rejected, expect.arrayContaining([expect.stringContaining('editorial word')]));
+  });
   test('does not request correction for valid output', async () => {
     const requestRepair = vi.fn();
     const recovered = await resolveSmartAudioWithValidationRecovery({

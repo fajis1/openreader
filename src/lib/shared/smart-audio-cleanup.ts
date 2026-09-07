@@ -1,4 +1,5 @@
 import { expandScholarEditorialWords, hasSplitScholarEditorialWord, SCHOLAR_EDITORIAL_WORD_INSTRUCTIONS } from './scholar-editorial-words';
+import { isKokoroSafePronunciation } from './kokoro-pronunciation-policy';
 
 export const SMART_AUDIO_OMIT_SENTINEL = '[OMIT]';
 
@@ -234,6 +235,15 @@ function rewriteSmartAudioPronunciationTags(
       .filter(Boolean)
       .map((word) => resolveAuthoritativeWord(word, pronunciationLookup));
     const ipaWords = ipa.split(/\s+/u).filter(Boolean);
+
+    // A validated exact single-word dictionary entry replaces the entire
+    // malformed IPA, before checking the rejected model output's alignment.
+    if (termWords.length === 1 && termWords[0].pronunciation
+      && isKokoroSafePronunciation(expandScholarEditorialWords(termWords[0].word), termWords[0].pronunciation)) {
+      assertSingleScriptWord(termWords[0].word);
+      assertGreekInflectionEnding(termWords[0].word, termWords[0].pronunciation.slice(1, -1));
+      return `[${termWords[0].word}](${termWords[0].pronunciation})`;
+    }
 
     if (termWords.length !== ipaWords.length) {
       throw new SmartAudioOutputValidationError(

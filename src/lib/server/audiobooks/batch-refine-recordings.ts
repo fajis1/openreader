@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { and, asc, eq, lt } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { audiobookChapters, batchRefineChanges, batchRefineRuns } from '@/db/schema';
+import { audiobookChapters, audiobookJobs, batchRefineChanges, batchRefineRuns } from '@/db/schema';
 import { listAdminProviders } from '@/lib/server/admin/providers';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { resolveEffectiveTtsInstructions } from '@/lib/server/admin/tts-instructions';
@@ -37,6 +37,7 @@ import type { AudiobookGenerationSettings } from '@/types/client';
 import type { TTSAudiobookFormat } from '@/types/tts';
 import { batchRefineTextHash } from './batch-refine-assessment';
 import { hasUntaggedScholarForeignScript } from './batch-refine-scholar-safety';
+import { canonicalRepairTextFile, assertPronunciationRepair, PRONUNCIATION_REPAIR_RULE } from '@/lib/shared/pronunciation-issues';
 
 const STALE_RECORDING_MS = 15 * 60 * 1000;
 
@@ -184,19 +185,35 @@ async function recordApprovedChange(
   const currentText = (await getAudiobookObjectBuffer(
     change.documentId,
     change.userId,
-    change.textFileName,
+    canonicalRepairTextFile(change.textFileName),
     null,
   )).toString('utf8');
   if (batchRefineTextHash(currentText) !== change.proposedTextHash) {
     throw new Error('Approved text changed before recording began. Review and approve the latest text again.');
   }
-  const runRows = await db.select({ profileCategory: batchRefineRuns.profileCategory })
+  const runRows = await db.select({ profileCategory: batchRefineRuns.profileCategory, rule: batchRefineRuns.rule })
     .from(batchRefineRuns)
     .where(and(
       eq(batchRefineRuns.id, change.runId),
       eq(batchRefineRuns.userId, change.userId),
     ))
     .limit(1);
+  const pronunciationRepair = runRows[0]?.rule === PRONUNCIATION_REPAIR_RULE;
+  const assertRepairStillCurrent = async () => {
+    if (!pronunciationRepair) return;
+    const jobs = await db.select({ status: audiobookJobs.status }).from(audiobookJobs).where(and(eq(audiobookJobs.documentId, change.documentId), eq(audiobookJobs.userId, change.userId)));
+    if (jobs.some((job: { status: string }) => job.status === 'running' || job.status === 'queued')) throw new Error('Pause generation before recording the approved pronunciation repair, then retry this recording.');
+    const latestText = (await getAudiobookObjectBuffer(change.documentId, change.userId, canonicalRepairTextFile(change.textFileName), null)).toString('utf8');
+    if (batchRefineTextHash(latestText) !== change.proposedTextHash) throw new Error('Chapter changed during recording; replacement was not promoted.');
+    if (change.textFileName.endsWith('__rejected.txt')) {
+      const rejected = (await getAudiobookObjectBuffer(change.documentId, change.userId, change.textFileName, null)).toString('utf8');
+      if (batchRefineTextHash(rejected) !== change.sourceTextHash) throw new Error('A newer failed attempt replaced this proposal. Scan again.');
+    }
+  };
+  if (pronunciationRepair) {
+    assertPronunciationRepair(change.previousText, currentText);
+    await assertRepairStillCurrent();
+  }
   if (
     runRows[0]?.profileCategory === 'scholar'
     && hasUntaggedScholarForeignScript(currentText)
@@ -292,6 +309,8 @@ async function recordApprovedChange(
     const finalBytes = await readFile(outputPath);
     const finalName = encodeChapterFileName(change.chapterIndex, chapterTitle, format);
 
+    await assertRepairStillCurrent();
+
     // The existing chapter remains playable until the complete replacement has
     // been generated. This Put is the promotion point.
     await putAudiobookObject(
@@ -310,6 +329,13 @@ async function recordApprovedChange(
         && fileName !== finalName)
       .map((fileName) => deleteAudiobookObject(change.documentId, change.userId, fileName, null).catch(() => {})));
     await deleteCombinedAudiobook(change.documentId, change.userId);
+
+    const originalName = change.textFileName.replace('__rejected.txt', '__original.txt');
+    if (pronunciationRepair && change.textFileName.endsWith('__rejected.txt') && !objectNames.includes(originalName)) {
+      const metadataName = change.textFileName.replace('__rejected.txt', '__pronunciation_failure.json');
+      const metadata = JSON.parse((await getAudiobookObjectBuffer(change.documentId, change.userId, metadataName, null)).toString('utf8'));
+      if (typeof metadata.sourceText === 'string') await putAudiobookObject(change.documentId, change.userId, originalName, Buffer.from(metadata.sourceText), 'text/plain; charset=utf-8', null);
+    }
 
     await db.insert(audiobookChapters).values({
       id: storedChapter?.id || `${change.documentId}-${change.chapterIndex}`,

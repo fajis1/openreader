@@ -129,6 +129,7 @@ export async function resolveSmartAudioWithValidationRecovery<T>(input: {
   ) => Promise<unknown>;
   sourceFallback?: (rejectedResult: unknown) => unknown;
   authoritativePronunciations: Record<string, string>;
+  onUnrecoverable?: (result: WorkerRecord, errors: string[]) => Promise<void>;
 }): Promise<SmartAudioValidationRecovery<T>> {
   try {
     const result = input.resolve(input.initialResult);
@@ -242,6 +243,10 @@ export async function resolveSmartAudioWithValidationRecovery<T>(input: {
         validationErrors,
         discardedTags: 0,
       };
+    }
+    if (input.onUnrecoverable) {
+      const rejected = workerRecord(fallbackCandidate);
+      if (rejected) await input.onUnrecoverable(rejected, validationErrors);
     }
     throw error;
   }

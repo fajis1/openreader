@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
 import { putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
+import { savePronunciationFailure } from '@/lib/server/audiobooks/pronunciation-failures';
 import { encodeChapterFileName } from '@/lib/server/audiobooks/chapters';
 import { createOrReuseCurrentPdfParseOperation } from '@/lib/server/pdf-parse/operation';
 import { extractPdfToc, computeTocBoundaries } from '@/lib/server/pdf-parse/toc';
@@ -1014,6 +1015,12 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             const recovery = await resolveSmartAudioWithValidationRecovery({
               initialResult: workerResult,
               authoritativePronunciations: currentPronunciations,
+              onUnrecoverable: async (rejected, errors) => {
+                await savePronunciationFailure({ bookId, userId, chapterIndex: chapter.index, chapterTitle: chapter.title,
+                  sourceText: cleanupSourceText, rejected, errors: errors.slice(0, 1), jobId: job.id,
+                  profileId: currentSelectedProfile?.id, cast: multiVoiceCharacters, namespace: testNamespace,
+                }).catch(() => serverLogger.warn({ event: 'audiobook.pronunciation_failure.save_failed', bookId, chapter: chapter.index }, 'Could not retain rejected chapter for pronunciation review.'));
+              },
               resolve: (candidate) => {
                 const multiVoiceResult = currentSelectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
                   ? resolveMultiVoiceWorkerResult(candidate, multiVoiceCharacters, {

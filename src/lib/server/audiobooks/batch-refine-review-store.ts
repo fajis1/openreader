@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { batchRefineChanges, batchRefineRuns } from '@/db/schema';
+import { audiobookJobs, batchRefineChanges, batchRefineRuns } from '@/db/schema';
+import { assertPronunciationRepair, canonicalRepairTextFile, PRONUNCIATION_REPAIR_RULE } from '@/lib/shared/pronunciation-issues';
+import { parseVoiceTaggedText } from '@/lib/shared/multi-voice';
 import {
   batchRefineFlagDefinitions,
   BATCH_REFINE_PROFILE_REVIEW_CONFIG,
@@ -18,6 +20,7 @@ import {
 import { hasUntaggedScholarForeignScript } from '@/lib/server/audiobooks/batch-refine-scholar-safety';
 import {
   getAudiobookObjectBuffer,
+  listAudiobookObjects,
   putAudiobookObject,
 } from '@/lib/server/audiobooks/blobstore';
 
@@ -173,6 +176,13 @@ export async function approveBatchRefineChange(input: {
   }
 
   const proposedText = input.editedText === undefined ? owned.change.proposedText : input.editedText;
+  const pronunciationRepair = owned.run.rule === PRONUNCIATION_REPAIR_RULE;
+  if (pronunciationRepair) {
+    const jobs = await db.select({ status: audiobookJobs.status }).from(audiobookJobs).where(and(eq(audiobookJobs.userId, input.userId), eq(audiobookJobs.documentId, owned.change.documentId)));
+    if (jobs.some((job: { status: string }) => job.status === 'queued' || job.status === 'running')) throw new BatchRefineReviewConflictError('Pause background generation before approving pronunciation repairs.');
+    assertPronunciationRepair(owned.change.previousText, proposedText);
+    if (/<voice\b/u.test(proposedText)) parseVoiceTaggedText(proposedText, { includeOmitted: true });
+  }
   if (
     owned.run.profileCategory === 'scholar'
     && hasUntaggedScholarForeignScript(proposedText)
@@ -188,6 +198,18 @@ export async function approveBatchRefineChange(input: {
     null,
   )).toString('utf8');
   const currentHash = batchRefineTextHash(currentText);
+  if (pronunciationRepair && owned.change.textFileName.endsWith('__rejected.txt')) {
+    const metadataName = owned.change.textFileName.replace('__rejected.txt', '__pronunciation_failure.json');
+    const metadata = JSON.parse((await getAudiobookObjectBuffer(owned.change.documentId, input.userId, metadataName, null)).toString('utf8'));
+    if (metadata.rejectedHash !== currentHash) throw new BatchRefineReviewConflictError('Rejected output changed after this proposal. Scan again.');
+    const canonicalName = canonicalRepairTextFile(owned.change.textFileName);
+    const objects = await listAudiobookObjects(owned.change.documentId, input.userId, null);
+    const canonicalHash = objects.some(object => object.fileName === canonicalName)
+      ? batchRefineTextHash((await getAudiobookObjectBuffer(owned.change.documentId, input.userId, canonicalName, null)).toString('utf8')) : null;
+    if (canonicalHash !== metadata.canonicalHash && canonicalHash !== batchRefineTextHash(proposedText)) {
+      throw new BatchRefineReviewConflictError('The saved chapter changed since generation failed. Scan the current chapter again.');
+    }
+  }
   if (currentHash !== owned.change.sourceTextHash && currentHash !== owned.change.proposedTextHash) {
     throw new BatchRefineReviewConflictError('The approved audiobook text changed after this proposal was created. Refresh the review before approving it.');
   }
@@ -206,7 +228,7 @@ export async function approveBatchRefineChange(input: {
   await putAudiobookObject(
     owned.change.documentId,
     input.userId,
-    owned.change.textFileName,
+    pronunciationRepair ? canonicalRepairTextFile(owned.change.textFileName) : owned.change.textFileName,
     Buffer.from(proposedText, 'utf8'),
     'text/plain; charset=utf-8',
     null,

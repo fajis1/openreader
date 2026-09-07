@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-hot-toast';
 
 import { ModalFrame } from '@/components/ui';
+import { PRONUNCIATION_REPAIR_RULE } from '@/lib/shared/pronunciation-issues';
 
 type ReviewFlag = {
   id: string;
@@ -12,6 +13,7 @@ type ReviewFlag = {
 };
 
 type BatchRefineRun = {
+  rule: string;
   id: string;
   status: string;
   recordingMode: string;
@@ -24,6 +26,7 @@ type BatchRefineRun = {
 };
 
 type BatchRefineChange = {
+  textFileName: string;
   id: string;
   chapterIndex: number;
   chapterTitle: string;
@@ -134,6 +137,12 @@ export function BatchRefineReviewModal({
     return () => window.clearInterval(poll);
   }, [loadReview, open]);
 
+  useEffect(() => {
+    // A targeted repair run contains one chapter; keep its recording status
+    // visible after approval instead of hiding it behind the pending filter.
+    if (review?.run?.rule === PRONUNCIATION_REPAIR_RULE) setFilter('all');
+  }, [review?.run?.id, review?.run?.rule]);
+
   const flagsById = useMemo(() => new Map(
     (review?.flagDefinitions || []).map((flag) => [flag.id, flag]),
   ), [review?.flagDefinitions]);
@@ -232,9 +241,9 @@ export function BatchRefineReviewModal({
       <div className="flex max-h-[92vh] flex-col overflow-hidden rounded-xl border border-line-soft bg-surface">
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line-soft bg-surface-raised p-4">
           <div>
-            <h2 className="text-xl font-bold text-text-strong">AI Batch Refine Review</h2>
+            <h2 className="text-xl font-bold text-text-strong">{review?.run?.rule === PRONUNCIATION_REPAIR_RULE ? 'Pronunciation Repair Review' : 'AI Batch Refine Review'}</h2>
             <p className="mt-1 text-sm text-text-soft">
-              Only chapters Gemini changed appear here. Approval saves that text and immediately queues its Kokoro replacement.
+              {review?.run?.rule === PRONUNCIATION_REPAIR_RULE ? 'Review targeted pronunciation corrections. Approval saves the corrected text and queues this chapter for recording.' : 'Only chapters Gemini changed appear here. Approval saves that text and immediately queues its Kokoro replacement.'}
             </p>
           </div>
           <button onClick={onClose} className="px-2 text-2xl leading-none text-text-soft hover:text-text-strong" aria-label="Close review">&times;</button>
@@ -392,12 +401,12 @@ export function BatchRefineReviewModal({
                   {isExpanded && (
                     <div className="grid gap-3 lg:grid-cols-2">
                       <div>
-                        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-soft">Previous approved text</div>
+                        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-soft">{change.textFileName.endsWith('__rejected.txt') ? 'Rejected generation text' : 'Previous approved text'}</div>
                         <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded border border-line-soft bg-surface p-3 text-xs leading-relaxed text-text-strong">{change.previousText}</pre>
                       </div>
                       <div>
                         <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-soft">
-                          {change.edited ? 'Reviewer-edited text' : 'Gemini proposal'}
+                          {change.edited ? 'Reviewer-edited text' : 'Proposed text'}
                         </div>
                         {isEditing ? (
                           <textarea
