@@ -70,14 +70,14 @@ export function GeminiPronunciationModelUpgradeModal({
   return (
     <ModalFrame open onClose={() => undefined}>
       <div className="w-[min(92vw,34rem)] bg-surface p-6 text-foreground">
-        <h2 className="text-xl font-bold">Gemini 3.7 Flash is available</h2>
+        <h2 className="text-xl font-bold">Gemini 3.8 Flash is available</h2>
         <p className="mt-3 text-sm text-soft">
-          You currently use Gemini 3.6 Flash for cleanup, pronunciation work, or both in{' '}
-          {offer.affectedProfileCount} {profileLabel}. Upgrade every 3.6 selection in those profiles
-          to Gemini 3.7 Flash, or keep 3.6 if you prefer it.
+          You currently use Gemini 3.7 Flash for cleanup, pronunciation work, or both in{' '}
+          {offer.affectedProfileCount} {profileLabel}. Upgrade every 3.7 selection in those profiles
+          to Gemini 3.8 Flash, or keep 3.7 if you prefer it.
         </p>
         <p className="mt-2 text-sm text-soft">
-          This updates both cleanup and pronunciation fields that are currently set to 3.6.
+          This updates both cleanup and pronunciation fields that are currently set to 3.7.
           Custom and other model choices, prompts, API keys, and pronunciations stay unchanged.
         </p>
         {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
@@ -88,7 +88,7 @@ export function GeminiPronunciationModelUpgradeModal({
             onClick={() => void choose('stay')}
             className="rounded border border-line px-4 py-2 text-sm hover:bg-surface-raised disabled:opacity-50"
           >
-            Stay on 3.6
+            Stay on 3.7
           </button>
           <button
             type="button"
@@ -96,7 +96,7 @@ export function GeminiPronunciationModelUpgradeModal({
             onClick={() => void choose('upgrade')}
             className="rounded bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
           >
-            {isSaving ? 'Saving…' : 'Upgrade to 3.7'}
+            {isSaving ? 'Saving…' : 'Upgrade to 3.8'}
           </button>
         </div>
       </div>

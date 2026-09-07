@@ -120,6 +120,47 @@ describe('Gemini key failover', () => {
     expect(request).toHaveBeenCalledWith('primary-placeholder', 'gemini-3.7-flash');
   });
 
+  test('never retries an aborted request or switches to a backup after cancellation', async () => {
+    const controller = new AbortController();
+    const request = vi.fn(async () => { controller.abort(); throw new DOMException('Stopped', 'AbortError'); });
+    await expect(fetchGeminiWithRateLimitFallback({ primaryApiKey: 'fixture', backupApiKey: 'backup', requestedModel: 'gemini-3.8-flash', signal: controller.signal, request })).rejects.toThrow();
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not start a request with an already expired signal', async () => {
+    const request = vi.fn();
+    await expect(fetchGeminiWithRateLimitFallback({ primaryApiKey: 'fixture', signal: AbortSignal.abort(), request })).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  test('stops before backoff when cancelled by the retry observer', async () => {
+    const controller = new AbortController();
+    const request = vi.fn().mockResolvedValue(new Response('Busy', { status: 503 }));
+    await expect(fetchGeminiWithRateLimitFallback({ primaryApiKey: 'fixture', request, signal: controller.signal, onStatusUpdate: () => controller.abort() })).rejects.toThrow();
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  test('honors a shorter repair retry budget before trying the backup key', async () => {
+    const request = vi.fn().mockImplementation(async (key: string) => key === 'primary-fixture' ? new Response('Busy', { status: 503 }) : Response.json({ ok: true }));
+    const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: 'primary-fixture', backupApiKey: 'backup-fixture', maxAttempts: 3, request });
+    expect(result.usedBackup).toBe(true);
+    expect(request).toHaveBeenCalledTimes(4);
+  });
+
+  test('uses a configured backup directly when the primary is blank', async () => {
+    const request = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+    const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: '', backupApiKey: 'backup-fixture', request });
+    expect(request).toHaveBeenCalledWith('backup-fixture');
+    expect(result.usedBackup).toBe(true);
+  });
+
+  test('falls back from unavailable 3.8 to 3.7', async () => {
+    const request = vi.fn().mockResolvedValueOnce(new Response('model not found', { status: 404 })).mockResolvedValueOnce(Response.json({ ok: true }));
+    const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: 'fixture', requestedModel: 'gemini-3.8-flash', request });
+    expect(result.usedModel).toBe('gemini-3.7-flash');
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
   test('classifies only definitive unavailable-model responses as unavailable', async () => {
     for (const response of [
       new Response('forbidden', { status: 403 }),

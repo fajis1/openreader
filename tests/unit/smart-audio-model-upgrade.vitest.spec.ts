@@ -20,7 +20,7 @@ const profile = (id: string, pronunciationAiModel: string) => ({
 });
 
 describe('Gemini pronunciation model upgrade offer', () => {
-  it('offers migration for every stored profile still explicitly using 3.6 Flash', () => {
+  it('offers migration for every stored profile still explicitly using 3.7 Flash', () => {
     const offer = buildPronunciationModelUpgradeOffer({
       smartAudioProfiles: {
         selectedProfileId: 'one',
@@ -73,7 +73,7 @@ describe('Gemini pronunciation model upgrade offer', () => {
     expect(offer.affectedProfileCount).toBe(1);
   });
 
-  it('does not prompt users who have no 3.6 pronunciation profiles', () => {
+  it('does not prompt users who have no 3.7 pronunciation profiles', () => {
     expect(buildPronunciationModelUpgradeOffer({
       smartAudioProfiles: {
         selectedProfileId: 'one',
@@ -82,7 +82,7 @@ describe('Gemini pronunciation model upgrade offer', () => {
     }).available).toBe(false);
   });
 
-  it('upgrades cleanup and pronunciation fields set to 3.6 and preserves other models', () => {
+  it('upgrades cleanup and pronunciation fields set to 3.7 and preserves other models', () => {
     const data: Record<string, unknown> = {
       unrelatedPreference: true,
       smartAudioProfiles: {
@@ -113,7 +113,7 @@ describe('Gemini pronunciation model upgrade offer', () => {
     });
   });
 
-  it('records stay without changing a 3.6 profile', () => {
+  it('records stay without changing a 3.7 profile', () => {
     const data: Record<string, unknown> = {
       smartAudioProfiles: {
         selectedProfileId: 'one',

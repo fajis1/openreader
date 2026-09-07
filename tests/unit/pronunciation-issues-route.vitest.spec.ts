@@ -1,5 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), owned: vi.fn(), catalog: vi.fn(), chapter: vi.fn(), propose: vi.fn(), resume: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), owned: vi.fn(), catalog: vi.fn(), chapter: vi.fn(), propose: vi.fn(), resume: vi.fn(), queue: vi.fn(), jobs: vi.fn(), stop: vi.fn(), config: vi.fn() }));
+vi.mock('@/lib/server/audiobooks/pronunciation-repair-jobs', () => ({ queuePronunciationRepairs: (...args: unknown[]) => mocks.queue(...args), listPronunciationRepairJobs: (...args: unknown[]) => mocks.jobs(...args), stopPronunciationRepairs: (...args: unknown[]) => mocks.stop(...args) }));
+vi.mock('@/lib/server/audiobooks/pronunciation-repair-config', () => ({ loadPronunciationRepairConfig: (...args: unknown[]) => mocks.config(...args), pronunciationRepairErrorMessage: () => 'Repair failed safely.' }));
 vi.mock('@/lib/server/auth/auth', () => ({ requireAuthContext: (...args: unknown[]) => mocks.auth(...args) }));
 vi.mock('@/db', () => ({ db: { select: () => ({ from: () => ({ where: () => ({ limit: () => mocks.owned() }) }) }) } }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repairs', () => ({
@@ -21,8 +23,24 @@ test('denies unauthenticated scans without accessing book data', async () => {
 });
 test('denies every mutation for another owner’s book', async () => {
   mocks.owned.mockResolvedValue([]);
-  for (const action of ['scan', 'propose', 'resume']) expect((await POST(request(action))).status).toBe(404);
+  for (const action of ['scan', 'propose', 'resume', 'queue', 'stop']) expect((await POST(request(action))).status).toBe(404);
   expect(mocks.chapter).not.toHaveBeenCalled(); expect(mocks.propose).not.toHaveBeenCalled(); expect(mocks.resume).not.toHaveBeenCalled();
+});
+test('queues work without waiting for Gemini and honors request-only configuration', async () => {
+  mocks.queue.mockResolvedValue({ jobId: 'job' });
+  const response = await POST(new Request('http://localhost/api/audiobooks/pronunciation-issues', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+    bookId: 'book', action: 'queue', requestId: 'request', profileId: 'chosen', aiModel: 'gemini-3.8-flash', primaryKeyRef: 'second:primary', backupKeyRef: '', chapters: [],
+  }) }));
+  expect(response.status).toBe(202);
+  expect(mocks.queue).toHaveBeenCalledWith(expect.objectContaining({ userId: 'owner', profileId: 'chosen', aiModel: 'gemini-3.8-flash', primaryKeyRef: 'second:primary', backupKeyRef: '' }));
+  expect(mocks.propose).not.toHaveBeenCalled();
+});
+test('provides a safe diagnostic reference instead of echoing unknown upstream errors', async () => {
+  mocks.queue.mockRejectedValue(new Error('https://upstream.invalid/?key=fixture-secret'));
+  const response = await POST(request('queue'));
+  const body = await response.json();
+  expect(body.requestId).toMatch(/^[a-f0-9-]+$/);
+  expect(JSON.stringify(body)).not.toContain('fixture-secret');
 });
 test('uses the authenticated owner and exposes no original source in scan results', async () => {
   mocks.chapter.mockResolvedValue({ text: 'שלום', original: 'private source context', chapterIndex: 0, hash: 'hash', title: 'Chapter', failed: false });

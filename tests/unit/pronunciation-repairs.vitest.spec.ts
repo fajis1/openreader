@@ -31,7 +31,7 @@ vi.mock('@/lib/server/audiobooks/batch-refine-review-store', () => ({
   finishBatchRefineRun: (...args: unknown[]) => mocks.finish(...args),
   updateBatchRefineRunProgress: vi.fn(), markBatchRefineRunStarted: vi.fn(),
 }));
-vi.mock('@/lib/server/smart-audio-profiles', () => ({ readSmartAudioProfilesDocument: async () => ({ selectedProfileId: 'profile' }), findSmartAudioProfileById: () => mocks.profile }));
+vi.mock('@/lib/server/smart-audio-profiles', () => ({ readSmartAudioProfilesDocument: async () => ({ selectedProfileId: 'profile', profiles: [mocks.profile] }), findSmartAudioProfileById: () => mocks.profile }));
 vi.mock('@/lib/server/smart-audio/book-lexicon', () => ({ readBookLexicon: async () => null }));
 vi.mock('@/lib/server/smart-audio/gemini-failover', () => ({ fetchGeminiWithRateLimitFallback: (...args: unknown[]) => mocks.gemini(...args) }));
 
@@ -85,7 +85,7 @@ describe('pronunciation repair service', () => {
   test('requires complete valid patches and rejects English rewrite attempts before saving', async () => {
     const input = seed('The [Aetherian](/bad split/) arrived.');
     mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ patches: [{ id: '0', replacement: 'Someone else' }] }) }] } }] })));
-    await expect(proposePronunciationRepair(input)).rejects.toThrow('English');
+    await expect(proposePronunciationRepair(input)).rejects.toThrow('unchanged-text validation');
     expect(mocks.createRun).not.toHaveBeenCalled();
   });
 
@@ -93,6 +93,27 @@ describe('pronunciation repair service', () => {
     const input = seed('God θεοῦ.');
     await proposePronunciationRepair({ ...input, manualPatches: [{ id: '0', replacement: '[θεοῦ](/θɛu/)' }] });
     expect(mocks.gemini).not.toHaveBeenCalled();
+  });
+
+  test('reports non-JSON Gemini output without echoing its body', async () => {
+    mocks.fetch.mockResolvedValue(new Response('<html>private upstream body</html>'));
+    await expect(proposePronunciationRepair(seed('God θεοῦ.'))).rejects.toThrow('Gemini returned invalid JSON');
+    expect(mocks.createRun).not.toHaveBeenCalled();
+  });
+
+  test('stops before saving if cancelled', async () => {
+    const input = seed('God θεοῦ.');
+    const controller = new AbortController();
+    controller.abort();
+    await expect(proposePronunciationRepair({ ...input, signal: controller.signal })).rejects.toThrow();
+    expect(mocks.gemini).not.toHaveBeenCalled();
+    expect(mocks.createRun).not.toHaveBeenCalled();
+  });
+
+  test('honors a requested model and key references for Gemini repairs', async () => {
+    mocks.fetch.mockResolvedValue(Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ patches: [{ id: '0', replacement: '[θεοῦ](/θɛu/)' }] }) }] } }] }));
+    await proposePronunciationRepair({ ...seed('God θεοῦ.'), profileId: 'profile', aiModel: 'custom-selected-model', primaryKeyRef: 'profile:primary', backupKeyRef: '' });
+    expect(mocks.gemini).toHaveBeenCalledWith(expect.objectContaining({ requestedModel: 'custom-selected-model', primaryApiKey: 'fixture', backupApiKey: '', maxAttempts: 3, signal: expect.any(AbortSignal) }));
   });
 
   test('restores an existing proposal and avoids another paid request', async () => {

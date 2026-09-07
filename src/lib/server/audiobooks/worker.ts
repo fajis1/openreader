@@ -375,6 +375,12 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     const userId = job.userId;
     const jobSettings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
 
+    if (jobSettings.jobType === 'pronunciation-repair') {
+      const { processPronunciationRepairJob } = await import('./pronunciation-repair-jobs');
+      await processPronunciationRepairJob(job);
+      return;
+    }
+
     if (jobSettings.jobType === 'batch-refine') {
       await processBatchRefineJob(job, updateProgress, markError);
       await updateClaimedAudiobookJob(job.id, 'running', { status: 'completed', progress: 100, completedAt: Date.now() });

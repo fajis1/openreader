@@ -1,8 +1,9 @@
 export const DEFAULT_CLEANUP_AI_MODEL = 'gemini-3.1-flash-lite';
-export const DEFAULT_PRONUNCIATION_AI_MODEL = 'gemini-3.7-flash';
-export const SMART_AUDIO_VALIDATION_REPAIR_MODEL = 'gemini-3.7-flash';
+export const DEFAULT_PRONUNCIATION_AI_MODEL = 'gemini-3.8-flash';
+export const SMART_AUDIO_VALIDATION_REPAIR_MODEL = 'gemini-3.8-flash';
 
 const SMART_AUDIO_REPAIR_ESCALATION_MODELS = new Set([
+  'gemini-3.7-flash',
   'gemini-2.5-flash',
   'gemini-2.5-flash-lite',
   'gemini-3.1-flash-lite',

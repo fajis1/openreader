@@ -4,9 +4,14 @@ import { useEffect, useRef, useState } from 'react';
 import { ModalFrame } from '@/components/ui';
 import { BatchRefineReviewModal } from './BatchRefineReviewModal';
 import type { PronunciationIssue } from '@/lib/shared/pronunciation-issues';
+import { PRESET_MODELS } from '@/components/constants';
+import { readJsonResponse } from '@/lib/client/read-json-response';
+import { v4 as uuidv4 } from 'uuid';
 
 type Chapter = { fileName: string; chapterIndex: number; failed: boolean };
 type Finding = Chapter & { title: string; hash: string; issues: PronunciationIssue[]; jobId?: string; failureError?: string; runId?: string; audioStatus?: string; error?: string };
+type RepairConfig = { selectedProfileId: string; profiles: { id: string; name: string; model: string; primaryKeyRef: string; backupKeyRef: string }[]; keySources: { ref: string; label: string; masked: string }[] };
+type RepairJob = { id: string; status: string; progress: number; total: number; error?: string; profileId?: string; aiModel?: string; primaryKeyRef?: string; backupKeyRef?: string; results: { fileName: string; runId?: string; error?: string; requestId: string }[] };
 
 export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onRecordingQueued }: {
   open: boolean; onClose: () => void; bookId: string; profileId?: string; onRecordingQueued: () => void;
@@ -20,6 +25,60 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
   const [reviewRun, setReviewRun] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const controller = useRef<AbortController | null>(null);
+  const [config, setConfig] = useState<RepairConfig | null>(null);
+  const [selection, setSelection] = useState({ profileId: profileId || '', aiModel: '', primaryKeyRef: '', backupKeyRef: '' });
+  const [job, setJob] = useState<RepairJob | null>(null);
+  const jobVersion = useRef('');
+  const activeRepair = job?.status === 'queued' || job?.status === 'running';
+
+  useEffect(() => {
+    if (!open) return;
+    const current = new AbortController();
+    void fetch(`/api/audiobooks/pronunciation-issues?bookId=${encodeURIComponent(bookId)}&action=config`, { signal: current.signal, cache: 'no-store' })
+      .then(readJsonResponse).then((value: RepairConfig) => {
+        if (current.signal.aborted) return;
+        setConfig(value);
+        const profile = value.profiles.find(item => item.id === profileId) || value.profiles.find(item => item.id === value.selectedProfileId) || value.profiles[0];
+        if (profile) setSelection({ profileId: profile.id, aiModel: profile.model, primaryKeyRef: profile.primaryKeyRef, backupKeyRef: profile.backupKeyRef });
+      }).catch(problem => { if (!current.signal.aborted) setError(problem.message); });
+    return () => current.abort();
+  }, [open, bookId, profileId]);
+
+  useEffect(() => {
+    if (!open) return;
+    const current = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const value = await fetch(`/api/audiobooks/pronunciation-issues?bookId=${encodeURIComponent(bookId)}&action=jobs`, { signal: current.signal, cache: 'no-store' }).then(readJsonResponse);
+        if (current.signal.aborted) return;
+        const latest: RepairJob | undefined = value.jobs[0];
+        setJob(latest || null);
+        const version = JSON.stringify(latest);
+        if (latest && version !== jobVersion.current) {
+          jobVersion.current = version;
+          setFindings(previous => {
+            const next = [...previous];
+            for (const result of latest.results) {
+              const index = next.findIndex(row => row.fileName === result.fileName);
+              const chapterIndex = Number(result.fileName.split('__')[0]) - 1;
+              const row = index >= 0 ? next[index] : { fileName: result.fileName, chapterIndex, title: `Chapter ${chapterIndex + 1}`, hash: '', issues: [], failed: result.fileName.endsWith('__rejected.txt') };
+              const updated = { ...row, runId: result.runId, error: result.error ? `${result.error} Reference: ${result.requestId}` : undefined };
+              if (index >= 0) next[index] = updated; else next.push(updated);
+            }
+            return next;
+          });
+          setSelected(previous => previous.filter(file => !latest.results.some(result => result.fileName === file && result.runId)));
+          const ready = latest.results.filter(result => result.runId).length;
+          const failed = latest.results.filter(result => result.error).length;
+          setStatus(`Repair job ${latest.status}: ${latest.results.length}/${latest.total} checked; ${ready} proposals ready; ${failed} failed. ${latest.status === 'queued' || latest.status === 'running' ? 'You can close this window; work continues in the background.' : 'Review saved proposals or scan again to retry failed chapters.'}`);
+        }
+      } catch (problem) { if (!current.signal.aborted) setError(problem instanceof Error ? problem.message : 'Could not load repair progress.'); }
+      finally { if (!current.signal.aborted) timer = setTimeout(() => void poll(), 3000); }
+    };
+    void poll();
+    return () => { current.abort(); clearTimeout(timer); };
+  }, [open, bookId]);
 
   useEffect(() => {
     if (!open) controller.current?.abort();
@@ -28,14 +87,13 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
   useEffect(() => {
     controller.current?.abort();
     setFindings([]); setSelected([]); setDrafts({}); setScanned(false); setStatus(''); setError(''); setReviewRun(null);
+    setJob(null); jobVersion.current = '';
   }, [bookId, profileId]);
 
   async function request(body: Record<string, unknown>, signal: AbortSignal) {
     const response = await fetch('/api/audiobooks/pronunciation-issues', { method: 'POST', signal,
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookId, profileId, ...body }) });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'The operation failed.');
-    return data;
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookId, ...selection, ...body }) });
+    return readJsonResponse(response);
   }
 
   async function scan() {
@@ -44,8 +102,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
     setBusy(true); setError(''); setFindings([]); setSelected([]); setDrafts({}); setScanned(false);
     try {
       const response = await fetch(`/api/audiobooks/pronunciation-issues?bookId=${encodeURIComponent(bookId)}`, { signal: current.signal, cache: 'no-store' });
-      const catalog = await response.json();
-      if (!response.ok) throw new Error(catalog.error || 'Could not load chapters.');
+      const catalog = await readJsonResponse(response);
       const chapters: Chapter[] = catalog.chapters;
       for (const [index, chapter] of chapters.entries()) {
         current.signal.throwIfAborted();
@@ -73,25 +130,14 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
     const current = new AbortController(); controller.current = current;
     setBusy(true); setError('');
     try {
-      for (const file of files) {
-        const finding = findings.find(row => row.fileName === file);
-        if (!finding || !finding.issues.length || finding.runId) continue;
-        current.signal.throwIfAborted();
-        setStatus(`Proposing repairs for ${finding.title}…`);
-        try {
-          const manualPatches = finding.issues.flatMap(issue => Object.hasOwn(drafts, `${file}:${issue.id}`)
-            ? [{ id: issue.id, replacement: drafts[`${file}:${issue.id}`] }] : []);
-          const result = await request({ action: 'propose', fileName: file, hash: finding.hash, manualPatches }, current.signal);
-          current.signal.throwIfAborted();
-          setFindings(previous => previous.map(row => row.fileName === file ? { ...row, runId: result.runId, error: undefined } : row));
-          setSelected(previous => previous.filter(item => item !== file));
-        } catch (problem) {
-          if (current.signal.aborted) throw problem;
-          setFindings(previous => previous.map(row => row.fileName === file ? { ...row, error: problem instanceof Error ? problem.message : 'Repair failed.' } : row));
-        }
-      }
-      setStatus('Proposals are ready to review. Chapter text and audio change only after approval.');
-    } catch { setStatus('Stopped. Completed proposals remain available in Review AI Changes.'); }
+      const chapters = findings.filter(row => files.includes(row.fileName) && row.issues.length && !row.runId).map(row => ({
+        fileName: row.fileName, hash: row.hash, manualPatches: row.issues.flatMap(issue => Object.hasOwn(drafts, `${row.fileName}:${issue.id}`)
+          ? [{ id: issue.id, replacement: drafts[`${row.fileName}:${issue.id}`] }] : []),
+      }));
+      const result = await request({ action: 'queue', requestId: uuidv4(), chapters }, current.signal);
+      setJob({ ...selection, id: result.jobId, status: 'queued', progress: 0, total: chapters.length, results: [] });
+      setStatus('Repairs queued. You can close this window; proposals will appear as chapters finish. Approval is still required.');
+    } catch (problem) { if (!current.signal.aborted) setError(problem instanceof Error ? problem.message : 'Could not queue repairs.'); }
     finally { if (controller.current === current) setBusy(false); }
   }
 
@@ -110,12 +156,30 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
       <div className="max-h-[90vh] overflow-y-auto rounded-xl border border-line-soft bg-surface p-5 text-text-strong">
         <div className="flex items-center justify-between gap-3"><h2 className="text-xl font-semibold">Scan Pronunciation Issues</h2><button onClick={onClose} aria-label="Close pronunciation scan">Close</button></div>
         <p className="my-3 text-sm text-text-soft">Check saved chapters and retained failed output for leftover Greek/Hebrew and broken pronunciation tags. Scanning uses no AI. Proposals use dictionary matches first, and send only affected chapters to Gemini when needed. Review every proposal before recording.</p>
+        {config && !activeRepair && <fieldset disabled={busy} className="my-3 space-y-2">
+          <label className="block text-sm">Profile<select aria-label="Repair profile" className="ml-2 rounded border border-line-soft bg-surface p-2" value={selection.profileId} onChange={event => {
+            const profile = config.profiles.find(item => item.id === event.target.value)!;
+            setSelection({ profileId: profile.id, aiModel: profile.model, primaryKeyRef: profile.primaryKeyRef, backupKeyRef: profile.backupKeyRef });
+            setFindings([]); setSelected([]); setDrafts({}); setScanned(false);
+          }}>{config.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+          <label className="block text-sm">AI Model<input aria-label="Repair AI model" list="pronunciation-repair-models" value={selection.aiModel} onChange={event => setSelection(previous => ({ ...previous, aiModel: event.target.value }))} className="ml-2 rounded border border-line-soft bg-surface p-2" /></label>
+          <datalist id="pronunciation-repair-models">{PRESET_MODELS.filter(model => model.id !== 'custom').map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist>
+          {(['primaryKeyRef', 'backupKeyRef'] as const).map((field, index) => <label key={field} className="block text-sm">{index === 0 ? 'Primary Gemini key' : 'Backup Gemini key'}<select aria-label={index === 0 ? 'Primary Gemini key' : 'Backup Gemini key'} className="ml-2 rounded border border-line-soft bg-surface p-2" value={selection[field]} onChange={event => setSelection(previous => ({ ...previous, [field]: event.target.value }))}>
+            <option value="">Not set</option>{config.keySources.map(key => <option key={key.ref} value={key.ref}>{key.label} ({key.masked})</option>)}
+          </select></label>)}
+          <p className="text-xs text-text-soft">These choices apply only to this repair job, including failed chapters. Add or change saved keys in AI Settings. Scanning and dictionary/manual-only repairs do not call Gemini.</p>
+        </fieldset>}
         <div className="flex flex-wrap gap-3">
-          <button disabled={busy} onClick={() => void scan()} className="rounded bg-accent px-3 py-2 text-background disabled:opacity-50">{scanned ? 'Scan Again' : 'Start Scan'}</button>
-          <button disabled={busy || !selected.length} onClick={() => void propose(selected)} className="rounded border border-line-soft px-3 py-2 disabled:opacity-50">Propose Repairs ({selected.length})</button>
+          <button disabled={busy || activeRepair || !config} onClick={() => void scan()} className="rounded bg-accent px-3 py-2 text-background disabled:opacity-50">{scanned ? 'Scan Again' : 'Start Scan'}</button>
+          <button disabled={busy || activeRepair || !config || !selected.length} onClick={() => void propose(selected)} className="rounded border border-line-soft px-3 py-2 disabled:opacity-50">Propose Repairs ({selected.length})</button>
+          {activeRepair && <button disabled={busy} onClick={() => {
+            void request({ action: 'stop', jobId: job.id }, new AbortController().signal).then(() => setStatus('Stop requested. Saved proposals are retained.')).catch(problem => setError(problem.message));
+          }} className="rounded border border-line-soft px-3 py-2">Stop repair job</button>}
           {busy && <button onClick={() => { controller.current?.abort(); setStatus('Stopping. Completed results are retained.'); }} className="rounded border border-line-soft px-3 py-2">Stop</button>}
         </div>
         <p role="status" className="my-3 text-sm text-text-soft">{status}</p>
+        {job && <p className="text-xs text-text-soft">Job: {job.id} · {job.status} · {job.progress}%{activeRepair ? ' · Wait until the job stops before approving recordings.' : ''}</p>}
+        {job?.aiModel && <p className="text-xs text-text-soft">Job model: {job.aiModel} · Profile: {config?.profiles.find(profile => profile.id === job.profileId)?.name || job.profileId} · Keys: {config?.keySources.find(key => key.ref === job.primaryKeyRef)?.masked || 'Not set'} / {config?.keySources.find(key => key.ref === job.backupKeyRef)?.masked || 'Not set'}</p>}
         {error && <p role="alert" className="my-3 text-danger">{error}</p>}
         {scanned && findings.length === 0 && <p>No pronunciation issues found in the checked text.</p>}
         <div className="space-y-4">{findings.map(finding => <article key={finding.fileName} className="rounded border border-line-soft p-3">

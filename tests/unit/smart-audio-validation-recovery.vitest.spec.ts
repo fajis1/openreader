@@ -120,7 +120,7 @@ describe('Smart Audio validation recovery', () => {
     const omission = { status: 'success', outcome: 'omitted', cleaned_text: '' };
     const requestRepair = vi.fn().mockResolvedValue({
       ...omission,
-      model_used: 'gemini-3.7-flash',
+      model_used: 'gemini-3.8-flash',
     });
     const recovered = await resolveSmartAudioWithValidationRecovery({
       initialResult: omission,
@@ -139,7 +139,7 @@ describe('Smart Audio validation recovery', () => {
     expect(recovered.result.text).toBe(sourceText.trim());
     expect(recovered.fallbackUsed).toBe(true);
     expect(recovered.sourceFallbackUsed).toBe(true);
-    expect(recovered.workerResult.model_used).toBe('gemini-3.7-flash');
+    expect(recovered.workerResult.model_used).toBe('gemini-3.8-flash');
   });
 
   test('builds a bounded repair payload without copying response metadata', () => {
@@ -159,7 +159,7 @@ describe('Smart Audio validation recovery', () => {
 
     expect(payload).toMatchObject({
       raw_text: 'Original.',
-      ai_model: 'gemini-3.7-flash',
+      ai_model: 'gemini-3.8-flash',
       repair_attempt: 1,
       validation_feedback: 'mixed-script OCR text',
       rejected_output: '[hello world](/hɛloʊ/)',

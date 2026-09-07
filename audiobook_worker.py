@@ -16,7 +16,7 @@ from gemini_rate_limiter import (
 API_STATES = {}
 MAX_DELAY = 300            # 5 minutes (in seconds)
 MIN_DELAY = 5              # The starting penalty
-QUALITY_REPAIR_MODEL = "gemini-3.7-flash"
+QUALITY_REPAIR_MODEL = "gemini-3.8-flash"
 
 def academic_pre_clean(text, user_abbreviations, biblical_books):
     """Phase 1: Regex & Structural Expansion"""

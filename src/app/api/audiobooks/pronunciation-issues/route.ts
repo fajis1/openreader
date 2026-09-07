@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
-import { pronunciationCatalog, pronunciationDictionary, readPronunciationChapter, proposePronunciationRepair, resumeRepairedPronunciationJob, existingPronunciationRepair } from '@/lib/server/audiobooks/pronunciation-repairs';
+import { pronunciationCatalog, pronunciationDictionary, readPronunciationChapter, resumeRepairedPronunciationJob, existingPronunciationRepair } from '@/lib/server/audiobooks/pronunciation-repairs';
+import { loadPronunciationRepairConfig, pronunciationRepairErrorMessage } from '@/lib/server/audiobooks/pronunciation-repair-config';
+import { listPronunciationRepairJobs, queuePronunciationRepairs, stopPronunciationRepairs } from '@/lib/server/audiobooks/pronunciation-repair-jobs';
+import { serverLogger } from '@/lib/server/logger';
 import { scanPronunciationIssues } from '@/lib/shared/pronunciation-issues';
 import { runTaskNow } from '@/lib/server/tasks/engine';
 import { errorResponse } from '@/lib/server/errors/next-response';
@@ -24,6 +28,9 @@ export async function GET(request: Request) {
     const bookId = new URL(request.url).searchParams.get('bookId') || '';
     const user = await ownedUser(request, bookId);
     if (user instanceof Response) return user;
+    const action = new URL(request.url).searchParams.get('action');
+    if (action === 'config') return NextResponse.json((await loadPronunciationRepairConfig(user)).publicConfig);
+    if (action === 'jobs') return NextResponse.json({ jobs: await listPronunciationRepairJobs(bookId, user) });
     return NextResponse.json(await pronunciationCatalog(bookId, user));
   } catch (error) {
     return errorResponse(error, { apiErrorMessage: 'Could not list audiobook chapters.' });
@@ -31,22 +38,35 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const requestId = randomUUID();
   try {
     const body = await request.json();
-    if (typeof body.bookId !== 'string' || typeof body.fileName !== 'string') return NextResponse.json({ error: 'Book and chapter are required.' }, { status: 400 });
+    if (typeof body.bookId !== 'string') return NextResponse.json({ error: 'Book is required.' }, { status: 400 });
     const user = await ownedUser(request, body.bookId);
     if (user instanceof Response) return user;
     const profileId = typeof body.profileId === 'string' ? body.profileId : undefined;
+    if (body.action === 'queue') {
+      const result = await queuePronunciationRepairs({ bookId: body.bookId, userId: user, chapters: body.chapters, requestId: body.requestId, profileId,
+        aiModel: typeof body.aiModel === 'string' ? body.aiModel : undefined,
+        primaryKeyRef: typeof body.primaryKeyRef === 'string' ? body.primaryKeyRef : undefined,
+        backupKeyRef: typeof body.backupKeyRef === 'string' ? body.backupKeyRef : undefined });
+      void runTaskNow('process-audiobook-queue').catch(() => serverLogger.warn({ event: 'pronunciation.repair.wake_failed', requestId }, 'Repair queue will retry on the next scheduled tick'));
+      return NextResponse.json(result, { status: 202 });
+    }
+    if (body.action === 'stop' && typeof body.jobId === 'string') {
+      await stopPronunciationRepairs(body.bookId, user, body.jobId);
+      return NextResponse.json({ success: true });
+    }
+    if (typeof body.fileName !== 'string') return NextResponse.json({ error: 'Chapter is required.' }, { status: 400 });
     if (body.action === 'scan') {
       const chapter = await readPronunciationChapter(body.bookId, user, body.fileName);
-      const { dictionary } = await pronunciationDictionary(user, body.bookId, chapter.profileId || profileId);
+      const { dictionary } = await pronunciationDictionary(user, body.bookId, profileId || chapter.profileId);
       const existing = await existingPronunciationRepair(body.bookId, user, body.fileName, chapter.hash);
       return NextResponse.json({ fileName: body.fileName, chapterIndex: chapter.chapterIndex, title: chapter.title, failed: chapter.failed,
         hash: chapter.hash, jobId: chapter.jobId, failureError: chapter.failureError, ...existing, issues: scanPronunciationIssues(chapter.text, dictionary) });
     }
     if (body.action === 'propose' && typeof body.hash === 'string') {
-      return NextResponse.json(await proposePronunciationRepair({ bookId: body.bookId, userId: user, fileName: body.fileName, hash: body.hash, profileId, signal: request.signal,
-        manualPatches: Array.isArray(body.manualPatches) ? body.manualPatches : undefined }));
+      return NextResponse.json({ error: 'Reload Reader to use background pronunciation repairs.' }, { status: 409 });
     }
     if (body.action === 'resume') {
       const jobId = await resumeRepairedPronunciationJob(body.bookId, user, body.fileName);
@@ -55,6 +75,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ error: 'Unknown scan action.' }, { status: 400 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Pronunciation repair failed.' }, { status: 409 });
+    serverLogger.warn({ event: 'pronunciation.repair.request_failed', requestId, errorType: error instanceof Error ? error.name : 'UnknownError' }, 'Pronunciation repair request failed');
+    return NextResponse.json({ error: pronunciationRepairErrorMessage(error), requestId }, { status: 409 });
   }
 }

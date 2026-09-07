@@ -301,7 +301,7 @@ describe('Smart Audio data-integrity guards', () => {
       expect(worker).toContain('raise RuntimeError("Gemini returned no text; expected cleaned text or [OMIT]")');
       expect(worker).toContain('"outcome": outcome');
       expect(worker).toContain('outcome = "omitted"');
-      expect(worker).toContain('QUALITY_REPAIR_MODEL = "gemini-3.7-flash"');
+      expect(worker).toContain('QUALITY_REPAIR_MODEL = "gemini-3.8-flash"');
       expect(worker).toContain('"model_used": ai_model');
     }
   });

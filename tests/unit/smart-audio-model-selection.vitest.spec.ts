@@ -16,7 +16,7 @@ const readSource = (relativePath: string) =>
 describe('Smart Audio model selection', () => {
   it('uses separate economical cleanup and pronunciation defaults', () => {
     expect(DEFAULT_CLEANUP_AI_MODEL).toBe('gemini-3.1-flash-lite');
-    expect(DEFAULT_PRONUNCIATION_AI_MODEL).toBe('gemini-3.7-flash');
+    expect(DEFAULT_PRONUNCIATION_AI_MODEL).toBe('gemini-3.8-flash');
     expect(resolveCleanupAiModel(undefined)).toBe(DEFAULT_CLEANUP_AI_MODEL);
     expect(resolvePronunciationAiModel(undefined)).toBe(DEFAULT_PRONUNCIATION_AI_MODEL);
     expect(DEFAULT_CLEANUP_AI_MODEL).not.toBe(DEFAULT_PRONUNCIATION_AI_MODEL);
@@ -41,20 +41,20 @@ describe('Smart Audio model selection', () => {
 
   it('uses at most two unique cleanup fallbacks in profile order', () => {
     expect(resolveCleanupAiModels({
-      aiModel: 'gemini-3.7-flash',
-      aiModelFallbacks: ['gemini-3.6-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'],
-    })).toEqual(['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash']);
+      aiModel: 'gemini-3.8-flash',
+      aiModelFallbacks: ['gemini-3.7-flash', 'gemini-3.7-flash', 'gemini-3.5-flash'],
+    })).toEqual(['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash']);
     expect(resolveCleanupAiModels({ aiModel: 'only-model', aiModelFallbacks: [] }))
       .toEqual(['only-model']);
   });
 
-  it('fails validation retries upward to 3.7 Flash without overriding custom models', () => {
+  it('fails validation retries upward to 3.8 Flash without overriding custom models', () => {
     expect(resolveSmartAudioValidationRepairModel('gemini-3.5-flash-lite'))
-      .toBe('gemini-3.7-flash');
-    expect(resolveSmartAudioValidationRepairModel('gemini-3.6-flash'))
-      .toBe('gemini-3.7-flash');
+      .toBe('gemini-3.8-flash');
     expect(resolveSmartAudioValidationRepairModel('gemini-3.7-flash'))
-      .toBe('gemini-3.7-flash');
+      .toBe('gemini-3.8-flash');
+    expect(resolveSmartAudioValidationRepairModel('gemini-3.8-flash'))
+      .toBe('gemini-3.8-flash');
     expect(resolveSmartAudioValidationRepairModel('private-cleanup-model'))
       .toBe('private-cleanup-model');
   });
@@ -85,15 +85,15 @@ describe('Smart Audio model selection', () => {
     expect(scanner).toContain('Pronunciation model:');
   });
 
-  it('offers existing 3.6 users a durable upgrade-or-stay decision after login', () => {
+  it('offers existing 3.7 users a durable upgrade-or-stay decision after login', () => {
     const route = readSource('src/app/api/tts-settings/route.ts');
     const modal = readSource('src/components/GeminiPronunciationModelUpgradeModal.tsx');
     const onboarding = readSource('src/contexts/OnboardingFlowContext.tsx');
 
     expect(route).toContain("body.pronunciationModelUpgradeDecision === 'upgrade'");
     expect(route).toContain("body.pronunciationModelUpgradeDecision === 'stay'");
-    expect(modal).toContain('Upgrade to 3.7');
-    expect(modal).toContain('Stay on 3.6');
+    expect(modal).toContain('Upgrade to 3.8');
+    expect(modal).toContain('Stay on 3.7');
     expect(onboarding).toContain('<GeminiPronunciationModelUpgradeModal');
   });
 

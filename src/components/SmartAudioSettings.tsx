@@ -1106,7 +1106,7 @@ export function SmartAudioSettings() {
           <div>
             <h2 className="text-lg font-bold">Smart Audio Profile Wizard & Universal Key Setup</h2>
             <p className="text-xs text-purple-200 mt-0.5">
-              Set up your Universal Gemini API key, choose your default model (Gemini 3.7 Flash), configure Biblical Scholar vs Standard settings, and explore the 12-point prompt walkthrough.
+              Set up your Universal Gemini API key, choose your default model (Gemini 3.8 Flash), configure Biblical Scholar vs Standard settings, and explore the 12-point prompt walkthrough.
             </p>
           </div>
         </div>
@@ -1482,7 +1482,7 @@ export function SmartAudioSettings() {
                 <input
                   type="text"
                   className="w-full p-2 border rounded bg-white dark:bg-gray-900 border-blue-400 dark:border-blue-500 text-gray-900 dark:text-gray-100 placeholder-gray-400 text-sm font-mono shadow-inner"
-                  placeholder="e.g., gemini-3.7-flash"
+                  placeholder="e.g., gemini-3.8-flash"
                   value={customPronunciationModelId}
                   onChange={(e) => setCustomPronunciationModelId(e.target.value)}
                 />

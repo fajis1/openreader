@@ -29,11 +29,11 @@ export interface RestoreMissingBuiltInProfilesResult {
   restoredProfiles: RestoredSmartAudioProfile[];
 }
 
-// Versioned because the first rollout migrated pronunciationAiModel only.
-// The v2 decision also migrates cleanup profiles explicitly set to 3.6.
-export const PRONUNCIATION_MODEL_UPGRADE_ID = 'gemini-3.6-flash-to-gemini-3.7-flash-all-tasks-v2';
-export const PRONUNCIATION_MODEL_UPGRADE_FROM = 'gemini-3.6-flash';
-export const PRONUNCIATION_MODEL_UPGRADE_TO = 'gemini-3.7-flash';
+// A new decision ID offers 3.8 even to users who decided on the earlier rollout.
+// Upgrade both primary task fields; preserve explicit fallback/custom choices.
+export const PRONUNCIATION_MODEL_UPGRADE_ID = 'gemini-3.7-flash-to-gemini-3.8-flash-all-tasks-v1';
+export const PRONUNCIATION_MODEL_UPGRADE_FROM = 'gemini-3.7-flash';
+export const PRONUNCIATION_MODEL_UPGRADE_TO = 'gemini-3.8-flash';
 
 export type PronunciationModelUpgradeDecision = 'upgrade' | 'stay';
 
