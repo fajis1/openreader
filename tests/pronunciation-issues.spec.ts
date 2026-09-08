@@ -27,6 +27,7 @@ test('scan selects only affected chapters and carries repair through approval', 
     if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: '<html><body><div id="root"></div><script src="/bundle.js"></script></body></html>' });
     if (url.pathname === '/bundle.js') return route.fulfill({ contentType: 'text/javascript', body: bundle.outputFiles.find(file => file.path.endsWith('.js'))!.text });
     if (url.pathname.endsWith('/pronunciation-issues')) {
+      if (url.searchParams.get('action') === 'report') return route.fulfill({ contentType: 'application/json', headers: { 'Content-Disposition': 'attachment; filename="pronunciation-repair-fixture-job.json"' }, body: JSON.stringify({ jobId: 'fixture-job', summary: { failures: 0, proposals: 1 } }) });
       if (url.searchParams.get('action') === 'config') return json({ selectedProfileId: 'fixture-profile', profiles: [{ id: 'fixture-profile', name: 'Scholar', model: 'gemini-3.8-flash', primaryKeyRef: 'fixture-profile:primary', backupKeyRef: '' }], keySources: [{ ref: 'fixture-profile:primary', label: 'Scholar primary', masked: '...1111' }, { ref: 'other:primary', label: 'Other primary', masked: '...2222' }] });
       if (url.searchParams.get('action') === 'jobs') return json({ jobs: queued ? [{ id: 'fixture-job', status: 'completed', progress: 100, total: 1, results: [{ fileName: '0107__text.txt', runId: 'fixture-run', requestId: 'fixture-request' }] }] : [] });
       if (route.request().method() === 'GET') return json({ chapters: [{ fileName: '0107__text.txt', chapterIndex: 106, failed: false }, { fileName: '0108__text.txt', chapterIndex: 107, failed: false }], failedJobs: [] });
@@ -55,6 +56,15 @@ test('scan selects only affected chapters and carries repair through approval', 
   await expect(page.getByText('Repairs queued.', { exact: false })).toBeVisible();
   // A reload must restore durable progress and the proposal review link.
   await page.reload();
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download repair report' }).click();
+  const reportDownload = await downloaded;
+  expect(reportDownload.suggestedFilename()).toBe('pronunciation-repair-fixture-job.json');
+  expect(await reportDownload.failure()).toBeNull();
+  const reportStream = await reportDownload.createReadStream();
+  const reportChunks: Buffer[] = [];
+  for await (const chunk of reportStream!) reportChunks.push(Buffer.from(chunk));
+  expect(JSON.parse(Buffer.concat(reportChunks).toString('utf8'))).toMatchObject({ jobId: 'fixture-job', summary: { proposals: 1 } });
   await page.getByRole('button', { name: 'Review & Approve' }).click();
   await expect(page.getByRole('heading', { name: 'Pronunciation Repair Review' })).toBeVisible();
   await page.getByRole('button', { name: 'Approve & Record', exact: true }).click();

@@ -116,6 +116,24 @@ describe('pronunciation repair service', () => {
     expect(mocks.gemini).toHaveBeenCalledWith(expect.objectContaining({ requestedModel: 'custom-selected-model', primaryApiKey: 'fixture', backupApiKey: '', maxAttempts: 3, signal: expect.any(AbortSignal) }));
   });
 
+  test('retains exact validator and per-finding reasons for rejected replacements', async () => {
+    const onDiagnostics = vi.fn();
+    mocks.fetch.mockResolvedValue(Response.json({ responseId: 'response-fixture', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ patches: [{ id: '0', replacement: 'Someone else' }] }) }] } }] }));
+    await expect(proposePronunciationRepair({ ...seed('The [Aetherian](/bad split/) arrived.'), onDiagnostics })).rejects.toThrow('unchanged-text');
+    const details = onDiagnostics.mock.calls[0][0];
+    expect(details).toMatchObject({ stage: 'patch-application', validatorReason: 'Repair changed unrelated English text.', finishReason: 'STOP', httpStatus: 200 });
+    expect(details.findings[0]).toMatchObject({ id: '0', original: '[Aetherian](/bad split/)', replacement: 'Someone else' });
+    expect(details.systemInstruction).toContain('Preserve all English words and numbers.');
+    expect(mocks.createRun).not.toHaveBeenCalled();
+  });
+
+  test('retains omitted finding IDs and supplied patches when Gemini returns an incomplete set', async () => {
+    const onDiagnostics = vi.fn();
+    mocks.fetch.mockResolvedValue(Response.json({ candidates: [{ content: { parts: [{ text: '{"patches":[]}' }] } }] }));
+    await expect(proposePronunciationRepair({ ...seed('God θεοῦ.'), onDiagnostics })).rejects.toThrow('every finding');
+    expect(onDiagnostics.mock.calls[0][0]).toMatchObject({ stage: 'patch-coverage', missingIds: ['0'], findings: [{ id: '0', original: 'θεοῦ', reasons: ['No replacement returned for this finding.'] }] });
+  });
+
   test('restores an existing proposal and avoids another paid request', async () => {
     const input = seed('God θεοῦ.');
     mocks.selectResults = [[], [{ runId: 'existing', decision: 'pending', audioStatus: 'not_requested' }]];

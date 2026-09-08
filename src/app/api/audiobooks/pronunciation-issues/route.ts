@@ -11,6 +11,7 @@ import { serverLogger } from '@/lib/server/logger';
 import { scanPronunciationIssues } from '@/lib/shared/pronunciation-issues';
 import { runTaskNow } from '@/lib/server/tasks/engine';
 import { errorResponse } from '@/lib/server/errors/next-response';
+import { pronunciationRepairReport } from '@/lib/server/audiobooks/pronunciation-repair-report';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -29,6 +30,14 @@ export async function GET(request: Request) {
     const user = await ownedUser(request, bookId);
     if (user instanceof Response) return user;
     const action = new URL(request.url).searchParams.get('action');
+    if (action === 'report') {
+      const report = await pronunciationRepairReport(bookId, user, new URL(request.url).searchParams.get('jobId') || '');
+      if (!report) return NextResponse.json({ error: 'Repair job not found.' }, { status: 404 });
+      return new Response(JSON.stringify(report, null, 2), { headers: {
+        'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store',
+        'Content-Disposition': `attachment; filename="pronunciation-repair-${report.jobId}.json"`,
+      } });
+    }
     if (action === 'config') return NextResponse.json((await loadPronunciationRepairConfig(user)).publicConfig);
     if (action === 'jobs') return NextResponse.json({ jobs: await listPronunciationRepairJobs(bookId, user) });
     return NextResponse.json(await pronunciationCatalog(bookId, user));

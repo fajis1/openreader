@@ -1,5 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), owned: vi.fn(), catalog: vi.fn(), chapter: vi.fn(), propose: vi.fn(), resume: vi.fn(), queue: vi.fn(), jobs: vi.fn(), stop: vi.fn(), config: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), owned: vi.fn(), catalog: vi.fn(), chapter: vi.fn(), propose: vi.fn(), resume: vi.fn(), queue: vi.fn(), jobs: vi.fn(), stop: vi.fn(), config: vi.fn(), report: vi.fn() }));
+vi.mock('@/lib/server/audiobooks/pronunciation-repair-report', () => ({ pronunciationRepairReport: (...args: unknown[]) => mocks.report(...args) }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-jobs', () => ({ queuePronunciationRepairs: (...args: unknown[]) => mocks.queue(...args), listPronunciationRepairJobs: (...args: unknown[]) => mocks.jobs(...args), stopPronunciationRepairs: (...args: unknown[]) => mocks.stop(...args) }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-config', () => ({ loadPronunciationRepairConfig: (...args: unknown[]) => mocks.config(...args), pronunciationRepairErrorMessage: () => 'Repair failed safely.' }));
 vi.mock('@/lib/server/auth/auth', () => ({ requireAuthContext: (...args: unknown[]) => mocks.auth(...args) }));
@@ -41,6 +42,20 @@ test('provides a safe diagnostic reference instead of echoing unknown upstream e
   const body = await response.json();
   expect(body.requestId).toMatch(/^[a-f0-9-]+$/);
   expect(JSON.stringify(body)).not.toContain('fixture-secret');
+});
+test('downloads reports only within the authenticated book ownership scope', async () => {
+  const id = 'ce5c61c4-5aa6-4d6f-9f3b-469543d2e321';
+  const url = `http://localhost/api/audiobooks/pronunciation-issues?bookId=book&action=report&jobId=${id}`;
+  mocks.owned.mockResolvedValue([]);
+  expect((await GET(new Request(url))).status).toBe(404);
+  expect(mocks.report).not.toHaveBeenCalled();
+  mocks.owned.mockResolvedValue([{ id: 'book' }]);
+  mocks.report.mockResolvedValue({ jobId: id, summary: { failures: 42 } });
+  const response = await GET(new Request(url));
+  expect(mocks.report).toHaveBeenCalledWith('book', 'owner', id);
+  expect(response.headers.get('Content-Disposition')).toContain('attachment;');
+  expect(response.headers.get('Cache-Control')).toContain('no-store');
+  expect((await response.json()).summary.failures).toBe(42);
 });
 test('uses the authenticated owner and exposes no original source in scan results', async () => {
   mocks.chapter.mockResolvedValue({ text: 'שלום', original: 'private source context', chapterIndex: 0, hash: 'hash', title: 'Chapter', failed: false });

@@ -1,5 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ rows: [] as unknown[], running: true, updates: [] as Record<string, unknown>[], insert: vi.fn(), propose: vi.fn(), idle: vi.fn(), selection: vi.fn() }));
+const mocks = vi.hoisted(() => ({ rows: [] as unknown[], running: true, updates: [] as Record<string, unknown>[], insert: vi.fn(), propose: vi.fn(), idle: vi.fn(), selection: vi.fn(), put: vi.fn() }));
+vi.mock('@/lib/server/audiobooks/blobstore', () => ({ putAudiobookObject: (...args: unknown[]) => mocks.put(...args) }));
 vi.mock('@/db', () => ({ db: {
   select: () => { const chain = { from: () => chain, where: () => chain, orderBy: async () => mocks.rows, limit: async () => mocks.rows }; return chain; },
   insert: () => ({ values: (...args: unknown[]) => mocks.insert(...args) }),
@@ -52,4 +53,24 @@ test('does no work after losing the running claim', async () => {
   await processPronunciationRepairJob(job());
   expect(mocks.propose).not.toHaveBeenCalled();
   expect(mocks.updates.some(update => update.status === 'completed')).toBe(false);
+});
+test('stores rejected diagnostics privately and checkpoints the report reference, not whole chapter data', async () => {
+  mocks.propose.mockImplementation(async ({ onDiagnostics }) => {
+    onDiagnostics({ version: 1, promptVersion: 1, stage: 'chapter-validation', validatorReason: 'Pronunciation issues remain.' });
+    throw new Error('Rejected');
+  });
+  await processPronunciationRepairJob(job());
+  expect(mocks.put).toHaveBeenCalledTimes(2);
+  expect(mocks.put.mock.calls[0].slice(0, 2)).toEqual(['book', 'owner']);
+  expect(mocks.put.mock.calls[0][2]).toMatch(/^pronunciation_repair_[a-f0-9-]+\.json$/);
+  const stored = mocks.updates.filter(update => update.settingsJson).at(-1)!.settingsJson as { results: { diagnosticsFile: string }[] };
+  expect(stored.results[0].diagnosticsFile).toBe(mocks.put.mock.calls[0][2]);
+  expect(JSON.stringify(stored)).not.toContain('validatorReason');
+});
+test('retains the original chapter failure if diagnostic storage itself fails', async () => {
+  mocks.put.mockRejectedValue(new Error('Storage unavailable'));
+  mocks.propose.mockImplementation(async ({ onDiagnostics }) => { onDiagnostics({ version: 1, promptVersion: 1, stage: 'validation' }); throw new Error('Rejected'); });
+  await processPronunciationRepairJob(job());
+  const stored = mocks.updates.filter(update => update.settingsJson).at(-1)!.settingsJson as { results: { diagnosticsUnavailable: string }[] };
+  expect(stored.results[0].diagnosticsUnavailable).toContain('Diagnostic storage failed');
 });

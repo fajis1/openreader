@@ -28,6 +28,10 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
   const [config, setConfig] = useState<RepairConfig | null>(null);
   const [selection, setSelection] = useState({ profileId: profileId || '', aiModel: '', primaryKeyRef: '', backupKeyRef: '' });
   const [job, setJob] = useState<RepairJob | null>(null);
+  const [reportJobs, setReportJobs] = useState<RepairJob[]>([]);
+  const [reportJobId, setReportJobId] = useState('');
+  const [reportDownloading, setReportDownloading] = useState(false);
+  const reportController = useRef<AbortController | null>(null);
   const jobVersion = useRef('');
   const activeRepair = job?.status === 'queued' || job?.status === 'running';
 
@@ -53,6 +57,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
         const value = await fetch(`/api/audiobooks/pronunciation-issues?bookId=${encodeURIComponent(bookId)}&action=jobs`, { signal: current.signal, cache: 'no-store' }).then(readJsonResponse);
         if (current.signal.aborted) return;
         const latest: RepairJob | undefined = value.jobs[0];
+        setReportJobs(value.jobs);
         setJob(latest || null);
         const version = JSON.stringify(latest);
         if (latest && version !== jobVersion.current) {
@@ -82,18 +87,39 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
 
   useEffect(() => {
     if (!open) controller.current?.abort();
-    return () => controller.current?.abort();
+    if (!open) reportController.current?.abort();
+    return () => { controller.current?.abort(); reportController.current?.abort(); };
   }, [open]);
   useEffect(() => {
     controller.current?.abort();
     setFindings([]); setSelected([]); setDrafts({}); setScanned(false); setStatus(''); setError(''); setReviewRun(null);
     setJob(null); jobVersion.current = '';
+    setReportJobs([]); setReportJobId('');
+    reportController.current?.abort();
   }, [bookId, profileId]);
 
   async function request(body: Record<string, unknown>, signal: AbortSignal) {
     const response = await fetch('/api/audiobooks/pronunciation-issues', { method: 'POST', signal,
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookId, ...selection, ...body }) });
     return readJsonResponse(response);
+  }
+
+  async function downloadReport() {
+    const id = reportJobId || reportJobs[0]?.id;
+    if (!id) return;
+    const current = new AbortController();
+    reportController.current?.abort(); reportController.current = current;
+    setReportDownloading(true); setError('');
+    try {
+      const report = await fetch(`/api/audiobooks/pronunciation-issues?bookId=${encodeURIComponent(bookId)}&action=report&jobId=${encodeURIComponent(id)}`, { signal: current.signal, cache: 'no-store' }).then(readJsonResponse);
+      current.signal.throwIfAborted();
+      const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url; link.download = `pronunciation-repair-${id}.json`;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (problem) { if (!current.signal.aborted) setError(problem instanceof Error ? problem.message : 'Could not download repair report.'); }
+    finally { if (reportController.current === current) setReportDownloading(false); }
   }
 
   async function scan() {
@@ -179,6 +205,13 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
         </div>
         <p role="status" className="my-3 text-sm text-text-soft">{status}</p>
         {job && <p className="text-xs text-text-soft">Job: {job.id} · {job.status} · {job.progress}%{activeRepair ? ' · Wait until the job stops before approving recordings.' : ''}</p>}
+        {reportJobs.length > 0 && <div className="my-3 space-y-2 text-sm">
+          <label>Report for job <select aria-label="Repair report job" value={reportJobId || reportJobs[0].id} onChange={event => setReportJobId(event.target.value)} className="rounded border border-line-soft bg-surface p-1">
+            {reportJobs.map(item => <option key={item.id} value={item.id}>{item.id} · {item.status}</option>)}
+          </select></label>
+          <button disabled={reportDownloading} className="ml-3 text-accent underline disabled:opacity-50" onClick={() => void downloadReport()}>{reportDownloading ? 'Preparing report…' : 'Download repair report'}</button>
+          <p className="text-xs text-text-soft">Includes saved errors, finding/replacement details and the Gemini instructions when retained. Older attempts may have only summary errors. Contains book excerpts—review before sharing.</p>
+        </div>}
         {job?.aiModel && <p className="text-xs text-text-soft">Job model: {job.aiModel} · Profile: {config?.profiles.find(profile => profile.id === job.profileId)?.name || job.profileId} · Keys: {config?.keySources.find(key => key.ref === job.primaryKeyRef)?.masked || 'Not set'} / {config?.keySources.find(key => key.ref === job.backupKeyRef)?.masked || 'Not set'}</p>}
         {error && <p role="alert" className="my-3 text-danger">{error}</p>}
         {scanned && findings.length === 0 && <p>No pronunciation issues found in the checked text.</p>}

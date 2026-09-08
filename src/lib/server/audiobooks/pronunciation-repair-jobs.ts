@@ -6,9 +6,11 @@ import { serverLogger } from '@/lib/server/logger';
 import { assertPronunciationBookIdle, proposePronunciationRepair } from './pronunciation-repairs';
 import { PronunciationRepairError, pronunciationRepairErrorMessage, resolveRepairAiSelection, type RepairAiSelection } from './pronunciation-repair-config';
 import type { PronunciationPatch } from '@/lib/shared/pronunciation-issues';
+import { putAudiobookObject } from './blobstore';
+import type { RepairDiagnostics } from './pronunciation-repair-diagnostics';
 
 export type RepairChapterRequest = { fileName: string; hash: string; manualPatches?: PronunciationPatch[] };
-type RepairResult = { fileName: string; runId?: string; error?: string; requestId: string };
+type RepairResult = { fileName: string; runId?: string; error?: string; requestId: string; diagnosticsFile?: string; diagnosticsUnavailable?: string };
 type RepairJobSettings = RepairAiSelection & { jobType: 'pronunciation-repair'; chapters: RepairChapterRequest[]; results: RepairResult[] };
 function settingsOf(job: typeof audiobookJobs.$inferSelect): RepairJobSettings {
   try {
@@ -78,9 +80,10 @@ export async function processPronunciationRepairJob(job: typeof audiobookJobs.$i
       await assertOwned();
       const requestId = randomUUID();
       let result: RepairResult;
+      let diagnostics: RepairDiagnostics | undefined;
       try {
         const proposal = await proposePronunciationRepair({ ...settings, ...chapter, bookId: job.documentId, userId: job.userId,
-          ownJobId: job.id, signal: controller.signal, assertOwned });
+          ownJobId: job.id, signal: controller.signal, assertOwned, onDiagnostics: value => { diagnostics = value; } });
         result = { fileName: chapter.fileName, runId: proposal.runId, requestId };
       } catch (error) {
         controller.signal.throwIfAborted();
@@ -90,6 +93,16 @@ export async function processPronunciationRepairJob(job: typeof audiobookJobs.$i
           reason: result.error, errorType: error instanceof Error ? error.name : 'UnknownError' }, 'Pronunciation proposal failed');
       }
       await assertOwned();
+      if (diagnostics) {
+        const fileName = `pronunciation_repair_${requestId}.json`;
+        try {
+          await putAudiobookObject(job.documentId, job.userId, fileName, Buffer.from(JSON.stringify(diagnostics)), 'application/json', null);
+          result.diagnosticsFile = fileName;
+        } catch {
+          result.diagnosticsUnavailable = 'Diagnostic storage failed; detailed patches were not retained.';
+          serverLogger.warn({ event: 'pronunciation.repair.diagnostics_save_failed', jobId: job.id, requestId }, 'Could not retain pronunciation repair diagnostics');
+        }
+      }
       settings.results.push(result);
       const updated = await db.update(audiobookJobs).set({ settingsJson: settings, progress: Math.round(settings.results.length / settings.chapters.length * 100), updatedAt: Date.now() }).where(ownedWhere).returning({ id: audiobookJobs.id });
       if (!updated.length) { controller.abort(); controller.signal.throwIfAborted(); }
