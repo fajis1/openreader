@@ -5,6 +5,52 @@ import { reconcileSmartAudioPronunciations } from '../../src/lib/shared/smart-au
 const dictionary = { Aetherian: '/eɪθɪriən/', 'θεοῦ': '/θɛu/' };
 
 describe('targeted pronunciation scan and patches', () => {
+  test('joins tagged suffixes, bounds mixed-script OCR, and repairs closing delimiters', () => {
+    expect(scanPronunciationIssues('[χάρι](/kɑrɪ/)τας', { 'χάριτας': '/kɑrɪtɑs/' })).toMatchObject([{ text: '[χάρι](/kɑrɪ/)τας', replacement: '[χάριτας](/kɑrɪtɑs/)' }]);
+    expect(scanPronunciationIssues('Tὶ now.')[0].text).toBe('Tὶ');
+    expect(scanPronunciationIssues('T[ὶ](/i/) now.')[0].text).toBe('T[ὶ](/i/)');
+    expect(scanPronunciationIssues('[χάρι](/kɑrɪ/)[τας](/tɑs/)', { 'χάριτας': '/kɑrɪtɑs/' })[0].replacement).toBe('[χάριτας](/kɑrɪtɑs/)');
+    const broken = '[ἁρπαγμός](/hɑrpɑɡmɒs/]';
+    expect(scanPronunciationIssues(broken + ' next.')[0]).toMatchObject({ text: broken, replacement: '[ἁρπαγμός](/hɑrpɑɡmɒs/)' });
+  });
+
+  test('permits only source-supported corrupt-label reconstruction', () => {
+    const previous = '[proseɪkoʊn](/proʊseɪkoʊn/)';
+    const proposed = '[προσῆκόν](/proʊseɪkoʊn/)';
+    expect(() => assertPronunciationRepair(previous, proposed)).toThrow('English');
+    expect(() => assertPronunciationRepair(previous, proposed, { sourceText: 'Greek προσῆκόν here.' })).not.toThrow();
+    expect(() => assertPronunciationRepair(previous, proposed, { sourceText: 'No evidence.' })).toThrow('English');
+    expect(() => assertPronunciationRepair('[Aetherian](/bad split/)', proposed, { sourceText: 'προσῆκόν' })).toThrow('English');
+  });
+
+  test('partial proposal validation does not disable the recording gate', () => {
+    const previous = 'τὸ θεῷ';
+    const proposed = '[τὸ](/toʊ/) θεῷ';
+    expect(() => assertPronunciationRepair(previous, proposed, { allowRemaining: true })).not.toThrow();
+    expect(() => assertPronunciationRepair(previous, proposed)).toThrow('remain');
+    expect(() => assertPronunciationRepair('English ' + previous, 'Changed ' + proposed, { allowRemaining: true })).toThrow();
+  });
+  test('repairs the complete bracketed region from chapter 0062', () => {
+    const text = 'Equal [τῷ] θεῷ.';
+    const issues = scanPronunciationIssues(text, { 'τῷ': '/toʊ/', 'θεῷ': '/θeɪoʊ/' });
+    expect(issues[0].text).toBe('[τῷ]');
+    const proposed = applyPronunciationPatches(text, issues, issues.map(issue => ({ id: issue.id, replacement: issue.replacement! })));
+    expect(proposed).toBe('Equal [τῷ](/toʊ/) [θεῷ](/θeɪoʊ/).');
+    expect(() => assertPronunciationRepair(text, proposed)).not.toThrow();
+  });
+
+  test('does not confuse slash alternatives with IPA delimiters', () => {
+    const text = 'Forms θεῷ/θέοισιν remain.';
+    const proposed = 'Forms [θεῷ](/θeɪoʊ/)/[θέοισιν](/θɛoʊeɪsɪn/) remain.';
+    expect(() => assertPronunciationRepair(text, proposed)).not.toThrow();
+    expect(() => assertPronunciationRepair(text, proposed.replace('remain', 'change'))).toThrow();
+  });
+
+  test('validates compacted single-word dictionary IPA before selecting it', () => {
+    expect(scanPronunciationIssues('τυγχάνω', { 'τυγχάνω': '/t juŋ k ɑ n oʊ/' })[0].replacement).toBe('[τυγχάνω](/tjuŋkɑnoʊ/)');
+    expect(scanPronunciationIssues('τυγχάνω', { 'τυγχάνω': '/[broken]/' })[0].replacement).toBeUndefined();
+  });
+
   test('finds and repairs malformed single-word IPA from an exact safe dictionary match', () => {
     const text = 'The [Aetherian](/bad split/) arrived.';
     const issues = scanPronunciationIssues(text, dictionary);

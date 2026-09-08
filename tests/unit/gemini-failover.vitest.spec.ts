@@ -5,7 +5,16 @@ import {
 } from '../../src/lib/server/smart-audio/gemini-failover';
 
 describe('Gemini key failover', () => {
-  test.each([429, 503])('uses a distinct backup after HTTP %s', async (status) => {
+  test('uses backup after bounded network retries but does not fail over cancellation', async () => {
+    const request = vi.fn().mockRejectedValueOnce(new TypeError('network')).mockRejectedValueOnce(new TypeError('network')).mockResolvedValue(new Response('ok'));
+    const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: 'primary-fixture', backupApiKey: 'backup-fixture', maxAttempts: 2, request });
+    expect(result.usedBackup).toBe(true);
+    expect(request).toHaveBeenNthCalledWith(3, 'backup-fixture');
+    request.mockReset().mockRejectedValue(new DOMException('cancel', 'AbortError'));
+    await expect(fetchGeminiWithRateLimitFallback({ primaryApiKey: 'primary-fixture', backupApiKey: 'backup-fixture', maxAttempts: 2, request })).rejects.toThrow('cancel');
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+  test.each([429, 500, 502, 503, 504])('uses a distinct backup after HTTP %s', async (status) => {
     const request = vi.fn();
     // Primary key fails 8 attempts with status, 9th attempt (backup key) succeeds with 200
     for (let i = 0; i < 8; i += 1) {

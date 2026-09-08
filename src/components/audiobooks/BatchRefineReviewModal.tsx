@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-hot-toast';
 
 import { ModalFrame } from '@/components/ui';
-import { PRONUNCIATION_REPAIR_RULE } from '@/lib/shared/pronunciation-issues';
+import { PRONUNCIATION_REPAIR_RULE, scanPronunciationIssues } from '@/lib/shared/pronunciation-issues';
 
 type ReviewFlag = {
   id: string;
@@ -165,6 +165,8 @@ export function BatchRefineReviewModal({
   }, [filter, review?.changes, sort]);
 
   const pendingCount = review?.changes.filter((change) => change.decision === 'pending').length || 0;
+  const hasPartialProposals = useMemo(() => review?.run?.rule === PRONUNCIATION_REPAIR_RULE
+    && review.changes.some(change => change.decision === 'pending' && scanPronunciationIssues(change.proposedText).length > 0), [review]);
   const approvedCount = review?.changes.filter((change) => change.decision === 'approved').length || 0;
   const rejectedCount = review?.changes.filter((change) => change.decision === 'rejected').length || 0;
 
@@ -298,8 +300,8 @@ export function BatchRefineReviewModal({
             </select>
             <button
               onClick={approveAll}
-              disabled={pendingCount === 0 || busyId !== null || editingId !== null}
-              title={editingId ? 'Approve or cancel the open edit before using Approve All.' : undefined}
+              disabled={pendingCount === 0 || busyId !== null || editingId !== null || hasPartialProposals}
+              title={hasPartialProposals ? 'Resolve partial proposals before recording.' : editingId ? 'Approve or cancel the open edit before using Approve All.' : undefined}
               className="ml-auto rounded bg-accent px-3 py-1.5 text-sm font-semibold text-background hover:bg-secondary-accent disabled:opacity-50"
             >
               {busyId === 'approve-all' ? 'Approving…' : `Approve All (${pendingCount})`}
@@ -324,6 +326,8 @@ export function BatchRefineReviewModal({
           {shownChanges.map((change) => {
             const isEditing = editingId === change.id;
             const isBusy = busyId === change.id;
+            const remainingIssues = review?.run?.rule === PRONUNCIATION_REPAIR_RULE
+              ? scanPronunciationIssues(isEditing ? drafts[change.id] ?? change.proposedText : change.proposedText) : [];
             const isExpanded = isEditing || expandedComparisons.includes(change.id);
             const ids = flagIds(change.flagsJson);
             return (
@@ -341,7 +345,7 @@ export function BatchRefineReviewModal({
                   <span className="ml-auto text-xs font-semibold text-text-soft">{audioStatusLabel(change)}</span>
                 </div>
 
-                {(ids.length > 0 || change.reviewNote) && (
+                {(ids.length > 0 || change.reviewNote || remainingIssues.length > 0) && (
                   <div className="space-y-2 border-b border-line-soft bg-surface-sunken px-4 py-3">
                     <div className="flex flex-wrap gap-2">
                       {ids.map((id) => {
@@ -364,6 +368,10 @@ export function BatchRefineReviewModal({
                       </p>
                     ))}
                     {change.reviewNote && <p className="text-xs text-text-soft"><span className="font-semibold">AI note:</span> {change.reviewNote}</p>}
+                    {remainingIssues.length > 0 && <div className="text-sm text-danger">
+                      <p>Needs review: {remainingIssues.length} unresolved passages. Edit the proposal to resolve these before recording.</p>
+                      <ul className="mt-2 list-disc pl-5">{remainingIssues.slice(0, 20).map(issue => <li key={issue.id}><code>{issue.text}</code>: {issue.reason}</li>)}</ul>
+                    </div>}
                   </div>
                 )}
 
@@ -446,7 +454,7 @@ export function BatchRefineReviewModal({
                       </button>
                       <button
                         onClick={() => void approve(change)}
-                        disabled={isBusy}
+                        disabled={isBusy || remainingIssues.length > 0}
                         className="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-background hover:bg-secondary-accent disabled:opacity-50"
                       >
                         {isBusy ? 'Saving…' : isEditing ? 'Approve Edit & Record' : 'Approve & Record'}

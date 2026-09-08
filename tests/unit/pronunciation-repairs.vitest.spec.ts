@@ -47,11 +47,42 @@ function seed(text: string) {
 
 beforeEach(() => {
   vi.clearAllMocks(); mocks.objects.clear(); mocks.selectResults = []; mocks.profile.pronunciations = {};
-  vi.stubGlobal('fetch', mocks.fetch);
+  vi.stubGlobal('fetch', async (...args: unknown[]) => (await mocks.fetch(...args)).clone());
   mocks.gemini.mockImplementation(async ({ request }) => ({ response: await request('fixture', 'fixture-model') }));
 });
 
 describe('pronunciation repair service', () => {
+  test('saves valid dictionary repairs when Gemini leaves ambiguous findings unresolved', async () => {
+    mocks.profile.pronunciations = { 'τὸ': '/toʊ/' };
+    mocks.fetch.mockResolvedValue(Response.json({ candidates: [{ content: { parts: [{ text: '{"patches":[]}' }] } }] }));
+    const onDiagnostics = vi.fn();
+    const result = await proposePronunciationRepair({ ...seed('Read τὸ θ.'), onDiagnostics });
+    expect(result.unresolvedCount).toBe(1);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.insert.mock.calls[0][0]).toMatchObject({ proposedText: 'Read [τὸ](/toʊ/) θ.', metrics: { reviewNote: expect.stringContaining('NEEDS REVIEW') } });
+    expect(onDiagnostics.mock.calls[0][0].findings).toEqual(expect.arrayContaining([expect.objectContaining({ original: 'τὸ', source: 'profile-dictionary' })]));
+  });
+
+  test('correction retries send only rejected findings and their reasons', async () => {
+    const response = (patches: unknown[]) => Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ patches }) }] } }] });
+    mocks.fetch.mockResolvedValueOnce(response([{ id: '0', replacement: '[τὸ](/toʊ/)' }, { id: '1', replacement: '[θεῷ](/θ eɪ oʊ/)' }]))
+      .mockResolvedValueOnce(response([{ id: '1', replacement: '[θεῷ](/θeɪoʊ/)' }]));
+    await proposePronunciationRepair(seed('Read τὸ θεῷ.'));
+    const retry = JSON.parse(JSON.parse(mocks.fetch.mock.calls[1][1].body).contents[0].parts[0].text);
+    expect(retry.findings.map((finding: { id: string }) => finding.id)).toEqual(['1']);
+    expect(retry.validationFeedback[0].reasons.length).toBeGreaterThan(0);
+    expect(mocks.insert.mock.calls[0][0].proposedText).toBe('Read [τὸ](/toʊ/) [θεῷ](/θeɪoʊ/).');
+  });
+
+  test('retries invalid JSON once and preserves valid dictionary patches on exhausted API failure', async () => {
+    mocks.profile.pronunciations = { 'τὸ': '/toʊ/' };
+    mocks.fetch.mockResolvedValue(new Response('<html>private upstream body</html>'));
+    const result = await proposePronunciationRepair(seed('Read τὸ θεῷ.'));
+    expect(result.unresolvedCount).toBe(1);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.insert.mock.calls[0][0].proposedText).toBe('Read [τὸ](/toʊ/) θεῷ.');
+  });
+
   test('uses a dictionary repair without Gemini and stores a proposal, never canonical text', async () => {
     mocks.profile.pronunciations = { Aetherian: '/eɪθɪriən/' };
     const result = await proposePronunciationRepair(seed('The [Aetherian](/bad split/) arrived.'));
@@ -85,7 +116,7 @@ describe('pronunciation repair service', () => {
   test('requires complete valid patches and rejects English rewrite attempts before saving', async () => {
     const input = seed('The [Aetherian](/bad split/) arrived.');
     mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ patches: [{ id: '0', replacement: 'Someone else' }] }) }] } }] })));
-    await expect(proposePronunciationRepair(input)).rejects.toThrow('unchanged-text validation');
+    await expect(proposePronunciationRepair(input)).rejects.toThrow('No safe repairs');
     expect(mocks.createRun).not.toHaveBeenCalled();
   });
 
@@ -119,9 +150,9 @@ describe('pronunciation repair service', () => {
   test('retains exact validator and per-finding reasons for rejected replacements', async () => {
     const onDiagnostics = vi.fn();
     mocks.fetch.mockResolvedValue(Response.json({ responseId: 'response-fixture', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({ patches: [{ id: '0', replacement: 'Someone else' }] }) }] } }] }));
-    await expect(proposePronunciationRepair({ ...seed('The [Aetherian](/bad split/) arrived.'), onDiagnostics })).rejects.toThrow('unchanged-text');
+    await expect(proposePronunciationRepair({ ...seed('The [Aetherian](/bad split/) arrived.'), onDiagnostics })).rejects.toThrow('No safe repairs');
     const details = onDiagnostics.mock.calls[0][0];
-    expect(details).toMatchObject({ stage: 'patch-application', validatorReason: 'Repair changed unrelated English text.', finishReason: 'STOP', httpStatus: 200 });
+    expect(details).toMatchObject({ stage: 'patch-coverage', validatorReason: 'Repair changed unrelated English text.', finishReason: 'STOP', httpStatus: 200 });
     expect(details.findings[0]).toMatchObject({ id: '0', original: '[Aetherian](/bad split/)', replacement: 'Someone else' });
     expect(details.systemInstruction).toContain('Preserve all English words and numbers.');
     expect(mocks.createRun).not.toHaveBeenCalled();
@@ -130,8 +161,8 @@ describe('pronunciation repair service', () => {
   test('retains omitted finding IDs and supplied patches when Gemini returns an incomplete set', async () => {
     const onDiagnostics = vi.fn();
     mocks.fetch.mockResolvedValue(Response.json({ candidates: [{ content: { parts: [{ text: '{"patches":[]}' }] } }] }));
-    await expect(proposePronunciationRepair({ ...seed('God θεοῦ.'), onDiagnostics })).rejects.toThrow('every finding');
-    expect(onDiagnostics.mock.calls[0][0]).toMatchObject({ stage: 'patch-coverage', missingIds: ['0'], findings: [{ id: '0', original: 'θεοῦ', reasons: ['No replacement returned for this finding.'] }] });
+    await expect(proposePronunciationRepair({ ...seed('God θεοῦ.'), onDiagnostics })).rejects.toThrow();
+    expect(onDiagnostics.mock.calls[0][0]).toMatchObject({ missingIds: ['0'], findings: [{ id: '0', original: 'θεοῦ', reasons: ['No replacement returned for this finding.'] }] });
   });
 
   test('restores an existing proposal and avoids another paid request', async () => {

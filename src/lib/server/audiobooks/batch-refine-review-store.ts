@@ -3,7 +3,8 @@ import { and, asc, desc, eq } from 'drizzle-orm';
 
 import { db } from '@/db';
 import { audiobookJobs, batchRefineChanges, batchRefineRuns } from '@/db/schema';
-import { assertPronunciationRepair, canonicalRepairTextFile, PRONUNCIATION_REPAIR_RULE } from '@/lib/shared/pronunciation-issues';
+import { canonicalRepairTextFile, PRONUNCIATION_REPAIR_RULE } from '@/lib/shared/pronunciation-issues';
+import { assertStoredPronunciationRepair } from './pronunciation-repair-validation';
 import { parseVoiceTaggedText } from '@/lib/shared/multi-voice';
 import {
   batchRefineFlagDefinitions,
@@ -180,7 +181,7 @@ export async function approveBatchRefineChange(input: {
   if (pronunciationRepair) {
     const jobs = await db.select({ status: audiobookJobs.status }).from(audiobookJobs).where(and(eq(audiobookJobs.userId, input.userId), eq(audiobookJobs.documentId, owned.change.documentId)));
     if (jobs.some((job: { status: string }) => job.status === 'queued' || job.status === 'running')) throw new BatchRefineReviewConflictError('Pause background generation before approving pronunciation repairs.');
-    assertPronunciationRepair(owned.change.previousText, proposedText);
+    await assertStoredPronunciationRepair({ bookId: owned.change.documentId, userId: input.userId, fileName: owned.change.textFileName, previous: owned.change.previousText, proposed: proposedText });
     if (/<voice\b/u.test(proposedText)) parseVoiceTaggedText(proposedText, { includeOmitted: true });
   }
   if (

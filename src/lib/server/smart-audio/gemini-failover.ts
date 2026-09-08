@@ -1,7 +1,7 @@
 import { serverLogger } from '@/lib/server/logger';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const BACKUP_ELIGIBLE_STATUSES = new Set([429, 503]);
+const BACKUP_ELIGIBLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS = 8;
 const INITIAL_DELAY_MS = 4000;
 const MAX_DELAY_MS = 300000; // 5 minutes
@@ -63,7 +63,7 @@ async function fetchWithExponentialBackoff(
         }
       }
 
-      const statusText = response.status === 429 ? 'rate-limited (HTTP 429)' : 'temporarily unavailable (HTTP 503)';
+      const statusText = response.status === 429 ? 'rate-limited (HTTP 429)' : `temporarily unavailable (HTTP ${response.status})`;
       const delaySeconds = Math.round(delayMs / 1000);
       const msg = `Gemini API ${statusText}. Retrying ${keyType} key (${maskedKey}) in ${delaySeconds}s (Attempt ${attempt}/${maxAttempts})...`;
 
@@ -117,7 +117,8 @@ async function fetchGeminiWithKeyFallback(
     return { response: await fetchWithExponentialBackoff(backupApiKey, 'backup', input.request, input.onStatusUpdate, input.initialDelayMs, input.signal, input.maxAttempts), usedBackup: true };
   }
 
-  const primaryResponse = await fetchWithExponentialBackoff(
+  let primaryResponse: Response;
+  try { primaryResponse = await fetchWithExponentialBackoff(
     primaryApiKey,
     'primary',
     input.request,
@@ -125,7 +126,12 @@ async function fetchGeminiWithKeyFallback(
     input.initialDelayMs,
     input.signal,
     input.maxAttempts,
-  );
+  ); } catch (error) {
+    input.signal?.throwIfAborted();
+    if (!backupApiKey || backupApiKey === primaryApiKey || (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name))) throw error;
+    await input.onStatusUpdate?.('Gemini network retries exhausted; trying the backup key.');
+    return { response: await fetchWithExponentialBackoff(backupApiKey, 'backup', input.request, input.onStatusUpdate, input.initialDelayMs, input.signal, input.maxAttempts), usedBackup: true };
+  }
 
   if (
     !BACKUP_ELIGIBLE_STATUSES.has(primaryResponse.status)

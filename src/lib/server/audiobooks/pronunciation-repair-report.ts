@@ -11,7 +11,7 @@ export async function pronunciationRepairReport(bookId: string, userId: string, 
   const job = rows[0];
   const settings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : job.settingsJson;
   if (settings?.jobType !== 'pronunciation-repair') return null;
-  type Result = { fileName: string; requestId?: string; runId?: string; error?: string; diagnosticsFile?: string; diagnosticsUnavailable?: string };
+  type Result = { fileName: string; requestId?: string; runId?: string; unresolvedCount?: number; error?: string; diagnosticsFile?: string; diagnosticsUnavailable?: string };
   const results: Result[] = Array.isArray(settings.results) ? settings.results : [];
   const groups: Record<string, number> = {};
   const chapters = [];
@@ -30,13 +30,13 @@ export async function pronunciationRepairReport(bookId: string, userId: string, 
     const reason = diagnostics?.validatorReason || result.error;
     if (result.error) groups[reason || 'Unspecified failure'] = (groups[reason || 'Unspecified failure'] || 0) + 1;
     chapters.push({ fileName: result.fileName, requestId: result.requestId, outcome: result.error ? 'failed' : result.runId ? 'proposal_saved' : 'unknown',
-      error: result.error, proposalRunId: result.runId, diagnostics: diagnostics || null, ...(!diagnostics ? { diagnosticsUnavailable: unavailable } : {}) });
+      error: result.error, proposalRunId: result.runId, unresolvedCount: result.unresolvedCount, needsReview: Boolean(result.unresolvedCount), diagnostics: diagnostics || null, ...(!diagnostics ? { diagnosticsUnavailable: unavailable } : {}) });
   }
   return {
     reportVersion: 1, generatedAt: new Date().toISOString(), jobId: job.id, status: job.status, progress: job.progress,
     createdAt: job.createdAt, startedAt: job.startedAt, completedAt: job.completedAt,
     requestedModel: settings.aiModel, profileId: settings.profileId,
-    summary: { selectedChapters: settings.chapters?.length || 0, processedChapters: results.length, proposals: results.filter(result => result.runId).length, failures: results.filter(result => result.error).length, failureReasons: groups },
+    summary: { selectedChapters: settings.chapters?.length || 0, processedChapters: results.length, proposals: results.filter(result => result.runId).length, partialProposals: results.filter(result => result.runId && result.unresolvedCount).length, failures: results.filter(result => result.error).length, failureReasons: groups },
     notes: ['Read-only export; no AI calls, reruns, approvals, or audio changes.', 'Contains book excerpts and pronunciation guidance. Review before sharing.', 'Per-finding reasons are isolated checks; the chapter-wide validator reason may indicate a cross-finding or alignment problem.', 'The recorded system instruction excludes the full chapter/source payload. Missing diagnostics cannot be reconstructed retroactively.'],
     chapters,
   };

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { build } from 'esbuild';
 import path from 'node:path';
 
-test('scan selects only affected chapters and carries repair through approval', async ({ page }) => {
+for (const partial of [false, true]) test(`scan carries repair through approval (partial: ${partial})`, async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('pageerror', error => pageErrors.push(error.message));
   // Exercise the actual React modals with fixture APIs: no paid AI/TTS calls
@@ -24,7 +24,7 @@ test('scan selects only affected chapters and carries repair through approval', 
   await page.route('http://localhost/**', async route => {
     const url = new URL(route.request().url());
     const json = (body: unknown) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
-    if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: '<html><body><div id="root"></div><script src="/bundle.js"></script></body></html>' });
+    if (url.pathname === '/') return route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<html><head><meta charset="utf-8"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>' });
     if (url.pathname === '/bundle.js') return route.fulfill({ contentType: 'text/javascript', body: bundle.outputFiles.find(file => file.path.endsWith('.js'))!.text });
     if (url.pathname.endsWith('/pronunciation-issues')) {
       if (url.searchParams.get('action') === 'report') return route.fulfill({ contentType: 'application/json', headers: { 'Content-Disposition': 'attachment; filename="pronunciation-repair-fixture-job.json"' }, body: JSON.stringify({ jobId: 'fixture-job', summary: { failures: 0, proposals: 1 } }) });
@@ -39,7 +39,7 @@ test('scan selects only affected chapters and carries repair through approval', 
     if (url.pathname.endsWith('/batch-refine/review')) {
       if (route.request().method() === 'POST') { approved = true; return json({ success: true }); }
       return json({ run: { id: 'fixture-run', rule: 'pronunciation-repair:v1', status: 'completed', processedChapters: 1, totalChapters: 1 },
-        changes: [{ id: 'change', textFileName: '0107__text.txt', chapterIndex: 106, chapterTitle: 'Aetherian chapter', previousText: 'The [Aetherian](/bad split/) arrived.', proposedText: 'The [Aetherian](/eɪθɪriən/) arrived.', diffText: '-bad split\n+eɪθɪriən', changedCharacters: 10, changePercent: 20, reviewPriority: 'high', priorityScore: 70, decision: approved ? 'approved' : 'pending', audioStatus: approved ? 'queued' : 'not_requested' }], flagDefinitions: [] });
+        changes: [{ id: 'change', textFileName: '0107__text.txt', chapterIndex: 106, chapterTitle: 'Aetherian chapter', previousText: 'The [Aetherian](/bad split/) arrived.', proposedText: 'The [Aetherian](/eɪθɪriən/) arrived.' + (partial ? ' θεῷ' : ''), reviewNote: partial ? 'NEEDS REVIEW: unresolved passage.' : null, diffText: '-bad split\n+eɪθɪriən', changedCharacters: 10, changePercent: 20, reviewPriority: 'high', priorityScore: 70, decision: approved ? 'approved' : 'pending', audioStatus: approved ? 'queued' : 'not_requested' }], flagDefinitions: [] });
     }
     return route.fulfill({ status: 404, body: 'Unexpected fixture request' });
   });
@@ -67,7 +67,13 @@ test('scan selects only affected chapters and carries repair through approval', 
   expect(JSON.parse(Buffer.concat(reportChunks).toString('utf8'))).toMatchObject({ jobId: 'fixture-job', summary: { proposals: 1 } });
   await page.getByRole('button', { name: 'Review & Approve' }).click();
   await expect(page.getByRole('heading', { name: 'Pronunciation Repair Review' })).toBeVisible();
-  await page.getByRole('button', { name: 'Approve & Record', exact: true }).click();
+  if (partial) {
+    await expect(page.getByText('Needs review: 1 unresolved passages.', { exact: false })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve & Record', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Edit proposal', exact: true }).click();
+    await page.locator('textarea').fill('The [Aetherian](/eɪθɪriən/) arrived. [θεῷ](/θeɪoʊ/)');
+    await page.getByRole('button', { name: 'Approve Edit & Record', exact: true }).click();
+  } else await page.getByRole('button', { name: 'Approve & Record', exact: true }).click();
   await expect(page.getByTestId('queued')).toHaveText('1');
   expect(proposedFiles).toEqual(['0107__text.txt']);
   expect(queuedSettings).toMatchObject({ aiModel: 'custom-fixture-model', primaryKeyRef: 'other:primary', backupKeyRef: '' });

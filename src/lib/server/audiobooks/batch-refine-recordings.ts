@@ -37,7 +37,8 @@ import type { AudiobookGenerationSettings } from '@/types/client';
 import type { TTSAudiobookFormat } from '@/types/tts';
 import { batchRefineTextHash } from './batch-refine-assessment';
 import { hasUntaggedScholarForeignScript } from './batch-refine-scholar-safety';
-import { canonicalRepairTextFile, assertPronunciationRepair, PRONUNCIATION_REPAIR_RULE } from '@/lib/shared/pronunciation-issues';
+import { canonicalRepairTextFile, PRONUNCIATION_REPAIR_RULE } from '@/lib/shared/pronunciation-issues';
+import { assertStoredPronunciationRepair } from './pronunciation-repair-validation';
 
 const STALE_RECORDING_MS = 15 * 60 * 1000;
 
@@ -211,7 +212,7 @@ async function recordApprovedChange(
     }
   };
   if (pronunciationRepair) {
-    assertPronunciationRepair(change.previousText, currentText);
+    await assertStoredPronunciationRepair({ bookId: change.documentId, userId: change.userId, fileName: change.textFileName, previous: change.previousText, proposed: currentText });
     await assertRepairStillCurrent();
   }
   if (

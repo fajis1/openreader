@@ -1,6 +1,30 @@
 import { expect, test } from 'vitest';
-import { buildPronunciationRepairInstructions, inspectRepairPatches, sanitizeRepairDiagnostics } from '@/lib/server/audiobooks/pronunciation-repair-diagnostics';
+import { buildPronunciationRepairInstructions, inspectRepairPatches, selectRepairCandidates, sanitizeRepairDiagnostics, type RepairDiagnostics } from '@/lib/server/audiobooks/pronunciation-repair-diagnostics';
 import { scanPronunciationIssues } from '@/lib/shared/pronunciation-issues';
+
+test('selects the first valid ranked candidate and retains rejected-choice reasons', () => {
+  const text = 'τυγχάνω';
+  const diagnostics: RepairDiagnostics = { version: 1, promptVersion: 2, stage: 'patch-coverage' };
+  const patches = [{ id: '0', replacement: '[τυγχάνω](/t juŋ k ɑ n oʊ/)', alternatives: ['[τυγχάνω](/tjuŋkɑnoʊ/)', '[τυγχάνω](/tuŋkɑnoʊ/)'] }];
+  expect(selectRepairCandidates(text, scanPronunciationIssues(text), patches, diagnostics)).toEqual([{ id: '0', replacement: patches[0].alternatives[0] }]);
+  expect(diagnostics.candidateChecks).toHaveLength(2);
+  expect(diagnostics.candidateChecks?.[0].reasons.length).toBeGreaterThan(0);
+  expect(diagnostics.candidateChecks?.[1]).toMatchObject({ rank: 2, selected: true });
+  // Simulate a legacy finding whose offsets excluded the surrounding brackets.
+  const bracketed = '[τυγχάνω]';
+  const legacyIssue = { ...scanPronunciationIssues(text)[0], start: 1, end: 1 + text.length };
+  selectRepairCandidates(bracketed, [legacyIssue], [{ id: '0', replacement: patches[0].alternatives[0] }], diagnostics);
+  expect(diagnostics.candidateChecks?.[0].selected).toBe(false);
+});
+
+test('ranked candidates cannot change English and stop after five choices', () => {
+  const text = '[Aetherian](/bad split/)';
+  const diagnostics: RepairDiagnostics = { version: 1, promptVersion: 2, stage: 'patch-coverage' };
+  const patch = { id: '0', replacement: 'Changed', alternatives: ['Changed', 'Changed', 'Changed', 'Changed', '[Aetherian](/eɪθɪriən/)'] };
+  expect(selectRepairCandidates(text, scanPronunciationIssues(text), [patch], diagnostics)[0].replacement).toBe('Changed');
+  expect(diagnostics.candidateChecks).toHaveLength(5);
+  expect(diagnostics.candidateChecks?.every(check => !check.selected)).toBe(true);
+});
 
 test('keeps the exact repair task with profile pronunciation guidance and mandatory editorial/policy instructions', () => {
   const prompt = buildPronunciationRepairInstructions({ pronunciationPromptMode: 'custom', customPronunciationPrompt: 'CUSTOM PRONUNCIATION GUIDE' });

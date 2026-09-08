@@ -11,7 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 type Chapter = { fileName: string; chapterIndex: number; failed: boolean };
 type Finding = Chapter & { title: string; hash: string; issues: PronunciationIssue[]; jobId?: string; failureError?: string; runId?: string; audioStatus?: string; error?: string };
 type RepairConfig = { selectedProfileId: string; profiles: { id: string; name: string; model: string; primaryKeyRef: string; backupKeyRef: string }[]; keySources: { ref: string; label: string; masked: string }[] };
-type RepairJob = { id: string; status: string; progress: number; total: number; error?: string; profileId?: string; aiModel?: string; primaryKeyRef?: string; backupKeyRef?: string; results: { fileName: string; runId?: string; error?: string; requestId: string }[] };
+type RepairJob = { id: string; status: string; progress: number; total: number; error?: string; profileId?: string; aiModel?: string; primaryKeyRef?: string; backupKeyRef?: string; results: { fileName: string; runId?: string; unresolvedCount?: number; error?: string; requestId: string }[] };
 
 export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onRecordingQueued }: {
   open: boolean; onClose: () => void; bookId: string; profileId?: string; onRecordingQueued: () => void;
@@ -75,8 +75,9 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
           });
           setSelected(previous => previous.filter(file => !latest.results.some(result => result.fileName === file && result.runId)));
           const ready = latest.results.filter(result => result.runId).length;
+          const partial = latest.results.filter(result => result.runId && result.unresolvedCount).length;
           const failed = latest.results.filter(result => result.error).length;
-          setStatus(`Repair job ${latest.status}: ${latest.results.length}/${latest.total} checked; ${ready} proposals ready; ${failed} failed. ${latest.status === 'queued' || latest.status === 'running' ? 'You can close this window; work continues in the background.' : 'Review saved proposals or scan again to retry failed chapters.'}`);
+          setStatus(`Repair job ${latest.status}: ${latest.results.length}/${latest.total} checked; ${ready} proposals saved (${partial} need corrections before recording); ${failed} failed. ${latest.status === 'queued' || latest.status === 'running' ? 'You can close this window; work continues in the background.' : 'Review saved proposals or scan again to retry failed chapters.'}`);
         }
       } catch (problem) { if (!current.signal.aborted) setError(problem instanceof Error ? problem.message : 'Could not load repair progress.'); }
       finally { if (!current.signal.aborted) timer = setTimeout(() => void poll(), 3000); }

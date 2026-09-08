@@ -10,7 +10,7 @@ import { putAudiobookObject } from './blobstore';
 import type { RepairDiagnostics } from './pronunciation-repair-diagnostics';
 
 export type RepairChapterRequest = { fileName: string; hash: string; manualPatches?: PronunciationPatch[] };
-type RepairResult = { fileName: string; runId?: string; error?: string; requestId: string; diagnosticsFile?: string; diagnosticsUnavailable?: string };
+type RepairResult = { fileName: string; runId?: string; unresolvedCount?: number; error?: string; requestId: string; diagnosticsFile?: string; diagnosticsUnavailable?: string };
 type RepairJobSettings = RepairAiSelection & { jobType: 'pronunciation-repair'; chapters: RepairChapterRequest[]; results: RepairResult[] };
 function settingsOf(job: typeof audiobookJobs.$inferSelect): RepairJobSettings {
   try {
@@ -84,7 +84,7 @@ export async function processPronunciationRepairJob(job: typeof audiobookJobs.$i
       try {
         const proposal = await proposePronunciationRepair({ ...settings, ...chapter, bookId: job.documentId, userId: job.userId,
           ownJobId: job.id, signal: controller.signal, assertOwned, onDiagnostics: value => { diagnostics = value; } });
-        result = { fileName: chapter.fileName, runId: proposal.runId, requestId };
+        result = { fileName: chapter.fileName, runId: proposal.runId, unresolvedCount: proposal.unresolvedCount, requestId };
       } catch (error) {
         controller.signal.throwIfAborted();
         result = { fileName: chapter.fileName, error: pronunciationRepairErrorMessage(error), requestId };

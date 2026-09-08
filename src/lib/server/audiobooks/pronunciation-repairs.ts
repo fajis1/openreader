@@ -12,7 +12,7 @@ import { readBookLexicon } from '@/lib/server/smart-audio/book-lexicon';
 import { fetchGeminiWithRateLimitFallback } from '@/lib/server/smart-audio/gemini-failover';
 import { resolvePronunciationAiModel } from '@/lib/shared/smart-audio-models';
 import { resolveBatchRefineProfileCategory } from '@/lib/shared/batch-refine-review';
-import { buildPronunciationRepairInstructions, inspectRepairPatches, sanitizeRepairDiagnostics, PRONUNCIATION_REPAIR_PROMPT_VERSION, type RepairDiagnostics } from './pronunciation-repair-diagnostics';
+import { buildPronunciationRepairInstructions, inspectRepairPatches, selectRepairCandidates, sanitizeRepairDiagnostics, PRONUNCIATION_REPAIR_PROMPT_VERSION, type RepairDiagnostics } from './pronunciation-repair-diagnostics';
 import { applyPronunciationPatches, assertPronunciationRepair, scanPronunciationIssues, PRONUNCIATION_REPAIR_RULE, type PronunciationPatch } from '@/lib/shared/pronunciation-issues';
 import { parseVoiceTaggedText } from '@/lib/shared/multi-voice';
 
@@ -113,7 +113,13 @@ export async function pronunciationDictionary(userId: string, bookId: string, re
   const lexicon = await readBookLexicon(userId, bookId);
   const bookWords = lexicon?.profileId === profile.id ? Object.fromEntries(Object.entries(lexicon.entries)
     .filter(([, entry]) => entry.pronunciation).map(([word, entry]) => [word, entry.pronunciation!])) : {};
-  return { profile, dictionary: { ...globalPronunciationDefaults(rows[0]?.valueJson || {}), ...bookWords, ...profile.pronunciations } };
+  const globalWords = globalPronunciationDefaults(rows[0]?.valueJson || {});
+  const provenance = Object.fromEntries([
+    ...Object.keys(globalWords).map(word => [word, 'global-dictionary']),
+    ...Object.keys(bookWords).map(word => [word, 'book-lexicon']),
+    ...Object.keys(profile.pronunciations || {}).map(word => [word, 'profile-dictionary']),
+  ]);
+  return { profile, dictionary: { ...globalWords, ...bookWords, ...profile.pronunciations }, provenance };
 }
 
 type RepairInput = {
@@ -136,7 +142,7 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
   if (chapter.hash !== input.hash) throw new PronunciationRepairError('Chapter changed since scanning. Scan again.');
   const existing = await existingPronunciationRepair(input.bookId, input.userId, input.fileName, chapter.hash);
   if (existing) return { runId: existing.runId, dictionaryRepairs: 0, aiRepairs: 0 };
-  const { profile, dictionary } = await pronunciationDictionary(input.userId, input.bookId, input.profileId || chapter.profileId);
+  const { profile, dictionary, provenance } = await pronunciationDictionary(input.userId, input.bookId, input.profileId || chapter.profileId);
   secrets.push(profile.geminiApiKey || '', profile.backupGeminiApiKey || '');
   diagnostics.systemInstruction = buildPronunciationRepairInstructions(profile);
   diagnostics.stage = 'scan';
@@ -160,6 +166,12 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
     if (!primaryApiKey && !backupApiKey) throw new PronunciationRepairError('Configure a Gemini key in the selected profile to repair findings without a dictionary match.');
     const signal = AbortSignal.any([input.signal, AbortSignal.timeout(10 * 60 * 1000)]);
     diagnostics.aiRequested = true;
+    let pending = unresolved;
+    // One correction request, only for unresolved findings. Good patches stay
+    // at their original offsets and are never sent back for regeneration.
+    for (let round = 0; round < 2 && pending.length; round += 1) {
+    diagnostics.stage = round ? 'gemini-correction' : 'gemini-request';
+    try {
     const { response, usedModel, usedBackup } = await fetchGeminiWithRateLimitFallback({
       primaryApiKey, backupApiKey, requestedModel: selection.aiModel, signal, maxAttempts: 3,
       request: async (key, model) => {
@@ -168,7 +180,8 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model || resolvePronunciationAiModel(profile))}:generateContent?key=${encodeURIComponent(key)}`, {
         method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
           systemInstruction: { parts: [{ text: diagnostics.systemInstruction! }] },
-          contents: [{ role: 'user', parts: [{ text: JSON.stringify({ originalSource: chapter.original, chapterContext: chapter.text, findings: unresolved }) }] }],
+          contents: [{ role: 'user', parts: [{ text: JSON.stringify({ originalSource: chapter.original, chapterContext: chapter.text, findings: pending,
+            ...(round ? { validationFeedback: diagnostics.findings?.filter(finding => pending.some(issue => issue.id === finding.id)).map(({ id, reasons }) => ({ id, reasons })) } : {}) }) }] }],
           generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
         }),
         });
@@ -193,25 +206,52 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
     diagnostics.stage = 'patch-coverage';
     const received: PronunciationPatch[] = Array.isArray(parsed?.patches) ? parsed.patches.filter((patch: unknown): patch is PronunciationPatch => Boolean(patch && typeof patch === 'object' && typeof (patch as PronunciationPatch).id === 'string')) : [];
     const receivedIds = received.map(patch => patch.id);
-    diagnostics.missingIds = unresolved.filter(issue => !receivedIds.includes(issue.id)).map(issue => issue.id);
+    diagnostics.missingIds = pending.filter(issue => !receivedIds.includes(issue.id)).map(issue => issue.id);
     diagnostics.duplicateIds = [...new Set(receivedIds.filter((id, index) => receivedIds.indexOf(id) !== index))];
-    diagnostics.unexpectedIds = receivedIds.filter(id => !aiIds.has(id));
-    diagnostics.findings = inspectRepairPatches(chapter.text, issues, [...patches, ...received], aiIds);
-    if (!Array.isArray(parsed?.patches) || parsed.patches.length !== unresolved.length) throw new PronunciationRepairError('Gemini could not resolve every finding. Enter a replacement for ambiguous findings in the scan results and propose again.');
-    const allowed = new Set(unresolved.map(issue => issue.id));
-    for (const patch of parsed.patches) {
-      if (!patch || !allowed.delete(patch.id) || typeof patch.replacement !== 'string') throw new PronunciationRepairError('Gemini returned an invalid targeted patch.');
-      patches.push(patch);
+    diagnostics.unexpectedIds = receivedIds.filter(id => !pending.some(issue => issue.id === id));
+    const candidates = selectRepairCandidates(chapter.text, pending, received.filter(patch => !diagnostics.duplicateIds!.includes(patch.id) && !diagnostics.unexpectedIds!.includes(patch.id)), diagnostics, chapter.original);
+    diagnostics.findings = inspectRepairPatches(chapter.text, issues, [...patches, ...candidates], aiIds, chapter.original);
+    for (const patch of candidates) {
+      if (diagnostics.findings.find(finding => finding.id === patch.id)?.reasons.length === 0) patches.push(patch);
+    }
+    pending = pending.filter(issue => !patches.some(patch => patch.id === issue.id));
+    } catch (error) {
+      input.signal.throwIfAborted();
+      if (signal.aborted) throw error;
+      // Invalid JSON is retried once. Exhausted transport failures do not
+      // restart the full transport budget; retain other valid repairs.
+      diagnostics.validatorReason = error instanceof PronunciationRepairError ? error.message : 'Gemini request failed after transport retries.';
+      (diagnostics.requestErrors ||= []).push({ round: round + 1, reason: diagnostics.validatorReason });
+      if (!(error instanceof PronunciationRepairError && error.message.includes('invalid JSON')) || round === 1) break;
+    }
     }
   }
   let proposedText: string;
-  diagnostics.findings = inspectRepairPatches(chapter.text, issues, patches, aiIds);
+  const checks = inspectRepairPatches(chapter.text, issues, patches, aiIds, chapter.original);
+  diagnostics.findings = checks.map(finding => ({ ...finding,
+    replacement: finding.replacement ?? diagnostics.findings?.find(old => old.id === finding.id)?.replacement,
+    dictionaryWord: issues.find(issue => issue.id === finding.id)?.dictionaryWord,
+    dictionarySource: provenance[issues.find(issue => issue.id === finding.id)?.dictionaryWord || ''],
+    dictionaryPronunciation: dictionary[issues.find(issue => issue.id === finding.id)?.dictionaryWord || ''],
+    source: manual.has(finding.id) ? 'manual' : aiIds.has(finding.id) ? 'gemini' : provenance[issues.find(issue => issue.id === finding.id)?.dictionaryWord || ''] || 'formatting',
+    reasons: finding.reasons.length && diagnostics.findings?.find(old => old.id === finding.id)?.reasons.length
+      ? diagnostics.findings.find(old => old.id === finding.id)!.reasons : finding.reasons,
+  }));
+  const validPatches = patches.filter(patch => checks.find(finding => finding.id === patch.id)?.reasons.length === 0);
+  if (!validPatches.length) {
+    diagnostics.validatorReason ||= diagnostics.findings.find(finding => finding.reasons.length)?.reasons.join(' ');
+    throw new PronunciationRepairError(diagnostics.validatorReason?.includes('invalid JSON') ? diagnostics.validatorReason : 'No safe repairs were found. Review the unresolved findings in the repair report.');
+  }
   try {
     diagnostics.stage = 'patch-application';
-    proposedText = applyPronunciationPatches(chapter.text, issues, patches);
+    proposedText = applyPronunciationPatches(chapter.text, issues, validPatches, { sourceText: chapter.original });
     diagnostics.stage = 'chapter-validation';
     diagnostics.remainingFindings = scanPronunciationIssues(proposedText).map(({ start, end, text, reason }) => ({ start, end, text, reason }));
-    assertPronunciationRepair(chapter.text, proposedText);
+    assertPronunciationRepair(chapter.text, proposedText, { sourceText: chapter.original, allowRemaining: true });
+    if (!diagnostics.remainingFindings.length) {
+      assertPronunciationRepair(chapter.text, proposedText, { sourceText: chapter.original });
+      delete diagnostics.validatorReason; // Recovered request errors remain in requestErrors.
+    }
   } catch (error) {
     diagnostics.validatorReason = error instanceof Error ? error.message : 'Unknown validator failure';
     throw new PronunciationRepairError('The proposed patches failed pronunciation or unchanged-text validation. Review the flagged passages and enter manual replacements.');
@@ -230,7 +270,8 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
     profileId: profile.id, profileCategory: category, rule: PRONUNCIATION_REPAIR_RULE, recordingMode: 'review', holdHighPriority: true });
   try {
     await markBatchRefineRunStarted(runId, 1);
-    const metrics = calculateBatchRefineMetrics({ category, previousText: chapter.text, proposedText, aiPriority: 'high', aiNote: `${patches.length} targeted repairs; ${unresolved.length ? 'Gemini assisted' : 'dictionary/manual/formatting only'}. ${chapter.failed ? 'Rejected generation text; approve to record this chapter, then resume the job.' : 'Existing audio remains until replacement succeeds.'}` });
+    const remaining = diagnostics.remainingFindings?.length || 0;
+    const metrics = calculateBatchRefineMetrics({ category, previousText: chapter.text, proposedText, aiPriority: 'high', aiNote: `${remaining ? `NEEDS REVIEW: ${remaining} unresolved passages; recording blocked until corrected. ` : ''}${validPatches.length} targeted repairs; ${unresolved.length ? 'Gemini assisted' : 'dictionary/manual/formatting only'}. Source-supported OCR changes require review. Existing audio remains until replacement succeeds.` });
     await insertBatchRefineProposal({ runId, userId: input.userId, documentId: input.bookId, chapterIndex: chapter.chapterIndex,
       chapterTitle: chapter.title, textFileName: input.fileName, previousText: chapter.text, proposedText,
       metrics,
@@ -240,7 +281,7 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
     await finishBatchRefineRun(runId, 'completed');
   } catch (error) { await finishBatchRefineRun(runId, 'error'); throw error; }
   diagnostics.stage = 'complete';
-  return { runId, dictionaryRepairs: patches.length - unresolved.length, aiRepairs: unresolved.length };
+  return { runId, dictionaryRepairs: validPatches.filter(patch => !aiIds.has(patch.id)).length, aiRepairs: validPatches.filter(patch => aiIds.has(patch.id)).length, unresolvedCount: diagnostics.remainingFindings?.length || 0 };
 }
 
 export async function resumeRepairedPronunciationJob(bookId: string, userId: string, fileName: string) {
