@@ -32,3 +32,14 @@ test('refuses missing jobs and never reads a forged diagnostic path', async () =
   await pronunciationRepairReport('book', 'owner', id);
   expect(mocks.get).not.toHaveBeenCalled();
 });
+test('separates API blocking from ambiguity and includes earlier attempt diagnostics', async () => {
+  const file = `pronunciation_repair_${id}.json`;
+  mocks.rows = [{ id, settingsJson: { jobType: 'pronunciation-repair', chapters: [{}, {}, {}], nextAttemptAt: 123,
+    results: [{ fileName: '0001__text.txt', runId: 'partial', unresolvedCount: 2, apiBlocked: true, previousAttempts: [{ requestId: 'earlier', diagnosticsFile: file }] },
+      { fileName: '0002__text.txt', error: 'Rejected candidates' }] } }];
+  mocks.get.mockResolvedValue(Buffer.from(JSON.stringify({ version: 1, promptVersion: 4, stage: 'gemini-response', apiBlocked: true })));
+  const report = await pronunciationRepairReport('book', 'owner', id);
+  expect(report?.summary).toMatchObject({ completeProposals: 0, partialProposals: 1, apiBlockedChapters: 1, unprocessedChapters: 1 });
+  expect(report?.chapters[0]).toMatchObject({ needsReview: true, recoveryStatus: 'api_blocked', previousAttempts: [{ requestId: 'earlier', diagnostics: { apiBlocked: true } }] });
+  expect(report?.chapters[1].needsReview).toBe(true);
+});

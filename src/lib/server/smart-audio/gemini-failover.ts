@@ -1,5 +1,6 @@
 import { serverLogger } from '@/lib/server/logger';
 import { setTimeout as delay } from 'node:timers/promises';
+import { geminiErrorDetails } from './gemini-error-details';
 
 const BACKUP_ELIGIBLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS = 8;
@@ -50,6 +51,10 @@ async function fetchWithExponentialBackoff(
       if (!BACKUP_ELIGIBLE_STATUSES.has(response.status) || attempt === maxAttempts) {
         return response;
       }
+      const details = await geminiErrorDetails(response);
+      // Long server delays belong in the durable caller, not a sleeping request.
+      if ((details.retryAfterMs || 0) > MAX_DELAY_MS) return response;
+      delayMs = Math.max(delayMs, details.retryAfterMs || 0);
 
       if (response.status === 429) {
         try {

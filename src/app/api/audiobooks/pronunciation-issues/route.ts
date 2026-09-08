@@ -71,8 +71,11 @@ export async function POST(request: Request) {
       const chapter = await readPronunciationChapter(body.bookId, user, body.fileName);
       const { dictionary } = await pronunciationDictionary(user, body.bookId, profileId || chapter.profileId);
       const existing = await existingPronunciationRepair(body.bookId, user, body.fileName, chapter.hash);
+      const scanText = existing?.decision === 'pending' ? existing.proposedText : chapter.text;
       return NextResponse.json({ fileName: body.fileName, chapterIndex: chapter.chapterIndex, title: chapter.title, failed: chapter.failed,
-        hash: chapter.hash, jobId: chapter.jobId, failureError: chapter.failureError, ...existing, issues: scanPronunciationIssues(chapter.text, dictionary) });
+        hash: chapter.hash, jobId: chapter.jobId, failureError: chapter.failureError, runId: existing?.runId, audioStatus: existing?.audioStatus,
+        retryRunId: existing?.decision === 'pending' ? existing.runId : undefined,
+        proposalHash: existing?.decision === 'pending' ? existing.proposedTextHash : undefined, issues: scanPronunciationIssues(scanText, dictionary) });
     }
     if (body.action === 'propose' && typeof body.hash === 'string') {
       return NextResponse.json({ error: 'Reload Reader to use background pronunciation repairs.' }, { status: 409 });

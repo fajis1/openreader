@@ -1,10 +1,63 @@
 import { describe, expect, test } from 'vitest';
 import { applyPronunciationPatches, assertPronunciationRepair, canonicalRepairTextFile, scanPronunciationIssues } from '../../src/lib/shared/pronunciation-issues';
 import { reconcileSmartAudioPronunciations } from '../../src/lib/shared/smart-audio-cleanup';
+import { getKokoroPronunciationWordWarnings } from '../../src/lib/shared/kokoro-pronunciation-policy';
 
 const dictionary = { Aetherian: '/eɪθɪriən/', 'θεοῦ': '/θɛu/' };
 
 describe('targeted pronunciation scan and patches', () => {
+  test.each([
+    ['[_[ἐπιποθῶ](/ɛpipoʊθoʊ/)_](/ɛpipoʊθoʊ/)', '[ἐπιποθῶ](/ɛpipoʊθoʊ/)'],
+    ['[Ὁ](/hoʊ)', '[Ὁ](/hoʊ/)'],
+    ['[ἀλλὰ](/ɑlɑ)', '[ἀλλὰ](/ɑlɑ/)'],
+    ['[ἃ](/hɑ)', '[ἃ](/hɑ/)'],
+  ])('normalizes report markup locally and idempotently: %s', (original, expected) => {
+    const issues = scanPronunciationIssues(`Before ${original} after.`);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ text: original, replacement: expected });
+    const proposed = applyPronunciationPatches(`Before ${original} after.`, issues, [{ id: '0', replacement: expected }]);
+    expect(proposed).toBe(`Before ${expected} after.`);
+    expect(() => assertPronunciationRepair(`Before ${original} after.`, proposed)).not.toThrow();
+    expect(scanPronunciationIssues(proposed)).toEqual([]);
+  });
+
+  test('keeps the complete suffix and narrow elisions contextual, without weakening dictionary safeguards', () => {
+    const original = 'Words ending in -(σ)[μός](/mɒs/) occur.';
+    const issues = scanPronunciationIssues(original);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].text).toBe('-(σ)[μός](/mɒs/)');
+    const proposed = 'Words ending in [-(σ)μός](/smɒs/) occur.';
+    expect(scanPronunciationIssues(proposed)).toEqual([]);
+    expect(() => assertPronunciationRepair(original, proposed)).not.toThrow();
+    for (const label of ['γ᾽', 'δ’', "γ'", 'γ᾿', 'δʼ']) {
+      expect(scanPronunciationIssues(`[${label}](/ɡɛ/)`)).toEqual([]);
+      expect(scanPronunciationIssues(`Before ${label} after.`)[0].text).toBe(label);
+    }
+    expect(scanPronunciationIssues('[δ᾽](/d)')[0].replacement).toBeUndefined();
+    expect(scanPronunciationIssues('[σ](/s/)').length).toBeGreaterThan(0);
+    expect(scanPronunciationIssues('[θ᾽](/θɛ/)').length).toBeGreaterThan(0);
+    expect(getKokoroPronunciationWordWarnings('-(σ)μός').length).toBeGreaterThan(0);
+    expect(getKokoroPronunciationWordWarnings('γ᾽').length).toBeGreaterThan(0);
+  });
+
+  test('bounds ambiguous nested regions without guessing or treating their IPA as OCR', () => {
+    const original = '[τὸ δύνασθαι αὐτὸν](/toʊ/ [δύνασθαι](/dunɑsθaɪ/) [αὐτὸν](/aʊtoʊn/) [ἑαυτῷ](/hɛaʊtoʊ/) ἀρκεῖν)';
+    const issues = scanPronunciationIssues(`Before ${original} after.`);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].text).toBe(original);
+    expect(issues[0].replacement).toBeUndefined();
+    expect(scanPronunciationIssues('[_[ἐπιποθῶ](/ɛpipoʊθoʊ/)_](/different/)')[0].replacement).toBeUndefined();
+    expect(scanPronunciationIssues('Χρισtῷ')[0].replacement).toBeUndefined();
+    const proposed = '[τὸ](/toʊ/) [δύνασθαι](/dunɑsθaɪ/) [αὐτὸν](/aʊtoʊn/) [ἑαυτῷ](/hɛaʊtoʊ/) [ἀρκεῖν](/ɑrkeɪn/)';
+    const sourceText = 'τὸ δύνασθαι αὐτὸν ἑαυτῷ ἀρκεῖν';
+    expect(() => assertPronunciationRepair(original, proposed)).toThrow();
+    expect(() => assertPronunciationRepair(original, proposed, { sourceText })).not.toThrow();
+    expect(() => assertPronunciationRepair(original, proposed + ' [ἀρκεῖν](/ɑrkeɪn/)', { sourceText })).toThrow();
+    expect(() => assertPronunciationRepair(original, proposed.replace('[τὸ](/toʊ/) ', ''), { sourceText })).toThrow();
+    expect(() => assertPronunciationRepair(original, '[τὸ](/toʊ/) [δύνασθαι](/dunɑsθaɪ/) [αὐτὸν](/aʊtoʊn/)', { sourceText })).toThrow();
+    expect(() => assertPronunciationRepair(original.replace(' ἀρκεῖν)', ' English ἀρκεῖν)'), proposed, { sourceText })).toThrow();
+    expect(() => assertPronunciationRepair('τὸ θεῷ', '[θεῷ](/θeɪoʊ/) [τὸ](/toʊ/)')).toThrow();
+  });
   test('joins tagged suffixes, bounds mixed-script OCR, and repairs closing delimiters', () => {
     expect(scanPronunciationIssues('[χάρι](/kɑrɪ/)τας', { 'χάριτας': '/kɑrɪtɑs/' })).toMatchObject([{ text: '[χάρι](/kɑrɪ/)τας', replacement: '[χάριτας](/kɑrɪtɑs/)' }]);
     expect(scanPronunciationIssues('Tὶ now.')[0].text).toBe('Tὶ');

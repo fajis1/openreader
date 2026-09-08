@@ -3,15 +3,15 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { audiobookJobs } from '@/db/schema';
 import { serverLogger } from '@/lib/server/logger';
-import { assertPronunciationBookIdle, proposePronunciationRepair } from './pronunciation-repairs';
+import { assertPronunciationBookIdle, existingPronunciationRepair, proposePronunciationRepair } from './pronunciation-repairs';
 import { PronunciationRepairError, pronunciationRepairErrorMessage, resolveRepairAiSelection, type RepairAiSelection } from './pronunciation-repair-config';
 import type { PronunciationPatch } from '@/lib/shared/pronunciation-issues';
 import { putAudiobookObject } from './blobstore';
 import type { RepairDiagnostics } from './pronunciation-repair-diagnostics';
 
-export type RepairChapterRequest = { fileName: string; hash: string; manualPatches?: PronunciationPatch[] };
-type RepairResult = { fileName: string; runId?: string; unresolvedCount?: number; error?: string; requestId: string; diagnosticsFile?: string; diagnosticsUnavailable?: string };
-type RepairJobSettings = RepairAiSelection & { jobType: 'pronunciation-repair'; chapters: RepairChapterRequest[]; results: RepairResult[] };
+export type RepairChapterRequest = { fileName: string; hash: string; manualPatches?: PronunciationPatch[]; retryRunId?: string; proposalHash?: string };
+type RepairResult = { fileName: string; runId?: string; unresolvedCount?: number; error?: string; requestId: string; diagnosticsFile?: string; diagnosticsUnavailable?: string; apiBlocked?: boolean; previousAttempts?: { requestId: string; diagnosticsFile?: string }[] };
+type RepairJobSettings = RepairAiSelection & { jobType: 'pronunciation-repair'; chapters: RepairChapterRequest[]; results: RepairResult[]; nextAttemptAt?: number; deferredAttempts?: number };
 function settingsOf(job: typeof audiobookJobs.$inferSelect): RepairJobSettings {
   try {
     return (typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : job.settingsJson || {}) as RepairJobSettings;
@@ -22,7 +22,7 @@ export async function listPronunciationRepairJobs(bookId: string, userId: string
   const jobs = await db.select().from(audiobookJobs).where(and(eq(audiobookJobs.documentId, bookId), eq(audiobookJobs.userId, userId))).orderBy(desc(audiobookJobs.createdAt));
   return jobs.filter((job: typeof audiobookJobs.$inferSelect) => settingsOf(job)?.jobType === 'pronunciation-repair').slice(0, 20).map((job: typeof audiobookJobs.$inferSelect) => {
     const settings = settingsOf(job);
-    return { id: job.id, status: job.status, progress: job.progress, error: job.error, total: settings.chapters.length, results: settings.results || [],
+    return { id: job.id, status: job.status, progress: job.progress, error: job.error, total: settings.chapters.length, results: settings.results || [], nextAttemptAt: settings.nextAttemptAt,
       profileId: settings.profileId, aiModel: settings.aiModel, primaryKeyRef: settings.primaryKeyRef, backupKeyRef: settings.backupKeyRef };
   });
 }
@@ -34,6 +34,7 @@ export async function queuePronunciationRepairs(input: { bookId: string; userId:
   for (const chapter of input.chapters) {
     if (!chapter || !/^[0-9]{1,6}__(text|rejected)\.txt$/u.test(chapter.fileName) || !/^[a-f0-9]{64}$/u.test(chapter.hash) || files.has(chapter.fileName)) throw new PronunciationRepairError('Invalid or duplicate scanned chapter. Scan again.');
     files.add(chapter.fileName);
+    if ((chapter.retryRunId !== undefined || chapter.proposalHash !== undefined) && (!/^[a-f0-9-]{36}$/iu.test(chapter.retryRunId || '') || !/^[a-f0-9]{64}$/u.test(chapter.proposalHash || ''))) throw new PronunciationRepairError('Invalid proposal retry. Scan again.');
     if (chapter.manualPatches !== undefined && (!Array.isArray(chapter.manualPatches) || chapter.manualPatches.some(patch => !patch || typeof patch.id !== 'string' || typeof patch.replacement !== 'string' || patch.replacement.length > 12000))) throw new PronunciationRepairError('Invalid manual patch.');
   }
   const id = input.requestId;
@@ -44,7 +45,7 @@ export async function queuePronunciationRepairs(input: { bookId: string; userId:
   }
   await assertPronunciationBookIdle(input.bookId, input.userId);
   const { selection } = await resolveRepairAiSelection(input.userId, input);
-  const settings: RepairJobSettings = { ...selection, jobType: 'pronunciation-repair', chapters: input.chapters.map(chapter => ({ fileName: chapter.fileName, hash: chapter.hash, manualPatches: chapter.manualPatches })), results: [] };
+  const settings: RepairJobSettings = { ...selection, jobType: 'pronunciation-repair', chapters: input.chapters.map(chapter => ({ fileName: chapter.fileName, hash: chapter.hash, manualPatches: chapter.manualPatches, retryRunId: chapter.retryRunId, proposalHash: chapter.proposalHash })), results: [] };
   await db.insert(audiobookJobs).values({ id, userId: input.userId, documentId: input.bookId, status: 'queued', progress: 0, settingsJson: settings, createdAt: Date.now(), updatedAt: Date.now() });
   serverLogger.info({ event: 'pronunciation.repair.queued', jobId: id, chapterCount: settings.chapters.length, model: selection.aiModel }, 'Pronunciation repairs queued');
   return { jobId: id };
@@ -76,7 +77,8 @@ export async function processPronunciationRepairJob(job: typeof audiobookJobs.$i
     await assertOwned();
     settings.results ||= [];
     for (const chapter of settings.chapters) {
-      if (settings.results.some(result => result.fileName === chapter.fileName)) continue;
+      const previous = settings.results.find(result => result.fileName === chapter.fileName);
+      if (previous && !previous.apiBlocked) continue;
       await assertOwned();
       const requestId = randomUUID();
       let result: RepairResult;
@@ -93,6 +95,8 @@ export async function processPronunciationRepairJob(job: typeof audiobookJobs.$i
           reason: result.error, errorType: error instanceof Error ? error.name : 'UnknownError' }, 'Pronunciation proposal failed');
       }
       await assertOwned();
+      result.apiBlocked = diagnostics?.apiBlocked;
+      if (previous) result.previousAttempts = [...(previous.previousAttempts || []), { requestId: previous.requestId, diagnosticsFile: previous.diagnosticsFile }];
       if (diagnostics) {
         const fileName = `pronunciation_repair_${requestId}.json`;
         try {
@@ -103,13 +107,37 @@ export async function processPronunciationRepairJob(job: typeof audiobookJobs.$i
           serverLogger.warn({ event: 'pronunciation.repair.diagnostics_save_failed', jobId: job.id, requestId }, 'Could not retain pronunciation repair diagnostics');
         }
       }
+      // Keep a pending partial proposal discoverable even when its retry could
+      // not improve it. The proposal itself was never discarded.
+      if (!result.runId && chapter.retryRunId) {
+        result.runId = chapter.retryRunId;
+        result.unresolvedCount = previous?.unresolvedCount;
+      }
+      if (result.runId && result.apiBlocked) {
+        const proposal = await existingPronunciationRepair(job.documentId, job.userId, chapter.fileName, chapter.hash);
+        if (proposal?.decision === 'pending' && proposal.runId === result.runId) {
+          chapter.retryRunId = proposal.runId;
+          chapter.proposalHash = proposal.proposedTextHash;
+        }
+      }
+      settings.results = settings.results.filter(item => item.fileName !== chapter.fileName);
       settings.results.push(result);
       const updated = await db.update(audiobookJobs).set({ settingsJson: settings, progress: Math.round(settings.results.length / settings.chapters.length * 100), updatedAt: Date.now() }).where(ownedWhere).returning({ id: audiobookJobs.id });
       if (!updated.length) { controller.abort(); controller.signal.throwIfAborted(); }
+      if (result.apiBlocked) {
+        settings.deferredAttempts = (settings.deferredAttempts || 0) + 1;
+        settings.nextAttemptAt = Math.max(diagnostics?.nextAttemptAt || 0, Date.now() + 60000 * 2 ** (settings.deferredAttempts - 1));
+        const exhausted = settings.deferredAttempts > 2;
+        await db.update(audiobookJobs).set({ settingsJson: settings, status: exhausted ? 'error' : 'queued',
+          error: exhausted ? 'Gemini remained unavailable after bounded deferred retries. Saved proposals are retained; retry unresolved chapters later.' : 'Gemini API blocked; repairs deferred until the saved retry time.',
+          updatedAt: Date.now(), ...(exhausted ? { completedAt: Date.now() } : {}) }).where(ownedWhere);
+        return;
+      }
     }
     const failures = settings.results.filter(result => result.error).length;
+    delete settings.nextAttemptAt;
     await db.update(audiobookJobs).set({ status: failures ? 'error' : 'completed', error: failures ? `${failures} chapter repairs failed; review individual errors and retry those chapters.` : null,
-      progress: 100, completedAt: Date.now(), updatedAt: Date.now() }).where(ownedWhere);
+      settingsJson: settings, progress: 100, completedAt: Date.now(), updatedAt: Date.now() }).where(ownedWhere);
   } catch (error) {
     if (!controller.signal.aborted) throw error;
   } finally { clearInterval(heartbeat); }

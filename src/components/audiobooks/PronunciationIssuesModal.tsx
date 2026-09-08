@@ -9,9 +9,9 @@ import { readJsonResponse } from '@/lib/client/read-json-response';
 import { v4 as uuidv4 } from 'uuid';
 
 type Chapter = { fileName: string; chapterIndex: number; failed: boolean };
-type Finding = Chapter & { title: string; hash: string; issues: PronunciationIssue[]; jobId?: string; failureError?: string; runId?: string; audioStatus?: string; error?: string };
+type Finding = Chapter & { title: string; hash: string; issues: PronunciationIssue[]; jobId?: string; failureError?: string; runId?: string; audioStatus?: string; error?: string; retryRunId?: string; proposalHash?: string; unresolvedCount?: number };
 type RepairConfig = { selectedProfileId: string; profiles: { id: string; name: string; model: string; primaryKeyRef: string; backupKeyRef: string }[]; keySources: { ref: string; label: string; masked: string }[] };
-type RepairJob = { id: string; status: string; progress: number; total: number; error?: string; profileId?: string; aiModel?: string; primaryKeyRef?: string; backupKeyRef?: string; results: { fileName: string; runId?: string; unresolvedCount?: number; error?: string; requestId: string }[] };
+type RepairJob = { id: string; status: string; progress: number; total: number; error?: string; profileId?: string; aiModel?: string; primaryKeyRef?: string; backupKeyRef?: string; nextAttemptAt?: number; results: { fileName: string; runId?: string; unresolvedCount?: number; error?: string; requestId: string; apiBlocked?: boolean }[] };
 
 export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onRecordingQueued }: {
   open: boolean; onClose: () => void; bookId: string; profileId?: string; onRecordingQueued: () => void;
@@ -68,16 +68,17 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
               const index = next.findIndex(row => row.fileName === result.fileName);
               const chapterIndex = Number(result.fileName.split('__')[0]) - 1;
               const row = index >= 0 ? next[index] : { fileName: result.fileName, chapterIndex, title: `Chapter ${chapterIndex + 1}`, hash: '', issues: [], failed: result.fileName.endsWith('__rejected.txt') };
-              const updated = { ...row, runId: result.runId, error: result.error ? `${result.error} Reference: ${result.requestId}` : undefined };
+              const updated = { ...row, runId: result.runId, unresolvedCount: result.unresolvedCount, error: result.error ? `${result.error} Reference: ${result.requestId}` : undefined };
               if (index >= 0) next[index] = updated; else next.push(updated);
             }
             return next;
           });
           setSelected(previous => previous.filter(file => !latest.results.some(result => result.fileName === file && result.runId)));
           const ready = latest.results.filter(result => result.runId).length;
-          const partial = latest.results.filter(result => result.runId && result.unresolvedCount).length;
+          const partial = latest.results.filter(result => result.runId && (result.unresolvedCount || result.apiBlocked || result.error)).length;
           const failed = latest.results.filter(result => result.error).length;
-          setStatus(`Repair job ${latest.status}: ${latest.results.length}/${latest.total} checked; ${ready} proposals saved (${partial} need corrections before recording); ${failed} failed. ${latest.status === 'queued' || latest.status === 'running' ? 'You can close this window; work continues in the background.' : 'Review saved proposals or scan again to retry failed chapters.'}`);
+          const blocked = latest.results.filter(result => result.apiBlocked).length;
+          setStatus(`Repair job ${latest.status}: ${latest.results.length}/${latest.total} checked; ${ready - partial} complete proposals; ${partial} partial proposals; ${blocked} API-blocked chapters (including partial proposals); ${failed} failed attempts. ${latest.nextAttemptAt && latest.status === 'queued' ? `Waiting until ${new Date(latest.nextAttemptAt).toLocaleString()} before retrying.` : latest.status === 'running' ? 'You can close this window; work continues in the background.' : 'Review saved proposals or scan again to retry unresolved findings.'}`);
         }
       } catch (problem) { if (!current.signal.aborted) setError(problem instanceof Error ? problem.message : 'Could not load repair progress.'); }
       finally { if (!current.signal.aborted) timer = setTimeout(() => void poll(), 3000); }
@@ -137,9 +138,9 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
         try {
           const result: Finding = await request({ action: 'scan', fileName: chapter.fileName }, current.signal);
           current.signal.throwIfAborted();
-          if (result.issues.length || result.failed) {
+          if (result.issues.length || result.failed || result.runId) {
             setFindings(previous => [...previous, result]);
-            if (result.issues.length && !result.runId) setSelected(previous => [...previous, result.fileName]);
+            if (result.issues.length && (!result.runId || result.retryRunId)) setSelected(previous => [...previous, result.fileName]);
           }
         } catch (problem) {
           if (current.signal.aborted) throw problem;
@@ -157,14 +158,28 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
     const current = new AbortController(); controller.current = current;
     setBusy(true); setError('');
     try {
-      const chapters = findings.filter(row => files.includes(row.fileName) && row.issues.length && !row.runId).map(row => ({
-        fileName: row.fileName, hash: row.hash, manualPatches: row.issues.flatMap(issue => Object.hasOwn(drafts, `${row.fileName}:${issue.id}`)
+      const chapters = findings.filter(row => files.includes(row.fileName) && row.issues.length && (!row.runId || row.retryRunId)).map(row => ({
+        fileName: row.fileName, hash: row.hash, retryRunId: row.retryRunId, proposalHash: row.proposalHash, manualPatches: row.issues.flatMap(issue => Object.hasOwn(drafts, `${row.fileName}:${issue.id}`)
           ? [{ id: issue.id, replacement: drafts[`${row.fileName}:${issue.id}`] }] : []),
       }));
       const result = await request({ action: 'queue', requestId: uuidv4(), chapters }, current.signal);
       setJob({ ...selection, id: result.jobId, status: 'queued', progress: 0, total: chapters.length, results: [] });
       setStatus('Repairs queued. You can close this window; proposals will appear as chapters finish. Approval is still required.');
     } catch (problem) { if (!current.signal.aborted) setError(problem instanceof Error ? problem.message : 'Could not queue repairs.'); }
+    finally { if (controller.current === current) setBusy(false); }
+  }
+
+  async function retryUnresolved(finding: Finding) {
+    const current = new AbortController(); controller.current = current;
+    setBusy(true); setError('');
+    try {
+      const fresh: Finding = await request({ action: 'scan', fileName: finding.fileName }, current.signal);
+      if (!fresh.retryRunId || !fresh.issues.length) throw new Error('No pending unresolved proposal remains. Scan again to refresh.');
+      const result = await request({ action: 'queue', requestId: uuidv4(), chapters: [{ fileName: fresh.fileName, hash: fresh.hash,
+        retryRunId: fresh.retryRunId, proposalHash: fresh.proposalHash }] }, current.signal);
+      setJob({ ...selection, id: result.jobId, status: 'queued', progress: 0, total: 1, results: [] });
+      setStatus('Retrying unresolved findings from the saved proposal. Existing repairs are preserved.');
+    } catch (problem) { if (!current.signal.aborted) setError(problem instanceof Error ? problem.message : 'Could not retry unresolved findings.'); }
     finally { if (controller.current === current) setBusy(false); }
   }
 
@@ -218,11 +233,12 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
         {scanned && findings.length === 0 && <p>No pronunciation issues found in the checked text.</p>}
         <div className="space-y-4">{findings.map(finding => <article key={finding.fileName} className="rounded border border-line-soft p-3">
           <div className="flex flex-wrap items-center gap-2">
-            <input type="checkbox" aria-label={`Select ${finding.title}`} disabled={busy || !finding.issues.length || Boolean(finding.runId)} checked={selected.includes(finding.fileName)} onChange={event => setSelected(previous => event.target.checked ? [...previous, finding.fileName] : previous.filter(file => file !== finding.fileName))} />
+            <input type="checkbox" aria-label={`Select ${finding.title}`} disabled={busy || activeRepair || !finding.issues.length || Boolean(finding.runId && !finding.retryRunId)} checked={selected.includes(finding.fileName)} onChange={event => setSelected(previous => event.target.checked ? [...previous, finding.fileName] : previous.filter(file => file !== finding.fileName))} />
             <h3 className="font-semibold">{finding.chapterIndex + 1}. {finding.title}</h3>
             <span className="text-sm text-text-soft">{finding.issues.length} findings{finding.failed ? ' · Rejected generation output' : ''}</span>
             {finding.audioStatus && <span className="text-sm text-text-soft">Recording: {finding.audioStatus.replaceAll('_', ' ')}</span>}
             {finding.runId && <button onClick={() => setReviewRun(finding.runId!)} className="ml-auto text-accent">Review &amp; Approve</button>}
+            {finding.runId && Boolean(finding.unresolvedCount || finding.retryRunId && finding.issues.length || finding.error) && <button disabled={busy || activeRepair} onClick={() => void retryUnresolved(finding)} className="text-accent disabled:opacity-50">Retry unresolved</button>}
           </div>
           {finding.failureError && <p className="mt-2 text-sm text-text-soft">Generation error: {finding.failureError}</p>}
           {finding.error && <p role="alert" className="mt-2 text-sm text-danger">{finding.error}</p>}

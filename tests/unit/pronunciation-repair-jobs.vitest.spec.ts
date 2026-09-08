@@ -9,7 +9,7 @@ vi.mock('@/db', () => ({ db: {
     return { returning: async () => mocks.running ? [{ id: 'job' }] : [], then: (resolve: (value: unknown) => unknown) => Promise.resolve().then(resolve) };
   } }) }),
 } }));
-vi.mock('@/lib/server/audiobooks/pronunciation-repairs', () => ({ proposePronunciationRepair: (...args: unknown[]) => mocks.propose(...args), assertPronunciationBookIdle: (...args: unknown[]) => mocks.idle(...args) }));
+vi.mock('@/lib/server/audiobooks/pronunciation-repairs', () => ({ proposePronunciationRepair: (...args: unknown[]) => mocks.propose(...args), assertPronunciationBookIdle: (...args: unknown[]) => mocks.idle(...args), existingPronunciationRepair: async () => null }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-config', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/server/audiobooks/pronunciation-repair-config')>(), resolveRepairAiSelection: (...args: unknown[]) => mocks.selection(...args) }));
 import { queuePronunciationRepairs, processPronunciationRepairJob } from '@/lib/server/audiobooks/pronunciation-repair-jobs';
 import type { audiobookJobs } from '@/db/schema';
@@ -27,6 +27,22 @@ test('persists selected work and references without calling Gemini or storing se
   expect(saved.settingsJson.chapters).toEqual(chapters);
   expect(saved.settingsJson.primaryKeyRef).toBe('other:primary');
   expect(JSON.stringify(saved)).not.toContain('fixture-never-persist');
+});
+test('checkpoints a future retry and stops processing later chapters after API exhaustion', async () => {
+  mocks.propose.mockImplementation(async ({ onDiagnostics }) => {
+    onDiagnostics({ version: 1, promptVersion: 4, stage: 'gemini-response', apiBlocked: true, nextAttemptAt: Date.now() + 120000 });
+    throw new Error('Unavailable');
+  });
+  await processPronunciationRepairJob(job());
+  expect(mocks.propose).toHaveBeenCalledTimes(1);
+  const deferred = mocks.updates.at(-1)!;
+  expect(deferred).toMatchObject({ status: 'queued', settingsJson: { deferredAttempts: 1, results: [{ apiBlocked: true }] } });
+  expect((deferred.settingsJson as { nextAttemptAt: number }).nextAttemptAt).toBeGreaterThan(Date.now());
+  const resumed = job();
+  resumed.settingsJson = { ...(deferred.settingsJson as object), deferredAttempts: 2 };
+  await processPronunciationRepairJob(resumed);
+  expect(mocks.propose).toHaveBeenCalledTimes(2);
+  expect(mocks.updates.at(-1)).toMatchObject({ status: 'error', settingsJson: { deferredAttempts: 3, results: [{ previousAttempts: [{ requestId: expect.any(String) }] }] } });
 });
 test('continues after an individual failure and checkpoints successful proposals', async () => {
   mocks.propose.mockRejectedValueOnce(new Error('upstream secret')).mockResolvedValueOnce({ runId: 'run-two' });

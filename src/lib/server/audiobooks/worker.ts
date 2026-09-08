@@ -316,7 +316,7 @@ export async function processAudiobookQueue() {
   const RATE_LIMIT_BACKOFF_MS = 24 * 60 * 60 * 1000; // 24 hours
   const backoffThreshold = Date.now() - RATE_LIMIT_BACKOFF_MS;
 
-  const rows = await db.select()
+  const queuedRows = await db.select()
     .from(audiobookJobs)
     .where(
       and(
@@ -329,7 +329,13 @@ export async function processAudiobookQueue() {
       )
     )
     .orderBy(asc(audiobookJobs.createdAt))
-    .limit(MAX_CONCURRENT_JOBS);
+    .limit(100);
+  const rows = queuedRows.filter((row: typeof queuedRows[0]) => {
+    try {
+      const settings = typeof row.settingsJson === 'string' ? JSON.parse(row.settingsJson) : row.settingsJson;
+      return settings?.jobType !== 'pronunciation-repair' || !(settings.nextAttemptAt > Date.now());
+    } catch { return true; }
+  }).slice(0, MAX_CONCURRENT_JOBS);
   
   if (rows.length === 0) return;
   

@@ -1,6 +1,7 @@
 import { getKokoroPronunciationQualityWarnings, isKokoroSafePronunciation } from './kokoro-pronunciation-policy';
 import { expandScholarEditorialWords, hasSplitScholarEditorialWord } from './scholar-editorial-words';
 import { validateSmartAudioOutput } from './smart-audio-cleanup';
+import { contextualPronunciationWord, normalizeRepairMarkup, pronunciationMarkupRegions } from './pronunciation-repair-markup';
 
 export const PRONUNCIATION_REPAIR_RULE = 'pronunciation-repair:v1';
 export type PronunciationIssue = {
@@ -20,7 +21,7 @@ const FOREIGN = /[\p{Script=Greek}\p{Script=Hebrew}]/u;
 function lookup(word: string, dictionary: Record<string, string>): string | undefined {
   const expanded = expandScholarEditorialWords(word.replace(/\\/gu, ''));
   const saved = dictionary[expanded];
-  if (!saved || !/^[\p{Letter}\p{Mark}'’]+$/u.test(expanded)) return undefined;
+  if (!saved || !/^[\p{Letter}\p{Mark}'’᾽᾿ʼ]+$/u.test(expanded)) return undefined;
   // Only compact phoneme spacing for a confirmed single word. Never mutate
   // the saved dictionary, or collapse whitespace in a phrase/initialism.
   const ipa = saved.replace(/\s+/gu, '');
@@ -35,19 +36,29 @@ export function scanPronunciationIssues(text: string, dictionary: Record<string,
   const regions: Array<{ start: number; end: number; reason: string }> = [];
   const add = (start: number, end: number, reason: string) => regions.push({ start, end, reason });
   const tags = [...text.matchAll(TAG)];
+  const outerRegions = pronunciationMarkupRegions(text);
+  for (const region of outerRegions) {
+    if (region.nested) add(region.start, region.end, 'Nested pronunciation markup requires complete-region repair.');
+  }
+  // Include optional initial letters and the existing tagged remainder together.
+  for (const match of text.matchAll(/(?<![\p{Letter}\p{Mark}])-(?:\([\p{Script=Greek}\p{Mark}]+\))?(?:\[[\p{Script=Greek}\p{Mark}]+\]\(\/[^/\r\n]+\/\)|[\p{Script=Greek}\p{Mark}]+)+/gu)) {
+    if (!tags.some(tag => match.index >= tag.index && match.index < tag.index + tag[0].length)) {
+      add(match.index, match.index + match[0].length, 'Grammatical suffix needs one contextual pronunciation, including optional letters.');
+    }
+  }
   const tagsByStart = new Map(tags.map(tag => [tag.index, tag]));
   // Include incomplete closing delimiters without consuming surrounding prose.
   for (const match of text.matchAll(/\[[^\[\]\r\n]+\]\(\/[^/\r\n]+\/\]/gu)) {
     add(match.index, match.index + match[0].length, 'Malformed pronunciation closing delimiter.');
   }
   for (const match of text.matchAll(/[\p{Letter}\p{Mark}]+/gu)) {
-    if (FOREIGN.test(match[0]) && /\p{Script=Latin}/u.test(match[0]) && !tags.some(tag => match.index >= tag.index && match.index < tag.index + tag[0].length)) {
+    if (FOREIGN.test(match[0]) && /\p{Script=Latin}/u.test(match[0]) && !outerRegions.some(region => match.index >= region.start && match.index < region.end) && !tags.some(tag => match.index >= tag.index && match.index < tag.index + tag[0].length)) {
       add(match.index, match.index + match[0].length, 'Mixed-script OCR word requires source-supported reconstruction.');
     }
   }
   // An incomplete bracketed word is one repair region, not bare letters
   // inside retained brackets. Exclude ordinary Markdown links.
-  for (const match of text.matchAll(/\[[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}()'’]+\](?!\()/gu)) {
+  for (const match of text.matchAll(/\[[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}()'’᾽᾿ʼ]+\](?!\()/gu)) {
     add(match.index, match.index + match[0].length, 'Foreign word has brackets but no pronunciation.');
   }
   // Mask markup without shifting offsets, so bare-script and punctuation
@@ -63,19 +74,24 @@ export function scanPronunciationIssues(text: string, dictionary: Record<string,
       const adjacent = tagsByStart.get(tag.index + tag[0].length);
       if (adjacent && FOREIGN.test(adjacent[1])) add(tag.index, adjacent.index + adjacent[0].length, 'A complete foreign word is split across pronunciation markup.');
     }
-    const expanded = expandScholarEditorialWords(word.replace(/\\/gu, ''));
+    const expanded = contextualPronunciationWord(word) || expandScholarEditorialWords(word.replace(/\\/gu, ''));
     const warnings = getKokoroPronunciationQualityWarnings(expanded, `/${tag[2]}/`);
     if (word.includes('\\')) warnings.push('Stray backslash in pronunciation label.');
     if (warnings.length) add(tag.index, tag.index + tag[0].length, warnings.join(' '));
     try { validateSmartAudioOutput(tag[0], { requirePronunciationTagsForForeignScripts: false }); }
     catch { add(tag.index, tag.index + tag[0].length, 'Pronunciation markup cannot be aligned safely.'); }
   }
+  for (const region of [...outerRegions].reverse()) {
+    masked = masked.slice(0, region.start) + ' '.repeat(region.end - region.start) + masked.slice(region.end);
+    const value = text.slice(region.start, region.end);
+    if (!tags.some(tag => tag.index === region.start && tag[0] === value)) add(region.start, region.end, 'Malformed pronunciation markup.');
+  }
   // Editorial groups may span a tag, its ending, or multiple tags. Match
   // compact tokens and confirm with the same detector used before recording.
   for (const token of text.matchAll(/[^\s<>]+/gu)) {
     if (hasSplitScholarEditorialWord(token[0])) add(token.index, token.index + token[0].length, 'An editorial word is split across pronunciation tags.');
   }
-  for (const match of masked.matchAll(/[\p{Script=Greek}\p{Script=Hebrew}][\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’]*(?:\([\p{Script=Greek}\p{Script=Hebrew}\p{Mark}]+\)[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’]*)*/gu)) {
+  for (const match of masked.matchAll(/[\p{Script=Greek}\p{Script=Hebrew}][\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’᾽᾿ʼ]*(?:\([\p{Script=Greek}\p{Script=Hebrew}\p{Mark}]+\)[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’᾽᾿ʼ]*)*/gu)) {
     add(match.index, match.index + match[0].length, 'Greek or Hebrew is outside a pronunciation tag.');
   }
   for (const match of masked.matchAll(/\(\s*\)|\\+(?=[\p{Script=Greek}\p{Script=Hebrew}])|\[[^\]\r\n]*\]\(\/[^\r\n)\]]*(?:\)|\]|$)/gu)) {
@@ -98,8 +114,8 @@ export function scanPronunciationIssues(text: string, dictionary: Record<string,
     let dictionaryWord: string | undefined;
     if (/^\(\s*\)$/u.test(value)) replacement = '';
     else {
-      const formatted = value.replace(/^(\[[^\[\]\r\n]+\]\(\/[^/\r\n]+\/)\]$/u, '$1)');
-      const visible = formatted.replace(TAG, '$1').replace(/\\/gu, '').replace(/^\[([\p{Script=Greek}\p{Script=Hebrew}\p{Mark}()'’]+)\]$/u, '$1');
+      const formatted = normalizeRepairMarkup(value);
+      const visible = formatted.replace(TAG, '$1').replace(/\\/gu, '').replace(/^\[([\p{Script=Greek}\p{Script=Hebrew}\p{Mark}()'’᾽᾿ʼ]+)\]$/u, '$1');
       const expanded = expandScholarEditorialWords(visible);
       if (dictionary[expanded]) dictionaryWord = expanded;
       const pronunciation = lookup(expanded, dictionary);
@@ -112,10 +128,49 @@ export function scanPronunciationIssues(text: string, dictionary: Record<string,
 
 function visibleEnglish(text: string): string {
   // Even a malformed/unclosed IPA payload is pronunciation data, not prose.
-  return text.replace(TAG, '$1').replace(/\[([^\]\r\n]+)\]\(\/[^\r\n)]*(?:\)|$)/gu, '$1').replace(/<[^>]*>/gu, '').match(/\p{Script=Latin}[\p{Script=Latin}\p{Mark}'’-]*|\p{Number}+/gu)?.join(' ') || '';
+  return normalizeRepairMarkup(text).replace(TAG, '$1').replace(/\[([^\]\r\n]+)\]\(\/[^\r\n)]*(?:\)|$)/gu, '$1').replace(/<[^>]*>/gu, '').match(/\p{Script=Latin}[\p{Script=Latin}\p{Mark}'’-]*|\p{Number}+/gu)?.join(' ') || '';
 }
 
 export type RepairValidationOptions = { sourceText?: string; allowRemaining?: boolean };
+
+function visibleForeign(text: string): string {
+  return normalizeRepairMarkup(text).replace(TAG, '$1').replace(/\[([^\]\r\n]+)\]\(\/[^\r\n)]*(?:\)|$)/gu, '$1')
+    .normalize('NFC').match(/[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}]+/gu)?.join(' ') || '';
+}
+
+function nestedSourceReconstruction(original: string, replacement: string, sourceText = ''): boolean {
+  const normalized = normalizeRepairMarkup(original);
+  const outer = /^\[([\p{Script=Greek}\p{Script=Hebrew}\p{Mark} ]+)\]\(\/(.*)\)$/u.exec(normalized);
+  if (!outer || !outer[2].includes('[')) return false;
+  const words = (value: string) => value.normalize('NFC').match(/[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}]+/gu) || [];
+  const label = words(outer[1]);
+  const tailText = outer[2].replace(TAG, '$1').replace(/^[^/\s]+\/\s*/u, '');
+  if (!/^[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}\s]+$/u.test(tailText)) return false;
+  const tail = words(tailText);
+  let overlap = Math.min(label.length, tail.length);
+  while (overlap && label.slice(-overlap).join(' ') !== tail.slice(0, overlap).join(' ')) overlap--;
+  if (!overlap) return false;
+  const intended = [...label, ...tail.slice(overlap)].join(' ');
+  const replacementTags = [...replacement.matchAll(TAG)];
+  if (replacementTags.map(tag => tag[1].normalize('NFC')).join(' ') !== intended || replacement.replace(TAG, '').trim()) return false;
+  // Require a contiguous source passage; stripping English from the original
+  // source must not manufacture evidence for a foreign-word sequence.
+  return sourceText.normalize('NFC').split(/[^\p{Script=Greek}\p{Script=Hebrew}\p{Mark}\s]/u)
+    .some(passage => ` ${words(passage).join(' ')} `.includes(` ${intended} `));
+}
+
+function assertSourceWords(original: string, replacement: string, sourceText?: string): void {
+  if (original === replacement) return;
+  // A malformed outer payload can contain more narrated words than its label.
+  // Never compare just that label and accidentally authorize dropping the tail.
+  if (pronunciationMarkupRegions(normalizeRepairMarkup(original)).some(region => region.nested)) {
+    if (nestedSourceReconstruction(original, replacement, sourceText)) return;
+    throw new Error('Nested repair requires verified source evidence for the complete word sequence.');
+  }
+  if (visibleForeign(original) === visibleForeign(replacement)) return;
+  if (sourceSupportedReconstruction(original, replacement, sourceText) || nestedSourceReconstruction(original, replacement, sourceText)) return;
+  throw new Error('Repair changed source words or word order without verified source evidence.');
+}
 
 function sourceSupportedReconstruction(original: string, replacement: string, sourceText = ''): boolean {
   const label = original.replace(TAG, '$1');
@@ -135,7 +190,8 @@ export function applyPronunciationPatches(text: string, issues: PronunciationIss
     if (!issue || ids.has(patch.id) || typeof patch.replacement !== 'string' || patch.replacement.length > 12000) throw new Error('Invalid or duplicate repair patch.');
     ids.add(patch.id);
     if (/[<>]/u.test(patch.replacement) || /\[(?:SYSTEM|LAYOUT|OMIT|CHAPTER_TITLE)/iu.test(patch.replacement)) throw new Error('Repair must not introduce voice or processing markup.');
-    if (visibleEnglish(issue.text) !== visibleEnglish(patch.replacement) && !sourceSupportedReconstruction(issue.text, patch.replacement, options.sourceText)) throw new Error('Repair changed unrelated English text.');
+    if (visibleEnglish(issue.text) !== visibleEnglish(patch.replacement) && !sourceSupportedReconstruction(issue.text, patch.replacement, options.sourceText) && !nestedSourceReconstruction(issue.text, patch.replacement, options.sourceText)) throw new Error('Repair changed unrelated English text.');
+    assertSourceWords(issue.text, patch.replacement, options.sourceText);
     if (text.slice(issue.start, issue.end) !== issue.text) throw new Error('Chapter text changed after scanning.');
     return { ...issue, replacement: patch.replacement };
   }).sort((a, b) => b.start - a.start);
@@ -167,7 +223,8 @@ export function assertPronunciationRepair(previous: string, proposed: string, op
     }
     if (end < 0) throw new Error('Repair changed surrounding chapter text.');
     const replacement = proposed.slice(proposedCursor, end);
-    if ((visibleEnglish(issue.text) !== visibleEnglish(replacement) && !sourceSupportedReconstruction(issue.text, replacement, options.sourceText)) || /[<>]/u.test(replacement)) throw new Error('Repair changed English text or speaker assignments.');
+    if ((visibleEnglish(issue.text) !== visibleEnglish(replacement) && !sourceSupportedReconstruction(issue.text, replacement, options.sourceText) && !nestedSourceReconstruction(issue.text, replacement, options.sourceText)) || /[<>]/u.test(replacement)) throw new Error('Repair changed English text or speaker assignments.');
+    assertSourceWords(issue.text, replacement, options.sourceText);
     proposedCursor = end;
   }
   if (previous.slice(cursor) !== proposed.slice(proposedCursor)) throw new Error('Repair changed the end of the chapter.');

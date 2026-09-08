@@ -4,14 +4,14 @@ import { batchRefineTextHash } from '../../src/lib/server/audiobooks/batch-refin
 const mocks = vi.hoisted(() => ({
   objects: new Map<string, string>(), selectResults: [] as unknown[][],
   profile: { id: 'profile', name: 'Standard', workerMode: 'standard', pronunciations: {} as Record<string, string>, geminiApiKey: 'fixture' },
-  createRun: vi.fn(), insert: vi.fn(), finish: vi.fn(), put: vi.fn(), gemini: vi.fn(), fetch: vi.fn(),
+  createRun: vi.fn(), insert: vi.fn(), finish: vi.fn(), put: vi.fn(), gemini: vi.fn(), fetch: vi.fn(), update: vi.fn(),
 }));
 vi.mock('@/db', () => ({ db: { select: () => {
   const rows = mocks.selectResults.shift() || [];
   const chain = { from: () => chain, innerJoin: () => chain, where: () => chain, orderBy: () => chain, limit: async () => rows,
     then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(rows).then(resolve) };
   return chain;
-} } }));
+}, update: () => ({ set: (values: unknown) => ({ where: () => ({ returning: () => mocks.update(values) }) }) }) } }));
 vi.mock('@/lib/server/audiobooks/blobstore', () => ({
   headAudiobookObject: async (_book: string, _user: string, file: string) => {
     if (!mocks.objects.has(file)) throw Object.assign(new Error('Not found'), { name: 'NoSuchKey' });
@@ -47,11 +47,69 @@ function seed(text: string) {
 
 beforeEach(() => {
   vi.clearAllMocks(); mocks.objects.clear(); mocks.selectResults = []; mocks.profile.pronunciations = {};
+  mocks.update.mockResolvedValue([{ id: 'change' }]);
   vi.stubGlobal('fetch', async (...args: unknown[]) => (await mocks.fetch(...args)).clone());
   mocks.gemini.mockImplementation(async ({ request }) => ({ response: await request('fixture', 'fixture-model') }));
 });
 
 describe('pronunciation repair service', () => {
+  test('retries current proposal offsets, preserves earlier repairs, and updates only a pending matching version', async () => {
+    const input = seed('Read τὸ θεῷ.');
+    const proposedText = 'Read [τὸ](/toʊ/) θεῷ.';
+    const proposalHash = batchRefineTextHash(proposedText);
+    mocks.selectResults = [[], [{ id: 'change', runId: 'existing', decision: 'pending', proposedText, proposedTextHash: proposalHash }]];
+    mocks.fetch.mockResolvedValue(Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ patches: [{ id: '0', replacement: '[θεῷ](/θeɪoʊ/)' }] }) }] } }] }));
+    const result = await proposePronunciationRepair({ ...input, retryRunId: 'existing', proposalHash });
+    expect(result).toMatchObject({ runId: 'existing', unresolvedCount: 0 });
+    const payload = JSON.parse(JSON.parse(mocks.fetch.mock.calls[0][1].body).contents[0].parts[0].text);
+    expect(payload.findings).toHaveLength(1);
+    expect(payload.findings[0]).toMatchObject({ text: 'θεῷ', start: proposedText.indexOf('θεῷ') });
+    expect(mocks.update.mock.calls[0][0].proposedText).toBe('Read [τὸ](/toʊ/) [θεῷ](/θeɪoʊ/).');
+    expect(mocks.createRun).not.toHaveBeenCalled();
+  });
+
+  test('rejects stale proposal retries before invoking Gemini', async () => {
+    const input = seed('Read τὸ θεῷ.');
+    mocks.selectResults = [[], [{ runId: 'existing', decision: 'pending', proposedTextHash: 'changed' }]];
+    await expect(proposePronunciationRepair({ ...input, retryRunId: 'existing', proposalHash: 'stale' })).rejects.toThrow('Proposal changed');
+    expect(mocks.gemini).not.toHaveBeenCalled();
+  });
+
+  test('does not overwrite a proposal changed while its retry was running', async () => {
+    const input = seed('Read τὸ θεῷ.');
+    const proposedText = 'Read [τὸ](/toʊ/) θεῷ.';
+    const proposalHash = batchRefineTextHash(proposedText);
+    mocks.selectResults = [[], [{ id: 'change', runId: 'existing', decision: 'pending', proposedText, proposedTextHash: proposalHash }]];
+    mocks.update.mockResolvedValue([]);
+    mocks.profile.pronunciations = { 'θεῷ': '/θeɪoʊ/' };
+    await expect(proposePronunciationRepair({ ...input, retryRunId: 'existing', proposalHash })).rejects.toThrow('Proposal changed during repair');
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(mocks.createRun).not.toHaveBeenCalled();
+  });
+
+  test('retains rejected candidates when a correction omits their finding', async () => {
+    const onDiagnostics = vi.fn();
+    const response = (patches: unknown[]) => Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ patches }) }] } }] });
+    mocks.fetch.mockResolvedValueOnce(response([{ id: '0', replacement: '[σ](/s/)', alternatives: ['[σ](/sɪɡmɑ/)'] }])).mockResolvedValueOnce(response([]));
+    await expect(proposePronunciationRepair({ ...seed('Read σ.'), onDiagnostics })).rejects.toThrow();
+    const diagnostics = onDiagnostics.mock.calls[0][0];
+    expect(diagnostics.findings[0].outcome).toBe('candidate_rejected');
+    expect(diagnostics.findings[0].reasons.join(' ')).toContain('stray Greek');
+    expect(diagnostics.validatorReason).not.toBe('No replacement returned for this finding.');
+    expect(diagnostics.rounds).toHaveLength(2);
+    expect(diagnostics.candidateChecks.every((check: { round: number }) => check.round === 1)).toBe(true);
+  });
+
+  test('classifies 429 as API-blocked and retains retry guidance without secret error messages', async () => {
+    const onDiagnostics = vi.fn();
+    mocks.fetch.mockResolvedValue(Response.json({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'private-message' } }, { status: 429, headers: { 'Retry-After': '120' } }));
+    await expect(proposePronunciationRepair({ ...seed('Read θεῷ.'), onDiagnostics })).rejects.toThrow();
+    const diagnostics = onDiagnostics.mock.calls[0][0];
+    expect(diagnostics).toMatchObject({ apiBlocked: true, findings: [{ outcome: 'api_blocked' }], attempts: [{ round: 1, errorDetails: { retryAfterMs: 120000, apiStatus: 'RESOURCE_EXHAUSTED' } }] });
+    expect(diagnostics.nextAttemptAt).toBeGreaterThan(Date.now() + 110000);
+    expect(JSON.stringify(diagnostics)).not.toContain('private-message');
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
   test('saves valid dictionary repairs when Gemini leaves ambiguous findings unresolved', async () => {
     mocks.profile.pronunciations = { 'τὸ': '/toʊ/' };
     mocks.fetch.mockResolvedValue(Response.json({ candidates: [{ content: { parts: [{ text: '{"patches":[]}' }] } }] }));
