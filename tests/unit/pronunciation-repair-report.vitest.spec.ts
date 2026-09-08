@@ -43,3 +43,15 @@ test('separates API blocking from ambiguity and includes earlier attempt diagnos
   expect(report?.chapters[0]).toMatchObject({ needsReview: true, recoveryStatus: 'api_blocked', previousAttempts: [{ requestId: 'earlier', diagnostics: { apiBlocked: true } }] });
   expect(report?.chapters[1].needsReview).toBe(true);
 });
+test('does not count retained failed proposals or advertise a retry for a terminal job', async () => {
+  mocks.rows = [{ id, status: 'error', settingsJson: { jobType: 'pronunciation-repair', chapters: Array(26).fill({}), nextAttemptAt: 123,
+    results: [{ fileName: '0067__text.txt', runId: 'old', error: 'Preparation failed' },
+      { fileName: '0079__text.txt', runId: 'new', unresolvedCount: 0, proposalAction: 'created' },
+      { fileName: '0081__text.txt', runId: 'updated', unresolvedCount: 0, proposalAction: 'updated' },
+      { fileName: '0092__text.txt', error: 'HTTP 429', apiBlocked: true }] } }];
+  const report = await pronunciationRepairReport('book', 'owner', id);
+  expect(report?.summary).toMatchObject({ proposals: 2, completeProposals: 2, partialProposals: 0, retainedProposalReferences: 1,
+    createdProposals: 1, updatedProposals: 1, failures: 2, unprocessedChapters: 22 });
+  expect(report?.nextAttemptAt).toBeUndefined();
+  expect(report?.chapters[0]).toMatchObject({ outcome: 'failed', proposalAction: 'retained', proposalRunId: 'old' });
+});

@@ -11,7 +11,7 @@ export async function pronunciationRepairReport(bookId: string, userId: string, 
   const job = rows[0];
   const settings = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : job.settingsJson;
   if (settings?.jobType !== 'pronunciation-repair') return null;
-  type Result = { fileName: string; requestId?: string; runId?: string; unresolvedCount?: number; error?: string; diagnosticsFile?: string; diagnosticsUnavailable?: string; apiBlocked?: boolean; previousAttempts?: { requestId: string; diagnosticsFile?: string }[] };
+  type Result = { fileName: string; requestId?: string; runId?: string; proposalAction?: 'created' | 'updated' | 'reused' | 'retained'; unresolvedCount?: number; error?: string; diagnosticsFile?: string; diagnosticsUnavailable?: string; apiBlocked?: boolean; previousAttempts?: { requestId: string; diagnosticsFile?: string }[] };
   const results: Result[] = Array.isArray(settings.results) ? settings.results : [];
   const groups: Record<string, number> = {};
   const chapters = [];
@@ -40,7 +40,8 @@ export async function pronunciationRepairReport(bookId: string, userId: string, 
         ...(!previousDiagnostics ? { diagnosticsUnavailable: 'Previous attempt diagnostics unavailable.' } : {}) });
     }
     if (result.error) groups[reason || 'Unspecified failure'] = (groups[reason || 'Unspecified failure'] || 0) + 1;
-    chapters.push({ fileName: result.fileName, requestId: result.requestId, outcome: result.error ? 'failed' : result.runId ? 'proposal_saved' : 'unknown',
+    chapters.push({ fileName: result.fileName, requestId: result.requestId, outcome: result.error ? 'failed' : result.proposalAction === 'reused' ? 'proposal_reused' : result.runId ? 'proposal_saved' : 'unknown',
+      proposalAction: result.proposalAction || (result.error && result.runId ? 'retained' : 'unknown'),
       error: result.error, proposalRunId: result.runId, unresolvedCount: result.unresolvedCount, needsReview: Boolean(result.error || result.unresolvedCount || result.apiBlocked),
       recoveryStatus: result.apiBlocked ? 'api_blocked' : result.error ? 'needs_review' : result.unresolvedCount ? 'partial_proposal' : 'complete_proposal',
       previousAttempts, diagnostics: diagnostics || null, ...(!diagnostics ? { diagnosticsUnavailable: unavailable } : {}) });
@@ -49,13 +50,17 @@ export async function pronunciationRepairReport(bookId: string, userId: string, 
     reportVersion: 1, generatedAt: new Date().toISOString(), jobId: job.id, status: job.status, progress: job.progress,
     createdAt: job.createdAt, startedAt: job.startedAt, completedAt: job.completedAt,
     requestedModel: settings.aiModel, profileId: settings.profileId,
-    nextAttemptAt: settings.nextAttemptAt,
-    summary: { selectedChapters: settings.chapters?.length || 0, processedChapters: results.length, proposals: results.filter(result => result.runId).length,
+    nextAttemptAt: job.status === 'queued' ? settings.nextAttemptAt : undefined,
+    summary: { selectedChapters: settings.chapters?.length || 0, processedChapters: results.length, proposals: results.filter(result => result.runId && !result.error && result.proposalAction !== 'retained').length,
+      createdProposals: results.filter(result => result.proposalAction === 'created' && !result.error).length,
+      updatedProposals: results.filter(result => result.proposalAction === 'updated' && !result.error).length,
+      reusedProposals: results.filter(result => result.proposalAction === 'reused' && !result.error).length,
+      retainedProposalReferences: results.filter(result => result.runId && (result.error || result.proposalAction === 'retained')).length,
       completeProposals: results.filter(result => result.runId && !result.unresolvedCount && !result.error && !result.apiBlocked).length,
       apiBlockedChapters: results.filter(result => result.apiBlocked).length,
       unprocessedChapters: Math.max(0, (settings.chapters?.length || 0) - results.length),
-      partialProposals: results.filter(result => result.runId && (result.unresolvedCount || result.apiBlocked || result.error)).length, failures: results.filter(result => result.error).length, failureReasons: groups },
-    notes: ['Read-only export; no AI calls, reruns, approvals, or audio changes.', 'Contains book excerpts and pronunciation guidance. Review before sharing.', 'Per-finding reasons are isolated checks; the chapter-wide validator reason may indicate a cross-finding or alignment problem.', 'The recorded system instruction excludes the full chapter/source payload. Missing diagnostics cannot be reconstructed retroactively.'],
+      partialProposals: results.filter(result => result.runId && !result.error && (result.unresolvedCount || result.apiBlocked)).length, failures: results.filter(result => result.error).length, failureReasons: groups },
+    notes: ['Read-only export; no AI calls, reruns, approvals, or audio changes.', 'Proposal counts describe the latest successful chapter results, not necessarily newly created proposals. Failed retries may retain an older proposal reference; these are counted separately. Older results may not record whether a proposal was created, updated or reused.', 'Contains book excerpts and pronunciation guidance. Review before sharing.', 'Per-finding reasons are isolated checks; the chapter-wide validator reason may indicate a cross-finding or alignment problem.', 'The recorded system instruction excludes the full chapter/source payload. Missing diagnostics cannot be reconstructed retroactively.'],
     chapters,
   };
 }

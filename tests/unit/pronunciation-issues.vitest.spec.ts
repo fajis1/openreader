@@ -6,6 +6,15 @@ import { getKokoroPronunciationWordWarnings } from '../../src/lib/shared/kokoro-
 const dictionary = { Aetherian: '/eɪθɪriən/', 'θεοῦ': '/θɛu/' };
 
 describe('targeted pronunciation scan and patches', () => {
+  test('does not send already-tagged suffixes to AI, but retains the complete optional-letter finding', () => {
+    const tagged = '-[μός](/mɒs/) and -[μα](/mɑ/)';
+    const text = `${Array(11).fill(tagged).join('. ')}. -(σ)[μός](/mɒs/)`;
+    expect(scanPronunciationIssues(text)).toMatchObject([{ text: '-(σ)[μός](/mɒs/)' }]);
+    expect(scanPronunciationIssues(text)).toHaveLength(1);
+    expect(scanPronunciationIssues(tagged)).toEqual([]);
+    expect(scanPronunciationIssues('-[μός](/bad split/)').length).toBeGreaterThan(0);
+    expect(scanPronunciationIssues('-μός')[0].text).toBe('-μός');
+  });
   test.each([
     ['[_[ἐπιποθῶ](/ɛpipoʊθoʊ/)_](/ɛpipoʊθoʊ/)', '[ἐπιποθῶ](/ɛpipoʊθoʊ/)'],
     ['[Ὁ](/hoʊ)', '[Ὁ](/hoʊ/)'],

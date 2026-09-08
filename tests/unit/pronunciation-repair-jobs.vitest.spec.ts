@@ -43,6 +43,43 @@ test('checkpoints a future retry and stops processing later chapters after API e
   await processPronunciationRepairJob(resumed);
   expect(mocks.propose).toHaveBeenCalledTimes(2);
   expect(mocks.updates.at(-1)).toMatchObject({ status: 'error', settingsJson: { deferredAttempts: 3, results: [{ previousAttempts: [{ requestId: expect.any(String) }] }] } });
+  expect(mocks.updates.at(-1)!.settingsJson).not.toHaveProperty('nextAttemptAt');
+});
+test('a recovered API request resets the consecutive retry budget before another chapter fails', async () => {
+  const resumed = job();
+  resumed.settingsJson = { ...settings(), deferredAttempts: 2, nextAttemptAt: 123,
+    results: [{ fileName: chapters[0].fileName, apiBlocked: true, requestId: 'earlier' }] };
+  mocks.propose.mockImplementationOnce(async ({ onDiagnostics }) => {
+    onDiagnostics({ version: 1, promptVersion: 4, stage: 'complete', httpStatus: 200, rounds: [{ round: 1, outcome: 'response_received' }] });
+    return { runId: 'recovered', unresolvedCount: 0, proposalAction: 'created' };
+  }).mockImplementationOnce(async ({ onDiagnostics }) => {
+    onDiagnostics({ version: 1, promptVersion: 4, stage: 'gemini-response', apiBlocked: true });
+    throw new Error('Unavailable');
+  });
+  await processPronunciationRepairJob(resumed);
+  expect(mocks.updates.at(-1)).toMatchObject({ status: 'queued', settingsJson: { deferredAttempts: 1 } });
+  expect(mocks.propose).toHaveBeenCalledTimes(2);
+});
+test('local repairs do not reset an API outage budget', async () => {
+  const resumed = job();
+  resumed.settingsJson = { ...settings(), deferredAttempts: 2 };
+  mocks.propose.mockImplementationOnce(async ({ onDiagnostics }) => {
+    onDiagnostics({ version: 1, promptVersion: 4, stage: 'complete', aiRequested: false });
+    return { runId: 'local', unresolvedCount: 0 };
+  }).mockImplementationOnce(async ({ onDiagnostics }) => {
+    onDiagnostics({ version: 1, promptVersion: 4, stage: 'gemini-response', apiBlocked: true });
+    throw new Error('Unavailable');
+  });
+  await processPronunciationRepairJob(resumed);
+  expect(mocks.updates.at(-1)).toMatchObject({ status: 'error', settingsJson: { deferredAttempts: 3 } });
+});
+
+test('a failed retry retains an older proposal without claiming a successful save', async () => {
+  const input = job();
+  input.settingsJson = { ...settings(), chapters: [{ ...chapters[0], retryRunId: 'older', proposalHash: 'c'.repeat(64) }] };
+  mocks.propose.mockRejectedValueOnce(new Error('validation failure'));
+  await processPronunciationRepairJob(input);
+  expect(mocks.updates.at(-1)).toMatchObject({ status: 'error', settingsJson: { results: [{ runId: 'older', proposalAction: 'retained', error: expect.any(String) }] } });
 });
 test('continues after an individual failure and checkpoints successful proposals', async () => {
   mocks.propose.mockRejectedValueOnce(new Error('upstream secret')).mockResolvedValueOnce({ runId: 'run-two' });

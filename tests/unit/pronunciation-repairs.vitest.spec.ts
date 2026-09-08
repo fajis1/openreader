@@ -74,6 +74,18 @@ describe('pronunciation repair service', () => {
     await expect(proposePronunciationRepair({ ...input, retryRunId: 'existing', proposalHash: 'stale' })).rejects.toThrow('Proposal changed');
     expect(mocks.gemini).not.toHaveBeenCalled();
   });
+  test('captures exact existing-proposal validation failures before any Gemini request', async () => {
+    const input = seed('Read τὸ θεῷ.');
+    const proposedText = 'Changed [τὸ](/toʊ/) θεῷ.';
+    const proposalHash = batchRefineTextHash(proposedText);
+    const onDiagnostics = vi.fn();
+    mocks.selectResults = [[], [{ id: 'change', runId: 'existing', decision: 'pending', proposedText, proposedTextHash: proposalHash }]];
+    await expect(proposePronunciationRepair({ ...input, retryRunId: 'existing', proposalHash, onDiagnostics })).rejects.toThrow('saved proposal failed validation');
+    expect(onDiagnostics.mock.calls[0][0]).toMatchObject({ stage: 'existing-proposal-validation', aiRequested: false,
+      validatorReason: 'Repair changed text outside a flagged passage.', errorType: 'PronunciationRepairError' });
+    expect(mocks.gemini).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
 
   test('does not overwrite a proposal changed while its retry was running', async () => {
     const input = seed('Read τὸ θεῷ.');

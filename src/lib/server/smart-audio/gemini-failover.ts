@@ -114,7 +114,7 @@ async function fetchWithExponentialBackoff(
 
 async function fetchGeminiWithKeyFallback(
   input: GeminiFallbackOptions,
-): Promise<{ response: Response; usedBackup: boolean }> {
+): Promise<{ response: Response; usedBackup: boolean; primaryStatus?: number }> {
   const primaryApiKey = input.primaryApiKey.trim();
   const backupApiKey = (input.backupApiKey || '').trim();
   input.signal?.throwIfAborted();
@@ -172,6 +172,7 @@ async function fetchGeminiWithKeyFallback(
   return {
     response: backupResponse,
     usedBackup: true,
+    primaryStatus: primaryResponse.status,
   };
 }
 
@@ -216,17 +217,24 @@ export async function fetchGeminiWithRateLimitFallback(
     ? [requestedModel, ...(GEMINI_MODEL_FALLBACKS[requestedModel] || [])]
     : [undefined];
   let lastResult: { response: Response; usedBackup: boolean } | null = null;
+  let backupBlocked = false;
 
   for (const candidateModel of models) {
     input.signal?.throwIfAborted();
     const result = await fetchGeminiWithKeyFallback({
       ...input,
+      backupApiKey: backupBlocked ? undefined : input.backupApiKey,
       request: (apiKey) => candidateModel
         ? input.request(apiKey, candidateModel)
         : input.request(apiKey),
     });
     lastResult = result;
-    const fallbackReason = await getGeminiModelFallbackReason(result.response);
+    // A rate-limited backup must not erase evidence that the primary model
+    // exhausted its overload retries. Try the next configured model on the
+    // primary, without retrying that blocked backup again in this call.
+    if (result.usedBackup && result.response.status === 429) backupBlocked = true;
+    const fallbackReason = result.primaryStatus === 503 && result.response.status === 429
+      ? 'overloaded' : await getGeminiModelFallbackReason(result.response);
     if (!fallbackReason) {
       return {
         ...result,

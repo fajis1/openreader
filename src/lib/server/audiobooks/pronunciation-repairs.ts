@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, ne } from 'drizzle-orm';
-import { PronunciationRepairError, resolveRepairAiSelection, type RepairAiSelection } from './pronunciation-repair-config';
+import { PronunciationRepairError, pronunciationRepairErrorMessage, resolveRepairAiSelection, type RepairAiSelection } from './pronunciation-repair-config';
 import { db } from '@/db';
 import { adminSettings, audiobookJobs, audiobookChapters, batchRefineChanges, batchRefineRuns } from '@/db/schema';
 import { getAudiobookObjectBuffer, headAudiobookObject, isMissingBlobError, listAudiobookObjects, putAudiobookObject } from './blobstore';
@@ -136,24 +136,40 @@ export async function proposePronunciationRepair(input: RepairInput) {
   const diagnostics: RepairDiagnostics = { version: 1, promptVersion: PRONUNCIATION_REPAIR_PROMPT_VERSION, stage: 'preparation', sourceHash: input.hash, aiRequested: false };
   const secrets = [process.env.GEMINI_API_KEY || '', process.env.BACKUP_GEMINI_API_KEY || ''];
   try { return await proposePronunciationRepairInternal(input, diagnostics, secrets); }
+  catch (error) {
+    diagnostics.validatorReason ||= pronunciationRepairErrorMessage(error);
+    diagnostics.errorType = error instanceof PronunciationRepairError ? 'PronunciationRepairError'
+      : error instanceof TypeError ? 'TypeError' : error instanceof Error ? 'Error' : 'UnknownError';
+    throw error;
+  }
   finally { input.onDiagnostics?.(sanitizeRepairDiagnostics(diagnostics, secrets)); }
 }
 
 async function proposePronunciationRepairInternal(input: RepairInput, diagnostics: RepairDiagnostics, secrets: string[]) {
   input.signal.throwIfAborted();
+  diagnostics.stage = 'book-idle-check';
   await assertPronunciationBookIdle(input.bookId, input.userId, input.ownJobId);
+  diagnostics.stage = 'chapter-read';
   const chapter = await readPronunciationChapter(input.bookId, input.userId, input.fileName);
   if (chapter.hash !== input.hash) throw new PronunciationRepairError('Chapter changed since scanning. Scan again.');
+  diagnostics.stage = 'proposal-lookup';
   const existing = await existingPronunciationRepair(input.bookId, input.userId, input.fileName, chapter.hash);
   if (input.retryRunId && (!existing || existing.runId !== input.retryRunId || existing.decision !== 'pending'
     || existing.proposedTextHash !== input.proposalHash)) throw new PronunciationRepairError('Proposal changed since scanning. Scan again before retrying unresolved findings.');
-  if (existing && !input.retryRunId) return { runId: existing.runId, dictionaryRepairs: 0, aiRepairs: 0,
+  if (existing && !input.retryRunId) return { runId: existing.runId, proposalAction: 'reused' as const, dictionaryRepairs: 0, aiRepairs: 0,
     unresolvedCount: scanPronunciationIssues(existing.proposedText || '').length };
   const baseline = chapter.text;
   if (existing && input.retryRunId) {
-    assertPronunciationRepair(baseline, existing.proposedText, { sourceText: chapter.original, allowRemaining: true });
+    diagnostics.stage = 'existing-proposal-validation';
+    try {
+      assertPronunciationRepair(baseline, existing.proposedText, { sourceText: chapter.original, allowRemaining: true });
+    } catch (error) {
+      diagnostics.validatorReason = error instanceof Error ? error.message : 'Existing proposal validation failed.';
+      throw new PronunciationRepairError('The saved proposal failed validation before retrying. Review the exact reason in the repair report.');
+    }
     chapter.text = existing.proposedText;
   }
+  diagnostics.stage = 'profile-selection';
   const { profile, dictionary, provenance } = await pronunciationDictionary(input.userId, input.bookId, input.profileId || chapter.profileId);
   secrets.push(profile.geminiApiKey || '', profile.backupGeminiApiKey || '');
   diagnostics.systemInstruction = `${buildPronunciationRepairInstructions(profile)}\n${CONTEXTUAL_REPAIR_INSTRUCTIONS}`;
@@ -324,7 +340,7 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
       serverLogger.warn({ event: 'pronunciation.repair.diff_refresh_failed', runId: existing.runId }, 'Proposal saved; its downloadable diff could not be refreshed. Review the current proposal comparison.');
     }
     diagnostics.stage = 'complete';
-    return { runId: existing.runId, dictionaryRepairs: validPatches.filter(patch => !aiIds.has(patch.id)).length,
+    return { runId: existing.runId, proposalAction: 'updated' as const, dictionaryRepairs: validPatches.filter(patch => !aiIds.has(patch.id)).length,
       aiRepairs: validPatches.filter(patch => aiIds.has(patch.id)).length, unresolvedCount: diagnostics.remainingFindings?.length || 0 };
   }
   const runId = randomUUID();
@@ -344,7 +360,7 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
     await finishBatchRefineRun(runId, 'completed');
   } catch (error) { await finishBatchRefineRun(runId, 'error'); throw error; }
   diagnostics.stage = 'complete';
-  return { runId, dictionaryRepairs: validPatches.filter(patch => !aiIds.has(patch.id)).length, aiRepairs: validPatches.filter(patch => aiIds.has(patch.id)).length, unresolvedCount: diagnostics.remainingFindings?.length || 0 };
+  return { runId, proposalAction: 'created' as const, dictionaryRepairs: validPatches.filter(patch => !aiIds.has(patch.id)).length, aiRepairs: validPatches.filter(patch => aiIds.has(patch.id)).length, unresolvedCount: diagnostics.remainingFindings?.length || 0 };
 }
 
 export async function resumeRepairedPronunciationJob(bookId: string, userId: string, fileName: string) {

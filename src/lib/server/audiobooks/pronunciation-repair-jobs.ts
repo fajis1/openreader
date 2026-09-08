@@ -10,7 +10,7 @@ import { putAudiobookObject } from './blobstore';
 import type { RepairDiagnostics } from './pronunciation-repair-diagnostics';
 
 export type RepairChapterRequest = { fileName: string; hash: string; manualPatches?: PronunciationPatch[]; retryRunId?: string; proposalHash?: string };
-type RepairResult = { fileName: string; runId?: string; unresolvedCount?: number; error?: string; requestId: string; diagnosticsFile?: string; diagnosticsUnavailable?: string; apiBlocked?: boolean; previousAttempts?: { requestId: string; diagnosticsFile?: string }[] };
+type RepairResult = { fileName: string; runId?: string; proposalAction?: 'created' | 'updated' | 'reused' | 'retained'; unresolvedCount?: number; error?: string; requestId: string; diagnosticsFile?: string; diagnosticsUnavailable?: string; apiBlocked?: boolean; previousAttempts?: { requestId: string; diagnosticsFile?: string }[] };
 type RepairJobSettings = RepairAiSelection & { jobType: 'pronunciation-repair'; chapters: RepairChapterRequest[]; results: RepairResult[]; nextAttemptAt?: number; deferredAttempts?: number };
 function settingsOf(job: typeof audiobookJobs.$inferSelect): RepairJobSettings {
   try {
@@ -22,7 +22,7 @@ export async function listPronunciationRepairJobs(bookId: string, userId: string
   const jobs = await db.select().from(audiobookJobs).where(and(eq(audiobookJobs.documentId, bookId), eq(audiobookJobs.userId, userId))).orderBy(desc(audiobookJobs.createdAt));
   return jobs.filter((job: typeof audiobookJobs.$inferSelect) => settingsOf(job)?.jobType === 'pronunciation-repair').slice(0, 20).map((job: typeof audiobookJobs.$inferSelect) => {
     const settings = settingsOf(job);
-    return { id: job.id, status: job.status, progress: job.progress, error: job.error, total: settings.chapters.length, results: settings.results || [], nextAttemptAt: settings.nextAttemptAt,
+    return { id: job.id, status: job.status, progress: job.progress, error: job.error, total: settings.chapters.length, results: settings.results || [], nextAttemptAt: job.status === 'queued' ? settings.nextAttemptAt : undefined,
       profileId: settings.profileId, aiModel: settings.aiModel, primaryKeyRef: settings.primaryKeyRef, backupKeyRef: settings.backupKeyRef };
   });
 }
@@ -86,7 +86,7 @@ export async function processPronunciationRepairJob(job: typeof audiobookJobs.$i
       try {
         const proposal = await proposePronunciationRepair({ ...settings, ...chapter, bookId: job.documentId, userId: job.userId,
           ownJobId: job.id, signal: controller.signal, assertOwned, onDiagnostics: value => { diagnostics = value; } });
-        result = { fileName: chapter.fileName, runId: proposal.runId, unresolvedCount: proposal.unresolvedCount, requestId };
+        result = { fileName: chapter.fileName, runId: proposal.runId, proposalAction: proposal.proposalAction, unresolvedCount: proposal.unresolvedCount, requestId };
       } catch (error) {
         controller.signal.throwIfAborted();
         result = { fileName: chapter.fileName, error: pronunciationRepairErrorMessage(error), requestId };
@@ -111,6 +111,7 @@ export async function processPronunciationRepairJob(job: typeof audiobookJobs.$i
       // not improve it. The proposal itself was never discarded.
       if (!result.runId && chapter.retryRunId) {
         result.runId = chapter.retryRunId;
+        result.proposalAction = 'retained';
         result.unresolvedCount = previous?.unresolvedCount;
       }
       if (result.runId && result.apiBlocked) {
@@ -122,12 +123,19 @@ export async function processPronunciationRepairJob(job: typeof audiobookJobs.$i
       }
       settings.results = settings.results.filter(item => item.fileName !== chapter.fileName);
       settings.results.push(result);
+      // Only a usable Gemini response proves the outage recovered. A local
+      // dictionary repair or preparation failure must not reset this budget.
+      if (!result.apiBlocked && diagnostics?.httpStatus === 200 && diagnostics.rounds?.some(round => round.outcome === 'response_received')) {
+        settings.deferredAttempts = 0;
+      }
+      delete settings.nextAttemptAt;
       const updated = await db.update(audiobookJobs).set({ settingsJson: settings, progress: Math.round(settings.results.length / settings.chapters.length * 100), updatedAt: Date.now() }).where(ownedWhere).returning({ id: audiobookJobs.id });
       if (!updated.length) { controller.abort(); controller.signal.throwIfAborted(); }
       if (result.apiBlocked) {
         settings.deferredAttempts = (settings.deferredAttempts || 0) + 1;
         settings.nextAttemptAt = Math.max(diagnostics?.nextAttemptAt || 0, Date.now() + 60000 * 2 ** (settings.deferredAttempts - 1));
         const exhausted = settings.deferredAttempts > 2;
+        if (exhausted) delete settings.nextAttemptAt;
         await db.update(audiobookJobs).set({ settingsJson: settings, status: exhausted ? 'error' : 'queued',
           error: exhausted ? 'Gemini remained unavailable after bounded deferred retries. Saved proposals are retained; retry unresolved chapters later.' : 'Gemini API blocked; repairs deferred until the saved retry time.',
           updatedAt: Date.now(), ...(exhausted ? { completedAt: Date.now() } : {}) }).where(ownedWhere);

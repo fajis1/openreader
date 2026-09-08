@@ -5,6 +5,26 @@ import {
 } from '../../src/lib/server/smart-audio/gemini-failover';
 
 describe('Gemini key failover', () => {
+  test('primary overload still uses a fallback model when the backup is rate limited', async () => {
+    const request = vi.fn(async (key: string, model?: string) => {
+      if (key === 'backup-fixture') return new Response(null, { status: 429 });
+      return new Response(null, { status: model === 'gemini-3.6-flash' ? 200 : 503 });
+    });
+    const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: 'primary-fixture', backupApiKey: 'backup-fixture',
+      requestedModel: 'gemini-3.8-flash', maxAttempts: 3, initialDelayMs: 0, request });
+    expect(result).toMatchObject({ usedModel: 'gemini-3.6-flash', usedBackup: false, usedModelFallback: true });
+    expect(request.mock.calls.filter(([key]) => key === 'backup-fixture')).toHaveLength(3);
+    expect(request.mock.calls.filter(([, model]) => model === 'gemini-3.7-flash')).toHaveLength(3);
+    expect(request.mock.calls.at(-1)).toEqual(['primary-fixture', 'gemini-3.6-flash']);
+  });
+
+  test('pure rate limits do not trigger model hopping', async () => {
+    const request = vi.fn(async () => new Response(null, { status: 429 }));
+    const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: 'primary-fixture', backupApiKey: 'backup-fixture',
+      requestedModel: 'gemini-3.8-flash', maxAttempts: 1, request });
+    expect(result.usedModelFallback).toBe(false);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
   test('uses backup after bounded network retries but does not fail over cancellation', async () => {
     const request = vi.fn().mockRejectedValueOnce(new TypeError('network')).mockRejectedValueOnce(new TypeError('network')).mockResolvedValue(new Response('ok'));
     const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: 'primary-fixture', backupApiKey: 'backup-fixture', maxAttempts: 2, request });

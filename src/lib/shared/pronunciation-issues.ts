@@ -42,6 +42,9 @@ export function scanPronunciationIssues(text: string, dictionary: Record<string,
   }
   // Include optional initial letters and the existing tagged remainder together.
   for (const match of text.matchAll(/(?<![\p{Letter}\p{Mark}])-(?:\([\p{Script=Greek}\p{Mark}]+\))?(?:\[[\p{Script=Greek}\p{Mark}]+\]\(\/[^/\r\n]+\/\)|[\p{Script=Greek}\p{Mark}]+)+/gu)) {
+    // A hyphen outside one complete tag is already narrated correctly.
+    // Ordinary tag validation below still checks its label and pronunciation.
+    if (/^-\[[\p{Script=Greek}\p{Mark}]+\]\(\/[^/\r\n]+\/\)$/u.test(match[0])) continue;
     if (!tags.some(tag => match.index >= tag.index && match.index < tag.index + tag[0].length)) {
       add(match.index, match.index + match[0].length, 'Grammatical suffix needs one contextual pronunciation, including optional letters.');
     }

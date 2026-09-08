@@ -74,11 +74,12 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
             return next;
           });
           setSelected(previous => previous.filter(file => !latest.results.some(result => result.fileName === file && result.runId)));
-          const ready = latest.results.filter(result => result.runId).length;
-          const partial = latest.results.filter(result => result.runId && (result.unresolvedCount || result.apiBlocked || result.error)).length;
+          const ready = latest.results.filter(result => result.runId && !result.error).length;
+          const partial = latest.results.filter(result => result.runId && !result.error && (result.unresolvedCount || result.apiBlocked)).length;
+          const retained = latest.results.filter(result => result.runId && result.error).length;
           const failed = latest.results.filter(result => result.error).length;
           const blocked = latest.results.filter(result => result.apiBlocked).length;
-          setStatus(`Repair job ${latest.status}: ${latest.results.length}/${latest.total} checked; ${ready - partial} complete proposals; ${partial} partial proposals; ${blocked} API-blocked chapters (including partial proposals); ${failed} failed attempts. ${latest.nextAttemptAt && latest.status === 'queued' ? `Waiting until ${new Date(latest.nextAttemptAt).toLocaleString()} before retrying.` : latest.status === 'running' ? 'You can close this window; work continues in the background.' : 'Review saved proposals or scan again to retry unresolved findings.'}`);
+          setStatus(`Repair job ${latest.status}: ${latest.results.length}/${latest.total} checked; ${ready - partial} complete proposals; ${partial} partial proposals; ${retained} older proposals retained after failed retries; ${blocked} API-blocked chapters (including partial proposals); ${failed} failed attempts. ${latest.nextAttemptAt && latest.status === 'queued' ? `Waiting until ${new Date(latest.nextAttemptAt).toLocaleString()} before retrying.` : latest.status === 'running' ? 'You can close this window; work continues in the background.' : 'Review saved proposals or scan again to retry unresolved findings.'}`);
         }
       } catch (problem) { if (!current.signal.aborted) setError(problem instanceof Error ? problem.message : 'Could not load repair progress.'); }
       finally { if (!current.signal.aborted) timer = setTimeout(() => void poll(), 3000); }

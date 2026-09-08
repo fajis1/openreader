@@ -14,6 +14,7 @@ export type RepairFindingOutcome = 'api_blocked' | 'model_omitted' | 'candidate_
 export type RepairDiagnostics = {
   version: 1; promptVersion: number; stage: string; sourceHash?: string;
   validatorReason?: string; systemInstruction?: string;
+  errorType?: string;
   aiRequested?: boolean;
   requestedModel?: string; usedModel?: string; usedBackup?: boolean;
   httpStatus?: number; responseId?: string; finishReason?: string;
