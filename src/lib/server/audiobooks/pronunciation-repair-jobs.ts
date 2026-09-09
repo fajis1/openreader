@@ -23,7 +23,7 @@ export async function listPronunciationRepairJobs(bookId: string, userId: string
   return jobs.filter((job: typeof audiobookJobs.$inferSelect) => settingsOf(job)?.jobType === 'pronunciation-repair').slice(0, 20).map((job: typeof audiobookJobs.$inferSelect) => {
     const settings = settingsOf(job);
     return { id: job.id, status: job.status, progress: job.progress, error: job.error, total: settings.chapters.length, results: settings.results || [], nextAttemptAt: job.status === 'queued' ? settings.nextAttemptAt : undefined,
-      profileId: settings.profileId, aiModel: settings.aiModel, primaryKeyRef: settings.primaryKeyRef, backupKeyRef: settings.backupKeyRef };
+      profileId: settings.profileId, aiModel: settings.aiModel, fallbackModels: settings.fallbackModels, primaryKeyRef: settings.primaryKeyRef, backupKeyRef: settings.backupKeyRef };
   });
 }
 
@@ -55,6 +55,25 @@ export async function stopPronunciationRepairs(bookId: string, userId: string, j
   const rows = await db.select().from(audiobookJobs).where(and(eq(audiobookJobs.id, jobId), eq(audiobookJobs.userId, userId), eq(audiobookJobs.documentId, bookId))).limit(1);
   if (!rows.length || settingsOf(rows[0])?.jobType !== 'pronunciation-repair') throw new PronunciationRepairError('Repair job not found.');
   await db.update(audiobookJobs).set({ status: 'paused', updatedAt: Date.now() }).where(and(eq(audiobookJobs.id, jobId), eq(audiobookJobs.userId, userId), inArray(audiobookJobs.status, ['queued', 'running'])));
+}
+
+export async function resumePronunciationRepairs(bookId: string, userId: string, jobId: string, selection: RepairAiSelection) {
+  const rows = await db.select().from(audiobookJobs).where(and(eq(audiobookJobs.id, jobId), eq(audiobookJobs.userId, userId), eq(audiobookJobs.documentId, bookId))).limit(1);
+  const job = rows[0];
+  if (!job || settingsOf(job)?.jobType !== 'pronunciation-repair') throw new PronunciationRepairError('Repair job not found.');
+  if (!['error', 'paused'].includes(job.status)) throw new PronunciationRepairError('Only stopped repair jobs can be resumed.');
+  const settings = settingsOf(job);
+  if (!settings.chapters.some(chapter => !settings.results?.some(result => result.fileName === chapter.fileName && !result.apiBlocked))) throw new PronunciationRepairError('No pending API-blocked or unprocessed chapters. Scan again to retry other findings.');
+  await assertPronunciationBookIdle(bookId, userId);
+  const explicitSelection = Object.fromEntries(Object.entries(selection).filter(([, value]) => value !== undefined));
+  const resolved = await resolveRepairAiSelection(userId, { ...settings, ...explicitSelection });
+  Object.assign(settings, resolved.selection, { deferredAttempts: 0 });
+  delete settings.nextAttemptAt;
+  const updated = await db.update(audiobookJobs).set({ settingsJson: settings, status: 'queued', error: null, completedAt: null, updatedAt: Date.now() })
+    .where(and(eq(audiobookJobs.id, jobId), eq(audiobookJobs.userId, userId), eq(audiobookJobs.documentId, bookId), eq(audiobookJobs.status, job.status), eq(audiobookJobs.updatedAt, job.updatedAt)))
+    .returning({ id: audiobookJobs.id });
+  if (!updated.length) throw new PronunciationRepairError('Repair job changed. Reload before resuming.');
+  return { jobId };
 }
 
 export async function processPronunciationRepairJob(job: typeof audiobookJobs.$inferSelect) {
@@ -137,7 +156,7 @@ export async function processPronunciationRepairJob(job: typeof audiobookJobs.$i
         const exhausted = settings.deferredAttempts > 2;
         if (exhausted) delete settings.nextAttemptAt;
         await db.update(audiobookJobs).set({ settingsJson: settings, status: exhausted ? 'error' : 'queued',
-          error: exhausted ? 'Gemini remained unavailable after bounded deferred retries. Saved proposals are retained; retry unresolved chapters later.' : 'Gemini API blocked; repairs deferred until the saved retry time.',
+          error: exhausted ? `Gemini retry limit reached—${settings.chapters.length - settings.results.length} chapters still unprocessed, plus an API-blocked chapter. Saved proposals are retained; resume pending repairs when ready.` : 'Gemini API blocked; repairs deferred until the saved retry time.',
           updatedAt: Date.now(), ...(exhausted ? { completedAt: Date.now() } : {}) }).where(ownedWhere);
         return;
       }

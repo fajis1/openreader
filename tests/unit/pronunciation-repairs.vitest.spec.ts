@@ -33,7 +33,7 @@ vi.mock('@/lib/server/audiobooks/batch-refine-review-store', () => ({
 }));
 vi.mock('@/lib/server/smart-audio-profiles', () => ({ readSmartAudioProfilesDocument: async () => ({ selectedProfileId: 'profile', profiles: [mocks.profile] }), findSmartAudioProfileById: () => mocks.profile }));
 vi.mock('@/lib/server/smart-audio/book-lexicon', () => ({ readBookLexicon: async () => null }));
-vi.mock('@/lib/server/smart-audio/gemini-failover', () => ({ fetchGeminiWithRateLimitFallback: (...args: unknown[]) => mocks.gemini(...args) }));
+vi.mock('@/lib/server/smart-audio/gemini-failover', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/server/smart-audio/gemini-failover')>(), fetchGeminiWithRateLimitFallback: (...args: unknown[]) => mocks.gemini(...args) }));
 
 import { pronunciationCatalog, proposePronunciationRepair, readPronunciationChapter, resumeRepairedPronunciationJob } from '../../src/lib/server/audiobooks/pronunciation-repairs';
 import { savePronunciationFailure } from '../../src/lib/server/audiobooks/pronunciation-failures';
@@ -115,7 +115,7 @@ describe('pronunciation repair service', () => {
   test('classifies 429 as API-blocked and retains retry guidance without secret error messages', async () => {
     const onDiagnostics = vi.fn();
     mocks.fetch.mockResolvedValue(Response.json({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'private-message' } }, { status: 429, headers: { 'Retry-After': '120' } }));
-    await expect(proposePronunciationRepair({ ...seed('Read θεῷ.'), onDiagnostics })).rejects.toThrow();
+    await expect(proposePronunciationRepair({ ...seed('Read θεῷ.'), onDiagnostics })).rejects.toThrow('Gemini API blocked; no usable candidates');
     const diagnostics = onDiagnostics.mock.calls[0][0];
     expect(diagnostics).toMatchObject({ apiBlocked: true, findings: [{ outcome: 'api_blocked' }], attempts: [{ round: 1, errorDetails: { retryAfterMs: 120000, apiStatus: 'RESOURCE_EXHAUSTED' } }] });
     expect(diagnostics.nextAttemptAt).toBeGreaterThan(Date.now() + 110000);
@@ -213,8 +213,8 @@ describe('pronunciation repair service', () => {
 
   test('honors a requested model and key references for Gemini repairs', async () => {
     mocks.fetch.mockResolvedValue(Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ patches: [{ id: '0', replacement: '[θεοῦ](/θɛu/)' }] }) }] } }] }));
-    await proposePronunciationRepair({ ...seed('God θεοῦ.'), profileId: 'profile', aiModel: 'custom-selected-model', primaryKeyRef: 'profile:primary', backupKeyRef: '' });
-    expect(mocks.gemini).toHaveBeenCalledWith(expect.objectContaining({ requestedModel: 'custom-selected-model', primaryApiKey: 'fixture', backupApiKey: '', maxAttempts: 3, signal: expect.any(AbortSignal) }));
+    await proposePronunciationRepair({ ...seed('God θεοῦ.'), profileId: 'profile', aiModel: 'custom-selected-model', fallbackModels: ['gemini-3.6-flash'], primaryKeyRef: 'profile:primary', backupKeyRef: '' });
+    expect(mocks.gemini).toHaveBeenCalledWith(expect.objectContaining({ requestedModel: 'custom-selected-model', fallbackModels: ['gemini-3.6-flash'], primaryApiKey: 'fixture', backupApiKey: '', maxAttempts: 3, signal: expect.any(AbortSignal) }));
   });
 
   test('retains exact validator and per-finding reasons for rejected replacements', async () => {

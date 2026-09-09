@@ -5,6 +5,15 @@ import {
 } from '../../src/lib/server/smart-audio/gemini-failover';
 
 describe('Gemini key failover', () => {
+  test('honors explicit fallback order and an empty list disables model fallback', async () => {
+    const request = vi.fn(async (_key: string, model?: string) => new Response(null, { status: model === 'chosen-two' ? 200 : 503 }));
+    const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: 'fixture', requestedModel: 'gemini-3.8-flash', fallbackModels: ['chosen-one', 'chosen-two'], maxAttempts: 1, request });
+    expect(result.usedModel).toBe('chosen-two');
+    expect(request.mock.calls.map(call => call[1])).toEqual(['gemini-3.8-flash', 'chosen-one', 'chosen-two']);
+    request.mockClear();
+    await fetchGeminiWithRateLimitFallback({ primaryApiKey: 'fixture', requestedModel: 'gemini-3.8-flash', fallbackModels: [], maxAttempts: 1, request });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
   test('primary overload still uses a fallback model when the backup is rate limited', async () => {
     const request = vi.fn(async (key: string, model?: string) => {
       if (key === 'backup-fixture') return new Response(null, { status: 429 });

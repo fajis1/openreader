@@ -11,11 +11,27 @@ vi.mock('@/db', () => ({ db: {
 } }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repairs', () => ({ proposePronunciationRepair: (...args: unknown[]) => mocks.propose(...args), assertPronunciationBookIdle: (...args: unknown[]) => mocks.idle(...args), existingPronunciationRepair: async () => null }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-config', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/server/audiobooks/pronunciation-repair-config')>(), resolveRepairAiSelection: (...args: unknown[]) => mocks.selection(...args) }));
-import { queuePronunciationRepairs, processPronunciationRepairJob } from '@/lib/server/audiobooks/pronunciation-repair-jobs';
+import { queuePronunciationRepairs, processPronunciationRepairJob, resumePronunciationRepairs } from '@/lib/server/audiobooks/pronunciation-repair-jobs';
 import type { audiobookJobs } from '@/db/schema';
 const chapters = [{ fileName: '0001__text.txt', hash: 'a'.repeat(64) }, { fileName: '0002__text.txt', hash: 'b'.repeat(64) }];
 const settings = () => ({ jobType: 'pronunciation-repair', chapters, results: [], profileId: 'chosen', aiModel: 'gemini-3.8-flash', primaryKeyRef: 'other:primary', backupKeyRef: '' });
 const job = () => ({ id: 'job', userId: 'owner', documentId: 'book', status: 'running', settingsJson: settings() }) as typeof audiobookJobs.$inferSelect;
+test('resume retains checkpoints and resets the bounded retry budget with selected models', async () => {
+  const saved = { ...settings(), deferredAttempts: 3, nextAttemptAt: 123, results: [{ fileName: chapters[0].fileName, runId: 'saved', apiBlocked: true }] };
+  mocks.rows = [{ ...job(), status: 'error', updatedAt: 123, settingsJson: saved }];
+  mocks.selection.mockResolvedValue({ selection: { aiModel: 'gemini-3.7-flash', fallbackModels: ['gemini-3.6-flash'] } });
+  await resumePronunciationRepairs('book', 'owner', 'job', { aiModel: 'gemini-3.7-flash', fallbackModels: ['gemini-3.6-flash'] });
+  expect(mocks.updates.at(-1)).toMatchObject({ status: 'queued', error: null, completedAt: null, settingsJson: { results: saved.results, chapters, deferredAttempts: 0, fallbackModels: ['gemini-3.6-flash'] } });
+  expect((mocks.updates.at(-1)?.settingsJson as Record<string, unknown>).nextAttemptAt).toBeUndefined();
+  expect(mocks.propose).not.toHaveBeenCalled();
+});
+test('resume refuses missing, active, or fully processed jobs', async () => {
+  await expect(resumePronunciationRepairs('book', 'owner', 'missing', {})).rejects.toThrow('not found');
+  mocks.rows = [job()];
+  await expect(resumePronunciationRepairs('book', 'owner', 'job', {})).rejects.toThrow('stopped');
+  mocks.rows = [{ ...job(), status: 'error', settingsJson: { ...settings(), results: chapters.map(chapter => ({ fileName: chapter.fileName, runId: 'done' })) } }];
+  await expect(resumePronunciationRepairs('book', 'owner', 'job', {})).rejects.toThrow('No pending');
+});
 beforeEach(() => {
   vi.clearAllMocks(); mocks.rows = []; mocks.running = true; mocks.updates = [];
   mocks.selection.mockResolvedValue({ selection: { profileId: 'chosen', aiModel: 'gemini-3.8-flash', primaryKeyRef: 'other:primary', backupKeyRef: '' }, primaryApiKey: 'fixture-never-persist', backupApiKey: '' });

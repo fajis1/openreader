@@ -25,6 +25,7 @@ export interface GeminiFallbackOptions {
   primaryApiKey: string;
   backupApiKey?: string | null;
   requestedModel?: string;
+  fallbackModels?: readonly string[];
   request: (apiKey: string, model?: string) => Promise<Response>;
   onStatusUpdate?: (statusMessage: string) => Promise<void> | void;
   initialDelayMs?: number;
@@ -214,7 +215,7 @@ export async function fetchGeminiWithRateLimitFallback(
 }> {
   const requestedModel = input.requestedModel?.trim() || undefined;
   const models: Array<string | undefined> = requestedModel
-    ? [requestedModel, ...(GEMINI_MODEL_FALLBACKS[requestedModel] || [])]
+    ? [...new Set([requestedModel, ...(input.fallbackModels ?? GEMINI_MODEL_FALLBACKS[requestedModel] ?? [])])]
     : [undefined];
   let lastResult: { response: Response; usedBackup: boolean } | null = null;
   let backupBlocked = false;

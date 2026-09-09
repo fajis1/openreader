@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 type Chapter = { fileName: string; chapterIndex: number; failed: boolean };
 type Finding = Chapter & { title: string; hash: string; issues: PronunciationIssue[]; jobId?: string; failureError?: string; runId?: string; audioStatus?: string; error?: string; retryRunId?: string; proposalHash?: string; unresolvedCount?: number };
-type RepairConfig = { selectedProfileId: string; profiles: { id: string; name: string; model: string; primaryKeyRef: string; backupKeyRef: string }[]; keySources: { ref: string; label: string; masked: string }[] };
+type RepairConfig = { selectedProfileId: string; modelFallbacks?: Record<string, string[]>; profiles: { id: string; name: string; model: string; primaryKeyRef: string; backupKeyRef: string }[]; keySources: { ref: string; label: string; masked: string }[] };
 type RepairJob = { id: string; status: string; progress: number; total: number; error?: string; profileId?: string; aiModel?: string; primaryKeyRef?: string; backupKeyRef?: string; nextAttemptAt?: number; results: { fileName: string; runId?: string; unresolvedCount?: number; error?: string; requestId: string; apiBlocked?: boolean }[] };
 
 export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onRecordingQueued }: {
@@ -27,6 +27,9 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
   const controller = useRef<AbortController | null>(null);
   const [config, setConfig] = useState<RepairConfig | null>(null);
   const [selection, setSelection] = useState({ profileId: profileId || '', aiModel: '', primaryKeyRef: '', backupKeyRef: '' });
+  const [customModel, setCustomModel] = useState(false);
+  const [fallbackModels, setFallbackModels] = useState<string[] | undefined>();
+  const effectiveFallbacks = fallbackModels ?? config?.modelFallbacks?.[selection.aiModel] ?? [];
   const [job, setJob] = useState<RepairJob | null>(null);
   const [reportJobs, setReportJobs] = useState<RepairJob[]>([]);
   const [reportJobId, setReportJobId] = useState('');
@@ -42,8 +45,12 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
       .then(readJsonResponse).then((value: RepairConfig) => {
         if (current.signal.aborted) return;
         setConfig(value);
+        setFallbackModels(undefined);
         const profile = value.profiles.find(item => item.id === profileId) || value.profiles.find(item => item.id === value.selectedProfileId) || value.profiles[0];
-        if (profile) setSelection({ profileId: profile.id, aiModel: profile.model, primaryKeyRef: profile.primaryKeyRef, backupKeyRef: profile.backupKeyRef });
+        if (profile) {
+          setSelection({ profileId: profile.id, aiModel: profile.model, primaryKeyRef: profile.primaryKeyRef, backupKeyRef: profile.backupKeyRef });
+          setCustomModel(!PRESET_MODELS.some(model => model.id !== 'custom' && model.id === profile.model));
+        }
       }).catch(problem => { if (!current.signal.aborted) setError(problem.message); });
     return () => current.abort();
   }, [open, bookId, profileId]);
@@ -103,7 +110,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
 
   async function request(body: Record<string, unknown>, signal: AbortSignal) {
     const response = await fetch('/api/audiobooks/pronunciation-issues', { method: 'POST', signal,
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookId, ...selection, ...body }) });
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookId, ...selection, fallbackModels: effectiveFallbacks, ...body }) });
     return readJsonResponse(response);
   }
 
@@ -170,6 +177,18 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
     finally { if (controller.current === current) setBusy(false); }
   }
 
+  async function resumePending() {
+    if (!job) return;
+    const current = new AbortController(); controller.current = current;
+    setBusy(true); setError('');
+    try {
+      await request({ action: 'resume-repairs', jobId: job.id }, current.signal);
+      setJob(previous => previous ? { ...previous, status: 'queued' } : null);
+      setStatus('Pending repairs requeued with the selected models and keys. Saved proposals are preserved.');
+    } catch (problem) { if (!current.signal.aborted) setError(problem instanceof Error ? problem.message : 'Could not resume repairs.'); }
+    finally { if (controller.current === current) setBusy(false); }
+  }
+
   async function retryUnresolved(finding: Finding) {
     const current = new AbortController(); controller.current = current;
     setBusy(true); setError('');
@@ -202,11 +221,29 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
         {config && !activeRepair && <fieldset disabled={busy} className="my-3 space-y-2">
           <label className="block text-sm">Profile<select aria-label="Repair profile" className="ml-2 rounded border border-line-soft bg-surface p-2" value={selection.profileId} onChange={event => {
             const profile = config.profiles.find(item => item.id === event.target.value)!;
+            setFallbackModels(undefined);
             setSelection({ profileId: profile.id, aiModel: profile.model, primaryKeyRef: profile.primaryKeyRef, backupKeyRef: profile.backupKeyRef });
+            setCustomModel(!PRESET_MODELS.some(model => model.id !== 'custom' && model.id === profile.model));
             setFindings([]); setSelected([]); setDrafts({}); setScanned(false);
           }}>{config.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-          <label className="block text-sm">AI Model<input aria-label="Repair AI model" list="pronunciation-repair-models" value={selection.aiModel} onChange={event => setSelection(previous => ({ ...previous, aiModel: event.target.value }))} className="ml-2 rounded border border-line-soft bg-surface p-2" /></label>
-          <datalist id="pronunciation-repair-models">{PRESET_MODELS.filter(model => model.id !== 'custom').map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist>
+          <label className="block text-sm">AI Model<select aria-label="Repair AI model" value={customModel ? 'custom' : selection.aiModel} onChange={event => {
+            const model = event.target.value;
+            setFallbackModels(undefined);
+            setCustomModel(model === 'custom');
+            setSelection(previous => ({ ...previous, aiModel: model === 'custom' ? '' : model }));
+          }} className="ml-2 rounded border border-line-soft bg-surface p-2">
+            {PRESET_MODELS.filter(model => model.id !== 'custom').map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+            <option value="custom">Custom model</option>
+          </select></label>
+          {[0, 1].map(index => <label key={index} className="block text-sm">Fallback model {index + 1}<select aria-label={`Repair fallback model ${index + 1}`} value={effectiveFallbacks[index] || ''} disabled={index === 1 && !effectiveFallbacks[0]} className="ml-2 rounded border border-line-soft bg-surface p-2" onChange={event => {
+            const value = event.target.value;
+            setFallbackModels(index === 0 ? value ? [value, ...effectiveFallbacks.slice(1).filter(model => model !== value)] : [] : [effectiveFallbacks[0], ...(value ? [value] : [])]);
+          }}>
+            <option value="">None</option>
+            {PRESET_MODELS.filter(model => model.id !== 'custom' && model.id !== selection.aiModel && model.id !== effectiveFallbacks[1 - index]).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+          </select></label>)}
+          <p className="text-xs text-text-soft">Fallbacks are tried in order after overload or model-unavailable errors. Rate/quota limits use bounded key retries and cooldowns, not automatic model switching.</p>
+          {customModel && <label className="block text-sm">Custom model ID<input aria-label="Custom repair AI model" value={selection.aiModel} onChange={event => setSelection(previous => ({ ...previous, aiModel: event.target.value }))} className="ml-2 rounded border border-line-soft bg-surface p-2" /></label>}
           {(['primaryKeyRef', 'backupKeyRef'] as const).map((field, index) => <label key={field} className="block text-sm">{index === 0 ? 'Primary Gemini key' : 'Backup Gemini key'}<select aria-label={index === 0 ? 'Primary Gemini key' : 'Backup Gemini key'} className="ml-2 rounded border border-line-soft bg-surface p-2" value={selection[field]} onChange={event => setSelection(previous => ({ ...previous, [field]: event.target.value }))}>
             <option value="">Not set</option>{config.keySources.map(key => <option key={key.ref} value={key.ref}>{key.label} ({key.masked})</option>)}
           </select></label>)}
@@ -221,7 +258,8 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
           {busy && <button onClick={() => { controller.current?.abort(); setStatus('Stopping. Completed results are retained.'); }} className="rounded border border-line-soft px-3 py-2">Stop</button>}
         </div>
         <p role="status" className="my-3 text-sm text-text-soft">{status}</p>
-        {job && <p className="text-xs text-text-soft">Job: {job.id} · {job.status} · {job.progress}%{activeRepair ? ' · Wait until the job stops before approving recordings.' : ''}</p>}
+        {job && <p className="text-xs text-text-soft">Job: {job.id} · {job.status} · {job.progress}%{activeRepair ? ' · Wait until the job stops before approving recordings.' : ''}{job.error ? ` · ${job.error}` : ''}</p>}
+        {job && !activeRepair && (job.status === 'error' || job.status === 'paused') && (job.results.length < job.total || job.results.some(result => result.apiBlocked)) && <button disabled={busy} onClick={() => void resumePending()} className="rounded border border-line-soft px-3 py-2">Resume pending repairs</button>}
         {reportJobs.length > 0 && <div className="my-3 space-y-2 text-sm">
           <label>Report for job <select aria-label="Repair report job" value={reportJobId || reportJobs[0].id} onChange={event => setReportJobId(event.target.value)} className="rounded border border-line-soft bg-surface p-1">
             {reportJobs.map(item => <option key={item.id} value={item.id}>{item.id} · {item.status}</option>)}

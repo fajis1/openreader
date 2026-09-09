@@ -190,6 +190,7 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
     secrets.push(primaryApiKey, backupApiKey);
     diagnostics.stage = 'gemini-request';
     diagnostics.requestedModel = selection.aiModel;
+    diagnostics.fallbackModels = selection.fallbackModels;
     diagnostics.attempts = [];
     if (!primaryApiKey && !backupApiKey) throw new PronunciationRepairError('Configure a Gemini key in the selected profile to repair findings without a dictionary match.');
     const signal = AbortSignal.any([input.signal, AbortSignal.timeout(10 * 60 * 1000)]);
@@ -201,7 +202,7 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
     diagnostics.stage = round ? 'gemini-correction' : 'gemini-request';
     try {
     const { response, usedModel, usedBackup } = await fetchGeminiWithRateLimitFallback({
-      primaryApiKey, backupApiKey, requestedModel: selection.aiModel, signal, maxAttempts: 3,
+      primaryApiKey, backupApiKey, requestedModel: selection.aiModel, fallbackModels: selection.fallbackModels, signal, maxAttempts: 3,
       request: async (key, model) => {
         const attempt = { model, keyRole: key === primaryApiKey ? 'primary' : 'backup', status: undefined as number | undefined, round: round + 1, errorDetails: undefined as GeminiErrorDetails | undefined };
         diagnostics.attempts!.push(attempt);
@@ -298,7 +299,7 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
   const validPatches = patches.filter(patch => checks.find(finding => finding.id === patch.id)?.reasons.length === 0);
   if (!validPatches.length) {
     diagnostics.validatorReason ||= diagnostics.findings.find(finding => finding.reasons.length)?.reasons.join(' ');
-    throw new PronunciationRepairError(diagnostics.validatorReason?.includes('invalid JSON') ? diagnostics.validatorReason : 'No safe repairs were found. Review the unresolved findings in the repair report.');
+    throw new PronunciationRepairError(diagnostics.apiBlocked ? 'Gemini API blocked; no usable candidates received for the unresolved findings. Saved proposals are retained.' : diagnostics.validatorReason?.includes('invalid JSON') ? diagnostics.validatorReason : 'No safe repairs were found. Review the unresolved findings in the repair report.');
   }
   try {
     diagnostics.stage = 'patch-application';

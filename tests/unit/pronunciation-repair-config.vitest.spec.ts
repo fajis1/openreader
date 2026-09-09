@@ -15,6 +15,14 @@ test('returns only masks and references to the browser', async () => {
   expect(publicConfig.keySources[0].masked).toBe('...1111');
   expect(publicConfig.profiles[0].model).toBe('gemini-3.8-flash');
 });
+test('defaults, disables, and validates ordered fallback choices', async () => {
+  expect((await resolveRepairAiSelection('owner', {})).selection.fallbackModels).toEqual(['gemini-3.7-flash', 'gemini-3.6-flash']);
+  expect((await resolveRepairAiSelection('owner', { fallbackModels: [] })).selection.fallbackModels).toEqual([]);
+  expect((await resolveRepairAiSelection('owner', { fallbackModels: ['gemini-3.6-flash', 'gemini-3.5-flash'] })).selection.fallbackModels).toEqual(['gemini-3.6-flash', 'gemini-3.5-flash']);
+  for (const fallbackModels of [['gemini-3.8-flash'], ['a', 'a'], ['a', 'b', 'c'], ['https://bad'], 'bad']) {
+    await expect(resolveRepairAiSelection('owner', { fallbackModels: fallbackModels as string[] })).rejects.toThrow('fallback');
+  }
+});
 test('honors explicit profile/model/key sources without silently replacing blank backup', async () => {
   const selected = await resolveRepairAiSelection('owner', { profileId: 'one', aiModel: 'chosen-model', primaryKeyRef: 'two:primary', backupKeyRef: '' });
   expect(selected.profile.id).toBe('one');

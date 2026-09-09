@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test';
 import { build } from 'esbuild';
 import path from 'node:path';
 
-for (const mode of ['complete', 'manual', 'retry']) test(`scan carries repair through approval (${mode})`, async ({ page }) => {
-  const partial = mode !== 'complete';
+for (const mode of ['complete', 'manual', 'retry', 'resume']) test(`scan carries repair through approval (${mode})`, async ({ page }) => {
+  const partial = mode === 'manual' || mode === 'retry';
   const pageErrors: string[] = [];
   page.on('pageerror', error => pageErrors.push(error.message));
   // Exercise the actual React modals with fixture APIs: no paid AI/TTS calls
@@ -23,6 +23,8 @@ for (const mode of ['complete', 'manual', 'retry']) test(`scan carries repair th
   let queuedSettings: Record<string, unknown> = {};
   let approved = false;
   let retried = false;
+  let resumed = false;
+  let resumeSettings: Record<string, unknown> = {};
   await page.route('http://localhost/**', async route => {
     const url = new URL(route.request().url());
     const json = (body: unknown) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
@@ -30,10 +32,11 @@ for (const mode of ['complete', 'manual', 'retry']) test(`scan carries repair th
     if (url.pathname === '/bundle.js') return route.fulfill({ contentType: 'text/javascript', body: bundle.outputFiles.find(file => file.path.endsWith('.js'))!.text });
     if (url.pathname.endsWith('/pronunciation-issues')) {
       if (url.searchParams.get('action') === 'report') return route.fulfill({ contentType: 'application/json', headers: { 'Content-Disposition': 'attachment; filename="pronunciation-repair-fixture-job.json"' }, body: JSON.stringify({ jobId: 'fixture-job', summary: { failures: 0, proposals: 1 } }) });
-      if (url.searchParams.get('action') === 'config') return json({ selectedProfileId: 'fixture-profile', profiles: [{ id: 'fixture-profile', name: 'Scholar', model: 'gemini-3.8-flash', primaryKeyRef: 'fixture-profile:primary', backupKeyRef: '' }], keySources: [{ ref: 'fixture-profile:primary', label: 'Scholar primary', masked: '...1111' }, { ref: 'other:primary', label: 'Other primary', masked: '...2222' }] });
-      if (url.searchParams.get('action') === 'jobs') return json({ jobs: queued ? [{ id: 'fixture-job', status: 'completed', progress: 100, total: 1, results: [{ fileName: '0107__text.txt', runId: 'fixture-run', requestId: 'fixture-request', unresolvedCount: partial && !retried ? 1 : 0 }] }] : [] });
+      if (url.searchParams.get('action') === 'config') return json({ selectedProfileId: 'fixture-profile', modelFallbacks: { 'gemini-3.8-flash': ['gemini-3.7-flash', 'gemini-3.6-flash'], 'gemini-3.7-flash': ['gemini-3.6-flash', 'gemini-3.5-flash'] }, profiles: [{ id: 'fixture-profile', name: 'Scholar', model: 'gemini-3.8-flash', primaryKeyRef: 'fixture-profile:primary', backupKeyRef: '' }], keySources: [{ ref: 'fixture-profile:primary', label: 'Scholar primary', masked: '...1111' }, { ref: 'other:primary', label: 'Other primary', masked: '...2222' }] });
+      if (url.searchParams.get('action') === 'jobs') return json({ jobs: queued ? [{ id: 'fixture-job', status: mode === 'resume' && !resumed ? 'error' : 'completed', progress: 100, total: 1, results: [{ fileName: '0107__text.txt', runId: 'fixture-run', requestId: 'fixture-request', apiBlocked: mode === 'resume' && !resumed, unresolvedCount: partial && !retried ? 1 : 0 }] }] : [] });
       if (route.request().method() === 'GET') return json({ chapters: [{ fileName: '0107__text.txt', chapterIndex: 106, failed: false }, { fileName: '0108__text.txt', chapterIndex: 107, failed: false }], failedJobs: [] });
       const body = route.request().postDataJSON();
+      if (body.action === 'resume-repairs') { resumed = true; resumeSettings = body; return json({ jobId: 'fixture-job' }); }
       if (body.action === 'scan' && queued && partial) return json({ fileName: body.fileName, hash: 'fixture-hash', retryRunId: 'fixture-run', proposalHash: 'current-proposal-hash', issues: [{ id: '0', text: 'θεῷ', start: 40, end: 43 }] });
       if (body.action === 'scan') return json({ fileName: body.fileName, chapterIndex: body.fileName === '0107__text.txt' ? 106 : 107, title: 'Aetherian chapter', hash: 'fixture-hash', failed: false,
         issues: body.fileName === '0107__text.txt' ? [{ id: '0', start: 4, end: 34, text: '[Aetherian](/bad split/)', context: 'The Aetherian arrived.', reason: 'Pronunciation cannot be aligned.', replacement: '[Aetherian](/eɪθɪriən/)' }] : [] });
@@ -50,7 +53,21 @@ for (const mode of ['complete', 'manual', 'retry']) test(`scan carries repair th
   await expect.poll(async () => pageErrors.length + await page.getByRole('button', { name: 'Start Scan', exact: true }).count()).toBeGreaterThan(0);
   expect(pageErrors).toEqual([]);
   await expect(page.getByLabel('Repair AI model')).toHaveValue('gemini-3.8-flash');
-  await page.getByLabel('Repair AI model').fill('custom-fixture-model');
+  await expect(page.getByLabel('Repair fallback model 1')).toHaveValue('gemini-3.7-flash');
+  await expect(page.getByLabel('Repair fallback model 2')).toHaveValue('gemini-3.6-flash');
+  await page.getByLabel('Repair AI model', { exact: true }).selectOption('gemini-3.7-flash');
+  await expect(page.getByLabel('Repair AI model', { exact: true })).toHaveValue('gemini-3.7-flash');
+  await page.getByLabel('Repair AI model', { exact: true }).selectOption('gemini-3.8-flash');
+  await expect(page.getByLabel('Repair AI model', { exact: true })).toHaveValue('gemini-3.8-flash');
+  await page.getByLabel('Repair AI model', { exact: true }).selectOption('custom');
+  await page.getByLabel('Custom repair AI model', { exact: true }).fill('custom-fixture-model');
+  await page.getByLabel('Repair fallback model 1').selectOption('gemini-3.7-flash');
+  await page.getByLabel('Repair fallback model 2').selectOption('gemini-3.6-flash');
+  await page.getByLabel('Repair fallback model 1').selectOption('');
+  await expect(page.getByLabel('Repair fallback model 2')).toBeDisabled();
+  await expect(page.getByLabel('Repair fallback model 2')).toHaveValue('');
+  await page.getByLabel('Repair fallback model 1').selectOption('gemini-3.6-flash');
+  await page.getByLabel('Repair fallback model 2').selectOption('gemini-3.7-flash');
   await page.getByLabel('Primary Gemini key', { exact: true }).selectOption('other:primary');
   await page.getByRole('button', { name: 'Start Scan', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Propose Repairs (1)' })).toBeEnabled();
@@ -73,6 +90,15 @@ for (const mode of ['complete', 'manual', 'retry']) test(`scan carries repair th
     await expect.poll(() => retried).toBe(true);
     expect(queuedSettings.chapters).toEqual([{ fileName: '0107__text.txt', hash: 'fixture-hash', retryRunId: 'fixture-run', proposalHash: 'current-proposal-hash' }]);
   }
+  if (mode === 'resume') {
+    await page.getByLabel('Repair AI model', { exact: true }).selectOption('gemini-3.7-flash');
+    await page.getByLabel('Repair fallback model 1').selectOption('gemini-3.6-flash');
+    await page.getByLabel('Repair fallback model 2').selectOption('');
+    await page.getByRole('button', { name: 'Resume pending repairs', exact: true }).click();
+    await expect.poll(() => resumed).toBe(true);
+    expect(resumeSettings).toMatchObject({ action: 'resume-repairs', jobId: 'fixture-job', aiModel: 'gemini-3.7-flash', fallbackModels: ['gemini-3.6-flash'] });
+    await expect(page.getByRole('button', { name: 'Review & Approve' })).toBeEnabled();
+  }
   await page.getByRole('button', { name: 'Review & Approve' }).click();
   await expect(page.getByRole('heading', { name: 'Pronunciation Repair Review' })).toBeVisible();
   if (mode === 'manual') {
@@ -84,6 +110,6 @@ for (const mode of ['complete', 'manual', 'retry']) test(`scan carries repair th
   } else await page.getByRole('button', { name: 'Approve & Record', exact: true }).click();
   await expect(page.getByTestId('queued')).toHaveText('1');
   expect(proposedFiles).toEqual(mode === 'retry' ? ['0107__text.txt', '0107__text.txt'] : ['0107__text.txt']);
-  if (mode !== 'retry') expect(queuedSettings).toMatchObject({ aiModel: 'custom-fixture-model', primaryKeyRef: 'other:primary', backupKeyRef: '' });
+  if (mode !== 'retry') expect(queuedSettings).toMatchObject({ aiModel: 'custom-fixture-model', fallbackModels: ['gemini-3.6-flash', 'gemini-3.7-flash'], primaryKeyRef: 'other:primary', backupKeyRef: '' });
   expect(approved).toBe(true);
 });

@@ -6,7 +6,7 @@ import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth/auth';
 import { pronunciationCatalog, pronunciationDictionary, readPronunciationChapter, resumeRepairedPronunciationJob, existingPronunciationRepair } from '@/lib/server/audiobooks/pronunciation-repairs';
 import { loadPronunciationRepairConfig, pronunciationRepairErrorMessage } from '@/lib/server/audiobooks/pronunciation-repair-config';
-import { listPronunciationRepairJobs, queuePronunciationRepairs, stopPronunciationRepairs } from '@/lib/server/audiobooks/pronunciation-repair-jobs';
+import { listPronunciationRepairJobs, queuePronunciationRepairs, stopPronunciationRepairs, resumePronunciationRepairs } from '@/lib/server/audiobooks/pronunciation-repair-jobs';
 import { serverLogger } from '@/lib/server/logger';
 import { scanPronunciationIssues } from '@/lib/shared/pronunciation-issues';
 import { runTaskNow } from '@/lib/server/tasks/engine';
@@ -54,9 +54,19 @@ export async function POST(request: Request) {
     const user = await ownedUser(request, body.bookId);
     if (user instanceof Response) return user;
     const profileId = typeof body.profileId === 'string' ? body.profileId : undefined;
+    if (body.action === 'resume-repairs' && typeof body.jobId === 'string') {
+      const result = await resumePronunciationRepairs(body.bookId, user, body.jobId, {
+        profileId, aiModel: typeof body.aiModel === 'string' ? body.aiModel : undefined, fallbackModels: body.fallbackModels,
+        primaryKeyRef: typeof body.primaryKeyRef === 'string' ? body.primaryKeyRef : undefined,
+        backupKeyRef: typeof body.backupKeyRef === 'string' ? body.backupKeyRef : undefined,
+      });
+      void runTaskNow('process-audiobook-queue').catch(() => serverLogger.warn({ event: 'pronunciation.repair.wake_failed', requestId }, 'Repair queue will retry on the next scheduled tick'));
+      return NextResponse.json(result, { status: 202 });
+    }
     if (body.action === 'queue') {
       const result = await queuePronunciationRepairs({ bookId: body.bookId, userId: user, chapters: body.chapters, requestId: body.requestId, profileId,
         aiModel: typeof body.aiModel === 'string' ? body.aiModel : undefined,
+        fallbackModels: body.fallbackModels,
         primaryKeyRef: typeof body.primaryKeyRef === 'string' ? body.primaryKeyRef : undefined,
         backupKeyRef: typeof body.backupKeyRef === 'string' ? body.backupKeyRef : undefined });
       void runTaskNow('process-audiobook-queue').catch(() => serverLogger.warn({ event: 'pronunciation.repair.wake_failed', requestId }, 'Repair queue will retry on the next scheduled tick'));

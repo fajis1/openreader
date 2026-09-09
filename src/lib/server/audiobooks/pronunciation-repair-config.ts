@@ -1,5 +1,6 @@
 import { readSmartAudioProfilesDocument } from '@/lib/server/smart-audio-profiles';
 import { resolvePronunciationAiModel } from '@/lib/shared/smart-audio-models';
+import { GEMINI_MODEL_FALLBACKS } from '@/lib/server/smart-audio/gemini-failover';
 
 export class PronunciationRepairError extends Error {}
 export function pronunciationRepairErrorMessage(error: unknown): string {
@@ -9,7 +10,7 @@ export function pronunciationRepairErrorMessage(error: unknown): string {
   return 'Pronunciation repair failed. See the server log using the request/job ID; no repair was approved automatically.';
 }
 
-export type RepairAiSelection = { profileId?: string; aiModel?: string; primaryKeyRef?: string; backupKeyRef?: string };
+export type RepairAiSelection = { profileId?: string; aiModel?: string; fallbackModels?: string[]; primaryKeyRef?: string; backupKeyRef?: string };
 
 export async function loadPronunciationRepairConfig(userId: string) {
   const document = await readSmartAudioProfilesDocument(userId);
@@ -25,6 +26,7 @@ export async function loadPronunciationRepairConfig(userId: string) {
   add('server:backup', process.env.BACKUP_GEMINI_API_KEY, 'Server — backup');
   const publicConfig = {
     selectedProfileId: document.selectedProfileId,
+    modelFallbacks: GEMINI_MODEL_FALLBACKS,
     profiles: document.profiles.map(profile => ({ id: profile.id, name: profile.name, model: resolvePronunciationAiModel(profile),
       primaryKeyRef: keys.has(`${profile.id}:primary`) ? `${profile.id}:primary` : keys.has('server:primary') ? 'server:primary' : '',
       backupKeyRef: keys.has(`${profile.id}:backup`) ? `${profile.id}:backup` : keys.has('server:backup') ? 'server:backup' : '',
@@ -46,6 +48,8 @@ export async function resolveRepairAiSelection(userId: string, selection: Repair
   }
   const aiModel = selection.aiModel?.trim() || defaults.model;
   if (!/^[a-zA-Z0-9._-]{1,160}$/u.test(aiModel)) throw new PronunciationRepairError('Invalid Gemini model identifier.');
-  return { profile, selection: { profileId: profile.id, aiModel, primaryKeyRef, backupKeyRef },
+  const fallbackModels = selection.fallbackModels ?? [...(GEMINI_MODEL_FALLBACKS[aiModel] || [])];
+  if (!Array.isArray(fallbackModels) || fallbackModels.length > 2 || fallbackModels.some(model => typeof model !== 'string' || !/^[a-zA-Z0-9._-]{1,160}$/u.test(model) || model === aiModel) || new Set(fallbackModels).size !== fallbackModels.length) throw new PronunciationRepairError('Choose up to two distinct fallback models different from the primary model.');
+  return { profile, selection: { profileId: profile.id, aiModel, fallbackModels, primaryKeyRef, backupKeyRef },
     primaryApiKey: keys.get(primaryKeyRef)?.key || '', backupApiKey: keys.get(backupKeyRef)?.key || '' };
 }

@@ -16,7 +16,7 @@ export type RepairDiagnostics = {
   validatorReason?: string; systemInstruction?: string;
   errorType?: string;
   aiRequested?: boolean;
-  requestedModel?: string; usedModel?: string; usedBackup?: boolean;
+  requestedModel?: string; fallbackModels?: string[]; usedModel?: string; usedBackup?: boolean;
   httpStatus?: number; responseId?: string; finishReason?: string;
   apiBlocked?: boolean; nextAttemptAt?: number;
   attempts?: { model?: string; keyRole: string; status?: number; round?: number; errorDetails?: import('../smart-audio/gemini-error-details').GeminiErrorDetails }[];
