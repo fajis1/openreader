@@ -37,8 +37,27 @@ vi.mock('@/lib/server/smart-audio/gemini-failover', async importOriginal => ({ .
 
 import { pronunciationCatalog, proposePronunciationRepair, readPronunciationChapter, resumeRepairedPronunciationJob } from '../../src/lib/server/audiobooks/pronunciation-repairs';
 import { savePronunciationFailure } from '../../src/lib/server/audiobooks/pronunciation-failures';
+import { listPronunciationRepairStatus } from '../../src/lib/server/audiobooks/pronunciation-repair-status';
+import { pronunciationRepairStatusLabel } from '../../src/lib/shared/pronunciation-repair-status';
 
 const base = { bookId: 'book', userId: 'user', fileName: '0107__text.txt', signal: new AbortController().signal };
+test('current repair status deduplicates older chapter runs and excludes partial/approved/rejected proposals from ready', async () => {
+  const row = { changeId: 'new', runId: 'run', fileName: '0001__text.txt', chapterIndex: 0, title: 'One', decision: 'approved', audioStatus: 'completed', proposedText: 'Good text.' };
+  mocks.selectResults.push([
+    row, { ...row, changeId: 'older', decision: 'pending' },
+    { ...row, chapterIndex: 1, decision: 'pending', proposedText: 'θεῷ' },
+    { ...row, chapterIndex: 2, decision: 'pending' },
+    { ...row, chapterIndex: 3, decision: 'rejected' },
+  ]);
+  const result = await listPronunciationRepairStatus('book', 'user');
+  expect(result).toHaveLength(4);
+  expect(result.map(item => item.ready)).toEqual([false, false, true, false]);
+  expect(result.map(pronunciationRepairStatusLabel)).toEqual(['Complete', 'Needs review', 'Awaiting approval', 'Kept previous text']);
+  expect(result[0]).not.toHaveProperty('proposedText');
+  expect(pronunciationRepairStatusLabel({ ...result[0], audioStatus: 'queued' })).toBe('Recording queued');
+  expect(pronunciationRepairStatusLabel({ ...result[0], audioStatus: 'running' })).toBe('Recording in progress');
+  expect(pronunciationRepairStatusLabel({ ...result[0], audioStatus: 'error' })).toContain('Recording failed');
+});
 function seed(text: string) {
   mocks.objects.set(base.fileName, text);
   mocks.objects.set('0107__original.txt', 'Original source context.');
@@ -118,7 +137,7 @@ describe('pronunciation repair service', () => {
     await expect(proposePronunciationRepair({ ...seed('Read θεῷ.'), onDiagnostics })).rejects.toThrow('Gemini API blocked; no usable candidates');
     const diagnostics = onDiagnostics.mock.calls[0][0];
     expect(diagnostics).toMatchObject({ apiBlocked: true, findings: [{ outcome: 'api_blocked' }], attempts: [{ round: 1, errorDetails: { retryAfterMs: 120000, apiStatus: 'RESOURCE_EXHAUSTED' } }] });
-    expect(diagnostics.nextAttemptAt).toBeGreaterThan(Date.now() + 110000);
+    expect(diagnostics.nextAttemptAt).toBeGreaterThan(Date.now() + 299000);
     expect(JSON.stringify(diagnostics)).not.toContain('private-message');
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
   });
@@ -214,7 +233,7 @@ describe('pronunciation repair service', () => {
   test('honors a requested model and key references for Gemini repairs', async () => {
     mocks.fetch.mockResolvedValue(Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ patches: [{ id: '0', replacement: '[θεοῦ](/θɛu/)' }] }) }] } }] }));
     await proposePronunciationRepair({ ...seed('God θεοῦ.'), profileId: 'profile', aiModel: 'custom-selected-model', fallbackModels: ['gemini-3.6-flash'], primaryKeyRef: 'profile:primary', backupKeyRef: '' });
-    expect(mocks.gemini).toHaveBeenCalledWith(expect.objectContaining({ requestedModel: 'custom-selected-model', fallbackModels: ['gemini-3.6-flash'], primaryApiKey: 'fixture', backupApiKey: '', maxAttempts: 3, signal: expect.any(AbortSignal) }));
+    expect(mocks.gemini).toHaveBeenCalledWith(expect.objectContaining({ requestedModel: 'custom-selected-model', fallbackModels: ['gemini-3.6-flash'], primaryApiKey: 'fixture', backupApiKey: '', maxAttempts: 3, retryRateLimitedModels: true, signal: expect.any(AbortSignal) }));
   });
 
   test('retains exact validator and per-finding reasons for rejected replacements', async () => {

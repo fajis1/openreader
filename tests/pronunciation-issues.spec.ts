@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { build } from 'esbuild';
 import path from 'node:path';
 
-for (const mode of ['complete', 'manual', 'retry', 'resume']) test(`scan carries repair through approval (${mode})`, async ({ page }) => {
+for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan carries repair through approval (${mode})`, async ({ page }) => {
   const partial = mode === 'manual' || mode === 'retry';
   const pageErrors: string[] = [];
   page.on('pageerror', error => pageErrors.push(error.message));
@@ -22,6 +22,8 @@ for (const mode of ['complete', 'manual', 'retry', 'resume']) test(`scan carries
   let queued = false;
   let queuedSettings: Record<string, unknown> = {};
   let approved = false;
+  let recordingComplete = false;
+  const approvedIds: string[] = [];
   let retried = false;
   let resumed = false;
   let resumeSettings: Record<string, unknown> = {};
@@ -31,6 +33,11 @@ for (const mode of ['complete', 'manual', 'retry', 'resume']) test(`scan carries
     if (url.pathname === '/') return route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<html><head><meta charset="utf-8"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>' });
     if (url.pathname === '/bundle.js') return route.fulfill({ contentType: 'text/javascript', body: bundle.outputFiles.find(file => file.path.endsWith('.js'))!.text });
     if (url.pathname.endsWith('/pronunciation-issues')) {
+      if (url.searchParams.get('action') === 'review-status') return json({ repairs: queued ? [
+        { changeId: 'change', runId: 'fixture-run', fileName: '0107__text.txt', chapterIndex: 106, title: 'Aetherian chapter', decision: approved ? 'approved' : 'pending', audioStatus: recordingComplete ? 'completed' : approved ? 'queued' : 'not_requested', ready: !approved && (!partial || retried), unresolvedCount: partial && !retried ? 1 : 0 },
+        ...(mode === 'bulk' ? [{ changeId: 'partial', runId: 'partial-run', fileName: '0108__text.txt', chapterIndex: 107, title: 'Partial chapter', decision: 'pending', audioStatus: 'not_requested', ready: false, unresolvedCount: 1 }] : []),
+        ...(mode === 'bulk' ? [{ changeId: 'second-ready', runId: 'second-run', fileName: '0109__text.txt', chapterIndex: 108, title: 'Second ready chapter', decision: approved ? 'approved' : 'pending', audioStatus: recordingComplete ? 'completed' : approved ? 'queued' : 'not_requested', ready: !approved, unresolvedCount: 0 }] : []),
+      ] : [] });
       if (url.searchParams.get('action') === 'report') return route.fulfill({ contentType: 'application/json', headers: { 'Content-Disposition': 'attachment; filename="pronunciation-repair-fixture-job.json"' }, body: JSON.stringify({ jobId: 'fixture-job', summary: { failures: 0, proposals: 1 } }) });
       if (url.searchParams.get('action') === 'config') return json({ selectedProfileId: 'fixture-profile', modelFallbacks: { 'gemini-3.8-flash': ['gemini-3.7-flash', 'gemini-3.6-flash'], 'gemini-3.7-flash': ['gemini-3.6-flash', 'gemini-3.5-flash'] }, profiles: [{ id: 'fixture-profile', name: 'Scholar', model: 'gemini-3.8-flash', primaryKeyRef: 'fixture-profile:primary', backupKeyRef: '' }], keySources: [{ ref: 'fixture-profile:primary', label: 'Scholar primary', masked: '...1111' }, { ref: 'other:primary', label: 'Other primary', masked: '...2222' }] });
       if (url.searchParams.get('action') === 'jobs') return json({ jobs: queued ? [{ id: 'fixture-job', status: mode === 'resume' && !resumed ? 'error' : 'completed', progress: 100, total: 1, results: [{ fileName: '0107__text.txt', runId: 'fixture-run', requestId: 'fixture-request', apiBlocked: mode === 'resume' && !resumed, unresolvedCount: partial && !retried ? 1 : 0 }] }] : [] });
@@ -43,7 +50,7 @@ for (const mode of ['complete', 'manual', 'retry', 'resume']) test(`scan carries
       if (body.action === 'queue') { queued = true; queuedSettings = body; retried = Boolean(body.chapters[0].retryRunId); proposedFiles.push(...body.chapters.map((chapter: { fileName: string }) => chapter.fileName)); return json({ jobId: 'fixture-job' }); }
     }
     if (url.pathname.endsWith('/batch-refine/review')) {
-      if (route.request().method() === 'POST') { approved = true; return json({ success: true }); }
+      if (route.request().method() === 'POST') { approved = true; approvedIds.push(route.request().postDataJSON().changeId); return json({ success: true }); }
       return json({ run: { id: 'fixture-run', rule: 'pronunciation-repair:v1', status: 'completed', processedChapters: 1, totalChapters: 1 },
         changes: [{ id: 'change', textFileName: '0107__text.txt', chapterIndex: 106, chapterTitle: 'Aetherian chapter', previousText: 'The [Aetherian](/bad split/) arrived.', proposedText: 'The [Aetherian](/eɪθɪriən/) arrived.' + (partial ? retried ? ' [θεῷ](/θeɪoʊ/)' : ' θεῷ' : ''), reviewNote: partial && !retried ? 'NEEDS REVIEW: unresolved passage.' : null, diffText: '-bad split\n+eɪθɪriən', changedCharacters: 10, changePercent: 20, reviewPriority: 'high', priorityScore: 70, decision: approved ? 'approved' : 'pending', audioStatus: approved ? 'queued' : 'not_requested' }], flagDefinitions: [] });
     }
@@ -98,6 +105,22 @@ for (const mode of ['complete', 'manual', 'retry', 'resume']) test(`scan carries
     await expect.poll(() => resumed).toBe(true);
     expect(resumeSettings).toMatchObject({ action: 'resume-repairs', jobId: 'fixture-job', aiModel: 'gemini-3.7-flash', fallbackModels: ['gemini-3.6-flash'] });
     await expect(page.getByRole('button', { name: 'Review & Approve' })).toBeEnabled();
+  }
+  if (mode === 'bulk') {
+    await expect(page.getByText('Awaiting approval', { exact: true })).toHaveCount(2);
+    await expect(page.getByText('Needs review', { exact: true })).toBeVisible();
+    page.once('dialog', dialog => dialog.accept());
+    await page.getByRole('button', { name: 'Approve all ready repairs (2)', exact: true }).click();
+    await expect(page.getByText('Recording queued', { exact: true })).toHaveCount(2);
+    expect(approvedIds).toEqual(['change', 'second-ready']);
+    await expect(page.getByRole('button', { name: 'Approve all ready repairs (0)' })).toBeDisabled();
+    recordingComplete = true;
+    await expect(page.getByText('Complete', { exact: true })).toHaveCount(2, { timeout: 10000 });
+    await page.reload();
+    await expect(page.getByText('Complete', { exact: true })).toHaveCount(2);
+    await expect(page.getByText('Needs review', { exact: true })).toBeVisible();
+    expect(pageErrors).toEqual([]);
+    return;
   }
   await page.getByRole('button', { name: 'Review & Approve' }).click();
   await expect(page.getByRole('heading', { name: 'Pronunciation Repair Review' })).toBeVisible();

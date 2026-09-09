@@ -193,16 +193,18 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
     diagnostics.fallbackModels = selection.fallbackModels;
     diagnostics.attempts = [];
     if (!primaryApiKey && !backupApiKey) throw new PronunciationRepairError('Configure a Gemini key in the selected profile to repair findings without a dictionary match.');
-    const signal = AbortSignal.any([input.signal, AbortSignal.timeout(10 * 60 * 1000)]);
     diagnostics.aiRequested = true;
     let pending = unresolved;
     // One correction request, only for unresolved findings. Good patches stay
     // at their original offsets and are never sent back for regeneration.
     for (let round = 0; round < 2 && pending.length; round += 1) {
+    // Bounded retries across three models/two keys can spend ~59 minutes in
+    // capped cooldowns alone. Cancellation still interrupts requests and waits.
+    const signal = AbortSignal.any([input.signal, AbortSignal.timeout(75 * 60 * 1000)]);
     diagnostics.stage = round ? 'gemini-correction' : 'gemini-request';
     try {
     const { response, usedModel, usedBackup } = await fetchGeminiWithRateLimitFallback({
-      primaryApiKey, backupApiKey, requestedModel: selection.aiModel, fallbackModels: selection.fallbackModels, signal, maxAttempts: 3,
+      primaryApiKey, backupApiKey, requestedModel: selection.aiModel, fallbackModels: selection.fallbackModels, signal, maxAttempts: 3, retryRateLimitedModels: true,
       request: async (key, model) => {
         const attempt = { model, keyRole: key === primaryApiKey ? 'primary' : 'backup', status: undefined as number | undefined, round: round + 1, errorDetails: undefined as GeminiErrorDetails | undefined };
         diagnostics.attempts!.push(attempt);
@@ -226,7 +228,7 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
     if (!response.ok) {
       if ([429, 500, 502, 503, 504].includes(response.status)) {
         diagnostics.apiBlocked = true;
-        const retryAfterMs = Math.max(60000, ...diagnostics.attempts!.filter(attempt => attempt.round === round + 1).map(attempt => attempt.errorDetails?.retryAfterMs || 0));
+        const retryAfterMs = Math.max(300000, ...diagnostics.attempts!.filter(attempt => attempt.round === round + 1).map(attempt => attempt.errorDetails?.retryAfterMs || 0));
         diagnostics.nextAttemptAt = Date.now() + Math.min(retryAfterMs, Number.MAX_SAFE_INTEGER - Date.now());
       }
       throw new PronunciationRepairError(`Gemini repair failed (HTTP ${response.status}). No chapter text was changed.`);
@@ -258,7 +260,7 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
       input.signal.throwIfAborted();
       if (!(error instanceof PronunciationRepairError) || signal.aborted) {
         diagnostics.apiBlocked = true;
-        diagnostics.nextAttemptAt = Date.now() + 60000;
+        diagnostics.nextAttemptAt = Date.now() + 300000;
       }
       // Invalid JSON is retried once. Exhausted transport failures do not
       // restart the full transport budget; retain other valid repairs.

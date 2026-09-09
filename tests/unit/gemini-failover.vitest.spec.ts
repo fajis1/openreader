@@ -5,6 +5,44 @@ import {
 } from '../../src/lib/server/smart-audio/gemini-failover';
 
 describe('Gemini key failover', () => {
+  test('opt-in quota retries pace key/model switches and cap the delay at five minutes', async () => {
+    const request = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'quota exhausted' } }), { status: 429 }));
+    const onStatusUpdate = vi.fn();
+    const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: 'primary-fixture', backupApiKey: 'backup-fixture',
+      requestedModel: 'gemini-3.8-flash', maxAttempts: 3, retryRateLimitedModels: true, request, onStatusUpdate });
+    expect(result.usedModel).toBe('gemini-3.6-flash');
+    expect(request).toHaveBeenCalledTimes(12);
+    expect(request.mock.calls).toEqual([
+      ...Array(3).fill(['primary-fixture', 'gemini-3.8-flash']),
+      ...Array(3).fill(['backup-fixture', 'gemini-3.8-flash']),
+      ...Array(3).fill(['primary-fixture', 'gemini-3.7-flash']),
+      ...Array(3).fill(['primary-fixture', 'gemini-3.6-flash']),
+    ]);
+    expect(onStatusUpdate.mock.calls.map(([message]) => message).filter(message => message.startsWith('Gemini recovery cooldown:')))
+      .toEqual([4, 8, 16, 32, 64, 128, 256, 300, 300, 300, 300].map(seconds => `Gemini recovery cooldown: waiting ${seconds}s before the next request.`));
+  });
+
+  test('opt-in fallback honors server cooldowns and retains backup-only credentials', async () => {
+    const request = vi.fn().mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'Retry-After': '380' } }))
+      .mockResolvedValueOnce(new Response('ok'));
+    const onStatusUpdate = vi.fn();
+    const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: '', backupApiKey: 'backup-fixture',
+      requestedModel: 'first', fallbackModels: ['second'], maxAttempts: 1, retryRateLimitedModels: true, request, onStatusUpdate });
+    expect(result).toMatchObject({ usedModel: 'second', usedBackup: true });
+    expect(request.mock.calls).toEqual([['backup-fixture', 'first'], ['backup-fixture', 'second']]);
+    expect(onStatusUpdate).toHaveBeenCalledWith('Gemini recovery cooldown: waiting 380s before the next request.');
+  });
+
+  test('cancellation stops opt-in recovery before a fallback request', async () => {
+    const controller = new AbortController();
+    const request = vi.fn(async () => new Response(null, { status: 429 }));
+    await expect(fetchGeminiWithRateLimitFallback({ primaryApiKey: 'fixture', requestedModel: 'first', fallbackModels: ['second'],
+      maxAttempts: 1, retryRateLimitedModels: true, signal: controller.signal, request,
+      onStatusUpdate: message => { if (message.startsWith('Gemini recovery cooldown:')) controller.abort(); },
+    })).rejects.toThrow();
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   test('honors explicit fallback order and an empty list disables model fallback', async () => {
     const request = vi.fn(async (_key: string, model?: string) => new Response(null, { status: model === 'chosen-two' ? 200 : 503 }));
     const result = await fetchGeminiWithRateLimitFallback({ primaryApiKey: 'fixture', requestedModel: 'gemini-3.8-flash', fallbackModels: ['chosen-one', 'chosen-two'], maxAttempts: 1, request });

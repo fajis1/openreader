@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ModalFrame } from '@/components/ui';
 import { BatchRefineReviewModal } from './BatchRefineReviewModal';
 import type { PronunciationIssue } from '@/lib/shared/pronunciation-issues';
 import { PRESET_MODELS } from '@/components/constants';
 import { readJsonResponse } from '@/lib/client/read-json-response';
 import { v4 as uuidv4 } from 'uuid';
+import { pronunciationRepairStatusLabel, type PronunciationRepairStatus } from '@/lib/shared/pronunciation-repair-status';
 
 type Chapter = { fileName: string; chapterIndex: number; failed: boolean };
 type Finding = Chapter & { title: string; hash: string; issues: PronunciationIssue[]; jobId?: string; failureError?: string; runId?: string; audioStatus?: string; error?: string; retryRunId?: string; proposalHash?: string; unresolvedCount?: number };
@@ -37,6 +38,56 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
   const reportController = useRef<AbortController | null>(null);
   const jobVersion = useRef('');
   const activeRepair = job?.status === 'queued' || job?.status === 'running';
+  const [repairs, setRepairs] = useState<PronunciationRepairStatus[]>([]);
+  const [approvalMessage, setApprovalMessage] = useState('');
+  const [approving, setApproving] = useState(false);
+  const refreshRepairs = useCallback(async (signal?: AbortSignal) => {
+    const value = await fetch(`/api/audiobooks/pronunciation-issues?bookId=${encodeURIComponent(bookId)}&action=review-status`, { signal, cache: 'no-store' }).then(readJsonResponse);
+    if (!signal?.aborted) setRepairs(value.repairs || []);
+  }, [bookId]);
+  useEffect(() => {
+    if (!open) return;
+    const current = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try { await refreshRepairs(current.signal); }
+      catch (problem) { if (!current.signal.aborted) setError(problem instanceof Error ? problem.message : 'Could not refresh repair status.'); }
+      finally { if (!current.signal.aborted) timer = setTimeout(() => void poll(), 4000); }
+    };
+    void poll();
+    return () => { current.abort(); clearTimeout(timer); };
+  }, [open, refreshRepairs]);
+  const readyRepairs = repairs.filter(repair => repair.ready);
+  const displayedFindings = [...findings];
+  for (const repair of repairs) {
+    if (!displayedFindings.some(row => row.chapterIndex === repair.chapterIndex)) {
+      displayedFindings.push({ ...repair, hash: '', issues: [], failed: repair.fileName.endsWith('__rejected.txt') });
+    }
+  }
+  displayedFindings.sort((a, b) => a.chapterIndex - b.chapterIndex);
+
+  async function approveReady() {
+    if (approving || activeRepair || !readyRepairs.length) return;
+    const targets = [...readyRepairs];
+    if (!window.confirm(`Approve ${targets.length} ready repairs and queue their replacement recordings? Partial proposals will be left for review.`)) return;
+    setApproving(true); setBusy(true); setApprovalMessage('');
+    let approved = 0;
+    const failures: string[] = [];
+    try {
+      for (const repair of targets) {
+        try {
+          await fetch('/api/audiobooks/batch-refine/review', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'approve', changeId: repair.changeId }),
+          }).then(readJsonResponse);
+          approved += 1;
+        } catch (problem) { failures.push(`${repair.title}: ${problem instanceof Error ? problem.message : 'Approval failed'}`); }
+      }
+      setApprovalMessage(`${approved} repairs approved. ${failures.length ? failures.join(' · ') : 'Partial proposals were left untouched.'}`);
+      if (approved) onRecordingQueued();
+      await refreshRepairs();
+    } catch (problem) { setError(problem instanceof Error ? problem.message : 'Could not refresh repair status.'); }
+    finally { setApproving(false); setBusy(false); }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -104,6 +155,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
     controller.current?.abort();
     setFindings([]); setSelected([]); setDrafts({}); setScanned(false); setStatus(''); setError(''); setReviewRun(null);
     setJob(null); jobVersion.current = '';
+    setRepairs([]); setApprovalMessage('');
     setReportJobs([]); setReportJobId('');
     reportController.current?.abort();
   }, [bookId, profileId]);
@@ -242,7 +294,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
             <option value="">None</option>
             {PRESET_MODELS.filter(model => model.id !== 'custom' && model.id !== selection.aiModel && model.id !== effectiveFallbacks[1 - index]).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
           </select></label>)}
-          <p className="text-xs text-text-soft">Fallbacks are tried in order after overload or model-unavailable errors. Rate/quota limits use bounded key retries and cooldowns, not automatic model switching.</p>
+          <p className="text-xs text-text-soft">Fallbacks are tried in order after rate/quota limits (429), overload, or model-unavailable errors. Recovery pauses double from 4 seconds up to 5 minutes across key/model switches; longer server cooldowns are respected. Retries are bounded, so sustained limits can require resuming later.</p>
           {customModel && <label className="block text-sm">Custom model ID<input aria-label="Custom repair AI model" value={selection.aiModel} onChange={event => setSelection(previous => ({ ...previous, aiModel: event.target.value }))} className="ml-2 rounded border border-line-soft bg-surface p-2" /></label>}
           {(['primaryKeyRef', 'backupKeyRef'] as const).map((field, index) => <label key={field} className="block text-sm">{index === 0 ? 'Primary Gemini key' : 'Backup Gemini key'}<select aria-label={index === 0 ? 'Primary Gemini key' : 'Backup Gemini key'} className="ml-2 rounded border border-line-soft bg-surface p-2" value={selection[field]} onChange={event => setSelection(previous => ({ ...previous, [field]: event.target.value }))}>
             <option value="">Not set</option>{config.keySources.map(key => <option key={key.ref} value={key.ref}>{key.label} ({key.masked})</option>)}
@@ -258,7 +310,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
           {busy && <button onClick={() => { controller.current?.abort(); setStatus('Stopping. Completed results are retained.'); }} className="rounded border border-line-soft px-3 py-2">Stop</button>}
         </div>
         <p role="status" className="my-3 text-sm text-text-soft">{status}</p>
-        {job && <p className="text-xs text-text-soft">Job: {job.id} · {job.status} · {job.progress}%{activeRepair ? ' · Wait until the job stops before approving recordings.' : ''}{job.error ? ` · ${job.error}` : ''}</p>}
+        {job && <p className="text-xs text-text-soft">Job: {job.id} · {job.status} · {job.progress}%{activeRepair ? ' · Wait until the job stops before approving recordings.' : ' · Historical proposal-generation results; current approval and recording status is shown below.'}{job.error ? ` · ${job.error}` : ''}</p>}
         {job && !activeRepair && (job.status === 'error' || job.status === 'paused') && (job.results.length < job.total || job.results.some(result => result.apiBlocked)) && <button disabled={busy} onClick={() => void resumePending()} className="rounded border border-line-soft px-3 py-2">Resume pending repairs</button>}
         {reportJobs.length > 0 && <div className="my-3 space-y-2 text-sm">
           <label>Report for job <select aria-label="Repair report job" value={reportJobId || reportJobs[0].id} onChange={event => setReportJobId(event.target.value)} className="rounded border border-line-soft bg-surface p-1">
@@ -269,15 +321,20 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
         </div>}
         {job?.aiModel && <p className="text-xs text-text-soft">Job model: {job.aiModel} · Profile: {config?.profiles.find(profile => profile.id === job.profileId)?.name || job.profileId} · Keys: {config?.keySources.find(key => key.ref === job.primaryKeyRef)?.masked || 'Not set'} / {config?.keySources.find(key => key.ref === job.backupKeyRef)?.masked || 'Not set'}</p>}
         {error && <p role="alert" className="my-3 text-danger">{error}</p>}
+        <button disabled={approving || busy || activeRepair || !readyRepairs.length} onClick={() => void approveReady()} className="my-3 rounded bg-accent px-3 py-2 text-background disabled:opacity-50">{approving ? 'Approving ready repairs…' : `Approve all ready repairs (${readyRepairs.length})`}</button>
+        {approvalMessage && <p role="status" className="text-sm">{approvalMessage}</p>}
         {scanned && findings.length === 0 && <p>No pronunciation issues found in the checked text.</p>}
-        <div className="space-y-4">{findings.map(finding => <article key={finding.fileName} className="rounded border border-line-soft p-3">
+        <div className="space-y-4">{displayedFindings.map(finding => {
+          const repair = repairs.find(item => item.chapterIndex === finding.chapterIndex);
+          const currentRun = repair?.runId || finding.runId;
+          return <article key={finding.fileName} className="rounded border border-line-soft p-3">
           <div className="flex flex-wrap items-center gap-2">
             <input type="checkbox" aria-label={`Select ${finding.title}`} disabled={busy || activeRepair || !finding.issues.length || Boolean(finding.runId && !finding.retryRunId)} checked={selected.includes(finding.fileName)} onChange={event => setSelected(previous => event.target.checked ? [...previous, finding.fileName] : previous.filter(file => file !== finding.fileName))} />
             <h3 className="font-semibold">{finding.chapterIndex + 1}. {finding.title}</h3>
-            <span className="text-sm text-text-soft">{finding.issues.length} findings{finding.failed ? ' · Rejected generation output' : ''}</span>
-            {finding.audioStatus && <span className="text-sm text-text-soft">Recording: {finding.audioStatus.replaceAll('_', ' ')}</span>}
-            {finding.runId && <button onClick={() => setReviewRun(finding.runId!)} className="ml-auto text-accent">Review &amp; Approve</button>}
-            {finding.runId && Boolean(finding.unresolvedCount || finding.retryRunId && finding.issues.length || finding.error) && <button disabled={busy || activeRepair} onClick={() => void retryUnresolved(finding)} className="text-accent disabled:opacity-50">Retry unresolved</button>}
+            <span className="text-sm text-text-soft">{repair?.unresolvedCount ?? finding.issues.length} findings{finding.failed ? ' · Rejected generation output' : ''}</span>
+            {repair ? <span className="text-sm text-text-soft">{pronunciationRepairStatusLabel(repair)}</span> : finding.audioStatus && <span className="text-sm text-text-soft">Recording: {finding.audioStatus.replaceAll('_', ' ')}</span>}
+            {currentRun && <button disabled={approving} onClick={() => setReviewRun(currentRun)} className="ml-auto text-accent">{repair?.decision === 'approved' ? 'View repair' : 'Review & Approve'}</button>}
+            {finding.runId && (!repair || repair.decision === 'pending') && Boolean(repair?.unresolvedCount || finding.unresolvedCount || finding.retryRunId && finding.issues.length || finding.error) && <button disabled={busy || activeRepair} onClick={() => void retryUnresolved(finding)} className="text-accent disabled:opacity-50">Retry unresolved</button>}
           </div>
           {finding.failureError && <p className="mt-2 text-sm text-text-soft">Generation error: {finding.failureError}</p>}
           {finding.error && <p role="alert" className="mt-2 text-sm text-danger">{finding.error}</p>}
@@ -293,9 +350,9 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
             </label>}
           </details>)}
           {finding.jobId && <button disabled={busy} onClick={() => void resume(finding)} className="mt-3 text-sm text-accent disabled:opacity-50">Resume generation after repair recording completes</button>}
-        </article>)}</div>
+        </article>})}</div>
       </div>
     </ModalFrame>
-    <BatchRefineReviewModal open={open && Boolean(reviewRun)} onClose={() => setReviewRun(null)} bookId={bookId} runId={reviewRun} onRecordingQueued={onRecordingQueued} />
+    <BatchRefineReviewModal open={open && Boolean(reviewRun)} onClose={() => { setReviewRun(null); void refreshRepairs().catch(() => {}); }} bookId={bookId} runId={reviewRun} onRecordingQueued={() => { onRecordingQueued(); void refreshRepairs().catch(() => {}); }} />
   </>;
 }

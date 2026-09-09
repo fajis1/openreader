@@ -1,5 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), owned: vi.fn(), catalog: vi.fn(), chapter: vi.fn(), propose: vi.fn(), resume: vi.fn(), queue: vi.fn(), jobs: vi.fn(), stop: vi.fn(), config: vi.fn(), report: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), owned: vi.fn(), catalog: vi.fn(), chapter: vi.fn(), propose: vi.fn(), resume: vi.fn(), queue: vi.fn(), jobs: vi.fn(), stop: vi.fn(), config: vi.fn(), report: vi.fn(), repairStatus: vi.fn() }));
+vi.mock('@/lib/server/audiobooks/pronunciation-repair-status', () => ({ listPronunciationRepairStatus: (...args: unknown[]) => mocks.repairStatus(...args) }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-report', () => ({ pronunciationRepairReport: (...args: unknown[]) => mocks.report(...args) }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-jobs', () => ({ queuePronunciationRepairs: (...args: unknown[]) => mocks.queue(...args), listPronunciationRepairJobs: (...args: unknown[]) => mocks.jobs(...args), stopPronunciationRepairs: (...args: unknown[]) => mocks.stop(...args) }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-config', () => ({ loadPronunciationRepairConfig: (...args: unknown[]) => mocks.config(...args), pronunciationRepairErrorMessage: () => 'Repair failed safely.' }));
@@ -16,6 +17,18 @@ vi.mock('@/lib/server/tasks/engine', () => ({ runTaskNow: vi.fn().mockResolvedVa
 import { GET, POST } from '../../src/app/api/audiobooks/pronunciation-issues/route';
 const request = (action: string) => new Request('http://localhost/api/audiobooks/pronunciation-issues', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookId: 'book', fileName: '0001__text.txt', action, hash: 'hash' }) });
 beforeEach(() => { vi.clearAllMocks(); mocks.auth.mockResolvedValue({ userId: 'owner' }); mocks.owned.mockResolvedValue([{ id: 'book' }]); });
+
+test('loads live repair status only for the authenticated book owner', async () => {
+  const url = 'http://localhost/api/audiobooks/pronunciation-issues?bookId=book&action=review-status';
+  mocks.owned.mockResolvedValue([]);
+  expect((await GET(new Request(url))).status).toBe(404);
+  expect(mocks.repairStatus).not.toHaveBeenCalled();
+  mocks.owned.mockResolvedValue([{ id: 'book' }]);
+  mocks.repairStatus.mockResolvedValue([{ changeId: 'change', decision: 'approved', audioStatus: 'completed' }]);
+  const response = await GET(new Request(url));
+  expect(mocks.repairStatus).toHaveBeenCalledWith('book', 'owner');
+  expect((await response.json()).repairs[0].audioStatus).toBe('completed');
+});
 
 test('denies unauthenticated scans without accessing book data', async () => {
   mocks.auth.mockResolvedValue(new Response('Unauthorized', { status: 401 }));

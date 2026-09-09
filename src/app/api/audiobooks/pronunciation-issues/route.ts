@@ -12,6 +12,7 @@ import { scanPronunciationIssues } from '@/lib/shared/pronunciation-issues';
 import { runTaskNow } from '@/lib/server/tasks/engine';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { pronunciationRepairReport } from '@/lib/server/audiobooks/pronunciation-repair-report';
+import { listPronunciationRepairStatus } from '@/lib/server/audiobooks/pronunciation-repair-status';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
     const user = await ownedUser(request, bookId);
     if (user instanceof Response) return user;
     const action = new URL(request.url).searchParams.get('action');
+    if (action === 'review-status') return NextResponse.json({ repairs: await listPronunciationRepairStatus(bookId, user) });
     if (action === 'report') {
       const report = await pronunciationRepairReport(bookId, user, new URL(request.url).searchParams.get('jobId') || '');
       if (!report) return NextResponse.json({ error: 'Repair job not found.' }, { status: 404 });
