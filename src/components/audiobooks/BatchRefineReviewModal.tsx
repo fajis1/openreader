@@ -116,6 +116,7 @@ export function BatchRefineReviewModal({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [issueDrafts, setIssueDrafts] = useState<Record<string, string>>({});
   const [openFlag, setOpenFlag] = useState<string | null>(null);
   const [expandedComparisons, setExpandedComparisons] = useState<string[]>([]);
   const [overrideSelections, setOverrideSelections] = useState<Record<string, string[]>>({});
@@ -364,7 +365,8 @@ export function BatchRefineReviewModal({
             // can require source evidence for a correction found under any
             // issue kind (including a malformed tag), and the UI must expose
             // that exact finding instead of allowing an unexplained failure.
-            const proposedVisibleSource = visiblePronunciationSource(change.proposedText);
+            const activeProposedText = isEditing ? drafts[change.id] ?? change.proposedText : change.proposedText;
+            const proposedVisibleSource = visiblePronunciationSource(activeProposedText);
             const sourceOverrideIssues = sourceIssues.filter(issue =>
               !proposedVisibleSource.includes(visiblePronunciationSource(issue.text)));
             const selectedOverrides = new Set((overrideSelections[change.id] || []).filter(id => sourceOverrideIssues.some(issue => issue.id === id)));
@@ -442,9 +444,43 @@ export function BatchRefineReviewModal({
                         ))}
                       </div>
                     )}
-                    {remainingIssues.length > 0 && <div className="text-sm text-danger">
+                    {remainingIssues.length > 0 && <div className="space-y-2 text-sm text-danger">
                       <p>Needs review: {remainingIssues.length} unresolved passages. Edit the proposal to resolve these before recording.</p>
-                      <ul className="mt-2 list-disc pl-5">{remainingIssues.slice(0, 20).map(issue => <li key={issue.id}><code>{issue.text}</code>: {issue.reason}</li>)}</ul>
+                      {remainingIssues.slice(0, 20).map(issue => {
+                        const issueKey = `${change.id}:${issue.start}:${issue.text}`;
+                        return <div key={issue.id} className="space-y-2 rounded border border-danger bg-surface p-2">
+                          <p><code className="rounded bg-danger-wash px-1 font-semibold">{issue.text}</code> — {issue.reason}</p>
+                          <pre className="whitespace-pre-wrap text-xs text-text-soft">{issue.context}</pre>
+                          <label className="block text-xs font-semibold text-text-strong">Replacement for only this flagged passage
+                            <textarea
+                              aria-label={`Replacement for ${issue.text}`}
+                              value={issueDrafts[issueKey] ?? issue.replacement ?? issue.text}
+                              onChange={event => setIssueDrafts(current => ({ ...current, [issueKey]: event.target.value }))}
+                              className="mt-1 min-h-20 w-full resize-y rounded border border-line-soft bg-surface p-2 font-mono text-xs"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="rounded border border-line-soft px-2 py-1 text-xs font-semibold text-text-strong"
+                            onClick={() => {
+                              const currentText = drafts[change.id] ?? change.proposedText;
+                              const currentIssue = scanPronunciationIssues(currentText).find(candidate => candidate.id === issue.id);
+                              if (!currentIssue) {
+                                toast.error('This finding changed. Reopen the review and try again.');
+                                return;
+                              }
+                              const replacement = issueDrafts[issueKey] ?? issue.replacement ?? issue.text;
+                              setDrafts(current => ({
+                                ...current,
+                                [change.id]: currentText.slice(0, currentIssue.start) + replacement + currentText.slice(currentIssue.end),
+                              }));
+                              setEditingId(change.id);
+                            }}
+                          >
+                            Apply only to this issue
+                          </button>
+                        </div>;
+                      })}
                     </div>}
                   </div>
                 )}
@@ -492,6 +528,7 @@ export function BatchRefineReviewModal({
                         </div>
                         {isEditing ? (
                           <textarea
+                            aria-label="Full chapter proposal"
                             value={drafts[change.id] ?? change.proposedText}
                             onChange={(event) => setDrafts((current) => ({ ...current, [change.id]: event.target.value }))}
                             className="h-72 w-full resize-y rounded border border-accent bg-surface p-3 font-mono text-xs leading-relaxed text-text-strong focus:outline-none focus:ring-2 focus:ring-accent-line"

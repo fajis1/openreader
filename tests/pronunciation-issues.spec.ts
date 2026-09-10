@@ -152,8 +152,9 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
   if (mode === 'manual') {
     await expect(page.getByText('Needs review: 1 unresolved passages.', { exact: false })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Approve & Record', exact: true })).toBeDisabled();
-    await page.getByRole('button', { name: 'Edit proposal', exact: true }).click();
-    await page.locator('textarea').fill('The [Aetherian](/eɪθɪriən/) arrived. [θεῷ](/θeɪoʊ/)');
+    await page.getByLabel('Replacement for θεῷ').fill('[θεῷ](/θeɪoʊ/)');
+    await page.getByRole('button', { name: 'Apply only to this issue', exact: true }).click();
+    await expect(page.getByLabel('Full chapter proposal')).toHaveValue('The [Aetherian](/eɪθɪriən/) arrived. [θεῷ](/θeɪoʊ/)');
     await page.getByRole('button', { name: 'Approve Edit & Record', exact: true }).click();
   } else await page.getByRole('button', { name: 'Approve & Record', exact: true }).click();
   await expect(page.getByTestId('queued')).toHaveText('1');
