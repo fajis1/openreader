@@ -5,6 +5,14 @@ import { hasUntaggedScholarForeignScript, prepareScholarBatchRefineText } from '
 import { resolveSmartAudioWithValidationRecovery } from '../../src/lib/server/audiobooks/smart-audio-validation-recovery';
 
 describe('Scholar internal editorial letters', () => {
+  test('ignores standalone Greek punctuation but still catches bare Greek words', () => {
+    expect(hasUntaggedScholarForeignScript('those who live [kat](/kɑt/) ᾿ [ἐριθείαν](/ɛriθeɪɑn/)')).toBe(false);
+    expect(hasUntaggedScholarForeignScript('those who live [kat](/kɑt/) · [ἐριθείαν](/ɛriθeɪɑn/)')).toBe(false);
+    expect(hasUntaggedScholarForeignScript('those who live [kat](/kɑt/) ᾿ ἐριθείαν')).toBe(true);
+    expect(() => validateSmartAudioOutput('those who live [kat](/kɑt/) ᾿ [ἐριθείαν](/ɛriθeɪɑn/)')).not.toThrow();
+    expect(() => validateSmartAudioOutput('those who live [kat](/kɑt/) ᾿ ἐριθείαν')).toThrow('bare Greek');
+  });
+
   test('expands same-script internal groups only', () => {
     expect(expandScholarEditorialWords('θε(οῦ) θ(ε)ο(ῦ) של(ו)ם')).toBe('θεοῦ θεοῦ שלום');
     expect(forcefullyTransliterateUntaggedForeignText('θε(οῦ)')).toBe('theoy');

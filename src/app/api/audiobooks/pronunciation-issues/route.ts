@@ -14,6 +14,9 @@ import { errorResponse } from '@/lib/server/errors/next-response';
 import { pronunciationRepairReport } from '@/lib/server/audiobooks/pronunciation-repair-report';
 import { listPronunciationRepairStatus } from '@/lib/server/audiobooks/pronunciation-repair-status';
 import { rememberApprovedPronunciations } from '@/lib/server/audiobooks/remember-approved-pronunciations';
+import { getAudiobookObjectBuffer } from '@/lib/server/audiobooks/blobstore';
+import { coerceAudiobookGenerationSettings } from '@/lib/server/audiobooks/settings';
+import { getDefaultVoices, isBuiltInTtsProviderId } from '@/lib/shared/tts-provider-catalog';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -41,7 +44,16 @@ export async function GET(request: Request) {
         'Content-Disposition': `attachment; filename="pronunciation-repair-${report.jobId}.json"`,
       } });
     }
-    if (action === 'config') return NextResponse.json((await loadPronunciationRepairConfig(user)).publicConfig);
+    if (action === 'config') {
+      const publicConfig = (await loadPronunciationRepairConfig(user)).publicConfig;
+      const parsed = JSON.parse((await getAudiobookObjectBuffer(bookId, user, 'audiobook.meta.json', null)).toString('utf8')) as unknown;
+      const settings = coerceAudiobookGenerationSettings(parsed).settings;
+      const recordingVoice = settings?.voice || '';
+      const recordingVoices = settings && isBuiltInTtsProviderId(settings.providerType)
+        ? Array.from(new Set([recordingVoice, ...getDefaultVoices(settings.providerType, settings.ttsModel)].filter(Boolean)))
+        : recordingVoice ? [recordingVoice] : [];
+      return NextResponse.json({ ...publicConfig, recordingVoice, recordingVoices });
+    }
     if (action === 'jobs') return NextResponse.json({ jobs: await listPronunciationRepairJobs(bookId, user) });
     return NextResponse.json(await pronunciationCatalog(bookId, user));
   } catch (error) {

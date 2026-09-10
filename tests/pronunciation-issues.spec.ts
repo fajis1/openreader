@@ -25,6 +25,7 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
   let recordingComplete = false;
   const recordingRetries: string[] = [];
   const approvedIds: string[] = [];
+  const recordingVoices: string[] = [];
   let remembered = false;
   let retried = false;
   let resumed = false;
@@ -42,7 +43,7 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
         ...(mode === 'bulk' ? [{ changeId: 'second-ready', runId: 'second-run', fileName: '0109__text.txt', chapterIndex: 108, title: 'Second ready chapter', decision: approved ? 'approved' : 'pending', audioStatus: recordingComplete ? 'completed' : approved ? 'queued' : 'not_requested', ready: !approved, unresolvedCount: 0 }] : []),
       ] : [] });
       if (url.searchParams.get('action') === 'report') return route.fulfill({ contentType: 'application/json', headers: { 'Content-Disposition': 'attachment; filename="pronunciation-repair-fixture-job.json"' }, body: JSON.stringify({ jobId: 'fixture-job', summary: { failures: 0, proposals: 1 } }) });
-      if (url.searchParams.get('action') === 'config') return json({ selectedProfileId: 'fixture-profile', modelFallbacks: { 'gemini-3.8-flash': ['gemini-3.7-flash', 'gemini-3.6-flash'], 'gemini-3.7-flash': ['gemini-3.6-flash', 'gemini-3.5-flash'] }, profiles: [{ id: 'fixture-profile', name: 'Scholar', model: 'gemini-3.8-flash', primaryKeyRef: 'fixture-profile:primary', backupKeyRef: '' }], keySources: [{ ref: 'fixture-profile:primary', label: 'Scholar primary', masked: '...1111' }, { ref: 'other:primary', label: 'Other primary', masked: '...2222' }] });
+      if (url.searchParams.get('action') === 'config') return json({ selectedProfileId: 'fixture-profile', recordingVoice: 'af_heart', recordingVoices: ['af_heart', 'am_adam'], modelFallbacks: { 'gemini-3.8-flash': ['gemini-3.7-flash', 'gemini-3.6-flash'], 'gemini-3.7-flash': ['gemini-3.6-flash', 'gemini-3.5-flash'] }, profiles: [{ id: 'fixture-profile', name: 'Scholar', model: 'gemini-3.8-flash', primaryKeyRef: 'fixture-profile:primary', backupKeyRef: '' }], keySources: [{ ref: 'fixture-profile:primary', label: 'Scholar primary', masked: '...1111' }, { ref: 'other:primary', label: 'Other primary', masked: '...2222' }] });
       if (url.searchParams.get('action') === 'jobs') return json({ jobs: queued ? [{ id: 'fixture-job', status: mode === 'resume' && !resumed ? 'error' : 'completed', progress: 100, total: 1, results: [{ fileName: '0107__text.txt', runId: 'fixture-run', requestId: 'fixture-request', apiBlocked: mode === 'resume' && !resumed, unresolvedCount: partial && !retried ? 1 : 0 }] }] : [] });
       if (route.request().method() === 'GET') return json({ chapters: [{ fileName: '0107__text.txt', chapterIndex: 106, failed: false }, { fileName: '0108__text.txt', chapterIndex: 107, failed: false }], failedJobs: [] });
       const body = route.request().postDataJSON();
@@ -55,9 +56,9 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
     }
     if (url.pathname.endsWith('/batch-refine/review')) {
       if (route.request().method() === 'POST' && route.request().postDataJSON().action === 'retry') {
-        recordingRetries.push(route.request().postDataJSON().changeId); return json({ success: true });
+        recordingRetries.push(route.request().postDataJSON().changeId); recordingVoices.push(route.request().postDataJSON().recordingVoice); return json({ success: true });
       }
-      if (route.request().method() === 'POST') { approved = true; approvedIds.push(route.request().postDataJSON().changeId); return json({ success: true }); }
+      if (route.request().method() === 'POST') { approved = true; approvedIds.push(route.request().postDataJSON().changeId); recordingVoices.push(route.request().postDataJSON().recordingVoice); return json({ success: true }); }
       return json({ run: { id: 'fixture-run', rule: 'pronunciation-repair:v1', status: 'completed', processedChapters: 1, totalChapters: 1 },
         changes: [{ id: 'change', textFileName: '0107__text.txt', chapterIndex: 106, chapterTitle: 'Aetherian chapter', previousText: 'The [Aetherian](/bad split/) arrived.', proposedText: 'The [Aetherian](/eɪθɪriən/) arrived.' + (partial ? retried ? ' [θεῷ](/θeɪoʊ/)' : ' θεῷ' : ''), reviewNote: partial && !retried ? 'NEEDS REVIEW: unresolved passage.' : null, diffText: '-bad split\n+eɪθɪriən', changedCharacters: 10, changePercent: 20, reviewPriority: 'high', priorityScore: 70, decision: approved ? 'approved' : 'pending', audioStatus: approved ? 'queued' : 'not_requested' }], flagDefinitions: [] });
     }
@@ -69,6 +70,8 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
   await expect(page.getByLabel('Repair AI model')).toHaveValue('gemini-3.8-flash');
   await expect(page.getByLabel('Repair fallback model 1')).toHaveValue('gemini-3.7-flash');
   await expect(page.getByLabel('Repair fallback model 2')).toHaveValue('gemini-3.6-flash');
+  await expect(page.getByLabel('Pronunciation repair recording voice')).toHaveValue('af_heart');
+  await page.getByLabel('Pronunciation repair recording voice').selectOption('am_adam');
   await page.getByLabel('Repair AI model', { exact: true }).selectOption('gemini-3.7-flash');
   await expect(page.getByLabel('Repair AI model', { exact: true })).toHaveValue('gemini-3.7-flash');
   await page.getByLabel('Repair AI model', { exact: true }).selectOption('gemini-3.8-flash');
@@ -138,6 +141,7 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
     await page.getByRole('button', { name: 'Retry all failed recordings (2)', exact: true }).click();
     await expect(page.getByText('2 recordings queued.', { exact: false })).toBeVisible();
     expect(recordingRetries).toEqual(['failed-one', 'failed-two']);
+    expect(recordingVoices).toEqual(['am_adam', 'am_adam', 'am_adam', 'am_adam']);
     expect(approvedIds).toEqual(['change', 'second-ready']);
     await expect(page.getByRole('button', { name: 'Retry all failed recordings (0)', exact: true })).toBeDisabled();
     expect(pageErrors).toEqual([]);
@@ -156,4 +160,5 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
   expect(proposedFiles).toEqual(mode === 'retry' ? ['0107__text.txt', '0107__text.txt'] : ['0107__text.txt']);
   if (mode !== 'retry') expect(queuedSettings).toMatchObject({ aiModel: 'custom-fixture-model', fallbackModels: ['gemini-3.6-flash', 'gemini-3.7-flash'], primaryKeyRef: 'other:primary', backupKeyRef: '' });
   expect(approved).toBe(true);
+  expect(recordingVoices).toEqual(['am_adam']);
 });

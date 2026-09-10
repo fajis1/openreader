@@ -160,6 +160,9 @@ describe('Batch Refine workflow integrity', () => {
     expect(review).toContain('Highest AI/review concern');
     expect(review).toContain('Approve All');
     expect(review).toContain('Approve Edit & Record');
+    expect(review).toContain('Select all (${sourceOverrideIssues.length})');
+    expect(review).toContain('sourceOverrideIssues.length > 0');
+    expect(review).toContain('Approve with override (${selectedOverrides.size})');
     expect(review).toContain('Keep Previous');
     expect(start).toContain('BATCH_REFINE_RECORDING_OPTION_HELP');
     expect(BATCH_REFINE_RECORDING_OPTION_HELP.review.label).toBe('Review before recording');

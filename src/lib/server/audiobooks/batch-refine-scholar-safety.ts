@@ -3,6 +3,7 @@ import { expandScholarEditorialWords, hasSplitScholarEditorialWord } from '@/lib
 const KOKORO_TAG_GLOBAL = /\[[^\]\r\n]+\]\(\/[^/\r\n]+\/\)/gu;
 const UNTAGGED_FOREIGN_WORD = /([\p{Script=Greek}\p{Mark}]+(?:\([\p{Script=Greek}\p{Mark}]+\)[\p{Script=Greek}\p{Mark}]*)+|[\p{Script=Hebrew}\p{Mark}]+(?:\([\p{Script=Hebrew}\p{Mark}]+\)[\p{Script=Hebrew}\p{Mark}]*)+|[\p{Script=Greek}\p{Script=Hebrew}][\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’ʼ᾽]*)([\t ]?)/gu;
 const FOREIGN_SCRIPT = /[\p{Script=Greek}\p{Script=Hebrew}]/u;
+const LETTER = /\p{Letter}/u;
 
 type PronunciationLookup = {
   exact: Map<string, string | null>;
@@ -144,5 +145,9 @@ export function prepareScholarBatchRefineText(
 }
 
 export function hasUntaggedScholarForeignScript(text: string): boolean {
-  return hasSplitScholarEditorialWord(text) || FOREIGN_SCRIPT.test(text.replace(KOKORO_TAG_GLOBAL, ''));
+  if (hasSplitScholarEditorialWord(text)) return true;
+  const untaggedText = text.replace(KOKORO_TAG_GLOBAL, '');
+  // Greek-block punctuation and editorial breathing marks are not words. Only
+  // actual Greek/Hebrew letters outside markup should block recording.
+  return Array.from(untaggedText).some(character => FOREIGN_SCRIPT.test(character) && LETTER.test(character));
 }

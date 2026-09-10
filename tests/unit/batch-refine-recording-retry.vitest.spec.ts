@@ -36,8 +36,8 @@ test('rejects missing or unowned change', async () => {
   await expect(retryBatchRefineRecording('change', 'other')).rejects.toThrow('not found');
   expect(mocks.update).not.toHaveBeenCalled();
 });
-test('requeues approved failed audio only and preserves approved text', async () => {
+test('requeues approved failed audio with the explicitly selected voice', async () => {
   mocks.rows = [owned(), [{ status: 'completed' }]];
-  await retryBatchRefineRecording('change', 'owner');
-  expect(mocks.set).toHaveBeenCalledWith({ audioStatus: 'queued', audioError: null, updatedAt: expect.any(Number) });
+  await retryBatchRefineRecording('change', 'owner', 'af_heart');
+  expect(mocks.set).toHaveBeenCalledWith({ audioStatus: 'queued', audioError: null, reviewNote: '[Recording voice=af_heart]', updatedAt: expect.any(Number) });
 });

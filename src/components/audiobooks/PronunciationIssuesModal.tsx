@@ -11,7 +11,7 @@ import { pronunciationRepairStatusLabel, type PronunciationRepairStatus } from '
 
 type Chapter = { fileName: string; chapterIndex: number; failed: boolean };
 type Finding = Chapter & { title: string; hash: string; issues: PronunciationIssue[]; jobId?: string; failureError?: string; runId?: string; audioStatus?: string; error?: string; retryRunId?: string; proposalHash?: string; unresolvedCount?: number };
-type RepairConfig = { selectedProfileId: string; modelFallbacks?: Record<string, string[]>; profiles: { id: string; name: string; model: string; primaryKeyRef: string; backupKeyRef: string }[]; keySources: { ref: string; label: string; masked: string }[] };
+type RepairConfig = { selectedProfileId: string; recordingVoice: string; recordingVoices: string[]; modelFallbacks?: Record<string, string[]>; profiles: { id: string; name: string; model: string; primaryKeyRef: string; backupKeyRef: string }[]; keySources: { ref: string; label: string; masked: string }[] };
 type RepairJob = { id: string; status: string; progress: number; total: number; error?: string; profileId?: string; aiModel?: string; primaryKeyRef?: string; backupKeyRef?: string; nextAttemptAt?: number; results: { fileName: string; runId?: string; unresolvedCount?: number; error?: string; requestId: string; apiBlocked?: boolean }[] };
 
 export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onRecordingQueued }: {
@@ -27,6 +27,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const controller = useRef<AbortController | null>(null);
   const [config, setConfig] = useState<RepairConfig | null>(null);
+  const [recordingVoice, setRecordingVoice] = useState('');
   const [selection, setSelection] = useState({ profileId: profileId || '', aiModel: '', primaryKeyRef: '', backupKeyRef: '' });
   const [customModel, setCustomModel] = useState(false);
   const [fallbackModels, setFallbackModels] = useState<string[] | undefined>();
@@ -78,7 +79,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
       for (const repair of targets) {
         try {
           await fetch('/api/audiobooks/batch-refine/review', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'approve', changeId: repair.changeId }),
+            body: JSON.stringify({ action: 'approve', changeId: repair.changeId, recordingVoice }),
           }).then(readJsonResponse);
           approved += 1;
         } catch (problem) { failures.push(`${repair.title}: ${problem instanceof Error ? problem.message : 'Approval failed'}`); }
@@ -102,7 +103,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
         setApprovalMessage(`Queuing failed recordings: ${queued}/${targets.length}…`);
         try {
           await fetch('/api/audiobooks/batch-refine/review', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'retry', changeId: repair.changeId }),
+            body: JSON.stringify({ action: 'retry', changeId: repair.changeId, recordingVoice }),
           }).then(readJsonResponse);
           queued += 1;
         } catch (problem) {
@@ -136,6 +137,8 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
       .then(readJsonResponse).then((value: RepairConfig) => {
         if (current.signal.aborted) return;
         setConfig(value);
+        const rememberedVoice = window.localStorage.getItem(`pronunciation-repair-voice:${bookId}`);
+        setRecordingVoice(rememberedVoice && value.recordingVoices.includes(rememberedVoice) ? rememberedVoice : value.recordingVoice);
         setFallbackModels(undefined);
         const profile = value.profiles.find(item => item.id === profileId) || value.profiles.find(item => item.id === value.selectedProfileId) || value.profiles[0];
         if (profile) {
@@ -195,6 +198,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
     controller.current?.abort();
     setFindings([]); setSelected([]); setDrafts({}); setScanned(false); setStatus(''); setError(''); setReviewRun(null);
     setJob(null); jobVersion.current = '';
+    setRecordingVoice('');
     setRepairs([]); setApprovalMessage('');
     setReportJobs([]); setReportJobId('');
     reportController.current?.abort();
@@ -340,6 +344,10 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
             <option value="">Not set</option>{config.keySources.map(key => <option key={key.ref} value={key.ref}>{key.label} ({key.masked})</option>)}
           </select></label>)}
           <p className="text-xs text-text-soft">These choices apply only to this repair job, including failed chapters. Add or change saved keys in AI Settings. Scanning and dictionary/manual-only repairs do not call Gemini.</p>
+          <label className="block text-sm">Recording voice<select aria-label="Pronunciation repair recording voice" className="ml-2 rounded border border-line-soft bg-surface p-2" value={recordingVoice} onChange={event => { setRecordingVoice(event.target.value); window.localStorage.setItem(`pronunciation-repair-voice:${bookId}`, event.target.value); }}>
+            {config.recordingVoices.map(voice => <option key={voice} value={voice}>{voice}{voice === config.recordingVoice ? ' (book voice)' : ''}</option>)}
+          </select></label>
+          <p className="text-xs text-text-soft">Used when an approved repair is recorded. Audio Drama speaker tags keep their assigned voices; this is the narrator/default voice for untagged text.</p>
         </fieldset>}
         <div className="flex flex-wrap gap-3">
           <button disabled={busy || activeRepair || !config} onClick={() => void scan()} className="rounded bg-accent px-3 py-2 text-background disabled:opacity-50">{scanned ? 'Scan Again' : 'Start Scan'}</button>
@@ -396,6 +404,6 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
         </article>})}</div>
       </div>
     </ModalFrame>
-    <BatchRefineReviewModal open={open && Boolean(reviewRun)} onClose={() => { setReviewRun(null); void refreshRepairs().catch(() => {}); }} bookId={bookId} runId={reviewRun} onRecordingQueued={() => { onRecordingQueued(); void refreshRepairs().catch(() => {}); }} />
+    <BatchRefineReviewModal open={open && Boolean(reviewRun)} onClose={() => { setReviewRun(null); void refreshRepairs().catch(() => {}); }} bookId={bookId} runId={reviewRun} recordingVoice={recordingVoice} onRecordingQueued={() => { onRecordingQueued(); void refreshRepairs().catch(() => {}); }} />
   </>;
 }

@@ -3,6 +3,11 @@ import { isKokoroSafePronunciation } from './kokoro-pronunciation-policy';
 
 export const SMART_AUDIO_OMIT_SENTINEL = '[OMIT]';
 
+function containsGreekOrHebrewLetter(text: string): boolean {
+  return Array.from(text).some(character =>
+    /[\p{Script=Greek}\p{Script=Hebrew}]/u.test(character) && /\p{Letter}/u.test(character));
+}
+
 export const FINAL_SMART_AUDIO_PRONUNCIATION_CHECK = `FINAL PRONUNCIATION-MARKUP CHECK (REQUIRED):
 ${SCHOLAR_EDITORIAL_WORD_INSTRUCTIONS}
 - Each pronunciation tag must contain exactly one corrected lexical word. Never put spaces inside the visible text or IPA of one tag.
@@ -423,7 +428,7 @@ export function validateSmartAudioOutput(
       throw new SmartAudioOutputValidationError('A Greek or Hebrew editorial word was split across pronunciation tags. Rebuild the complete word, including internal parenthesized letters, and replace its partial IPA.');
     }
     const nakedText = normalized.replace(KOKORO_PRONUNCIATION_TAG, '');
-    if (/[\p{Script=Greek}\p{Script=Hebrew}]/u.test(nakedText)) {
+    if (containsGreekOrHebrewLetter(nakedText)) {
       throw new SmartAudioOutputValidationError(
         'Smart Audio output contained bare Greek or Hebrew characters without pronunciation markup. You must either omit foreign text completely according to the omission rules, or individually tag each foreign word you keep.',
       );

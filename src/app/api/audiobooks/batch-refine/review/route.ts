@@ -60,6 +60,7 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const action = typeof body.action === 'string' ? body.action : '';
     const changeId = typeof body.changeId === 'string' ? body.changeId : '';
+    const recordingVoice = typeof body.recordingVoice === 'string' ? body.recordingVoice : undefined;
 
     if (action === 'approve') {
       if (!changeId) return NextResponse.json({ error: 'changeId is required' }, { status: 400 });
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
       const overrideIssueIds = Array.isArray(body.overrideIssueIds)
         ? body.overrideIssueIds.filter((value): value is string => typeof value === 'string')
         : undefined;
-      const result = await approveBatchRefineChange({ changeId, userId: ctx.userId, editedText, overrideSourceEvidence: body.overrideSourceEvidence === true, overrideIssueIds });
+      const result = await approveBatchRefineChange({ changeId, userId: ctx.userId, editedText, overrideSourceEvidence: body.overrideSourceEvidence === true, overrideIssueIds, recordingVoice });
       wakeRecordingQueue();
       return NextResponse.json({ success: true, ...result });
     }
@@ -80,7 +81,7 @@ export async function POST(request: Request) {
 
     if (action === 'retry') {
       if (!changeId) return NextResponse.json({ error: 'changeId is required' }, { status: 400 });
-      await retryBatchRefineRecording(changeId, ctx.userId);
+      await retryBatchRefineRecording(changeId, ctx.userId, recordingVoice);
       wakeRecordingQueue();
       return NextResponse.json({ success: true });
     }
@@ -97,7 +98,7 @@ export async function POST(request: Request) {
       const failures: Array<{ changeId: string; error: string }> = [];
       for (const change of pending) {
         try {
-          await approveBatchRefineChange({ changeId: change.id, userId: ctx.userId });
+          await approveBatchRefineChange({ changeId: change.id, userId: ctx.userId, recordingVoice });
           approved.push(change.id);
         } catch (error) {
           failures.push({

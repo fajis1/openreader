@@ -32,6 +32,29 @@ export class BatchRefineReviewConflictError extends Error {
   }
 }
 
+const RECORDING_VOICE_MARKER = /\[Recording voice=([^\]]+)\]/u;
+
+function validatedRecordingVoice(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const voice = value.trim();
+  if (!voice || voice.length > 100 || /[\u0000-\u001f\u007f\[\]]/u.test(voice)) {
+    throw new BatchRefineReviewConflictError('Choose a valid recording voice.');
+  }
+  return voice;
+}
+
+function reviewNoteWithRecordingVoice(note: string | null, voice: string | undefined): string | null {
+  if (!voice) return note;
+  const marker = `[Recording voice=${voice}]`;
+  return RECORDING_VOICE_MARKER.test(note || '')
+    ? (note || '').replace(RECORDING_VOICE_MARKER, marker)
+    : `${note || ''}${note ? ' ' : ''}${marker}`;
+}
+
+export function recordingVoiceFromReviewNote(note: string | null | undefined): string | undefined {
+  return note?.match(RECORDING_VOICE_MARKER)?.[1];
+}
+
 export async function createBatchRefineRun(input: {
   id: string;
   jobId: string;
@@ -168,6 +191,7 @@ export async function approveBatchRefineChange(input: {
   editedText?: string;
   overrideSourceEvidence?: boolean;
   overrideIssueIds?: string[];
+  recordingVoice?: string;
 }): Promise<{ changeId: string; queued: boolean }> {
   const owned = await ownedChange(input.changeId, input.userId);
   if (!owned) throw new BatchRefineReviewConflictError('Batch Refine change not found.');
@@ -237,6 +261,9 @@ export async function approveBatchRefineChange(input: {
     null,
   );
 
+  const overrideNote = input.overrideSourceEvidence === true || input.overrideIssueIds?.length
+    ? `${owned.change.reviewNote || ''}${owned.change.reviewNote ? ' ' : ''}[Reviewer override: source-evidence issue IDs=${input.overrideIssueIds?.length ? input.overrideIssueIds.join(',') : 'all'}; verify OCR/script corrections.]`
+    : owned.change.reviewNote;
   await db.update(batchRefineChanges).set({
     proposedText,
     proposedTextHash: metrics.proposedTextHash,
@@ -248,9 +275,7 @@ export async function approveBatchRefineChange(input: {
     reviewPriority: metrics.reviewPriority,
     priorityScore: metrics.priorityScore,
     flagsJson: metrics.reviewFlags,
-    reviewNote: input.overrideSourceEvidence === true || input.overrideIssueIds?.length
-      ? `${owned.change.reviewNote || ''}${owned.change.reviewNote ? ' ' : ''}[Reviewer override: source-evidence issue IDs=${input.overrideIssueIds?.length ? input.overrideIssueIds.join(',') : 'all'}; verify OCR/script corrections.]`
-      : owned.change.reviewNote,
+    reviewNote: reviewNoteWithRecordingVoice(overrideNote, validatedRecordingVoice(input.recordingVoice)),
     edited,
     decision: 'approved',
     audioStatus: 'queued',
@@ -303,7 +328,7 @@ export async function rejectBatchRefineChange(changeId: string, userId: string):
   }).where(and(eq(batchRefineChanges.id, changeId), eq(batchRefineChanges.userId, userId)));
 }
 
-export async function retryBatchRefineRecording(changeId: string, userId: string): Promise<void> {
+export async function retryBatchRefineRecording(changeId: string, userId: string, recordingVoice?: string): Promise<void> {
   const owned = await ownedChange(changeId, userId);
   if (!owned) throw new BatchRefineReviewConflictError('Batch Refine change not found.');
   if (owned.change.decision !== 'approved' || owned.change.audioStatus !== 'error') {
@@ -318,6 +343,7 @@ export async function retryBatchRefineRecording(changeId: string, userId: string
   await db.update(batchRefineChanges).set({
     audioStatus: 'queued',
     audioError: null,
+    reviewNote: reviewNoteWithRecordingVoice(owned.change.reviewNote, validatedRecordingVoice(recordingVoice)),
     updatedAt: Date.now(),
   }).where(and(eq(batchRefineChanges.id, changeId), eq(batchRefineChanges.userId, userId),
     eq(batchRefineChanges.decision, 'approved'), eq(batchRefineChanges.audioStatus, 'error')));

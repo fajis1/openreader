@@ -38,6 +38,12 @@ test('approving a failed output writes the canonical chapter, not the rejected s
   expect(mocks.put).toHaveBeenCalledWith('book', 'user', '0107__text.txt', Buffer.from(proposed), expect.any(String), null);
   expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ decision: 'approved', audioStatus: 'queued' }));
 });
+test('approval records the selected replacement recording voice', async () => {
+  mocks.rows = [[owned()], []];
+  mocks.objects.set('0107__text.txt', previous);
+  await approveBatchRefineChange({ changeId: 'change', userId: 'user', recordingVoice: 'af_heart' });
+  expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ reviewNote: 'repair [Recording voice=af_heart]' }));
+});
 test('rejects edits outside the flagged region before writing text or queueing audio', async () => {
   mocks.rows = [[owned()], []];
   await expect(approveBatchRefineChange({ changeId: 'change', userId: 'user', editedText: proposed.replace('arrived', 'departed') })).rejects.toThrow();

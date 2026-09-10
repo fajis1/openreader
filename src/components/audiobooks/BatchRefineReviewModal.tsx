@@ -92,12 +92,14 @@ export function BatchRefineReviewModal({
   bookId,
   runId,
   onRecordingQueued,
+  recordingVoice,
 }: {
   open: boolean;
   onClose: () => void;
   bookId: string;
   runId?: string | null;
   onRecordingQueued?: () => void;
+  recordingVoice?: string;
 }) {
   const [review, setReview] = useState<ReviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -191,7 +193,7 @@ export function BatchRefineReviewModal({
     setBusyId(change.id);
     try {
       const editedText = editingId === change.id ? drafts[change.id] : undefined;
-      await reviewAction({ action: 'approve', changeId: change.id, editedText }, 'Approved and queued for Kokoro.');
+      await reviewAction({ action: 'approve', changeId: change.id, editedText, recordingVoice }, 'Approved and queued for Kokoro.');
       setEditingId(null);
       onRecordingQueued?.();
     } catch (actionError) {
@@ -211,7 +213,7 @@ export function BatchRefineReviewModal({
     setBusyId(change.id);
     try {
       const editedText = editingId === change.id ? drafts[change.id] : undefined;
-      await reviewAction({ action: 'approve', changeId: change.id, editedText, overrideIssueIds }, 'Approved selected issues with source-evidence override and queued for Kokoro.');
+      await reviewAction({ action: 'approve', changeId: change.id, editedText, overrideIssueIds, recordingVoice }, 'Approved selected issues with source-evidence override and queued for Kokoro.');
       setEditingId(null);
       onRecordingQueued?.();
     } catch (actionError) {
@@ -238,7 +240,7 @@ export function BatchRefineReviewModal({
     if (!window.confirm(`Approve all ${pendingCount} pending changes and queue their replacement recordings?`)) return;
     setBusyId('approve-all');
     try {
-      await reviewAction({ action: 'approve-all', runId: review.run.id }, `Approved ${pendingCount} change(s) and queued Kokoro.`);
+      await reviewAction({ action: 'approve-all', runId: review.run.id, recordingVoice }, `Approved ${pendingCount} change(s) and queued Kokoro.`);
       onRecordingQueued?.();
     } catch (actionError) {
       toast.error(actionError instanceof Error ? actionError.message : 'Approve All failed.');
@@ -250,7 +252,7 @@ export function BatchRefineReviewModal({
   const retry = async (change: BatchRefineChange) => {
     setBusyId(change.id);
     try {
-      await reviewAction({ action: 'retry', changeId: change.id }, 'Recording queued again.');
+      await reviewAction({ action: 'retry', changeId: change.id, recordingVoice }, 'Recording queued again.');
       onRecordingQueued?.();
     } catch (actionError) {
       toast.error(actionError instanceof Error ? actionError.message : 'Retry failed.');
@@ -403,7 +405,21 @@ export function BatchRefineReviewModal({
                     {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && <p className="text-xs text-warning">Strict review note: source-word/OCR changes require verified source evidence. If you have confirmed an OCR artifact manually, use the override approval below; it is recorded with the chapter.</p>}
                     {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && sourceOverrideIssues.length > 0 && change.decision === 'pending' && (
                       <div className="space-y-1 rounded border border-warning-line bg-warning-wash p-2 text-xs text-warning">
-                        <p className="font-semibold">Select the specific findings you have verified as OCR/source corrections:</p>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-semibold">Select the findings you have verified as OCR/source corrections:</p>
+                          <button
+                            type="button"
+                            className="font-semibold underline"
+                            onClick={() => setOverrideSelections(current => ({
+                              ...current,
+                              [change.id]: selectedOverrides.size === sourceOverrideIssues.length
+                                ? []
+                                : sourceOverrideIssues.map(issue => issue.id),
+                            }))}
+                          >
+                            {selectedOverrides.size === sourceOverrideIssues.length ? 'Clear all' : `Select all (${sourceOverrideIssues.length})`}
+                          </button>
+                        </div>
                         {sourceOverrideIssues.map(issue => (
                           <label key={issue.id} className="flex items-start gap-2">
                             <input
@@ -506,18 +522,19 @@ export function BatchRefineReviewModal({
                       </button>
                       <button
                         onClick={() => void approve(change)}
-                        disabled={isBusy || remainingIssues.length > 0}
+                        disabled={isBusy || remainingIssues.length > 0 || sourceOverrideIssues.length > 0}
+                        title={sourceOverrideIssues.length > 0 ? 'This proposal changes source text. Select the verified findings and use Approve with override.' : undefined}
                         className="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-background hover:bg-secondary-accent disabled:opacity-50"
                       >
                         {isBusy ? 'Saving…' : isEditing ? 'Approve Edit & Record' : 'Approve & Record'}
                       </button>
-                      {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && remainingIssues.length === 0 && sourceOverrideIssues.length > 0 && selectedOverrides.size > 0 && (
+                      {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && remainingIssues.length === 0 && sourceOverrideIssues.length > 0 && (
                         <button
                           onClick={() => void approveWithOverride(change)}
-                          disabled={isBusy}
+                          disabled={isBusy || selectedOverrides.size === 0}
                           className="rounded border border-warning bg-warning-wash px-3 py-1.5 text-sm font-semibold text-warning hover:bg-surface-sunken disabled:opacity-50"
                         >
-                          Approve with override
+                          {selectedOverrides.size > 0 ? `Approve with override (${selectedOverrides.size})` : 'Select findings to override'}
                         </button>
                       )}
                     </>
