@@ -181,6 +181,16 @@ describe('pronunciation repair service', () => {
     expect(mocks.put.mock.calls.every(call => String(call[2]).endsWith('.diff'))).toBe(true);
   });
 
+  test('repairs independent malformed closing delimiters locally without Gemini', async () => {
+    const text = '[ἀνθρώποις](/ɑnθroʊpɔɪs/] [ἰσόθεον](/isoʊθɛɒn/) and [ποικίλων](/pɔɪkɪloʊn/]';
+    const result = await proposePronunciationRepair(seed(text));
+    expect(result).toMatchObject({ dictionaryRepairs: 2, aiRepairs: 0, unresolvedCount: 0 });
+    expect(mocks.gemini).not.toHaveBeenCalled();
+    expect(mocks.insert.mock.calls[0][0].proposedText).toBe(
+      '[ἀνθρώποις](/ɑnθroʊpɔɪs/) [ἰσόθεον](/isoʊθɛɒn/) and [ποικίλων](/pɔɪkɪloʊn/)',
+    );
+  });
+
   test('sends only the affected chapter and original context; applies returned patches', async () => {
     const input = seed('God θεοῦ.'); mocks.objects.set('0108__text.txt', 'UNRELATED CHAPTER');
     mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ patches: [{ id: '0', replacement: '[θεοῦ](/θɛu/)' }] }) }] } }] })));

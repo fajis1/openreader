@@ -11,6 +11,7 @@ export type PronunciationIssue = {
   text: string;
   context: string;
   reason: string;
+  kind: 'formatting' | 'missing_pronunciation' | 'ocr_source' | 'contextual' | 'unsafe_pronunciation' | 'structural';
   replacement?: string;
   dictionaryWord?: string;
 };
@@ -19,8 +20,12 @@ const TAG = /\[([^\]\r\n]+)\]\(\/([^/\r\n]+)\/\)/gu;
 const FOREIGN = /[\p{Script=Greek}\p{Script=Hebrew}]/u;
 
 function lookup(word: string, dictionary: Record<string, string>): string | undefined {
-  const expanded = expandScholarEditorialWords(word.replace(/\\/gu, ''));
-  const saved = dictionary[expanded];
+  const expanded = contextualPronunciationWord(word)
+    || expandScholarEditorialWords(word.replace(/\\/gu, ''));
+  // Elided δ᾽/γ᾽ are contextual labels. They may reuse an approved complete
+  // word pronunciation, but are never themselves promoted as dictionary keys.
+  const accentedContext = expanded === 'δε' ? 'δέ' : expanded === 'γε' ? 'γέ' : undefined;
+  const saved = dictionary[expanded] || (accentedContext ? dictionary[accentedContext] : undefined);
   if (!saved || !/^[\p{Letter}\p{Mark}'’᾽᾿ʼ]+$/u.test(expanded)) return undefined;
   // Only compact phoneme spacing for a confirmed single word. Never mutate
   // the saved dictionary, or collapse whitespace in a phrase/initialism.
@@ -96,6 +101,9 @@ export function scanPronunciationIssues(text: string, dictionary: Record<string,
     if (hasSplitScholarEditorialWord(token[0])) add(token.index, token.index + token[0].length, 'An editorial word is split across pronunciation tags.');
   }
   for (const match of masked.matchAll(/[\p{Script=Greek}\p{Script=Hebrew}][\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’᾽᾿ʼ]*(?:\([\p{Script=Greek}\p{Script=Hebrew}\p{Mark}]+\)[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’᾽᾿ʼ]*)*/gu)) {
+    // A detached Greek elision mark is punctuation, not a pronounceable
+    // foreign word. Preserve it exactly and scan only lexical text.
+    if (/^[᾿᾽'’ʼ]+$/u.test(match[0])) continue;
     add(match.index, match.index + match[0].length, 'Greek or Hebrew is outside a pronunciation tag.');
   }
   for (const match of masked.matchAll(/\(\s*\)|\\+(?=[\p{Script=Greek}\p{Script=Hebrew}])|\[[^\]\r\n]*\]\(\/[^\r\n)\]]*(?:\)|\]|$)/gu)) {
@@ -135,7 +143,18 @@ export function scanPronunciationIssues(text: string, dictionary: Record<string,
       }
       else if (formatted !== value && !scanPronunciationIssues(formatted).length) replacement = formatted;
     }
-    return { ...region, id: String(index), text: value, dictionaryWord, context: text.slice(Math.max(0, region.start - 180), Math.min(text.length, region.end + 180)), ...(replacement !== undefined ? { replacement } : {}) };
+    const kind: PronunciationIssue['kind'] = /Mixed-script OCR|bare IPA/iu.test(region.reason)
+      ? 'ocr_source'
+      : /Grammatical suffix|elision/iu.test(region.reason) || /^[γδ][’'᾽᾿ʼ]$/u.test(value) || /^\[[γδ][’'᾽᾿ʼ]\]/u.test(value)
+        ? 'contextual'
+        : /outside a pronunciation tag|brackets but no pronunciation/iu.test(region.reason)
+          ? 'missing_pronunciation'
+          : /Malformed pronunciation|closing delimiter|Empty parentheses|Stray backslash/iu.test(region.reason)
+            ? 'formatting'
+            : /Kokoro|pronunciation covers|Dictionary word|standalone|stress|syllable/iu.test(region.reason)
+              ? 'unsafe_pronunciation'
+              : 'structural';
+    return { ...region, id: String(index), text: value, kind, dictionaryWord, context: text.slice(Math.max(0, region.start - 180), Math.min(text.length, region.end + 180)), ...(replacement !== undefined ? { replacement } : {}) };
   });
 }
 

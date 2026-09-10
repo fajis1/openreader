@@ -351,7 +351,15 @@ export function BatchRefineReviewModal({
               ? scanPronunciationIssues(isEditing ? drafts[change.id] ?? change.proposedText : change.proposedText) : [];
             const sourceIssues = review?.run?.rule === PRONUNCIATION_REPAIR_RULE
               ? scanPronunciationIssues(change.previousText) : [];
-            const selectedOverrides = new Set(overrideSelections[change.id] || []);
+            // Raw Greek/Hebrew that is merely wrapped in a pronunciation tag
+            // preserves the source word and does not need an override. Only
+            // findings whose exact source span disappeared from the proposal
+            // are source/OCR changes requiring explicit reviewer consent.
+            const proposedVisibleSource = change.proposedText.replace(/\[([^\]\r\n]+)\]\(\/[^/\r\n]+\/\)/gu, '$1');
+            const sourceOverrideIssues = sourceIssues.filter(issue =>
+              (issue.kind === 'ocr_source' || issue.kind === 'structural')
+              && !proposedVisibleSource.includes(issue.text));
+            const selectedOverrides = new Set((overrideSelections[change.id] || []).filter(id => sourceOverrideIssues.some(issue => issue.id === id)));
             const isExpanded = isEditing || expandedComparisons.includes(change.id);
             const ids = flagIds(change.flagsJson);
             return (
@@ -393,10 +401,10 @@ export function BatchRefineReviewModal({
                     ))}
                     {change.reviewNote && <p className="text-xs text-text-soft"><span className="font-semibold">AI note:</span> {change.reviewNote}</p>}
                     {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && <p className="text-xs text-warning">Strict review note: source-word/OCR changes require verified source evidence. If you have confirmed an OCR artifact manually, use the override approval below; it is recorded with the chapter.</p>}
-                    {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && sourceIssues.length > 0 && change.decision === 'pending' && (
+                    {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && sourceOverrideIssues.length > 0 && change.decision === 'pending' && (
                       <div className="space-y-1 rounded border border-warning-line bg-warning-wash p-2 text-xs text-warning">
                         <p className="font-semibold">Select the specific findings you have verified as OCR/source corrections:</p>
-                        {sourceIssues.map(issue => (
+                        {sourceOverrideIssues.map(issue => (
                           <label key={issue.id} className="flex items-start gap-2">
                             <input
                               type="checkbox"
@@ -503,7 +511,7 @@ export function BatchRefineReviewModal({
                       >
                         {isBusy ? 'Saving…' : isEditing ? 'Approve Edit & Record' : 'Approve & Record'}
                       </button>
-                      {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && remainingIssues.length === 0 && (overrideSelections[change.id] || []).length > 0 && (
+                      {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && remainingIssues.length === 0 && sourceOverrideIssues.length > 0 && selectedOverrides.size > 0 && (
                         <button
                           onClick={() => void approveWithOverride(change)}
                           disabled={isBusy}

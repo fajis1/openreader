@@ -150,7 +150,7 @@ export async function repairPronunciationText(input: {
     diagnostics.stage = 'patch-application';
     proposedText = applyPronunciationPatches(input.text, issues, validPatches, { sourceText: input.original });
     diagnostics.stage = 'chapter-validation';
-    diagnostics.remainingFindings = scanPronunciationIssues(proposedText).map(({ start, end, text, reason }) => ({ start, end, text, reason }));
+    diagnostics.remainingFindings = scanPronunciationIssues(proposedText).map(({ start, end, text, reason, kind }) => ({ start, end, text, reason, issueKind: kind }));
     assertPronunciationRepair(input.text, proposedText, { sourceText: input.original, allowRemaining: true });
     if (!diagnostics.remainingFindings.length) {
       assertPronunciationRepair(input.text, proposedText, { sourceText: input.original });
@@ -165,4 +165,3 @@ export async function repairPronunciationText(input: {
   catch (error) { diagnostics.validatorReason = error instanceof Error ? error.message : 'Voice validation failed'; throw error; }
   return { proposedText, validPatches, aiIds, unresolved };
 }
-

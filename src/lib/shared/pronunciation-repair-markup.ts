@@ -22,6 +22,14 @@ export function pronunciationMarkupRegions(text: string): { start: number; end: 
     if (depth !== 0 || text.slice(end + 1, end + 3) !== '(/') continue;
     depth = 1;
     for (end += 3; end < limit && !/[\r\n]/u.test(text[end]); end++) {
+      // A common OCR/authoring typo closes the IPA payload with `/]` rather
+      // than `/)`. Bound that malformed tag here instead of allowing its
+      // opening parenthesis to swallow every later tag up to another `)`.
+      if (depth === 1 && text[end] === '/' && text[end + 1] === ']') {
+        end += 1;
+        depth = 0;
+        break;
+      }
       if (text[end] === '[') nested = true;
       if (text[end] === '(') depth++;
       if (text[end] === ')' && --depth === 0) break;

@@ -42,6 +42,7 @@ describe('targeted pronunciation scan and patches', () => {
       expect(scanPronunciationIssues(`[${label}](/ɡɛ/)`)).toEqual([]);
       expect(scanPronunciationIssues(`Before ${label} after.`)[0].text).toBe(label);
     }
+    expect(scanPronunciationIssues('Before ᾿ after.')).toEqual([]);
     expect(scanPronunciationIssues('[δ᾽](/d)')[0].replacement).toBeUndefined();
     expect(scanPronunciationIssues('[σ](/s/)').length).toBeGreaterThan(0);
     expect(scanPronunciationIssues('[θ᾽](/θɛ/)').length).toBeGreaterThan(0);
@@ -74,6 +75,28 @@ describe('targeted pronunciation scan and patches', () => {
     expect(scanPronunciationIssues('[χάρι](/kɑrɪ/)[τας](/tɑs/)', { 'χάριτας': '/kɑrɪtɑs/' })[0].replacement).toBe('[χάριτας](/kɑrɪtɑs/)');
     const broken = '[ἁρπαγμός](/hɑrpɑɡmɒs/]';
     expect(scanPronunciationIssues(broken + ' next.')[0]).toMatchObject({ text: broken, replacement: '[ἁρπαγμός](/hɑrpɑɡmɒs/)' });
+  });
+
+  test('bounds each malformed closing delimiter without swallowing neighboring valid tags', () => {
+    const first = '[ἀνθρώποις](/ɑnθroʊpɔɪs/]';
+    const second = '[μικροχαρῶν](/mikroʊxɑroʊn/]';
+    const text = `${first} [ἰσόθεον](/isoʊθɛɒn/) [ὄντα](/ɒntɑ/). ${second} [νομίζουσι](/nɒmɪzusɪ/).`;
+    const issues = scanPronunciationIssues(text);
+    expect(issues.map(issue => issue.text)).toEqual([first, second]);
+    expect(issues.every(issue => issue.kind === 'formatting')).toBe(true);
+    expect(issues.map(issue => issue.replacement)).toEqual([
+      '[ἀνθρώποις](/ɑnθroʊpɔɪs/)',
+      '[μικροχαρῶν](/mikroʊxɑroʊn/)',
+    ]);
+  });
+
+  test('repairs an elided contextual form only from an approved complete-word pronunciation', () => {
+    const text = 'Words [δ᾽](/d) [οὐδεὶς](/udeɪs/).';
+    expect(scanPronunciationIssues(text)[0]).toMatchObject({ text: '[δ᾽](/d)', kind: 'contextual' });
+    expect(scanPronunciationIssues(text)[0]).not.toHaveProperty('replacement');
+    expect(scanPronunciationIssues(text, { 'δέ': '/dɛ/' })[0]).toMatchObject({
+      text: '[δ᾽](/d)', kind: 'contextual', replacement: '[δ᾽](/dɛ/)',
+    });
   });
 
   test('permits only source-supported corrupt-label reconstruction', () => {
