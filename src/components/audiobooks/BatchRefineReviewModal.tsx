@@ -120,6 +120,7 @@ export function BatchRefineReviewModal({
   const [openFlag, setOpenFlag] = useState<string | null>(null);
   const [expandedComparisons, setExpandedComparisons] = useState<string[]>([]);
   const [overrideSelections, setOverrideSelections] = useState<Record<string, string[]>>({});
+  const [fullManualOverrides, setFullManualOverrides] = useState<string[]>([]);
 
   const loadReview = useCallback(async (quiet = false) => {
     if (!open) return;
@@ -213,15 +214,18 @@ export function BatchRefineReviewModal({
 
   const approveWithOverride = async (change: BatchRefineChange) => {
     const overrideIssueIds = overrideSelections[change.id] || [];
-    if (!overrideIssueIds.length) {
+    const overrideFullManualEdit = fullManualOverrides.includes(change.id);
+    if (!overrideIssueIds.length && !overrideFullManualEdit) {
       toast.error('Select at least one issue to override.');
       return;
     }
-    if (!window.confirm(`Approve ${overrideIssueIds.length} selected pronunciation issue(s) with a source-evidence override? Unchecked issues remain protected.`)) return;
+    if (!window.confirm(overrideFullManualEdit
+      ? 'Approve the entire manual edit? This permits intentional text changes outside flagged passages, but pronunciation and speaker safety checks still apply.'
+      : `Approve ${overrideIssueIds.length} selected pronunciation issue(s) with a source-evidence override? Unchecked issues remain protected.`)) return;
     setBusyId(change.id);
     try {
       const editedText = editingId === change.id ? drafts[change.id] : undefined;
-      await reviewAction({ action: 'approve', changeId: change.id, editedText, overrideIssueIds, recordingVoice }, 'Approved selected issues with source-evidence override and queued for Kokoro.');
+      await reviewAction({ action: 'approve', changeId: change.id, editedText, overrideIssueIds, overrideFullManualEdit, recordingVoice }, 'Approved reviewed manual changes and queued for Kokoro.');
       setEditingId(null);
       onRecordingQueued?.();
     } catch (actionError) {
@@ -444,6 +448,18 @@ export function BatchRefineReviewModal({
                         ))}
                       </div>
                     )}
+                    {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && isEditing && change.decision === 'pending' && (
+                      <label className="flex items-start gap-2 rounded border border-warning-line bg-warning-wash p-2 text-xs font-semibold text-warning">
+                        <input
+                          type="checkbox"
+                          checked={fullManualOverrides.includes(change.id)}
+                          onChange={event => setFullManualOverrides(current => event.target.checked
+                            ? [...new Set([...current, change.id])]
+                            : current.filter(id => id !== change.id))}
+                        />
+                        <span>Approve my entire manual edit, including intentional changes outside the flagged passages.</span>
+                      </label>
+                    )}
                     {remainingIssues.length > 0 && <div className="space-y-2 text-sm text-danger">
                       <p>Needs review: {remainingIssues.length} unresolved passages. Edit the proposal to resolve these before recording.</p>
                       {remainingIssues.slice(0, 20).map(issue => {
@@ -571,13 +587,15 @@ export function BatchRefineReviewModal({
                       >
                         {isBusy ? 'Saving…' : isEditing ? 'Approve Edit & Record' : 'Approve & Record'}
                       </button>
-                      {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && remainingIssues.length === 0 && sourceOverrideIssues.length > 0 && (
+                      {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && remainingIssues.length === 0 && (sourceOverrideIssues.length > 0 || isEditing) && (
                         <button
                           onClick={() => void approveWithOverride(change)}
-                          disabled={isBusy || selectedOverrides.size === 0}
+                          disabled={isBusy || selectedOverrides.size === 0 && !fullManualOverrides.includes(change.id)}
                           className="rounded border border-warning bg-warning-wash px-3 py-1.5 text-sm font-semibold text-warning hover:bg-surface-sunken disabled:opacity-50"
                         >
-                          {selectedOverrides.size > 0 ? `Approve with override (${selectedOverrides.size})` : 'Select findings to override'}
+                          {fullManualOverrides.includes(change.id)
+                            ? 'Approve entire manual edit'
+                            : selectedOverrides.size > 0 ? `Approve with override (${selectedOverrides.size})` : 'Select findings to override'}
                         </button>
                       )}
                     </>

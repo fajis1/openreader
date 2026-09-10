@@ -1,10 +1,20 @@
 import { assertPronunciationRepair } from '@/lib/shared/pronunciation-issues';
+import { validateSmartAudioOutput } from '@/lib/shared/smart-audio-cleanup';
 import { getAudiobookObjectBuffer } from './blobstore';
 
 /** Recheck source evidence at approval and recording, never trust an AI claim. */
 export async function assertStoredPronunciationRepair(input: {
-  bookId: string; userId: string; fileName: string; previous: string; proposed: string; allowSourceEvidenceOverride?: boolean; overrideIssueIds?: string[];
+  bookId: string; userId: string; fileName: string; previous: string; proposed: string; allowSourceEvidenceOverride?: boolean; overrideIssueIds?: string[]; allowFullManualOverride?: boolean;
 }) {
+  if (input.allowFullManualOverride) {
+    const previousVoices = input.previous.match(/<\/?voice\b[^>]*>/gu) || [];
+    const proposedVoices = input.proposed.match(/<\/?voice\b[^>]*>/gu) || [];
+    if (JSON.stringify(previousVoices) !== JSON.stringify(proposedVoices)) {
+      throw new Error('A pronunciation-repair override cannot change speaker assignments.');
+    }
+    validateSmartAudioOutput(input.proposed, { requirePronunciationTagsForForeignScripts: true });
+    return;
+  }
   if (input.allowSourceEvidenceOverride || input.overrideIssueIds?.length) {
     const ids = new Set(input.overrideIssueIds || []);
     const allow = input.overrideIssueIds?.length

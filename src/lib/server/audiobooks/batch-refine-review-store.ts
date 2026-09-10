@@ -192,6 +192,7 @@ export async function approveBatchRefineChange(input: {
   overrideSourceEvidence?: boolean;
   overrideIssueIds?: string[];
   recordingVoice?: string;
+  overrideFullManualEdit?: boolean;
 }): Promise<{ changeId: string; queued: boolean }> {
   const owned = await ownedChange(input.changeId, input.userId);
   if (!owned) throw new BatchRefineReviewConflictError('Batch Refine change not found.');
@@ -207,7 +208,7 @@ export async function approveBatchRefineChange(input: {
   if (pronunciationRepair) {
     const jobs = await db.select({ status: audiobookJobs.status }).from(audiobookJobs).where(and(eq(audiobookJobs.userId, input.userId), eq(audiobookJobs.documentId, owned.change.documentId)));
     if (jobs.some((job: { status: string }) => job.status === 'queued' || job.status === 'running')) throw new BatchRefineReviewConflictError('Pause background generation before approving pronunciation repairs.');
-    await assertStoredPronunciationRepair({ bookId: owned.change.documentId, userId: input.userId, fileName: owned.change.textFileName, previous: owned.change.previousText, proposed: proposedText, allowSourceEvidenceOverride: input.overrideSourceEvidence === true, overrideIssueIds: input.overrideIssueIds });
+    await assertStoredPronunciationRepair({ bookId: owned.change.documentId, userId: input.userId, fileName: owned.change.textFileName, previous: owned.change.previousText, proposed: proposedText, allowSourceEvidenceOverride: input.overrideSourceEvidence === true, overrideIssueIds: input.overrideIssueIds, allowFullManualOverride: input.overrideFullManualEdit === true });
     if (/<voice\b/u.test(proposedText)) parseVoiceTaggedText(proposedText, { includeOmitted: true });
   }
   if (
@@ -261,8 +262,8 @@ export async function approveBatchRefineChange(input: {
     null,
   );
 
-  const overrideNote = input.overrideSourceEvidence === true || input.overrideIssueIds?.length
-    ? `${owned.change.reviewNote || ''}${owned.change.reviewNote ? ' ' : ''}[Reviewer override: source-evidence issue IDs=${input.overrideIssueIds?.length ? input.overrideIssueIds.join(',') : 'all'}; verify OCR/script corrections.]`
+  const overrideNote = input.overrideSourceEvidence === true || input.overrideIssueIds?.length || input.overrideFullManualEdit
+    ? `${owned.change.reviewNote || ''}${owned.change.reviewNote ? ' ' : ''}[Reviewer override: ${input.overrideFullManualEdit ? 'entire manual edit' : `source-evidence issue IDs=${input.overrideIssueIds?.length ? input.overrideIssueIds.join(',') : 'all'}`}; verify OCR/script corrections.]`
     : owned.change.reviewNote;
   await db.update(batchRefineChanges).set({
     proposedText,

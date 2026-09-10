@@ -49,6 +49,16 @@ test('rejects edits outside the flagged region before writing text or queueing a
   await expect(approveBatchRefineChange({ changeId: 'change', userId: 'user', editedText: proposed.replace('arrived', 'departed') })).rejects.toThrow();
   expect(mocks.put).not.toHaveBeenCalled(); expect(mocks.update).not.toHaveBeenCalled();
 });
+test('allows an explicitly confirmed full manual edit while retaining pronunciation safety', async () => {
+  mocks.rows = [[owned()], []];
+  mocks.objects.set('0107__text.txt', previous);
+  const editedText = 'A preface. The [Aetherian](/eɪθɪriən/) arrived.';
+  await expect(approveBatchRefineChange({ changeId: 'change', userId: 'user', editedText, overrideFullManualEdit: true })).resolves.toEqual({ changeId: 'change', queued: true });
+  expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({
+    proposedText: editedText,
+    reviewNote: expect.stringContaining('[Reviewer override: entire manual edit;'),
+  }));
+});
 test('protects a canonical chapter changed after failed generation', async () => {
   mocks.rows = [[owned('0107__rejected.txt')], []];
   mocks.objects.set('0107__rejected.txt', previous);

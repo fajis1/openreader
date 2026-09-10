@@ -214,9 +214,11 @@ async function recordApprovedChange(
   };
   if (pronunciationRepair) {
     const overrideMarker = change.reviewNote?.match(/\[Reviewer override: source-evidence issue IDs=([^;]+);/u)?.[1];
+    const fullManualOverride = change.reviewNote?.includes('[Reviewer override: entire manual edit;') === true;
     await assertStoredPronunciationRepair({ bookId: change.documentId, userId: change.userId, fileName: change.textFileName, previous: change.previousText, proposed: currentText,
       allowSourceEvidenceOverride: overrideMarker === 'all' || change.reviewNote?.includes('[Reviewer override: source-evidence validation') === true,
-      overrideIssueIds: overrideMarker && overrideMarker !== 'all' ? overrideMarker.split(',').filter(Boolean) : undefined });
+      overrideIssueIds: overrideMarker && overrideMarker !== 'all' ? overrideMarker.split(',').filter(Boolean) : undefined,
+      allowFullManualOverride: fullManualOverride });
     await assertRepairStillCurrent();
   }
   if (
