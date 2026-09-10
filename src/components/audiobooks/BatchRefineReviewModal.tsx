@@ -109,6 +109,7 @@ export function BatchRefineReviewModal({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [openFlag, setOpenFlag] = useState<string | null>(null);
   const [expandedComparisons, setExpandedComparisons] = useState<string[]>([]);
+  const [overrideSelections, setOverrideSelections] = useState<Record<string, string[]>>({});
 
   const loadReview = useCallback(async (quiet = false) => {
     if (!open) return;
@@ -195,6 +196,26 @@ export function BatchRefineReviewModal({
       onRecordingQueued?.();
     } catch (actionError) {
       toast.error(actionError instanceof Error ? actionError.message : 'Approval failed.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const approveWithOverride = async (change: BatchRefineChange) => {
+    const overrideIssueIds = overrideSelections[change.id] || [];
+    if (!overrideIssueIds.length) {
+      toast.error('Select at least one issue to override.');
+      return;
+    }
+    if (!window.confirm(`Approve ${overrideIssueIds.length} selected pronunciation issue(s) with a source-evidence override? Unchecked issues remain protected.`)) return;
+    setBusyId(change.id);
+    try {
+      const editedText = editingId === change.id ? drafts[change.id] : undefined;
+      await reviewAction({ action: 'approve', changeId: change.id, editedText, overrideIssueIds }, 'Approved selected issues with source-evidence override and queued for Kokoro.');
+      setEditingId(null);
+      onRecordingQueued?.();
+    } catch (actionError) {
+      toast.error(actionError instanceof Error ? actionError.message : 'Override approval failed.');
     } finally {
       setBusyId(null);
     }
@@ -328,6 +349,9 @@ export function BatchRefineReviewModal({
             const isBusy = busyId === change.id;
             const remainingIssues = review?.run?.rule === PRONUNCIATION_REPAIR_RULE
               ? scanPronunciationIssues(isEditing ? drafts[change.id] ?? change.proposedText : change.proposedText) : [];
+            const sourceIssues = review?.run?.rule === PRONUNCIATION_REPAIR_RULE
+              ? scanPronunciationIssues(change.previousText) : [];
+            const selectedOverrides = new Set(overrideSelections[change.id] || []);
             const isExpanded = isEditing || expandedComparisons.includes(change.id);
             const ids = flagIds(change.flagsJson);
             return (
@@ -345,7 +369,7 @@ export function BatchRefineReviewModal({
                   <span className="ml-auto text-xs font-semibold text-text-soft">{audioStatusLabel(change)}</span>
                 </div>
 
-                {(ids.length > 0 || change.reviewNote || remainingIssues.length > 0) && (
+                {(ids.length > 0 || change.reviewNote || remainingIssues.length > 0 || review?.run?.rule === PRONUNCIATION_REPAIR_RULE) && (
                   <div className="space-y-2 border-b border-line-soft bg-surface-sunken px-4 py-3">
                     <div className="flex flex-wrap gap-2">
                       {ids.map((id) => {
@@ -368,6 +392,26 @@ export function BatchRefineReviewModal({
                       </p>
                     ))}
                     {change.reviewNote && <p className="text-xs text-text-soft"><span className="font-semibold">AI note:</span> {change.reviewNote}</p>}
+                    {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && <p className="text-xs text-warning">Strict review note: source-word/OCR changes require verified source evidence. If you have confirmed an OCR artifact manually, use the override approval below; it is recorded with the chapter.</p>}
+                    {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && sourceIssues.length > 0 && change.decision === 'pending' && (
+                      <div className="space-y-1 rounded border border-warning-line bg-warning-wash p-2 text-xs text-warning">
+                        <p className="font-semibold">Select the specific findings you have verified as OCR/source corrections:</p>
+                        {sourceIssues.map(issue => (
+                          <label key={issue.id} className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedOverrides.has(issue.id)}
+                              onChange={(event) => setOverrideSelections(current => {
+                                const selected = new Set(current[change.id] || []);
+                                if (event.target.checked) selected.add(issue.id); else selected.delete(issue.id);
+                                return { ...current, [change.id]: [...selected] };
+                              })}
+                            />
+                            <span><code>{issue.text}</code> — {issue.reason}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
                     {remainingIssues.length > 0 && <div className="text-sm text-danger">
                       <p>Needs review: {remainingIssues.length} unresolved passages. Edit the proposal to resolve these before recording.</p>
                       <ul className="mt-2 list-disc pl-5">{remainingIssues.slice(0, 20).map(issue => <li key={issue.id}><code>{issue.text}</code>: {issue.reason}</li>)}</ul>
@@ -459,6 +503,15 @@ export function BatchRefineReviewModal({
                       >
                         {isBusy ? 'Saving…' : isEditing ? 'Approve Edit & Record' : 'Approve & Record'}
                       </button>
+                      {review?.run?.rule === PRONUNCIATION_REPAIR_RULE && remainingIssues.length === 0 && (overrideSelections[change.id] || []).length > 0 && (
+                        <button
+                          onClick={() => void approveWithOverride(change)}
+                          disabled={isBusy}
+                          className="rounded border border-warning bg-warning-wash px-3 py-1.5 text-sm font-semibold text-warning hover:bg-surface-sunken disabled:opacity-50"
+                        >
+                          Approve with override
+                        </button>
+                      )}
                     </>
                   )}
                 </div>

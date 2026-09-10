@@ -175,6 +175,13 @@ describe('targeted pronunciation scan and patches', () => {
     expect(() => applyPronunciationPatches(text.replace('Aetherian', 'Another'), issues, [good])).toThrow('changed');
   });
 
+  test('requires explicit reviewer override for a confirmed cross-script OCR correction', () => {
+    const previous = 'The quotation contains [ἔرως](/ɛroʊs/).';
+    const proposed = 'The quotation contains [ἔρως](/ɛroʊs/).';
+    expect(() => assertPronunciationRepair(previous, proposed)).toThrow('source');
+    expect(() => assertPronunciationRepair(previous, proposed, { allowSourceEvidenceOverride: true })).not.toThrow();
+  });
+
   test('preserves Audio Drama speaker boundaries and rejects unrepaired output', () => {
     const text = '<voice name="af_bella">The [Aetherian](/bad split/) came.</voice>\n<voice name="am_adam">Hello.</voice>';
     const issues = scanPronunciationIssues(text, dictionary);

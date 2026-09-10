@@ -64,7 +64,10 @@ export async function POST(request: Request) {
     if (action === 'approve') {
       if (!changeId) return NextResponse.json({ error: 'changeId is required' }, { status: 400 });
       const editedText = typeof body.editedText === 'string' ? body.editedText : undefined;
-      const result = await approveBatchRefineChange({ changeId, userId: ctx.userId, editedText });
+      const overrideIssueIds = Array.isArray(body.overrideIssueIds)
+        ? body.overrideIssueIds.filter((value): value is string => typeof value === 'string')
+        : undefined;
+      const result = await approveBatchRefineChange({ changeId, userId: ctx.userId, editedText, overrideSourceEvidence: body.overrideSourceEvidence === true, overrideIssueIds });
       wakeRecordingQueue();
       return NextResponse.json({ success: true, ...result });
     }

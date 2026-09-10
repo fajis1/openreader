@@ -3,8 +3,16 @@ import { getAudiobookObjectBuffer } from './blobstore';
 
 /** Recheck source evidence at approval and recording, never trust an AI claim. */
 export async function assertStoredPronunciationRepair(input: {
-  bookId: string; userId: string; fileName: string; previous: string; proposed: string;
+  bookId: string; userId: string; fileName: string; previous: string; proposed: string; allowSourceEvidenceOverride?: boolean; overrideIssueIds?: string[];
 }) {
+  if (input.allowSourceEvidenceOverride || input.overrideIssueIds?.length) {
+    const ids = new Set(input.overrideIssueIds || []);
+    const allow = input.overrideIssueIds?.length
+      ? (issue: { id: string }) => ids.has(issue.id)
+      : true;
+    assertPronunciationRepair(input.previous, input.proposed, { allowSourceEvidenceOverride: allow });
+    return;
+  }
   try { assertPronunciationRepair(input.previous, input.proposed); return; }
   catch (error) {
     if (!(error instanceof Error) || !error.message.includes('English')) throw error;

@@ -144,7 +144,7 @@ function visibleEnglish(text: string): string {
   return normalizeRepairMarkup(text).replace(TAG, '$1').replace(/\[([^\]\r\n]+)\]\(\/[^\r\n)]*(?:\)|$)/gu, '$1').replace(/<[^>]*>/gu, '').match(/\p{Script=Latin}[\p{Script=Latin}\p{Mark}'’-]*|\p{Number}+/gu)?.join(' ') || '';
 }
 
-export type RepairValidationOptions = { sourceText?: string; allowRemaining?: boolean };
+export type RepairValidationOptions = { sourceText?: string; allowRemaining?: boolean; allowSourceEvidenceOverride?: boolean | ((issue: PronunciationIssue) => boolean) };
 
 function visibleForeign(text: string): string {
   return normalizeRepairMarkup(text).replace(TAG, '$1').replace(/\[([^\]\r\n]+)\]\(\/[^\r\n)]*(?:\)|$)/gu, '$1')
@@ -172,8 +172,9 @@ function nestedSourceReconstruction(original: string, replacement: string, sourc
     .some(passage => ` ${words(passage).join(' ')} `.includes(` ${intended} `));
 }
 
-function assertSourceWords(original: string, replacement: string, sourceText?: string): void {
+function assertSourceWords(original: string, replacement: string, sourceText?: string, allowSourceEvidenceOverride = false): void {
   if (original === replacement) return;
+  if (allowSourceEvidenceOverride) return;
   // A malformed outer payload can contain more narrated words than its label.
   // Never compare just that label and accidentally authorize dropping the tail.
   if (pronunciationMarkupRegions(normalizeRepairMarkup(original)).some(region => region.nested)) {
@@ -237,7 +238,10 @@ export function assertPronunciationRepair(previous: string, proposed: string, op
     if (end < 0) throw new Error('Repair changed surrounding chapter text.');
     const replacement = proposed.slice(proposedCursor, end);
     if ((visibleEnglish(issue.text) !== visibleEnglish(replacement) && !sourceSupportedReconstruction(issue.text, replacement, options.sourceText) && !nestedSourceReconstruction(issue.text, replacement, options.sourceText)) || /[<>]/u.test(replacement)) throw new Error('Repair changed English text or speaker assignments.');
-    assertSourceWords(issue.text, replacement, options.sourceText);
+    const override = typeof options.allowSourceEvidenceOverride === 'function'
+      ? options.allowSourceEvidenceOverride(issue)
+      : options.allowSourceEvidenceOverride === true;
+    assertSourceWords(issue.text, replacement, options.sourceText, override);
     proposedCursor = end;
   }
   if (previous.slice(cursor) !== proposed.slice(proposedCursor)) throw new Error('Repair changed the end of the chapter.');
