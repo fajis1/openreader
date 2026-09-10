@@ -70,6 +70,13 @@ function flagIds(value: unknown): string[] {
   return [];
 }
 
+function visiblePronunciationSource(value: string): string {
+  return value
+    .replace(/\[([^\]\r\n]+)\]\(\/[^/\r\n]+\/[\)\]]/gu, '$1')
+    .replace(/^\[([^\]\r\n]+)\]$/u, '$1')
+    .normalize('NFC');
+}
+
 function priorityClasses(priority: BatchRefineChange['reviewPriority']): string {
   if (priority === 'high') return 'border-danger bg-danger-wash text-danger';
   if (priority === 'medium') return 'border-accent-line bg-accent-wash text-accent';
@@ -353,14 +360,13 @@ export function BatchRefineReviewModal({
               ? scanPronunciationIssues(isEditing ? drafts[change.id] ?? change.proposedText : change.proposedText) : [];
             const sourceIssues = review?.run?.rule === PRONUNCIATION_REPAIR_RULE
               ? scanPronunciationIssues(change.previousText) : [];
-            // Raw Greek/Hebrew that is merely wrapped in a pronunciation tag
-            // preserves the source word and does not need an override. Only
-            // findings whose exact source span disappeared from the proposal
-            // are source/OCR changes requiring explicit reviewer consent.
-            const proposedVisibleSource = change.proposedText.replace(/\[([^\]\r\n]+)\]\(\/[^/\r\n]+\/\)/gu, '$1');
+            // Compare visible source text, not scanner categories. The server
+            // can require source evidence for a correction found under any
+            // issue kind (including a malformed tag), and the UI must expose
+            // that exact finding instead of allowing an unexplained failure.
+            const proposedVisibleSource = visiblePronunciationSource(change.proposedText);
             const sourceOverrideIssues = sourceIssues.filter(issue =>
-              (issue.kind === 'ocr_source' || issue.kind === 'structural')
-              && !proposedVisibleSource.includes(issue.text));
+              !proposedVisibleSource.includes(visiblePronunciationSource(issue.text)));
             const selectedOverrides = new Set((overrideSelections[change.id] || []).filter(id => sourceOverrideIssues.some(issue => issue.id === id)));
             const isExpanded = isEditing || expandedComparisons.includes(change.id);
             const ids = flagIds(change.flagsJson);
