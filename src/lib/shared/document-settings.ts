@@ -53,6 +53,8 @@ function normalizeLexicon(value: unknown): SmartAudioBookLexicon | undefined {
         ? { confidence: Math.max(0, Math.min(1, entry.confidence)) }
         : {}),
       ...(typeof entry.needsReview === 'boolean' ? { needsReview: entry.needsReview } : {}),
+      ...(typeof entry.definitionOmitted === 'boolean' ? { definitionOmitted: entry.definitionOmitted } : {}),
+      ...(entry.approvedRepair === true ? { approvedRepair: true } : {}),
     };
   }
 

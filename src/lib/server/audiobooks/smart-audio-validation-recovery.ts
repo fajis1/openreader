@@ -8,6 +8,10 @@ import { resolveSmartAudioValidationRepairModel } from '@/lib/shared/smart-audio
 
 type WorkerRecord = Record<string, unknown>;
 
+function throwIfRecoveryCancelled(error: unknown): void {
+  if (error instanceof Error && ['AbortError', 'TimeoutError', 'AudiobookJobStoppedError'].includes(error.name)) throw error;
+}
+
 export type SmartAudioValidationRecovery<T> = {
   result: T;
   workerResult: WorkerRecord;
@@ -130,7 +134,21 @@ export async function resolveSmartAudioWithValidationRecovery<T>(input: {
   sourceFallback?: (rejectedResult: unknown) => unknown;
   authoritativePronunciations: Record<string, string>;
   onUnrecoverable?: (result: WorkerRecord, errors: string[]) => Promise<void>;
+  targetedRepair?: (result: unknown) => Promise<unknown>;
 }): Promise<SmartAudioValidationRecovery<T>> {
+  let targetedChanged = false;
+  if (input.targetedRepair) {
+    try {
+      const repaired = await input.targetedRepair(input.initialResult);
+      targetedChanged = repaired !== input.initialResult;
+      input = { ...input, initialResult: repaired };
+    } catch (error) {
+      throwIfRecoveryCancelled(error);
+      const rejected = workerRecord(input.initialResult);
+      if (rejected && input.onUnrecoverable) await input.onUnrecoverable(rejected, [error instanceof Error ? error.message : 'Targeted repair failed.']);
+      throw error;
+    }
+  }
   try {
     const result = input.resolve(input.initialResult);
     const strictWorkerResult = workerRecord(input.initialResult);
@@ -140,7 +158,7 @@ export async function resolveSmartAudioWithValidationRecovery<T>(input: {
     return {
       result,
       workerResult: strictWorkerResult,
-      repairAttempted: false,
+      repairAttempted: targetedChanged,
       fallbackUsed: false,
       sourceFallbackUsed: false,
       validationErrors: [],
@@ -153,7 +171,8 @@ export async function resolveSmartAudioWithValidationRecovery<T>(input: {
     let fallbackCandidate = input.initialResult;
 
     try {
-      const repaired = await input.requestRepair(input.initialResult, error);
+      const response = await input.requestRepair(input.initialResult, error);
+      const repaired = input.targetedRepair ? await input.targetedRepair(response) : response;
       const repairedRecord = workerRecord(repaired);
       if (repairedRecord?.status === 'success') {
         fallbackCandidate = repaired;
@@ -175,6 +194,7 @@ export async function resolveSmartAudioWithValidationRecovery<T>(input: {
         }
       }
     } catch (repairRequestError) {
+      throwIfRecoveryCancelled(repairRequestError);
       if (!(repairRequestError instanceof SmartAudioOutputValidationError)) {
         validationErrors.push(
           repairRequestError instanceof Error
@@ -184,6 +204,28 @@ export async function resolveSmartAudioWithValidationRecovery<T>(input: {
       }
     }
 
+    if (input.targetedRepair) {
+      // Source omission still has its established source fallback. Run that
+      // text through the same pronunciation checks before the final validator;
+      // do not strip or transliterate unresolved words to bypass a failure.
+      if (shouldPreserveSource && input.sourceFallback) {
+        const sourceCandidate = input.sourceFallback(fallbackCandidate);
+        try {
+          const repairedSource = workerRecord(await input.targetedRepair(sourceCandidate));
+          if (!repairedSource) throw new SmartAudioOutputValidationError('Smart Audio source fallback returned an invalid response.');
+          return { result: input.resolve(repairedSource), workerResult: repairedSource, repairAttempted: true,
+            fallbackUsed: true, sourceFallbackUsed: true, validationErrors, discardedTags: 0 };
+        } catch (sourceError) {
+          throwIfRecoveryCancelled(sourceError);
+          const rejected = workerRecord(sourceCandidate);
+          if (rejected && input.onUnrecoverable) await input.onUnrecoverable(rejected, validationErrors);
+          throw sourceError;
+        }
+      }
+      const rejected = workerRecord(fallbackCandidate);
+      if (rejected && input.onUnrecoverable) await input.onUnrecoverable(rejected, validationErrors);
+      throw error;
+    }
     const fallbackCandidates = fallbackCandidate === input.initialResult
       ? [fallbackCandidate]
       : [fallbackCandidate, input.initialResult];

@@ -101,6 +101,19 @@ describe('targeted pronunciation scan and patches', () => {
     expect(() => assertPronunciationRepair(text, proposed)).not.toThrow();
   });
 
+  test('repairs chapter 167 bracketed phrase as one region without nesting or changing English', () => {
+    const text = 'Seek not [μὴ ζητεῖτε] your own advantages, but be concerned [σκοπεῖτε](/skoʊpeɪtɛ/) also for others.';
+    const issues = scanPronunciationIssues(text, { 'μὴ': '/meɪ/', 'ζητεῖτε': '/zeɪ teɪ tɛ/' });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ text: '[μὴ ζητεῖτε]', replacement: '[μὴ](/meɪ/) [ζητεῖτε](/zeɪteɪtɛ/)' });
+    const proposed = applyPronunciationPatches(text, issues, [{ id: '0', replacement: issues[0].replacement! }]);
+    expect(() => assertPronunciationRepair(text, proposed)).not.toThrow();
+    expect(scanPronunciationIssues(proposed)).toHaveLength(0);
+    expect(() => assertPronunciationRepair(text, proposed.replace('advantages', 'profits'))).toThrow();
+    expect(() => assertPronunciationRepair(text, proposed.replace('[μὴ](/meɪ/)', ''))).toThrow();
+    expect(scanPronunciationIssues(text, { 'μὴ': '/meɪ/' })[0].replacement).toBeUndefined();
+  });
+
   test('does not confuse slash alternatives with IPA delimiters', () => {
     const text = 'Forms θεῷ/θέοισιν remain.';
     const proposed = 'Forms [θεῷ](/θeɪoʊ/)/[θέοισιν](/θɛoʊeɪsɪn/) remain.';

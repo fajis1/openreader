@@ -59,9 +59,10 @@ export function scanPronunciationIssues(text: string, dictionary: Record<string,
       add(match.index, match.index + match[0].length, 'Mixed-script OCR word requires source-supported reconstruction.');
     }
   }
-  // An incomplete bracketed word is one repair region, not bare letters
-  // inside retained brackets. Exclude ordinary Markdown links.
-  for (const match of text.matchAll(/\[[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}()'’᾽᾿ʼ]+\](?!\()/gu)) {
+  // A bracketed foreign word or phrase is one region. Per-word edits inside
+  // retained outer brackets would manufacture nested pronunciation markup.
+  // Restrict this to foreign text; exclude ordinary Markdown links.
+  for (const match of text.matchAll(/\[[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}()'’᾽᾿ʼ]+(?:[ \t]+[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}()'’᾽᾿ʼ]+)*\](?!\()/gu)) {
     add(match.index, match.index + match[0].length, 'Foreign word has brackets but no pronunciation.');
   }
   // Mask markup without shifting offsets, so bare-script and punctuation
@@ -123,6 +124,15 @@ export function scanPronunciationIssues(text: string, dictionary: Record<string,
       if (dictionary[expanded]) dictionaryWord = expanded;
       const pronunciation = lookup(expanded, dictionary);
       if (pronunciation && !/[\s<>]/u.test(visible)) replacement = `[${visible}](${pronunciation})`;
+      else if (/^\[[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’᾽᾿ʼ]+(?:[ \t]+[\p{Script=Greek}\p{Script=Hebrew}\p{Mark}'’᾽᾿ʼ]+)+\]$/u.test(value)) {
+        const words = value.slice(1, -1).split(/([ \t]+)/u);
+        const tagged = words.map(word => {
+          if (/^[ \t]+$/u.test(word)) return word;
+          const ipa = lookup(word, dictionary);
+          return ipa ? `[${word}](${ipa})` : undefined;
+        });
+        if (tagged.every(word => word !== undefined)) replacement = tagged.join('');
+      }
       else if (formatted !== value && !scanPronunciationIssues(formatted).length) replacement = formatted;
     }
     return { ...region, id: String(index), text: value, dictionaryWord, context: text.slice(Math.max(0, region.start - 180), Math.min(text.length, region.end + 180)), ...(replacement !== undefined ? { replacement } : {}) };

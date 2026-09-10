@@ -58,6 +58,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
     return () => { current.abort(); clearTimeout(timer); };
   }, [open, refreshRepairs]);
   const readyRepairs = repairs.filter(repair => repair.ready);
+  const failedRecordings = repairs.filter(repair => repair.decision === 'approved' && repair.audioStatus === 'error');
   const displayedFindings = [...findings];
   for (const repair of repairs) {
     if (!displayedFindings.some(row => row.chapterIndex === repair.chapterIndex)) {
@@ -87,6 +88,45 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
       await refreshRepairs();
     } catch (problem) { setError(problem instanceof Error ? problem.message : 'Could not refresh repair status.'); }
     finally { setApproving(false); setBusy(false); }
+  }
+
+  async function retryFailedRecordings() {
+    if (busy || activeRepair || !failedRecordings.length) return;
+    const targets = [...failedRecordings];
+    if (!window.confirm(`Retry ${targets.length} failed recordings using their already-approved text? No repairs will be approved again. Keep this window open until queuing finishes.`)) return;
+    setBusy(true); setApprovalMessage('');
+    let queued = 0;
+    let failure = '';
+    try {
+      for (const repair of targets) {
+        setApprovalMessage(`Queuing failed recordings: ${queued}/${targets.length}…`);
+        try {
+          await fetch('/api/audiobooks/batch-refine/review', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'retry', changeId: repair.changeId }),
+          }).then(readJsonResponse);
+          queued += 1;
+        } catch (problem) {
+          failure = `${repair.title}: ${problem instanceof Error ? problem.message : 'Retry failed'}`;
+          break;
+        }
+      }
+      setApprovalMessage(`${queued} recordings queued. ${failure ? `Stopped: ${failure}. Remaining recordings were left unchanged.` : 'Already-approved text was preserved.'}`);
+      if (queued) onRecordingQueued();
+      await refreshRepairs();
+    } catch (problem) { setError(problem instanceof Error ? problem.message : 'Could not refresh recording status.'); }
+    finally { setBusy(false); }
+  }
+
+  async function rememberApproved() {
+    if (!window.confirm('Remember reusable pronunciations from approved repairs for this book and its lexicon profile? Existing conflicting entries and contextual forms will be left unchanged.')) return;
+    setBusy(true); setApprovalMessage('');
+    try {
+      const result = await fetch('/api/audiobooks/pronunciation-issues', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookId, action: 'remember-approved' }),
+      }).then(readJsonResponse);
+      setApprovalMessage(result.message || `Remembered ${result.saved} pronunciations for this book; ${result.alreadyKnown} already remembered; ${result.skipped} unsafe or conflicting candidates skipped.`);
+    } catch (problem) { setError(problem instanceof Error ? problem.message : 'Could not remember pronunciations.'); }
+    finally { setBusy(false); }
   }
 
   useEffect(() => {
@@ -322,6 +362,9 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
         {job?.aiModel && <p className="text-xs text-text-soft">Job model: {job.aiModel} · Profile: {config?.profiles.find(profile => profile.id === job.profileId)?.name || job.profileId} · Keys: {config?.keySources.find(key => key.ref === job.primaryKeyRef)?.masked || 'Not set'} / {config?.keySources.find(key => key.ref === job.backupKeyRef)?.masked || 'Not set'}</p>}
         {error && <p role="alert" className="my-3 text-danger">{error}</p>}
         <button disabled={approving || busy || activeRepair || !readyRepairs.length} onClick={() => void approveReady()} className="my-3 rounded bg-accent px-3 py-2 text-background disabled:opacity-50">{approving ? 'Approving ready repairs…' : `Approve all ready repairs (${readyRepairs.length})`}</button>
+        <button disabled={busy || activeRepair || !failedRecordings.length} onClick={() => void retryFailedRecordings()} className="my-3 rounded bg-accent px-3 py-2 text-background disabled:opacity-50">Retry all failed recordings ({failedRecordings.length})</button>
+        <button disabled={busy || activeRepair || !repairs.some(repair => repair.decision === 'approved')} onClick={() => void rememberApproved()} className="ml-3 rounded border border-line-soft px-3 py-2 disabled:opacity-50">Remember approved pronunciations</button>
+        <p className="text-xs text-text-soft">Remembering saves reusable Greek/Hebrew corrections to this book’s lexicon profile, not the global dictionary. Contextual forms and conflicting entries stay unchanged.</p>
         {approvalMessage && <p role="status" className="text-sm">{approvalMessage}</p>}
         {scanned && findings.length === 0 && <p>No pronunciation issues found in the checked text.</p>}
         <div className="space-y-4">{displayedFindings.map(finding => {

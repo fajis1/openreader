@@ -13,6 +13,7 @@ import { runTaskNow } from '@/lib/server/tasks/engine';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { pronunciationRepairReport } from '@/lib/server/audiobooks/pronunciation-repair-report';
 import { listPronunciationRepairStatus } from '@/lib/server/audiobooks/pronunciation-repair-status';
+import { rememberApprovedPronunciations } from '@/lib/server/audiobooks/remember-approved-pronunciations';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
     const user = await ownedUser(request, body.bookId);
     if (user instanceof Response) return user;
     const profileId = typeof body.profileId === 'string' ? body.profileId : undefined;
+    if (body.action === 'remember-approved') return NextResponse.json(await rememberApprovedPronunciations(body.bookId, user));
     if (body.action === 'resume-repairs' && typeof body.jobId === 'string') {
       const result = await resumePronunciationRepairs(body.bookId, user, body.jobId, {
         profileId, aiModel: typeof body.aiModel === 'string' ? body.aiModel : undefined, fallbackModels: body.fallbackModels,

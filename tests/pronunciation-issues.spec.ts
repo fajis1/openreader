@@ -23,7 +23,9 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
   let queuedSettings: Record<string, unknown> = {};
   let approved = false;
   let recordingComplete = false;
+  const recordingRetries: string[] = [];
   const approvedIds: string[] = [];
+  let remembered = false;
   let retried = false;
   let resumed = false;
   let resumeSettings: Record<string, unknown> = {};
@@ -34,6 +36,7 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
     if (url.pathname === '/bundle.js') return route.fulfill({ contentType: 'text/javascript', body: bundle.outputFiles.find(file => file.path.endsWith('.js'))!.text });
     if (url.pathname.endsWith('/pronunciation-issues')) {
       if (url.searchParams.get('action') === 'review-status') return json({ repairs: queued ? [
+        ...(mode === 'bulk' ? ['failed-one', 'failed-two'].map((changeId, index) => ({ changeId, runId: `${changeId}-run`, fileName: `02${index}0__text.txt`, chapterIndex: 200 + index, title: `Failed recording ${index}`, decision: 'approved', audioStatus: recordingRetries.includes(changeId) ? 'queued' : 'error', ready: false, unresolvedCount: 0 })) : []),
         { changeId: 'change', runId: 'fixture-run', fileName: '0107__text.txt', chapterIndex: 106, title: 'Aetherian chapter', decision: approved ? 'approved' : 'pending', audioStatus: recordingComplete ? 'completed' : approved ? 'queued' : 'not_requested', ready: !approved && (!partial || retried), unresolvedCount: partial && !retried ? 1 : 0 },
         ...(mode === 'bulk' ? [{ changeId: 'partial', runId: 'partial-run', fileName: '0108__text.txt', chapterIndex: 107, title: 'Partial chapter', decision: 'pending', audioStatus: 'not_requested', ready: false, unresolvedCount: 1 }] : []),
         ...(mode === 'bulk' ? [{ changeId: 'second-ready', runId: 'second-run', fileName: '0109__text.txt', chapterIndex: 108, title: 'Second ready chapter', decision: approved ? 'approved' : 'pending', audioStatus: recordingComplete ? 'completed' : approved ? 'queued' : 'not_requested', ready: !approved, unresolvedCount: 0 }] : []),
@@ -43,6 +46,7 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
       if (url.searchParams.get('action') === 'jobs') return json({ jobs: queued ? [{ id: 'fixture-job', status: mode === 'resume' && !resumed ? 'error' : 'completed', progress: 100, total: 1, results: [{ fileName: '0107__text.txt', runId: 'fixture-run', requestId: 'fixture-request', apiBlocked: mode === 'resume' && !resumed, unresolvedCount: partial && !retried ? 1 : 0 }] }] : [] });
       if (route.request().method() === 'GET') return json({ chapters: [{ fileName: '0107__text.txt', chapterIndex: 106, failed: false }, { fileName: '0108__text.txt', chapterIndex: 107, failed: false }], failedJobs: [] });
       const body = route.request().postDataJSON();
+      if (body.action === 'remember-approved') { remembered = true; return json({ saved: 2, alreadyKnown: 0, skipped: 1 }); }
       if (body.action === 'resume-repairs') { resumed = true; resumeSettings = body; return json({ jobId: 'fixture-job' }); }
       if (body.action === 'scan' && queued && partial) return json({ fileName: body.fileName, hash: 'fixture-hash', retryRunId: 'fixture-run', proposalHash: 'current-proposal-hash', issues: [{ id: '0', text: 'θεῷ', start: 40, end: 43 }] });
       if (body.action === 'scan') return json({ fileName: body.fileName, chapterIndex: body.fileName === '0107__text.txt' ? 106 : 107, title: 'Aetherian chapter', hash: 'fixture-hash', failed: false,
@@ -50,6 +54,9 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
       if (body.action === 'queue') { queued = true; queuedSettings = body; retried = Boolean(body.chapters[0].retryRunId); proposedFiles.push(...body.chapters.map((chapter: { fileName: string }) => chapter.fileName)); return json({ jobId: 'fixture-job' }); }
     }
     if (url.pathname.endsWith('/batch-refine/review')) {
+      if (route.request().method() === 'POST' && route.request().postDataJSON().action === 'retry') {
+        recordingRetries.push(route.request().postDataJSON().changeId); return json({ success: true });
+      }
       if (route.request().method() === 'POST') { approved = true; approvedIds.push(route.request().postDataJSON().changeId); return json({ success: true }); }
       return json({ run: { id: 'fixture-run', rule: 'pronunciation-repair:v1', status: 'completed', processedChapters: 1, totalChapters: 1 },
         changes: [{ id: 'change', textFileName: '0107__text.txt', chapterIndex: 106, chapterTitle: 'Aetherian chapter', previousText: 'The [Aetherian](/bad split/) arrived.', proposedText: 'The [Aetherian](/eɪθɪriən/) arrived.' + (partial ? retried ? ' [θεῷ](/θeɪoʊ/)' : ' θεῷ' : ''), reviewNote: partial && !retried ? 'NEEDS REVIEW: unresolved passage.' : null, diffText: '-bad split\n+eɪθɪriən', changedCharacters: 10, changePercent: 20, reviewPriority: 'high', priorityScore: 70, decision: approved ? 'approved' : 'pending', audioStatus: approved ? 'queued' : 'not_requested' }], flagDefinitions: [] });
@@ -107,18 +114,32 @@ for (const mode of ['complete', 'manual', 'retry', 'resume', 'bulk']) test(`scan
     await expect(page.getByRole('button', { name: 'Review & Approve' })).toBeEnabled();
   }
   if (mode === 'bulk') {
+    await expect(page.getByRole('button', { name: 'Retry all failed recordings (2)', exact: true })).toBeEnabled();
+    page.once('dialog', dialog => dialog.dismiss());
+    await page.getByRole('button', { name: 'Retry all failed recordings (2)', exact: true }).click();
+    expect(recordingRetries).toEqual([]);
     await expect(page.getByText('Awaiting approval', { exact: true })).toHaveCount(2);
     await expect(page.getByText('Needs review', { exact: true })).toBeVisible();
     page.once('dialog', dialog => dialog.accept());
     await page.getByRole('button', { name: 'Approve all ready repairs (2)', exact: true }).click();
     await expect(page.getByText('Recording queued', { exact: true })).toHaveCount(2);
     expect(approvedIds).toEqual(['change', 'second-ready']);
+    page.once('dialog', dialog => dialog.accept());
+    await page.getByRole('button', { name: 'Remember approved pronunciations', exact: true }).click();
+    await expect(page.getByText('Remembered 2 pronunciations for this book;', { exact: false })).toBeVisible();
+    expect(remembered).toBe(true);
     await expect(page.getByRole('button', { name: 'Approve all ready repairs (0)' })).toBeDisabled();
     recordingComplete = true;
     await expect(page.getByText('Complete', { exact: true })).toHaveCount(2, { timeout: 10000 });
     await page.reload();
     await expect(page.getByText('Complete', { exact: true })).toHaveCount(2);
     await expect(page.getByText('Needs review', { exact: true })).toBeVisible();
+    page.once('dialog', dialog => dialog.accept());
+    await page.getByRole('button', { name: 'Retry all failed recordings (2)', exact: true }).click();
+    await expect(page.getByText('2 recordings queued.', { exact: false })).toBeVisible();
+    expect(recordingRetries).toEqual(['failed-one', 'failed-two']);
+    expect(approvedIds).toEqual(['change', 'second-ready']);
+    await expect(page.getByRole('button', { name: 'Retry all failed recordings (0)', exact: true })).toBeDisabled();
     expect(pageErrors).toEqual([]);
     return;
   }

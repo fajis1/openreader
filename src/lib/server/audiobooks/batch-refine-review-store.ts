@@ -304,11 +304,18 @@ export async function retryBatchRefineRecording(changeId: string, userId: string
   if (owned.change.decision !== 'approved' || owned.change.audioStatus !== 'error') {
     throw new BatchRefineReviewConflictError('Only failed approved recordings can be retried.');
   }
+  const jobs = await db.select({ status: audiobookJobs.status }).from(audiobookJobs).where(and(
+    eq(audiobookJobs.documentId, owned.change.documentId), eq(audiobookJobs.userId, userId),
+  ));
+  if (jobs.some((job: { status: string }) => ['running', 'queued', 'pausing'].includes(job.status))) {
+    throw new BatchRefineReviewConflictError('Pause background generation and repair jobs before retrying recordings.');
+  }
   await db.update(batchRefineChanges).set({
     audioStatus: 'queued',
     audioError: null,
     updatedAt: Date.now(),
-  }).where(and(eq(batchRefineChanges.id, changeId), eq(batchRefineChanges.userId, userId)));
+  }).where(and(eq(batchRefineChanges.id, changeId), eq(batchRefineChanges.userId, userId),
+    eq(batchRefineChanges.decision, 'approved'), eq(batchRefineChanges.audioStatus, 'error')));
 }
 
 export async function getBatchRefineReview(input: {

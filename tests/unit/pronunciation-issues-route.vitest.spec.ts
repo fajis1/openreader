@@ -1,5 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), owned: vi.fn(), catalog: vi.fn(), chapter: vi.fn(), propose: vi.fn(), resume: vi.fn(), queue: vi.fn(), jobs: vi.fn(), stop: vi.fn(), config: vi.fn(), report: vi.fn(), repairStatus: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), owned: vi.fn(), catalog: vi.fn(), chapter: vi.fn(), propose: vi.fn(), resume: vi.fn(), queue: vi.fn(), jobs: vi.fn(), stop: vi.fn(), config: vi.fn(), report: vi.fn(), repairStatus: vi.fn(), remember: vi.fn() }));
+vi.mock('@/lib/server/audiobooks/remember-approved-pronunciations', () => ({ rememberApprovedPronunciations: (...args: unknown[]) => mocks.remember(...args) }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-status', () => ({ listPronunciationRepairStatus: (...args: unknown[]) => mocks.repairStatus(...args) }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-report', () => ({ pronunciationRepairReport: (...args: unknown[]) => mocks.report(...args) }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-jobs', () => ({ queuePronunciationRepairs: (...args: unknown[]) => mocks.queue(...args), listPronunciationRepairJobs: (...args: unknown[]) => mocks.jobs(...args), stopPronunciationRepairs: (...args: unknown[]) => mocks.stop(...args) }));
@@ -37,7 +38,8 @@ test('denies unauthenticated scans without accessing book data', async () => {
 });
 test('denies every mutation for another owner’s book', async () => {
   mocks.owned.mockResolvedValue([]);
-  for (const action of ['scan', 'propose', 'resume', 'queue', 'stop']) expect((await POST(request(action))).status).toBe(404);
+  for (const action of ['scan', 'propose', 'resume', 'queue', 'stop', 'remember-approved']) expect((await POST(request(action))).status).toBe(404);
+  expect(mocks.remember).not.toHaveBeenCalled();
   expect(mocks.chapter).not.toHaveBeenCalled(); expect(mocks.propose).not.toHaveBeenCalled(); expect(mocks.resume).not.toHaveBeenCalled();
 });
 test('queues work without waiting for Gemini and honors request-only configuration', async () => {
@@ -77,4 +79,13 @@ test('uses the authenticated owner and exposes no original source in scan result
   expect(mocks.chapter).toHaveBeenCalledWith('book', 'owner', '0001__text.txt');
   const body = await response.json();
   expect(body.issues).toHaveLength(1); expect(body.original).toBeUndefined();
+});
+
+test('remembers approved repairs only for the authenticated owner without accepting client pronunciations', async () => {
+  mocks.remember.mockResolvedValue({ saved: 2, alreadyKnown: 0, skipped: 1 });
+  const response = await POST(request('remember-approved'));
+  expect(response.status).toBe(200);
+  expect(mocks.remember).toHaveBeenCalledWith('book', 'owner');
+  expect((await response.json()).saved).toBe(2);
+  expect(mocks.queue).not.toHaveBeenCalled();
 });

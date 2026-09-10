@@ -9,6 +9,8 @@ export interface SmartAudioBookLexiconEntry {
   context?: string;
   confidence?: number;
   needsReview?: boolean;
+  /** Explicitly remembered from an approved repair, scoped to this book. */
+  approvedRepair?: boolean;
 }
 
 export interface SmartAudioBookLexicon {

@@ -30,6 +30,16 @@ const lexicon: SmartAudioBookLexicon = {
 };
 
 describe('Smart Audio book lexicon', () => {
+  test('keeps remembered pronunciations through settings reads and rescans with no new candidate', async () => {
+    const { resolveSmartAudioBookLexicon } = await import('../../src/lib/server/smart-audio/book-lexicon');
+    const remembered = { ...lexicon, entries: { 'λόγος': { term: 'λόγος', pronunciation: '/lɒɡɒs/', definition: null,
+      language: 'koine_greek' as const, definitionOmitted: true, approvedRepair: true } } };
+    const restored = mergeDocumentSettings(DEFAULT_DOCUMENT_SETTINGS, { smartAudioLexicon: remembered }).smartAudioLexicon!;
+    expect(restored.entries['λόγος']).toMatchObject({ approvedRepair: true, definitionOmitted: true });
+    const result = await resolveSmartAudioBookLexicon({ profile: { id: 'test', name: 'Test', aiModel: 'fixture', customTtsPrompt: '', abbreviations: {}, pronunciations: {}, books: {} },
+      candidates: [], existing: restored });
+    expect(pronunciationsFromBookLexicon(result)).toEqual({ 'λόγος': '/lɒɡɒs/' });
+  });
   test('collects unique Greek and Hebrew terms with representative context', () => {
     const candidates = collectSmartAudioTermCandidates([
       'John calls Christ the λόγος who was with God. Later, λόγος appears again.',

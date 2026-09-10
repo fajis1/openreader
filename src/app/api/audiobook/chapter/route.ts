@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { repairSmartAudioWorkerPronunciations } from '@/lib/server/audiobooks/smart-audio-targeted-repair';
 import { savePronunciationFailure } from '@/lib/server/audiobooks/pronunciation-failures';
 import { spawn } from 'child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
@@ -904,6 +905,9 @@ export async function POST(request: NextRequest) {
           if (workerResult.status === "success") {
             const recovery = await resolveSmartAudioWithValidationRecovery({
               initialResult: workerResult,
+              targetedRepair: selectedProfile ? candidate => repairSmartAudioWorkerPronunciations(candidate, {
+                profile: selectedProfile, sourceText: data.text, dictionary: authoritativePronunciations, signal: request.signal,
+              }) : undefined,
               authoritativePronunciations,
               onUnrecoverable: async (rejected, errors) => {
                 await savePronunciationFailure({ bookId, userId: storageUserId, chapterIndex, chapterTitle: `Chapter ${chapterIndex + 1}`,

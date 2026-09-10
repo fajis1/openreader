@@ -42,7 +42,7 @@ describe('Smart Audio data-integrity guards', () => {
     expect(worker).toContain('termsNeedingGeneratedPronunciations');
     expect(worker).toContain('.filter((candidate) => !candidate.pronunciation)');
     expect(worker).toContain(
-      '.filter((entry) => termsNeedingGeneratedPronunciations.has(entry.term))',
+      '.filter((entry) => !entry.approvedRepair && termsNeedingGeneratedPronunciations.has(entry.term))',
     );
   });
 

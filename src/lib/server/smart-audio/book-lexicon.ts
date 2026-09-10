@@ -179,7 +179,7 @@ export async function resolveSmartAudioBookLexicon(input: {
   const candidateTerms = new Set(input.candidates.map((candidate) => candidate.term));
   const entries: Record<string, SmartAudioBookLexiconEntry> = Object.fromEntries(
     Object.entries(input.existing?.entries || {})
-      .filter(([term]) => candidateTerms.has(term))
+      .filter(([term, entry]) => candidateTerms.has(term) || entry.approvedRepair === true)
       .map(([term, entry]) => {
         const definition = normalizeDictionaryDefinition(entry.definition);
         if (definition === entry.definition) return [term, entry];
@@ -314,7 +314,8 @@ ${JSON.stringify(batch)}`;
       const generatedPronunciations = Array.isArray(item.pronunciations)
         ? item.pronunciations.map(normalizePronunciation).filter((value): value is string => Boolean(value))
         : [];
-      const pronunciation = normalizePronunciation(candidate.pronunciation) || generatedPronunciations[0];
+      const remembered = entries[term]?.approvedRepair ? entries[term] : undefined;
+      const pronunciation = normalizePronunciation(remembered?.pronunciation) || normalizePronunciation(candidate.pronunciation) || generatedPronunciations[0];
       if (!pronunciation) continue;
       const language = item.language === 'biblical_hebrew'
         ? 'biblical_hebrew'
@@ -330,6 +331,7 @@ ${JSON.stringify(batch)}`;
       const definitionOmitted = item.definitionOmitted === true
         || shouldOmitDictionaryDefinition(item.definition);
       entries[term] = {
+        ...(remembered ? { approvedRepair: true } : {}),
         term,
         pronunciation,
         definition: definitionOmitted ? null : normalizeDictionaryDefinition(item.definition),

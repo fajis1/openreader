@@ -1,4 +1,5 @@
 import { processBatchRefineJob } from './refine';
+import { repairSmartAudioWorkerPronunciations, SmartAudioTargetedRepairError } from './smart-audio-targeted-repair';
 
 import {
   findSmartAudioProfileById,
@@ -799,7 +800,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       );
       const selectedDefaults = Object.fromEntries(
         Object.values(bookLexicon.entries)
-          .filter((entry) => termsNeedingGeneratedPronunciations.has(entry.term))
+          .filter((entry) => !entry.approvedRepair && termsNeedingGeneratedPronunciations.has(entry.term))
           .map((entry) => [entry.term, entry.pronunciation]),
       );
       const mergedProfile = await mergeGeneratedPronunciationsIntoLatestProfile(
@@ -1026,6 +1027,27 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
           if (workerResult.status === "success") {
             const recovery = await resolveSmartAudioWithValidationRecovery({
               initialResult: workerResult,
+              targetedRepair: currentSelectedProfile ? async candidate => {
+                const controller = new AbortController();
+                let checking = false;
+                const check = async () => {
+                  if (checking || controller.signal.aborted) return;
+                  checking = true;
+                  try {
+                    if (!await workerStillOwnsAudiobookJob(job.id)) controller.abort();
+                    else await updateClaimedAudiobookJob(job.id, 'running', { updatedAt: Date.now() });
+                  } finally { checking = false; }
+                };
+                await check();
+                const timer = setInterval(() => { void check().catch(() => controller.abort()); }, 1000);
+                try {
+                  return await repairSmartAudioWorkerPronunciations(candidate, { profile: currentSelectedProfile,
+                    sourceText: cleanupSourceText, dictionary: currentPronunciations, signal: controller.signal });
+                } catch (error) {
+                  if (controller.signal.aborted) throw new AudiobookJobStoppedError();
+                  throw error;
+                } finally { clearInterval(timer); }
+              } : undefined,
               authoritativePronunciations: currentPronunciations,
               onUnrecoverable: async (rejected, errors) => {
                 await savePronunciationFailure({ bookId, userId, chapterIndex: chapter.index, chapterTitle: chapter.title,
@@ -1192,6 +1214,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
           serverLogger.error({ event: 'audiobook.queue.smart_audio.failed', error: e }, 'Smart audio processing failed. Aborting generation.');
           if (nc) await nc.close();
+          if (e instanceof SmartAudioTargetedRepairError && !e.apiBlocked) throw e;
           
           const jobSettingsParsed = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
           const retries = typeof jobSettingsParsed.smartAudioRetries === 'number' ? jobSettingsParsed.smartAudioRetries : 0;
@@ -1203,7 +1226,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             await updateClaimedAudiobookJob(job.id, 'running', {
               settingsJson: JSON.stringify(jobSettingsParsed), 
               status: 'error', 
-              error: 'Smart audio failed to connect. Will automatically retry in 5 minutes...' 
+              error: e instanceof SmartAudioTargetedRepairError
+                ? 'Pronunciation repair API retries were exhausted. Will automatically retry in 5 minutes...'
+                : 'Smart audio failed to connect. Will automatically retry in 5 minutes...'
             });
             
             setTimeout(async () => {
