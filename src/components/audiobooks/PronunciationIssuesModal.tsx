@@ -388,7 +388,7 @@ export function PronunciationIssuesModal({ open, onClose, bookId, profileId, onR
             {finding.runId && (!repair || repair.decision === 'pending') && Boolean(repair?.unresolvedCount || finding.unresolvedCount || finding.retryRunId && finding.issues.length || finding.error) && <button disabled={busy || activeRepair} onClick={() => void retryUnresolved(finding)} className="text-accent disabled:opacity-50">Retry unresolved</button>}
           </div>
           {finding.failureError && <p className="mt-2 text-sm text-text-soft">Generation error: {finding.failureError}</p>}
-          {finding.error && <p role="alert" className="mt-2 text-sm text-danger">{finding.error}</p>}
+          {finding.error && !(repair?.decision === 'approved' && repair.audioStatus === 'completed') && <p role="alert" className="mt-2 text-sm text-danger">{finding.error}</p>}
           {finding.failed && finding.issues.length === 0 && <p className="mt-2 text-sm text-text-soft">No supported pronunciation defect detected. This failure may need source or speaker review.</p>}
           {finding.issues.map(issue => <details key={issue.id} className="mt-3 rounded border border-line-soft p-2">
             <summary className="cursor-pointer text-sm">{issue.reason} · {issue.replacement !== undefined ? 'Dictionary/formatting repair available' : 'AI or manual review needed'}</summary>

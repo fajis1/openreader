@@ -6,6 +6,7 @@ import {
   BatchRefineReviewConflictError,
   getBatchRefineReview,
   listPendingBatchRefineChanges,
+  reopenBatchRefineChange,
   rejectBatchRefineChange,
   retryBatchRefineRecording,
 } from '@/lib/server/audiobooks/batch-refine-review-store';
@@ -76,6 +77,12 @@ export async function POST(request: Request) {
     if (action === 'reject') {
       if (!changeId) return NextResponse.json({ error: 'changeId is required' }, { status: 400 });
       await rejectBatchRefineChange(changeId, ctx.userId);
+      return NextResponse.json({ success: true });
+    }
+
+    if (action === 'reopen') {
+      if (!changeId) return NextResponse.json({ error: 'changeId is required' }, { status: 400 });
+      await reopenBatchRefineChange(changeId, ctx.userId);
       return NextResponse.json({ success: true });
     }
 

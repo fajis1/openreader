@@ -329,6 +329,24 @@ export async function rejectBatchRefineChange(changeId: string, userId: string):
   }).where(and(eq(batchRefineChanges.id, changeId), eq(batchRefineChanges.userId, userId)));
 }
 
+export async function reopenBatchRefineChange(changeId: string, userId: string): Promise<void> {
+  const owned = await ownedChange(changeId, userId);
+  if (!owned) throw new BatchRefineReviewConflictError('Batch Refine change not found.');
+  if (owned.change.decision !== 'approved') {
+    throw new BatchRefineReviewConflictError('Only an approved change can be reopened for correction.');
+  }
+  if (owned.change.audioStatus === 'queued' || owned.change.audioStatus === 'running') {
+    throw new BatchRefineReviewConflictError('Wait for the current replacement recording to finish before reopening this repair.');
+  }
+  await db.update(batchRefineChanges).set({
+    decision: 'pending',
+    audioStatus: 'not_requested',
+    audioError: null,
+    decidedAt: null,
+    updatedAt: Date.now(),
+  }).where(and(eq(batchRefineChanges.id, changeId), eq(batchRefineChanges.userId, userId)));
+}
+
 export async function retryBatchRefineRecording(changeId: string, userId: string, recordingVoice?: string): Promise<void> {
   const owned = await ownedChange(changeId, userId);
   if (!owned) throw new BatchRefineReviewConflictError('Batch Refine change not found.');

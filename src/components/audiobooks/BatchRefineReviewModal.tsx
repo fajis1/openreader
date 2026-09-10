@@ -273,6 +273,20 @@ export function BatchRefineReviewModal({
     }
   };
 
+  const reopen = async (change: BatchRefineChange) => {
+    if (!window.confirm('Reopen this approved repair for correction? Existing audio remains available until you approve and successfully record a new replacement.')) return;
+    setBusyId(change.id);
+    try {
+      await reviewAction({ action: 'reopen', changeId: change.id }, 'Repair reopened for correction.');
+      setDrafts(current => ({ ...current, [change.id]: change.proposedText }));
+      setEditingId(change.id);
+    } catch (actionError) {
+      toast.error(actionError instanceof Error ? actionError.message : 'The repair could not be reopened.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <ModalFrame open={open} onClose={onClose} size="xl">
       <div className="flex max-h-[92vh] flex-col overflow-hidden rounded-xl border border-line-soft bg-surface">
@@ -558,6 +572,16 @@ export function BatchRefineReviewModal({
                 </div>
 
                 <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-soft px-4 py-3">
+                  {change.decision === 'approved' && (
+                    <button
+                      onClick={() => void reopen(change)}
+                      disabled={isBusy || change.audioStatus === 'queued' || change.audioStatus === 'running'}
+                      title={change.audioStatus === 'queued' || change.audioStatus === 'running' ? 'Wait for the current recording to finish before reopening.' : undefined}
+                      className="rounded border border-line-soft px-3 py-1.5 text-sm font-semibold text-text-strong hover:bg-surface-sunken disabled:opacity-50"
+                    >
+                      Reopen for correction
+                    </button>
+                  )}
                   {change.audioStatus === 'error' && (
                     <>
                       <span className="mr-auto text-xs text-danger" title={change.audioError || undefined}>{change.audioError || 'Recording failed.'}</span>

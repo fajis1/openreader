@@ -12,7 +12,7 @@ vi.mock('@/db', () => ({ db: {
 } }));
 vi.mock('@/lib/server/audiobooks/blobstore', () => ({ getAudiobookObjectBuffer: vi.fn(), listAudiobookObjects: vi.fn(), putAudiobookObject: vi.fn() }));
 vi.mock('@/lib/server/audiobooks/pronunciation-repair-validation', () => ({ assertStoredPronunciationRepair: vi.fn() }));
-import { retryBatchRefineRecording } from '@/lib/server/audiobooks/batch-refine-review-store';
+import { reopenBatchRefineChange, retryBatchRefineRecording } from '@/lib/server/audiobooks/batch-refine-review-store';
 
 beforeEach(() => {
   vi.clearAllMocks(); mocks.rows = [];
@@ -40,4 +40,23 @@ test('requeues approved failed audio with the explicitly selected voice', async 
   mocks.rows = [owned(), [{ status: 'completed' }]];
   await retryBatchRefineRecording('change', 'owner', 'af_heart');
   expect(mocks.set).toHaveBeenCalledWith({ audioStatus: 'queued', audioError: null, reviewNote: '[Recording voice=af_heart]', updatedAt: expect.any(Number) });
+});
+test('reopens an approved repair for correction without deleting its audio', async () => {
+  mocks.rows = [owned('approved', 'completed')];
+  await reopenBatchRefineChange('change', 'owner');
+  expect(mocks.set).toHaveBeenCalledWith({
+    decision: 'pending',
+    audioStatus: 'not_requested',
+    audioError: null,
+    decidedAt: null,
+    updatedAt: expect.any(Number),
+  });
+});
+
+test.each(['queued', 'running'] as const)('does not reopen an approved repair while audio is %s', async audioStatus => {
+  mocks.rows = [owned('approved', audioStatus)];
+  await expect(reopenBatchRefineChange('change', 'owner')).rejects.toThrow(
+    'Wait for the current replacement recording to finish before reopening this repair.',
+  );
+  expect(mocks.set).not.toHaveBeenCalled();
 });

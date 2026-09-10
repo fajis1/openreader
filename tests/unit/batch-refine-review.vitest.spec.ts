@@ -164,6 +164,7 @@ describe('Batch Refine workflow integrity', () => {
     expect(review).toContain('sourceOverrideIssues.length > 0');
     expect(review).toContain('Approve with override (${selectedOverrides.size})');
     expect(review).toContain('visiblePronunciationSource(issue.text)');
+    expect(review).toContain('Reopen for correction');
     expect(review).toContain('Keep Previous');
     expect(start).toContain('BATCH_REFINE_RECORDING_OPTION_HELP');
     expect(BATCH_REFINE_RECORDING_OPTION_HELP.review.label).toBe('Review before recording');
