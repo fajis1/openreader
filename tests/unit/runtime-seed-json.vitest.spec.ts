@@ -276,6 +276,12 @@ describe('runtime config JSON seeding', () => {
       computeParseSustainedMax: 12,
       computeParseSustainedWindowSec: 300,
       maxUploadMb: 150,
+      audiobookshelfUrl: 'http://abs.example.com:13378',
+      audiobookshelfToken: 'test-abs-token',
+      audiobookshelfLibraryId: 'lib-test-123',
+      audiobookshelfFolderId: 'folder-test-456',
+      audiobookshelfAutoDetectMetadata: true,
+      geminiApiKey: 'AIzaSy-test-key',
     };
     try {
       await db.delete(adminSettings).where(inArray(adminSettings.key, keys));
