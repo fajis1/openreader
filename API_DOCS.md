@@ -33,7 +33,7 @@ Authorization: Bearer OR_YOUR_GENERATED_API_KEY
 | :--- | :--- | :--- | :--- |
 | `file` | File Binary | **Yes** | The document binary file (`.pdf`, `.epub`, `.docx`, `.html`, `.txt`). |
 | `title` | Text | No | Document title. Defaults to filename if omitted. |
-| `profile` | Text | No | Processing profile for workers (e.g., `Biblical Scholarship 3.6` or `Default Profile`). |
+| `profile` | Text | No | Processing profile for workers (e.g., `Biblical Scholarship 3.8` or `Default Profile`). |
 
 ### Response (`200 OK`)
 
@@ -55,18 +55,18 @@ Authorization: Bearer OR_YOUR_GENERATED_API_KEY
 
 ### cURL
 ```bash
-curl -X POST https://reader.seekins.info/api/v1/upload \
+curl -X POST https://reader.example.com/api/v1/upload \
   -H "Authorization: Bearer or_live_abcdef1234567890..." \
   -F "file=@/path/to/Genesis_Study.pdf" \
   -F "title=Genesis Chapter 1" \
-  -F "profile=Biblical Scholarship 3.6"
+  -F "profile=Biblical Scholarship 3.8"
 ```
 
 ### Python
 ```python
 import requests
 
-url = "https://reader.seekins.info/api/v1/upload"
+url = "https://reader.example.com/api/v1/upload"
 api_key = "or_live_abcdef1234567890..."
 
 headers = {
@@ -79,7 +79,7 @@ files = {
 
 data = {
     "title": "Genesis Chapter 1",
-    "profile": "Biblical Scholarship 3.6"
+    "profile": "Biblical Scholarship 3.8"
 }
 
 response = requests.post(url, headers=headers, files=files, data=data)
@@ -88,7 +88,7 @@ print(response.json())
 
 ### Windows PowerShell
 ```powershell
-$Uri = "https://reader.seekins.info/api/v1/upload"
+$Uri = "https://reader.example.com/api/v1/upload"
 $ApiKey = "or_live_abcdef1234567890..."
 $FilePath = "C:\Exports\Genesis_Study.pdf"
 

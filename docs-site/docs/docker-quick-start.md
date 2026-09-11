@@ -142,6 +142,19 @@ Visit [http://localhost:3003](http://localhost:3003) after startup.
 
 ## 3. Update Docker image
 
+To update your container to the latest release:
+
+```bash
+docker stop openreader || true && \
+docker rm openreader || true && \
+docker image rm ghcr.io/richardr1126/openreader:latest || true && \
+docker pull ghcr.io/richardr1126/openreader:latest
+```
+
+:::tip
+If you use a mounted volume for `/app/docstore`, your persisted data remains after image updates.
+:::
+
 Legacy image compatibility: `ghcr.io/richardr1126/openreader-webui:latest` remains available as an alias.
 For external compute mode image details, see [Compute Worker (NATS JetStream)](./deploy/compute-worker).
 
@@ -203,17 +216,6 @@ services:
 
 The CUDA image accelerates document layout analysis. It does not move Gemini,
 Kokoro, or FFmpeg audio work into this container.
-
-```bash
-docker stop openreader || true && \
-docker rm openreader || true && \
-docker image rm ghcr.io/richardr1126/openreader:latest || true && \
-docker pull ghcr.io/richardr1126/openreader:latest
-```
-
-:::tip
-If you use a mounted volume for `/app/docstore`, your persisted data remains after image updates.
-:::
 
 :::info Related Docs
 - [Environment Variables](./reference/environment-variables)

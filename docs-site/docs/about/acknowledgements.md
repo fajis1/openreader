@@ -13,4 +13,4 @@ This project is built with support from the following open-source projects and t
 - [OpenAI Whisper](https://github.com/openai/whisper)
 - [ffmpeg](https://ffmpeg.org)
 - [react-pdf](https://github.com/wojtekmaj/react-pdf)
-- [react-reader](https://github.com/happyr/react-reader)
+- [react-reader](https://github.com/gerhardsletten/react-reader)
