@@ -81,6 +81,14 @@ test('uses the authenticated owner and exposes no original source in scan result
   expect(body.issues).toHaveLength(1); expect(body.original).toBeUndefined();
 });
 
+test('returns an editable review region when TTS failed but pronunciation scanning is clean', async () => {
+  mocks.chapter.mockResolvedValue({ text: 'Plain narration.', original: 'Plain narration.', chapterIndex: 3, hash: 'hash', title: 'Chapter 4', failed: true, failureError: 'TTS recording failed.' });
+  const response = await POST(request('scan'));
+  const body = await response.json();
+  expect(body.failed).toBe(true);
+  expect(body.issues).toMatchObject([{ id: 'failed-chapter', text: 'Plain narration.', replacement: 'Plain narration.', reason: 'TTS recording failed.' }]);
+});
+
 test('remembers approved repairs only for the authenticated owner without accepting client pronunciations', async () => {
   mocks.remember.mockResolvedValue({ saved: 2, alreadyKnown: 0, skipped: 1 });
   const response = await POST(request('remember-approved'));

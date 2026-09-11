@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, use, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { HTMLViewer } from "@/components/views/HTMLViewer";
 import { parseHtmlBlocks } from "@/lib/client/html/blocks";
 import { BookPronunciationInspectorModal } from "@/components/doclist/BookPronunciationInspectorModal";
@@ -33,6 +33,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const unwrappedParams = use(params);
   const bookId = unwrappedParams.bookId;
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +87,14 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
 
   const isMultiVoice = chapterText.includes('<voice');
   const isWaitingForGpu = activeJob?.phase === AUDIOBOOK_WAITING_FOR_GPU_PHASE;
+
+  useEffect(() => {
+    if (searchParams.get('reviewPronunciation') !== 'true') return;
+    setShowPronunciationIssues(true);
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('reviewPronunciation');
+    router.replace(next.size ? `/listen/${encodeURIComponent(bookId)}?${next}` : `/listen/${encodeURIComponent(bookId)}`);
+  }, [bookId, router, searchParams]);
   const activeJobSettings = useMemo(() => {
     if (!activeJob?.settingsJson) return {} as Record<string, unknown>;
     if (typeof activeJob.settingsJson === 'string') {

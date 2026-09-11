@@ -12,4 +12,9 @@ describe('AudiobookExportModal downloads', () => {
     expect(source).not.toContain('window.location.assign(url)');
     expect(source).toContain("downloadAudiobookWithBackgroundPolling");
   });
+
+  test('sends blocked full-book downloads directly to pronunciation review', () => {
+    expect(source).toContain("AUDIOBOOK_CHAPTER_REVIEW_REQUIRED");
+    expect(source).toContain("reviewPronunciation=true");
+  });
 });

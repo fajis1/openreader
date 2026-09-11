@@ -111,6 +111,14 @@ export async function GET(request: NextRequest) {
 
     const objects = await listAudiobookObjects(bookId, storageUserId, testNamespace);
     const objectNames = objects.map((item) => item.fileName);
+    const failedChapterFiles = objectNames.filter((name) => /^\d{1,6}__rejected\.txt$/u.test(name));
+    if (failedChapterFiles.length) {
+      return NextResponse.json({
+        error: `${failedChapterFiles.length} chapter${failedChapterFiles.length === 1 ? '' : 's'} require${failedChapterFiles.length === 1 ? 's' : ''} review and successful replacement recording before full-book download.`,
+        code: 'AUDIOBOOK_CHAPTER_REVIEW_REQUIRED',
+        failedChapterFiles,
+      }, { status: 409 });
+    }
     let chapters = listChapterObjects(objectNames);
     if (chapters.length === 0) {
       console.log('DEBUG 404: No chapters found', { bookId, storageUserId, testNamespace, objectNames, objectsLength: objects.length });
@@ -237,6 +245,14 @@ export async function POST(request: NextRequest) {
 
     const objects = await listAudiobookObjects(bookId, storageUserId, testNamespace);
     const objectNames = objects.map((item) => item.fileName);
+    const failedChapterFiles = objectNames.filter((name) => /^\d{1,6}__rejected\.txt$/u.test(name));
+    if (failedChapterFiles.length) {
+      return NextResponse.json({
+        error: `${failedChapterFiles.length} chapter${failedChapterFiles.length === 1 ? '' : 's'} require${failedChapterFiles.length === 1 ? 's' : ''} review and successful replacement recording before full-book download.`,
+        code: 'AUDIOBOOK_CHAPTER_REVIEW_REQUIRED',
+        failedChapterFiles,
+      }, { status: 409 });
+    }
     
     let chapters = listChapterObjects(objectNames);
     if (chapters.length === 0) {

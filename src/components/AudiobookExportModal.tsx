@@ -710,11 +710,16 @@ export function AudiobookExportModal({
       await new Promise(resolve => setTimeout(resolve, 2000));
     } catch (error) {
       console.error('Error downloading complete audiobook:', error);
-      setErrorMessage('Failed to download audiobook. Please try again.');
+      if (error instanceof Error && (error as Error & { code?: string }).code === 'AUDIOBOOK_CHAPTER_REVIEW_REQUIRED') {
+        setIsOpen(false);
+        router.push(`/listen/${encodeURIComponent(bookId)}?reviewPronunciation=true`);
+        return;
+      }
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to download audiobook. Please try again.');
     } finally {
       setIsCombining(false);
     }
-  }, [bookId, format]);
+  }, [bookId, format, router, setIsOpen]);
 
 
   const formatDuration = (seconds?: number) => {

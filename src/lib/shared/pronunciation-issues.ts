@@ -19,6 +19,20 @@ export type PronunciationPatch = { id: string; replacement: string };
 const TAG = /\[([^\]\r\n]+)\]\(\/([^/\r\n]+)\/\)/gu;
 const FOREIGN = /[\p{Script=Greek}\p{Script=Hebrew}]/u;
 
+export function failedChapterReviewIssue(text: string, reason?: string): PronunciationIssue | null {
+  if (!text) return null;
+  return {
+    id: 'failed-chapter',
+    start: 0,
+    end: text.length,
+    text,
+    context: text.slice(0, 500),
+    reason: reason || 'Chapter generation failed. Review or edit the chapter before recording it again.',
+    kind: 'structural',
+    replacement: text,
+  };
+}
+
 function lookup(word: string, dictionary: Record<string, string>): string | undefined {
   const expanded = contextualPronunciationWord(word)
     || expandScholarEditorialWords(word.replace(/\\/gu, ''));

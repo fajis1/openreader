@@ -92,6 +92,10 @@ class GeminiRateLimiterTests(unittest.TestCase):
 class GeminiCapacityFallbackTests(unittest.IsolatedAsyncioTestCase):
     async def test_advances_to_next_model_after_capacity_error(self):
         attempts = []
+        slept_delays = []
+
+        async def mock_sleep(seconds):
+            slept_delays.append(seconds)
 
         async def request(api_key, model):
             attempts.append((api_key, model))
@@ -106,13 +110,177 @@ class GeminiCapacityFallbackTests(unittest.IsolatedAsyncioTestCase):
             request=request,
             min_delay=5,
             max_delay=300,
+            max_top_delays=3,
+            sleep_fn=mock_sleep,
         )
 
         self.assertEqual(result, ("success", "backup"))
-        self.assertEqual(attempts, [("key", "primary"), ("key", "backup")])
+        # Primary failed 1 initial + 6 doublings (5, 10, 20, 40, 80, 160) + 3 waits at 300s = 10 attempts on primary
+        self.assertEqual(len([a for a in attempts if a[1] == "primary"]), 10)
+        self.assertEqual(slept_delays, [5, 10, 20, 40, 80, 160, 300, 300, 300])
+        self.assertIn(("key", "backup"), attempts)
+
+    async def test_exponential_doubling_and_three_300s_waits(self):
+        delays = []
+
+        async def mock_sleep(seconds):
+            delays.append(seconds)
+
+        async def request(api_key, model):
+            raise RuntimeError("429 Too Many Requests")
+
+        result = await call_gemini_with_capacity_fallback(
+            api_states={},
+            api_keys=["key"],
+            models=["only-model"],
+            request=request,
+            min_delay=5,
+            max_delay=300,
+            max_top_delays=3,
+            sleep_fn=mock_sleep,
+        )
+
+        self.assertIsNone(result)
+        # Verify exact exponential sequence up to 300, then 3 waits at 300
+        self.assertEqual(delays, [5, 10, 20, 40, 80, 160, 300, 300, 300])
+
+    async def test_gradual_downshift_and_equilibrium(self):
+        delays = []
+
+        async def mock_sleep(seconds):
+            delays.append(seconds)
+
+        api_states = {}
+
+        # First call hits 429 once, then succeeds on retry
+        call_count = 0
+        async def request_one(api_key, model):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("429 Too Many Requests")
+            return "ok"
+
+        res1 = await call_gemini_with_capacity_fallback(
+            api_states=api_states,
+            api_keys=["key"],
+            models=["model"],
+            request=request_one,
+            min_delay=5,
+            max_delay=300,
+            sleep_fn=mock_sleep,
+        )
+        self.assertEqual(res1, ("ok", "model"))
+        # Started at 0, hit 429, spiked to 5s, slept 5s, retried and succeeded.
+        # On success, delay 5 was reduced by // 2 to 2 (< 5 min_delay), so 0.
+        state = api_states[("key", "model")]
+        self.assertEqual(state["current_delay"], 0)
+
+        # Now simulate a higher delay (e.g. 80s) to test gradual downshift
+        state["current_delay"] = 80
+        state["last_attempt_time"] = 0.0
+
+        async def request_success(api_key, model):
+            return "ok"
+
+        # Next successful call downshifts 80 -> 40
+        await call_gemini_with_capacity_fallback(
+            api_states=api_states,
+            api_keys=["key"],
+            models=["model"],
+            request=request_success,
+            min_delay=5,
+            max_delay=300,
+            sleep_fn=mock_sleep,
+        )
+        self.assertEqual(state["current_delay"], 40)
+
+        # Next successful call downshifts 40 -> 20
+        state["last_attempt_time"] = 0.0
+        await call_gemini_with_capacity_fallback(
+            api_states=api_states,
+            api_keys=["key"],
+            models=["model"],
+            request=request_success,
+            min_delay=5,
+            max_delay=300,
+            sleep_fn=mock_sleep,
+        )
+        self.assertEqual(state["current_delay"], 20)
+
+        # Next successful call downshifts 20 -> 10
+        state["last_attempt_time"] = 0.0
+        await call_gemini_with_capacity_fallback(
+            api_states=api_states,
+            api_keys=["key"],
+            models=["model"],
+            request=request_success,
+            min_delay=5,
+            max_delay=300,
+            sleep_fn=mock_sleep,
+        )
+        self.assertEqual(state["current_delay"], 10)
+
+        # Next successful call downshifts 10 -> 5
+        state["last_attempt_time"] = 0.0
+        await call_gemini_with_capacity_fallback(
+            api_states=api_states,
+            api_keys=["key"],
+            models=["model"],
+            request=request_success,
+            min_delay=5,
+            max_delay=300,
+            sleep_fn=mock_sleep,
+        )
+        self.assertEqual(state["current_delay"], 5)
+
+        # Next successful call downshifts 5 -> 2 (< min_delay) -> 0
+        state["last_attempt_time"] = 0.0
+        await call_gemini_with_capacity_fallback(
+            api_states=api_states,
+            api_keys=["key"],
+            models=["model"],
+            request=request_success,
+            min_delay=5,
+            max_delay=300,
+            sleep_fn=mock_sleep,
+        )
+        self.assertEqual(state["current_delay"], 0)
+
+    async def test_backup_key_tried_before_sleep(self):
+        attempts = []
+        delays = []
+
+        async def mock_sleep(seconds):
+            delays.append(seconds)
+
+        async def request(api_key, model):
+            attempts.append((api_key, model))
+            if api_key == "primary-key":
+                raise RuntimeError("429 Too Many Requests")
+            return "backup-success"
+
+        result = await call_gemini_with_capacity_fallback(
+            api_states={},
+            api_keys=["primary-key", "backup-key"],
+            models=["model"],
+            request=request,
+            min_delay=5,
+            max_delay=300,
+            sleep_fn=mock_sleep,
+        )
+
+        self.assertEqual(result, ("backup-success", "model"))
+        # Primary failed, backup tried immediately without sleep
+        self.assertEqual(attempts, [("primary-key", "model"), ("backup-key", "model")])
+        self.assertEqual(delays, [])
 
     async def test_reports_exhaustion_only_after_every_key_and_model(self):
         attempts = []
+        delays = []
+
+        async def mock_sleep(seconds):
+            delays.append(seconds)
 
         async def request(api_key, model):
             attempts.append((api_key, model))
@@ -125,10 +293,15 @@ class GeminiCapacityFallbackTests(unittest.IsolatedAsyncioTestCase):
             request=request,
             min_delay=5,
             max_delay=300,
+            max_top_delays=1,
+            sleep_fn=mock_sleep,
         )
 
         self.assertIsNone(result)
-        self.assertEqual(len(attempts), 6)
+        # Each model had attempts with primary and backup across the doubling sequence
+        self.assertTrue(any(a[1] == "model-1" for a in attempts))
+        self.assertTrue(any(a[1] == "model-2" for a in attempts))
+        self.assertTrue(any(a[1] == "model-3" for a in attempts))
 
 
 if __name__ == "__main__":

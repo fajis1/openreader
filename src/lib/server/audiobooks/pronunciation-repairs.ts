@@ -171,6 +171,7 @@ async function proposePronunciationRepairInternal(input: RepairInput, diagnostic
   secrets.push(profile.geminiApiKey || '', profile.backupGeminiApiKey || '');
   const { proposedText, validPatches, aiIds, unresolved } = await repairPronunciationText({
     text: chapter.text, original: chapter.original, profile, dictionary, provenance,
+    failedChapterReason: chapter.failed ? chapter.failureError : undefined,
     signal: input.signal, manualPatches: input.manualPatches,
     resolveAi: () => resolveRepairAiSelection(input.userId, { ...input, profileId: profile.id }),
   }, diagnostics, secrets);

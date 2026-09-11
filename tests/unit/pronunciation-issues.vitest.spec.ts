@@ -1,11 +1,21 @@
 import { describe, expect, test } from 'vitest';
-import { applyPronunciationPatches, assertPronunciationRepair, canonicalRepairTextFile, scanPronunciationIssues } from '../../src/lib/shared/pronunciation-issues';
+import { applyPronunciationPatches, assertPronunciationRepair, canonicalRepairTextFile, failedChapterReviewIssue, scanPronunciationIssues } from '../../src/lib/shared/pronunciation-issues';
 import { reconcileSmartAudioPronunciations } from '../../src/lib/shared/smart-audio-cleanup';
 import { getKokoroPronunciationWordWarnings } from '../../src/lib/shared/kokoro-pronunciation-policy';
 
 const dictionary = { Aetherian: '/eɪθɪriən/', 'θεοῦ': '/θɛu/' };
 
 describe('targeted pronunciation scan and patches', () => {
+  test('creates an editable whole-chapter review item for a retained generation failure', () => {
+    expect(failedChapterReviewIssue('Narration text.', 'TTS recording failed.')).toMatchObject({
+      id: 'failed-chapter',
+      start: 0,
+      end: 15,
+      text: 'Narration text.',
+      replacement: 'Narration text.',
+      reason: 'TTS recording failed.',
+    });
+  });
   test('does not send already-tagged suffixes to AI, but retains the complete optional-letter finding', () => {
     const tagged = '-[μός](/mɒs/) and -[μα](/mɑ/)';
     const text = `${Array(11).fill(tagged).join('. ')}. -(σ)[μός](/mɒs/)`;

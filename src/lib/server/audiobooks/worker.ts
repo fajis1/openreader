@@ -893,6 +893,13 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
     }
 
     let continuityState = "Beginning of book.";
+    const failedChapterIndexes: number[] = [];
+
+    const markChapterForReview = async (chapterIndex: number, chapterLength: number) => {
+      if (!failedChapterIndexes.includes(chapterIndex)) failedChapterIndexes.push(chapterIndex);
+      processedLength += chapterLength;
+      await updateProgress(Math.floor((processedLength / totalLength) * 100));
+    };
 
     for (const chapter of chapters) {
       // ABORT CHECK: If user cancelled/deleted the job from the UI, abort processing
@@ -1053,7 +1060,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
                 await savePronunciationFailure({ bookId, userId, chapterIndex: chapter.index, chapterTitle: chapter.title,
                   sourceText: cleanupSourceText, rejected, errors: errors.slice(0, 1), jobId: job.id,
                   profileId: currentSelectedProfile?.id, cast: multiVoiceCharacters, namespace: testNamespace,
-                }).catch(() => serverLogger.warn({ event: 'audiobook.pronunciation_failure.save_failed', bookId, chapter: chapter.index }, 'Could not retain rejected chapter for pronunciation review.'));
+                });
               },
               resolve: (candidate) => {
                 const multiVoiceResult = currentSelectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE
@@ -1212,9 +1219,20 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         } catch (e) {
           if (e instanceof AudiobookJobStoppedError) throw e;
 
+          if (e instanceof SmartAudioTargetedRepairError) {
+            serverLogger.warn({
+              event: 'audiobook.queue.chapter_held_for_review',
+              jobId: job.id,
+              bookId,
+              chapter: chapter.index,
+              error: e.message,
+            }, 'Skipping one unrecoverable chapter and continuing audiobook generation.');
+            await markChapterForReview(chapter.index, chapter.text.length);
+            continue;
+          }
+
           serverLogger.error({ event: 'audiobook.queue.smart_audio.failed', error: e }, 'Smart audio processing failed. Aborting generation.');
           if (nc) await nc.close();
-          if (e instanceof SmartAudioTargetedRepairError && !e.apiBlocked) throw e;
           
           const jobSettingsParsed = typeof job.settingsJson === 'string' ? JSON.parse(job.settingsJson) : (job.settingsJson || {});
           const retries = typeof jobSettingsParsed.smartAudioRetries === 'number' ? jobSettingsParsed.smartAudioRetries : 0;
@@ -1272,31 +1290,64 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       // known so blob discovery and the chapter database agree.
       const chapterFileName = encodeChapterFileName(chapter.index, chapter.title, format);
 
-      const ttsBuffer = await generateQueuedAudiobookTts(
-        job.id,
-        {
-          text: processedTextForTts,
-          voice: settings.voice || 'alloy',
-          speed: settings.speed || 1,
-          format: 'mp3',
-          provider: creds.provider,
-          apiKey: creds.apiKey,
-          baseUrl: creds.baseUrl,
-          testNamespace: testNamespace,
-        },
-        {
-          provider: creds.provider,
-          model: typeof settings.ttsModel === 'string'
-            ? settings.ttsModel
-            : creds.adminRecord?.defaultModel,
-        },
-        {
-          ttsCacheMaxSizeBytes: runtimeConfig.ttsCacheMaxSizeBytes,
-          ttsCacheTtlMs: runtimeConfig.ttsCacheTtlMs,
-          ttsUpstreamMaxRetries: runtimeConfig.ttsUpstreamMaxRetries,
-          ttsUpstreamTimeoutMs: runtimeConfig.ttsUpstreamTimeoutMs,
-        },
-      );
+      let ttsBuffer: Buffer;
+      try {
+        ttsBuffer = await generateQueuedAudiobookTts(
+          job.id,
+          {
+            text: processedTextForTts,
+            voice: settings.voice || 'alloy',
+            speed: settings.speed || 1,
+            format: 'mp3',
+            provider: creds.provider,
+            apiKey: creds.apiKey,
+            baseUrl: creds.baseUrl,
+            testNamespace: testNamespace,
+          },
+          {
+            provider: creds.provider,
+            model: typeof settings.ttsModel === 'string'
+              ? settings.ttsModel
+              : creds.adminRecord?.defaultModel,
+          },
+          {
+            ttsCacheMaxSizeBytes: runtimeConfig.ttsCacheMaxSizeBytes,
+            ttsCacheTtlMs: runtimeConfig.ttsCacheTtlMs,
+            ttsUpstreamMaxRetries: runtimeConfig.ttsUpstreamMaxRetries,
+            ttsUpstreamTimeoutMs: runtimeConfig.ttsUpstreamTimeoutMs,
+          },
+        );
+      } catch (error) {
+        if (error instanceof AudiobookJobStoppedError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        try {
+          await savePronunciationFailure({
+            bookId,
+            userId,
+            chapterIndex: chapter.index,
+            chapterTitle: chapter.title,
+            sourceText: cleanupSource,
+            rejected: { status: 'success', cleaned_text: processedTextForTts },
+            errors: [`TTS recording failed: ${message}`],
+            jobId: job.id,
+            profileId: selectedProfile?.id,
+            cast: multiVoiceCharacters,
+            namespace: testNamespace,
+          });
+        } catch (retentionError) {
+          serverLogger.error({ event: 'audiobook.pronunciation_failure.save_failed', bookId, chapter: chapter.index, error: retentionError }, 'Could not retain failed chapter for manual review; stopping to avoid an untracked gap.');
+          throw retentionError;
+        }
+        serverLogger.error({
+          event: 'audiobook.queue.chapter_tts_failed',
+          jobId: job.id,
+          bookId,
+          chapter: chapter.index,
+          error,
+        }, 'One chapter failed TTS; continuing audiobook generation.');
+        await markChapterForReview(chapter.index, chapter.text.length);
+        continue;
+      }
       if (!await workerStillOwnsAudiobookJob(job.id)) throw new AudiobookJobStoppedError();
 
       const contentType = format === 'mp3' ? 'audio/mpeg' : 'audio/mp4';
@@ -1357,6 +1408,9 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
       status: 'completed',
       completedAt: Date.now(),
       progress: 100,
+      error: failedChapterIndexes.length
+        ? `${failedChapterIndexes.length} chapter${failedChapterIndexes.length === 1 ? '' : 's'} require${failedChapterIndexes.length === 1 ? 's' : ''} manual review before full-book download.`
+        : null,
     });
     await db.update(audiobooks).set({ totalBytes }).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, userId)));
     serverLogger.info({ event: 'audiobook.queue.complete', jobId: job.id, documentId: job.documentId }, `Successfully completed audiobook job ${job.id}`);

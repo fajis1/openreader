@@ -8,7 +8,7 @@ import { pronunciationCatalog, pronunciationDictionary, readPronunciationChapter
 import { loadPronunciationRepairConfig, pronunciationRepairErrorMessage } from '@/lib/server/audiobooks/pronunciation-repair-config';
 import { listPronunciationRepairJobs, queuePronunciationRepairs, stopPronunciationRepairs, resumePronunciationRepairs } from '@/lib/server/audiobooks/pronunciation-repair-jobs';
 import { serverLogger } from '@/lib/server/logger';
-import { scanPronunciationIssues } from '@/lib/shared/pronunciation-issues';
+import { failedChapterReviewIssue, scanPronunciationIssues } from '@/lib/shared/pronunciation-issues';
 import { runTaskNow } from '@/lib/server/tasks/engine';
 import { errorResponse } from '@/lib/server/errors/next-response';
 import { pronunciationRepairReport } from '@/lib/server/audiobooks/pronunciation-repair-report';
@@ -98,10 +98,15 @@ export async function POST(request: Request) {
       const { dictionary } = await pronunciationDictionary(user, body.bookId, profileId || chapter.profileId);
       const existing = await existingPronunciationRepair(body.bookId, user, body.fileName, chapter.hash);
       const scanText = existing?.decision === 'pending' ? existing.proposedText : chapter.text;
+      const scannedIssues = scanPronunciationIssues(scanText, dictionary);
+      const forcedFailureIssue = chapter.failed && !existing && !scannedIssues.length
+        ? failedChapterReviewIssue(scanText, chapter.failureError)
+        : null;
       return NextResponse.json({ fileName: body.fileName, chapterIndex: chapter.chapterIndex, title: chapter.title, failed: chapter.failed,
         hash: chapter.hash, jobId: chapter.jobId, failureError: chapter.failureError, runId: existing?.runId, audioStatus: existing?.audioStatus,
         retryRunId: existing?.decision === 'pending' ? existing.runId : undefined,
-        proposalHash: existing?.decision === 'pending' ? existing.proposedTextHash : undefined, issues: scanPronunciationIssues(scanText, dictionary) });
+        proposalHash: existing?.decision === 'pending' ? existing.proposedTextHash : undefined,
+        issues: forcedFailureIssue ? [forcedFailureIssue] : scannedIssues });
     }
     if (body.action === 'propose' && typeof body.hash === 'string') {
       return NextResponse.json({ error: 'Reload Reader to use background pronunciation repairs.' }, { status: 409 });

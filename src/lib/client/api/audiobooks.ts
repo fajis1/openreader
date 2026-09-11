@@ -211,7 +211,12 @@ export const combineAudiobook = async (bookId: string, format: string): Promise<
   const response = await fetch(`/api/audiobook?bookId=${bookId}&format=${format}`, {
     method: 'POST',
   });
-  if (!response.ok) throw new Error('Failed to combine audiobook');
+  if (!response.ok) {
+    const problem = await response.json().catch(() => null) as { error?: string; code?: string } | null;
+    const error = new Error(problem?.error || 'Failed to combine audiobook') as Error & { code?: string };
+    error.code = problem?.code;
+    throw error;
+  }
   return await response.json();
 };
 

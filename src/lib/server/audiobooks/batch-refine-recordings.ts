@@ -362,6 +362,12 @@ async function recordApprovedChange(
         format,
       },
     });
+    if (pronunciationRepair && change.textFileName.endsWith('__rejected.txt')) {
+      await Promise.all([
+        deleteAudiobookObject(change.documentId, change.userId, change.textFileName, null).catch(() => {}),
+        deleteAudiobookObject(change.documentId, change.userId, change.textFileName.replace('__rejected.txt', '__pronunciation_failure.json'), null).catch(() => {}),
+      ]);
+    }
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }

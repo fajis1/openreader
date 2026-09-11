@@ -4,20 +4,25 @@ import { resolvePronunciationAiModel } from '@/lib/shared/smart-audio-models';
 import { fetchGeminiWithRateLimitFallback } from '../smart-audio/gemini-failover';
 import { geminiErrorDetails, type GeminiErrorDetails } from '../smart-audio/gemini-error-details';
 import { buildPronunciationRepairInstructions, CONTEXTUAL_REPAIR_INSTRUCTIONS, inspectRepairPatches, selectRepairCandidates, type RepairDiagnostics } from './pronunciation-repair-diagnostics';
-import { scanPronunciationIssues, applyPronunciationPatches, assertPronunciationRepair, type PronunciationPatch } from '@/lib/shared/pronunciation-issues';
+import { scanPronunciationIssues, applyPronunciationPatches, assertPronunciationRepair, failedChapterReviewIssue, type PronunciationPatch } from '@/lib/shared/pronunciation-issues';
 import { parseVoiceTaggedText } from '@/lib/shared/multi-voice';
 
 export async function repairPronunciationText(input: {
   text: string; original: string; profile: SmartAudioProfile;
   dictionary: Record<string, string>; provenance?: Record<string, string>;
   signal: AbortSignal; manualPatches?: PronunciationPatch[];
+  failedChapterReason?: string;
   resolveAi: () => Promise<{ primaryApiKey: string; backupApiKey: string; selection: { aiModel: string; fallbackModels?: string[] } }>;
 }, diagnostics: RepairDiagnostics, secrets: string[] = []) {
   const { profile, dictionary } = input;
   const provenance = input.provenance || {};
   diagnostics.systemInstruction = `${buildPronunciationRepairInstructions(profile)}\n${CONTEXTUAL_REPAIR_INSTRUCTIONS}`;
   diagnostics.stage = 'scan';
-  const issues = scanPronunciationIssues(input.text, dictionary);
+  const scannedIssues = scanPronunciationIssues(input.text, dictionary);
+  const forcedFailureIssue = !scannedIssues.length && input.failedChapterReason
+    ? failedChapterReviewIssue(input.text, input.failedChapterReason)
+    : null;
+  const issues = forcedFailureIssue ? [forcedFailureIssue] : scannedIssues;
   if (!issues.length) throw new PronunciationRepairError('No pronunciation issues remain in this chapter.');
   if ((input.manualPatches || []).some(patch => !patch || typeof patch.id !== 'string' || typeof patch.replacement !== 'string')) throw new PronunciationRepairError('Invalid manual repair.');
   const manual = new Map((input.manualPatches || []).map(patch => [patch.id, patch.replacement]));
