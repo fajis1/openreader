@@ -53,11 +53,27 @@ export function AdminFeaturesPanel() {
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const { providers: sharedProviders } = useSharedProviders();
+  const [showAbsToken, setShowAbsToken] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [isTestingAbs, setIsTestingAbs] = useState(false);
+  const [absTestStatus, setAbsTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [absTestError, setAbsTestError] = useState<string>('');
+  const [absLibraries, setAbsLibraries] = useState<Array<{ id: string; name: string; mediaType: string; folders: Array<{ id: string; fullPath: string }> }>>([]);
 
   useEffect(() => {
     if (!data) return;
     setDraft({ ...data.values });
     setDirty(new Set());
+    if (data.values?.audiobookshelfToken) {
+      fetch('/api/admin/audiobookshelf/test')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((json) => {
+          if (json?.ok && Array.isArray(json.libraries)) {
+            setAbsLibraries(json.libraries);
+          }
+        })
+        .catch(() => {});
+    }
   }, [data]);
 
   useEffect(() => {
@@ -160,6 +176,51 @@ export function AdminFeaturesPanel() {
 
   const handleProviderChange = (opt: ProviderOption) => {
     updateDraft('defaultTtsProvider', opt.id);
+  };
+
+  const currentLibraryFolders = useMemo(() => {
+    const selectedLibId = String(draft.audiobookshelfLibraryId ?? '');
+    const lib = absLibraries.find((l) => l.id === selectedLibId);
+    return lib ? lib.folders : [];
+  }, [absLibraries, draft.audiobookshelfLibraryId]);
+
+  const handleTestAbsConnection = async () => {
+    setIsTestingAbs(true);
+    setAbsTestStatus('idle');
+    setAbsTestError('');
+    try {
+      const res = await fetch('/api/admin/audiobookshelf/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: draft.audiobookshelfUrl,
+          token: draft.audiobookshelfToken,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.ok) {
+        setAbsTestStatus('success');
+        const libs = Array.isArray(json.libraries) ? json.libraries : [];
+        setAbsLibraries(libs);
+        toast.success(`Connected to Audiobookshelf! Found ${libs.length} libraries.`);
+        if (libs.length > 0 && !draft.audiobookshelfLibraryId) {
+          updateDraft('audiobookshelfLibraryId', libs[0].id);
+          if (libs[0].folders?.length > 0 && !draft.audiobookshelfFolderId) {
+            updateDraft('audiobookshelfFolderId', libs[0].folders[0].id);
+          }
+        }
+      } else {
+        setAbsTestStatus('error');
+        setAbsTestError(json.error || 'Connection test failed');
+        toast.error(json.error || 'Failed to connect to Audiobookshelf');
+      }
+    } catch (err) {
+      setAbsTestStatus('error');
+      setAbsTestError((err as Error).message || 'Connection test failed');
+      toast.error('Failed to connect to Audiobookshelf');
+    } finally {
+      setIsTestingAbs(false);
+    }
   };
 
   const renderSource = (key: string) => {
@@ -518,6 +579,165 @@ export function AdminFeaturesPanel() {
               value={String(draft.ttsCacheTtlMs ?? '')}
               onChange={(event) => updatePositiveIntDraft('ttsCacheTtlMs', event.target.value)}
             />
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Audiobookshelf & AI Integration"
+        subtitle="Directly export generated audiobooks and companion documents to Audiobookshelf."
+        action={<Badge tone="accent">Audiobookshelf</Badge>}
+      >
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-medium text-foreground">Audiobookshelf Server URL</label>
+              {renderSource('audiobookshelfUrl')}
+            </div>
+            <Input
+              type="text"
+              placeholder="http://192.168.90.244:13378"
+              value={String(draft.audiobookshelfUrl ?? '')}
+              onChange={(e) => updateDraft('audiobookshelfUrl', e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-medium text-foreground">Audiobookshelf API Token</label>
+              {renderSource('audiobookshelfToken')}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                type={showAbsToken ? 'text' : 'password'}
+                placeholder="Enter API token..."
+                value={String(draft.audiobookshelfToken ?? '')}
+                onChange={(e) => updateDraft('audiobookshelfToken', e.target.value)}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowAbsToken((s) => !s)}
+                className="shrink-0"
+              >
+                {showAbsToken ? 'Hide' : 'Show'}
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted">
+              Generate an API token in Audiobookshelf (Settings &gt; Users &gt; API Tokens).
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={isTestingAbs || !draft.audiobookshelfUrl || !draft.audiobookshelfToken}
+              onClick={handleTestAbsConnection}
+            >
+              {isTestingAbs ? 'Testing...' : 'Test Connection & Fetch Libraries'}
+            </Button>
+            {absTestStatus === 'success' && (
+              <span className="text-xs text-emerald-500 font-medium flex items-center gap-1">
+                ✓ Connected successfully ({absLibraries.length} {absLibraries.length === 1 ? 'library' : 'libraries'} found)
+              </span>
+            )}
+            {absTestStatus === 'error' && (
+              <span className="text-xs text-rose-500 font-medium">
+                ✗ {absTestError}
+              </span>
+            )}
+          </div>
+
+          {absLibraries.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium text-foreground">Default Target Library</label>
+                  {renderSource('audiobookshelfLibraryId')}
+                </div>
+                <select
+                  className="w-full rounded-md border border-line-soft bg-background px-3 py-2 text-xs text-foreground outline-none focus:border-accent"
+                  value={String(draft.audiobookshelfLibraryId ?? '')}
+                  onChange={(e) => {
+                    const libId = e.target.value;
+                    updateDraft('audiobookshelfLibraryId', libId);
+                    const lib = absLibraries.find((l) => l.id === libId);
+                    if (lib && lib.folders.length > 0) {
+                      updateDraft('audiobookshelfFolderId', lib.folders[0].id);
+                    }
+                  }}
+                >
+                  <option value="">Select a library...</option>
+                  {absLibraries.map((lib) => (
+                    <option key={lib.id} value={lib.id}>
+                      {lib.name} ({lib.mediaType})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium text-foreground">Default Folder</label>
+                  {renderSource('audiobookshelfFolderId')}
+                </div>
+                <select
+                  className="w-full rounded-md border border-line-soft bg-background px-3 py-2 text-xs text-foreground outline-none focus:border-accent"
+                  value={String(draft.audiobookshelfFolderId ?? '')}
+                  onChange={(e) => updateDraft('audiobookshelfFolderId', e.target.value)}
+                  disabled={!currentLibraryFolders.length}
+                >
+                  {currentLibraryFolders.length === 0 ? (
+                    <option value="">(Select library first)</option>
+                  ) : (
+                    currentLibraryFolders.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.fullPath}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+            </div>
+          )}
+
+          <ToggleRow
+            label="Infer document metadata with Gemini"
+            description="Automatically detect clean canonical book title, author, and series when exporting to Audiobookshelf."
+            checked={Boolean(draft.audiobookshelfAutoDetectMetadata ?? true)}
+            onChange={(checked) => updateDraft('audiobookshelfAutoDetectMetadata', checked)}
+            right={renderSource('audiobookshelfAutoDetectMetadata')}
+            variant="flat"
+          />
+
+          <div className="space-y-1 pt-2 border-t border-line-soft">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-medium text-foreground">Admin Universal Gemini API Key</label>
+              {renderSource('geminiApiKey')}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                type={showGeminiKey ? 'text' : 'password'}
+                placeholder="AIzaSy..."
+                value={String(draft.geminiApiKey ?? '')}
+                onChange={(e) => updateDraft('geminiApiKey', e.target.value)}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowGeminiKey((s) => !s)}
+                className="shrink-0"
+              >
+                {showGeminiKey ? 'Hide' : 'Show'}
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted">
+              Used by Gemini 3.8 Flash to intelligently determine clean titles, author, and series for strange/raw filenames, and serves as server fallback for Smart Audio.
+            </p>
           </div>
         </div>
       </Section>

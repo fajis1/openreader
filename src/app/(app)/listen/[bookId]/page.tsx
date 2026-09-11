@@ -9,6 +9,7 @@ import { MultiVoiceReviewStudio } from "@/components/audiobooks/MultiVoiceReview
 import { MobileReviewPlayer } from "@/components/audiobooks/MobileReviewPlayer";
 import { BatchRefineReviewModal } from "@/components/audiobooks/BatchRefineReviewModal";
 import { PronunciationIssuesModal } from "@/components/audiobooks/PronunciationIssuesModal";
+import { AudiobookshelfModal } from "@/components/audiobooks/AudiobookshelfModal";
 import { BASE_BOOKS, PRESET_MODELS } from "@/components/constants";
 import { toast } from "react-hot-toast";
 import { ModalFrame } from "@/components/ui";
@@ -49,6 +50,7 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
   const [showBatchRefineModal, setShowBatchRefineModal] = useState(false);
   const [showBatchRefineReview, setShowBatchRefineReview] = useState(false);
   const [showPronunciationIssues, setShowPronunciationIssues] = useState(false);
+  const [showAudiobookshelfModal, setShowAudiobookshelfModal] = useState(false);
   const [batchRefineRunId, setBatchRefineRunId] = useState<string | null>(null);
   const [batchRefineRule, setBatchRefineRule] = useState('');
   const [batchRefineModel, setBatchRefineModel] = useState('gemini-2.5-flash');
@@ -753,6 +755,13 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
             📱 Mobile Player
           </button>
           <button onClick={() => setShowPronunciationIssues(true)} className="rounded border border-line-soft bg-surface-raised px-3 py-1.5 text-xs font-medium text-text-strong">Scan Pronunciation Issues</button>
+          <button
+            onClick={() => setShowAudiobookshelfModal(true)}
+            className="rounded border border-line-soft bg-surface-raised px-3 py-1.5 text-xs font-medium text-text-strong hover:bg-surface-sunken flex items-center gap-1.5"
+            title="Export this audiobook and companion document to Audiobookshelf"
+          >
+            <span>📚</span> Add to Audiobookshelf
+          </button>
           <div className="hidden md:flex gap-2 items-center border-l border-line-soft pl-2 ml-1">
             <button
               onClick={handleFixAllAbbreviations}
@@ -1470,6 +1479,12 @@ export default function ListenPage({ params }: { params: Promise<{ bookId: strin
         void fetchStatus();
         if (selectedChapterIndex !== undefined) void fetchChapterText(selectedChapterIndex, true);
       }} />
+
+      <AudiobookshelfModal
+        open={showAudiobookshelfModal}
+        onClose={() => setShowAudiobookshelfModal(false)}
+        bookId={bookId}
+      />
 
     </div>
   );

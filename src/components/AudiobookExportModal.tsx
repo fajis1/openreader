@@ -12,6 +12,7 @@ import { useTTS } from '@/contexts/TTSContext';
 import { VoicesControlBase } from '@/components/player/VoicesControlBase';
 import { ReaderSidebarShell } from '@/components/reader/ReaderSidebarShell';
 import { MultiVoiceCharacterModal } from '@/components/doclist/MultiVoiceCharacterModal';
+import { AudiobookshelfModal } from '@/components/audiobooks/AudiobookshelfModal';
 import { resolveTtsProviderModelPolicy } from '@/lib/shared/tts-provider-policy';
 import { getTtsLanguageCompatibilityWarnings, resolveTtsLanguage } from '@/lib/shared/language';
 import {
@@ -108,6 +109,7 @@ export function AudiobookExportModal({
   const [isLoadingDramaNarrator, setIsLoadingDramaNarrator] = useState(false);
   const [pendingScholarRegeneration, setPendingScholarRegeneration] = useState<TTSAudiobookChapter | null>(null);
   const [pendingCloseAction, setPendingCloseAction] = useState<'close_modal' | 'navigate' | null>(null);
+  const [showAudiobookshelfModal, setShowAudiobookshelfModal] = useState(false);
 
   const formatSpeed = useCallback((speed: number) => {
     return Number.isInteger(speed) ? speed.toString() : speed.toFixed(1);
@@ -1274,16 +1276,29 @@ export function AudiobookExportModal({
                             </div>
 
                             {bookId && !isGenerating && (
-                              <div className="pt-4 border-t border-line-soft">
+                              <div className="pt-4 border-t border-line-soft flex flex-col sm:flex-row gap-2">
                                 <Button
                                   onClick={handleDownloadComplete}
                                   disabled={isCombining}
                                   variant="primary"
                                   size="md"
-                                  className="w-full space-x-2"
+                                  className="flex-1 space-x-2"
                                 >
                                   <DownloadIcon className="h-5 w-5" />
                                   <span>{isCombining ? 'Combining chapters...' : `Full Download (${format.toUpperCase()})`}</span>
+                                </Button>
+                                <Button
+                                  onClick={() => setShowAudiobookshelfModal(true)}
+                                  disabled={isCombining}
+                                  variant="secondary"
+                                  size="md"
+                                  className="flex-1 space-x-2"
+                                  title="Export this audiobook and original document directly to Audiobookshelf"
+                                >
+                                  <svg className="h-5 w-5 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                                  </svg>
+                                  <span>Add to Audiobookshelf</span>
                                 </Button>
                               </div>
                             )}
@@ -1423,6 +1438,14 @@ export function AudiobookExportModal({
               await handleStartGeneration(false, narratorVoice);
             }
           }}
+        />
+      )}
+      {bookId && (
+        <AudiobookshelfModal
+          open={showAudiobookshelfModal}
+          onClose={() => setShowAudiobookshelfModal(false)}
+          bookId={bookId}
+          documentType={documentType}
         />
       )}
     </>

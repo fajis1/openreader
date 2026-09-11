@@ -115,6 +115,14 @@ export const RUNTIME_CONFIG_SCHEMA = {
   supportMinimumUsd: positiveIntValue(10),
   supportExtraAudiobooks: positiveIntValue(5),
   supportServerUrl: stringValue(''),
+  // Audiobookshelf integration
+  audiobookshelfUrl: stringValue('http://192.168.90.244:13378'),
+  audiobookshelfToken: stringValue(''),
+  audiobookshelfLibraryId: stringValue(''),
+  audiobookshelfFolderId: stringValue(''),
+  audiobookshelfAutoDetectMetadata: booleanFlag(true),
+  // Admin universal Gemini API key
+  geminiApiKey: stringValue(''),
 } as const satisfies Record<string, RuntimeConfigKeyDef<unknown>>;
 
 export type RuntimeConfigKey = keyof typeof RUNTIME_CONFIG_SCHEMA;
@@ -224,6 +232,16 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
         if (implicitDefaultTtsProvider) {
           (out as Record<string, unknown>)[key] = implicitDefaultTtsProvider;
         }
+      } else if (key === 'audiobookshelfUrl' && process.env.AUDIOBOOKSHELF_URL) {
+        (out as Record<string, unknown>)[key] = process.env.AUDIOBOOKSHELF_URL.trim();
+      } else if (key === 'audiobookshelfToken' && process.env.AUDIOBOOKSHELF_TOKEN) {
+        (out as Record<string, unknown>)[key] = process.env.AUDIOBOOKSHELF_TOKEN.trim();
+      } else if (key === 'audiobookshelfLibraryId' && process.env.AUDIOBOOKSHELF_LIBRARY_ID) {
+        (out as Record<string, unknown>)[key] = process.env.AUDIOBOOKSHELF_LIBRARY_ID.trim();
+      } else if (key === 'audiobookshelfFolderId' && process.env.AUDIOBOOKSHELF_FOLDER_ID) {
+        (out as Record<string, unknown>)[key] = process.env.AUDIOBOOKSHELF_FOLDER_ID.trim();
+      } else if (key === 'geminiApiKey' && process.env.GEMINI_API_KEY) {
+        (out as Record<string, unknown>)[key] = process.env.GEMINI_API_KEY.trim();
       }
       continue;
     }
@@ -254,6 +272,26 @@ export async function getRuntimeConfigWithSources(): Promise<{
         if (implicitDefaultTtsProvider) {
           (values as Record<string, unknown>)[key] = implicitDefaultTtsProvider;
         }
+      } else if (key === 'audiobookshelfUrl' && process.env.AUDIOBOOKSHELF_URL) {
+        (values as Record<string, unknown>)[key] = process.env.AUDIOBOOKSHELF_URL.trim();
+        sources[key] = 'env-seed';
+        continue;
+      } else if (key === 'audiobookshelfToken' && process.env.AUDIOBOOKSHELF_TOKEN) {
+        (values as Record<string, unknown>)[key] = process.env.AUDIOBOOKSHELF_TOKEN.trim();
+        sources[key] = 'env-seed';
+        continue;
+      } else if (key === 'audiobookshelfLibraryId' && process.env.AUDIOBOOKSHELF_LIBRARY_ID) {
+        (values as Record<string, unknown>)[key] = process.env.AUDIOBOOKSHELF_LIBRARY_ID.trim();
+        sources[key] = 'env-seed';
+        continue;
+      } else if (key === 'audiobookshelfFolderId' && process.env.AUDIOBOOKSHELF_FOLDER_ID) {
+        (values as Record<string, unknown>)[key] = process.env.AUDIOBOOKSHELF_FOLDER_ID.trim();
+        sources[key] = 'env-seed';
+        continue;
+      } else if (key === 'geminiApiKey' && process.env.GEMINI_API_KEY) {
+        (values as Record<string, unknown>)[key] = process.env.GEMINI_API_KEY.trim();
+        sources[key] = 'env-seed';
+        continue;
       }
       sources[key] = 'default';
       continue;
