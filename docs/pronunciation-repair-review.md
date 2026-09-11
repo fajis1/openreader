@@ -47,6 +47,31 @@ but cannot prove it from the retained source artifact. Broad manuscript edits
 and deletion of long foreign passages belong to the text-cleaning/OCR stage,
 not the pronunciation-only repair stage.
 
+## Failed chapter isolation and download gating
+
+Background generation isolates unrecoverable chapter failures instead of aborting
+the entire audiobook:
+
+- If a chapter fails targeted pronunciation repair (`SmartAudioTargetedRepairError`)
+  or TTS synthesis, the failure artifacts (`*__rejected.txt` and
+  `*__pronunciation_failure.json`) are retained, and the worker advances to
+  subsequent chapters.
+- The audiobook job completes with a review-required status message indicating how
+  many chapters require manual attention.
+- **Download Gating**: Full-book combined assembly (`GET` / `POST /api/audiobook`)
+  is blocked with HTTP 409 `AUDIOBOOK_CHAPTER_REVIEW_REQUIRED` while any
+  `*__rejected.txt` artifacts exist for the document.
+- Attempting to download an audiobook with unreviewed chapters redirects the user
+  to `/listen/[bookId]?reviewPronunciation=true`, automatically opening the
+  pronunciation review modal.
+- For chapters that failed due to TTS or processing errors rather than dictionary
+  IPA issues, the review tool synthesizes an editable whole-chapter finding
+  (`failed-chapter`). This allows the reviewer to inspect or edit the text and
+  re-record.
+- Once a rejected chapter is successfully approved and re-recorded via Batch Refine,
+  its `*__rejected.txt` and `*__pronunciation_failure.json` artifacts are deleted,
+  clearing the download gate once all chapters pass.
+
 ## Operational notes
 
 - Wait for background generation and repair jobs to finish or pause before
