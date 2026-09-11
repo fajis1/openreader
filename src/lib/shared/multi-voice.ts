@@ -425,3 +425,203 @@ export function parseVoiceTaggedText(
   }
   return segments;
 }
+
+export const KOKORO_AMERICAN_FEMALE_VOICES = [
+  'af_alloy', 'af_aoede', 'af_bella', 'af_heart', 'af_jessica',
+  'af_kore', 'af_nicole', 'af_nova', 'af_river', 'af_sarah', 'af_sky',
+] as const;
+
+export const KOKORO_AMERICAN_MALE_VOICES = [
+  'am_adam', 'am_echo', 'am_eric', 'am_fenrir', 'am_liam',
+  'am_michael', 'am_onyx', 'am_puck', 'am_santa',
+] as const;
+
+export const KOKORO_BRITISH_FEMALE_VOICES = [
+  'bf_alice', 'bf_emma', 'bf_isabella', 'bf_lily',
+] as const;
+
+export const KOKORO_BRITISH_MALE_VOICES = [
+  'bm_daniel', 'bm_fable', 'bm_george', 'bm_lewis',
+] as const;
+
+export const KOKORO_RECYCLABLE_ENGLISH_VOICES = [
+  ...KOKORO_AMERICAN_FEMALE_VOICES,
+  ...KOKORO_AMERICAN_MALE_VOICES,
+  ...KOKORO_BRITISH_FEMALE_VOICES,
+  ...KOKORO_BRITISH_MALE_VOICES,
+] as const;
+
+export interface CharacterUsageMetrics {
+  spokenLength?: number;
+  chapterCount?: number;
+}
+
+export interface AutoAssignMinorVoicesOptions {
+  characterMap: SmartAudioCharacterMap;
+  characterUsageMetrics?: Record<string, CharacterUsageMetrics>;
+  mainCharacterThreshold?: number;
+  targetCharacters?: string[];
+}
+
+export interface AutoAssignMinorVoicesResult {
+  updatedMap: SmartAudioCharacterMap;
+  assigned: Array<{ characterName: string; voiceId: string; reason: string }>;
+  protectedVoices: string[];
+}
+
+export function autoAssignMinorCharacterVoices(
+  options: AutoAssignMinorVoicesOptions,
+): AutoAssignMinorVoicesResult {
+  const {
+    characterMap,
+    characterUsageMetrics = {},
+    mainCharacterThreshold = 0.05,
+    targetCharacters,
+  } = options;
+
+  const entriesCopy: Record<string, SmartAudioCharacterEntry> = Object.fromEntries(
+    Object.entries(characterMap.entries).map(([k, v]) => [k, { ...v }]),
+  );
+
+  const targetSet = targetCharacters
+    ? new Set(targetCharacters.map((c) => c.toLowerCase()))
+    : null;
+
+  const protectedVoices = new Set<string>();
+
+  const narratorVoice = getNarratorVoiceId(characterMap);
+  if (narratorVoice) {
+    protectedVoices.add(narratorVoice);
+  }
+
+  let totalSpokenLength = 0;
+  for (const [name, metrics] of Object.entries(characterUsageMetrics)) {
+    if (name.toLowerCase() === 'narrator') continue;
+    totalSpokenLength += metrics.spokenLength || 0;
+  }
+
+  const hasMetrics = totalSpokenLength > 0;
+
+  for (const entry of Object.values(entriesCopy)) {
+    if (entry.aliasFor || !entry.voiceId) continue;
+    if (entry.name.toLowerCase() === 'narrator') continue;
+
+    if (entry.sampleText && entry.voiceId) {
+      protectedVoices.add(entry.voiceId);
+      continue;
+    }
+
+    if (hasMetrics) {
+      const charMetrics = characterUsageMetrics[entry.name]
+        || characterUsageMetrics[entry.name.toLowerCase()]
+        || characterUsageMetrics[entry.voiceId];
+      const spoken = charMetrics?.spokenLength || 0;
+      const chapters = charMetrics?.chapterCount || 0;
+      const share = totalSpokenLength > 0 ? spoken / totalSpokenLength : 0;
+
+      if (share >= mainCharacterThreshold || chapters >= 3) {
+        protectedVoices.add(entry.voiceId);
+      }
+    }
+  }
+
+  let recyclableVoices = KOKORO_RECYCLABLE_ENGLISH_VOICES.filter(
+    (v) => !protectedVoices.has(v),
+  );
+
+  if (recyclableVoices.length === 0) {
+    recyclableVoices = KOKORO_RECYCLABLE_ENGLISH_VOICES.filter((v) => v !== narratorVoice);
+  }
+
+  const femaleVoices = recyclableVoices.filter((v) => (
+    (KOKORO_AMERICAN_FEMALE_VOICES as readonly string[]).includes(v)
+    || (KOKORO_BRITISH_FEMALE_VOICES as readonly string[]).includes(v)
+  ));
+  const maleVoices = recyclableVoices.filter((v) => (
+    (KOKORO_AMERICAN_MALE_VOICES as readonly string[]).includes(v)
+    || (KOKORO_BRITISH_MALE_VOICES as readonly string[]).includes(v)
+  ));
+
+  const voiceUsageCount = new Map<string, number>();
+  for (const v of recyclableVoices) {
+    voiceUsageCount.set(v, 0);
+  }
+  for (const entry of Object.values(entriesCopy)) {
+    if (entry.voiceId && voiceUsageCount.has(entry.voiceId)) {
+      voiceUsageCount.set(entry.voiceId, (voiceUsageCount.get(entry.voiceId) || 0) + 1);
+    }
+  }
+
+  const assigned: Array<{ characterName: string; voiceId: string; reason: string }> = [];
+
+  for (const entry of Object.values(entriesCopy)) {
+    if (entry.aliasFor) continue;
+    if (entry.name.toLowerCase() === 'narrator') continue;
+    if (entry.voiceId && KOKORO_CHARACTER_VOICE_SET.has(entry.voiceId)) continue;
+
+    if (targetSet && !targetSet.has(entry.name.toLowerCase())) {
+      continue;
+    }
+
+    const desc = `${entry.name} ${entry.description || ''} ${entry.sampleText || ''}`.toLowerCase();
+    const isFemale = /\b(she|her|female|woman|girl|lady|queen|princess|mother|sister|daughter|witch|priestess|goddess|mrs|ms|miss)\b/iu.test(desc);
+    const isMale = /\b(he|him|his|male|man|boy|lord|king|prince|father|brother|son|wizard|priest|god|mr|sir)\b/iu.test(desc);
+
+    let candidates: readonly string[] = recyclableVoices;
+    let genderReason = 'neutral';
+    if (isFemale && !isMale && femaleVoices.length > 0) {
+      candidates = femaleVoices;
+      genderReason = 'female';
+    } else if (isMale && !isFemale && maleVoices.length > 0) {
+      candidates = maleVoices;
+      genderReason = 'male';
+    }
+
+    let bestVoice = candidates[0];
+    let minCount = voiceUsageCount.get(bestVoice) ?? 0;
+    for (const v of candidates) {
+      const count = voiceUsageCount.get(v) ?? 0;
+      if (count < minCount) {
+        minCount = count;
+        bestVoice = v;
+      }
+    }
+
+    entry.voiceId = bestVoice;
+    if (!entry.description) {
+      entry.description = `Auto-assigned minor character (${bestVoice}).`;
+    }
+    voiceUsageCount.set(bestVoice, (voiceUsageCount.get(bestVoice) || 0) + 1);
+
+    assigned.push({
+      characterName: entry.name,
+      voiceId: bestVoice,
+      reason: `Assigned least-used ${genderReason} recyclable English voice (avoiding main characters).`,
+    });
+  }
+
+  const tempMap = {
+    ...characterMap,
+    status: 'complete' as const,
+    entries: entriesCopy,
+  };
+  delete tempMap.needsRescan;
+  const readiness = getCharacterMapReadiness(tempMap);
+  const isComplete = readiness.ready && readiness.unassigned.length === 0;
+
+  const updatedMap: SmartAudioCharacterMap = {
+    ...characterMap,
+    status: isComplete ? 'complete' : characterMap.status,
+    entries: entriesCopy,
+  };
+
+  if (isComplete) {
+    delete updatedMap.needsRescan;
+  }
+
+  return {
+    updatedMap,
+    assigned,
+    protectedVoices: Array.from(protectedVoices),
+  };
+}

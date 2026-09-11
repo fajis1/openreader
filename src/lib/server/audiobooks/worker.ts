@@ -15,7 +15,7 @@ import { checkSystemResources } from '@/lib/server/audiobooks/system-monitor';
 import { randomUUID } from 'node:crypto';
 import { resolveTtsCredentials } from '@/lib/server/admin/resolve-credentials';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
-import { putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
+import { getAudiobookObjectBuffer, listAudiobookObjects, putAudiobookObject } from '@/lib/server/audiobooks/blobstore';
 import { savePronunciationFailure } from '@/lib/server/audiobooks/pronunciation-failures';
 import { encodeChapterFileName } from '@/lib/server/audiobooks/chapters';
 import { createOrReuseCurrentPdfParseOperation } from '@/lib/server/pdf-parse/operation';
@@ -65,7 +65,7 @@ import { resolveSmartAudioNatsTimeoutMs } from '@/lib/server/audiobooks/smart-au
 import { mergeGlobalDefinitions, readGlobalDefinitions } from '@/lib/server/smart-audio/global-definition-library';
 import { preparePdfAudiobookBlocks } from '@/lib/shared/pdf-audiobook-blocks';
 import { mergeDocumentSettings } from '@/lib/shared/document-settings';
-import { DEFAULT_DOCUMENT_SETTINGS } from '@/types/document-settings';
+import { DEFAULT_DOCUMENT_SETTINGS, type SmartAudioCharacterMap } from '@/types/document-settings';
 import {
   buildSmartAudioCleanupPrompt,
   extractNarratableSmartAudioSourceText,
@@ -77,11 +77,15 @@ import {
   validateSmartAudioOutput,
 } from '@/lib/shared/smart-audio-cleanup';
 import {
+  autoAssignMinorCharacterVoices,
   buildMultiVoiceCast,
   getCharacterMapReadiness,
   MULTI_VOICE_WORKER_MODE,
+  parseVoiceTaggedText,
+  renderVoiceSegments,
   resolveMultiVoiceWorkerResult,
   type MultiVoiceCastMember,
+  type MultiVoiceSegment,
   WAITING_FOR_VOICES_STATUS,
 } from '@/lib/shared/multi-voice';
 import {
@@ -288,6 +292,183 @@ async function generateQueuedAudiobookTts(
   }
 }
 
+export async function getDocumentCharacterUsageMetrics(
+  bookId: string,
+  userId: string,
+  namespace: string | null = null,
+  characterMap?: SmartAudioCharacterMap | null,
+): Promise<Record<string, { spokenLength: number; chapterCount: number }>> {
+  const metrics: Record<string, { spokenLength: number; chapterCount: number }> = {};
+  try {
+    const objects = await listAudiobookObjects(bookId, userId, namespace);
+    const textFiles = objects
+      .map((o) => o.fileName)
+      .filter((name) => /^\d{4}__text\.txt$/i.test(name));
+
+    const voiceToCharacterName = new Map<string, string>();
+    if (characterMap?.entries) {
+      for (const entry of Object.values(characterMap.entries)) {
+        if (!entry.aliasFor && entry.voiceId) {
+          voiceToCharacterName.set(entry.voiceId, entry.name);
+        }
+      }
+    }
+
+    const voiceUsage: Record<string, { spokenLength: number; chapters: Set<string> }> = {};
+
+    for (const fileName of textFiles) {
+      try {
+        const buf = await getAudiobookObjectBuffer(bookId, userId, fileName, namespace);
+        const text = buf.toString('utf8');
+        if (!/<\/?voice\b/iu.test(text)) continue;
+
+        const segments = parseVoiceTaggedText(text, { includeOmitted: true });
+        const voicesInThisChapter = new Set<string>();
+
+        for (const seg of segments) {
+          if (!seg.voiceId) continue;
+          if (!voiceUsage[seg.voiceId]) {
+            voiceUsage[seg.voiceId] = { spokenLength: 0, chapters: new Set() };
+          }
+          if (!seg.omitted) {
+            voiceUsage[seg.voiceId].spokenLength += (seg.text || '').length;
+          }
+          voicesInThisChapter.add(seg.voiceId);
+        }
+
+        for (const v of voicesInThisChapter) {
+          voiceUsage[v].chapters.add(fileName);
+        }
+      } catch (err) {
+        serverLogger.warn({
+          event: 'audiobook.queue.metrics.chapter_parse_error',
+          bookId,
+          fileName,
+          error: err instanceof Error ? err.message : String(err),
+        }, 'Failed to parse chapter text for character metrics');
+      }
+    }
+
+    for (const [voiceId, data] of Object.entries(voiceUsage)) {
+      const charName = voiceToCharacterName.get(voiceId);
+      const usage = {
+        spokenLength: data.spokenLength,
+        chapterCount: data.chapters.size,
+      };
+      if (charName) {
+        metrics[charName] = usage;
+      } else {
+        metrics[voiceId] = usage;
+      }
+    }
+  } catch (error) {
+    serverLogger.warn({
+      event: 'audiobook.queue.metrics.error',
+      bookId,
+      error: error instanceof Error ? error.message : String(error),
+    }, 'Failed to collect character usage metrics');
+  }
+
+  return metrics;
+}
+
+export async function resumeWaitingAudioDramaJobs(): Promise<number> {
+  let resumedCount = 0;
+  try {
+    const waitingJobs = await db.select()
+      .from(audiobookJobs)
+      .where(eq(audiobookJobs.status, WAITING_FOR_VOICES_STATUS))
+      .limit(50);
+
+    for (const job of waitingJobs) {
+      try {
+        const [docRow] = await db.select({ dataJson: documentSettings.dataJson })
+          .from(documentSettings)
+          .where(and(eq(documentSettings.documentId, job.documentId), eq(documentSettings.userId, job.userId)))
+          .limit(1);
+
+        if (!docRow?.dataJson) continue;
+        const currentSettings = typeof docRow.dataJson === 'string'
+          ? JSON.parse(docRow.dataJson)
+          : docRow.dataJson;
+
+        const charMap = currentSettings.smartAudioCharacters;
+        if (!charMap || typeof charMap !== 'object') continue;
+
+        const jobSettings = typeof job.settingsJson === 'string'
+          ? JSON.parse(job.settingsJson)
+          : (job.settingsJson || {});
+        const testNamespace = typeof jobSettings.testNamespace === 'string'
+          ? jobSettings.testNamespace
+          : null;
+
+        const readiness = getCharacterMapReadiness(charMap);
+        if (readiness.unassigned.length > 0 && readiness.map) {
+          const metrics = await getDocumentCharacterUsageMetrics(
+            job.bookId,
+            job.userId,
+            testNamespace,
+            readiness.map,
+          );
+          const autoResult = autoAssignMinorCharacterVoices({
+            characterMap: readiness.map,
+            characterUsageMetrics: metrics,
+          });
+
+          if (autoResult.assigned.length > 0) {
+            currentSettings.smartAudioCharacters = autoResult.updatedMap;
+            await db.update(documentSettings)
+              .set({ dataJson: JSON.stringify(currentSettings) })
+              .where(and(eq(documentSettings.documentId, job.documentId), eq(documentSettings.userId, job.userId)));
+
+            serverLogger.info({
+              event: 'audiobook.queue.multivoice.startup_auto_assigned',
+              jobId: job.id,
+              bookId: job.bookId,
+              assigned: autoResult.assigned,
+            }, 'Startup hook: auto-assigned recyclable voices to waiting characters.');
+          }
+
+          const newReadiness = getCharacterMapReadiness(autoResult.updatedMap);
+          if (newReadiness.ready) {
+            await db.update(audiobookJobs)
+              .set({ status: 'queued', error: null, progress: 0, updatedAt: Date.now() })
+              .where(eq(audiobookJobs.id, job.id));
+            resumedCount += 1;
+            serverLogger.info({
+              event: 'audiobook.queue.multivoice.requeued_waiting_job',
+              jobId: job.id,
+              bookId: job.bookId,
+            }, 'Startup hook: requeued waiting_for_voices job after auto-assigning voices.');
+          }
+        } else if (readiness.ready) {
+          await db.update(audiobookJobs)
+            .set({ status: 'queued', error: null, progress: 0, updatedAt: Date.now() })
+            .where(eq(audiobookJobs.id, job.id));
+          resumedCount += 1;
+          serverLogger.info({
+            event: 'audiobook.queue.multivoice.requeued_ready_job',
+            jobId: job.id,
+            bookId: job.bookId,
+          }, 'Startup hook: requeued previously ready waiting_for_voices job.');
+        }
+      } catch (jobErr) {
+        serverLogger.warn({
+          event: 'audiobook.queue.multivoice.resume_error',
+          jobId: job.id,
+          error: jobErr instanceof Error ? jobErr.message : String(jobErr),
+        }, 'Failed to resume waiting audiobook job.');
+      }
+    }
+  } catch (err) {
+    serverLogger.warn({
+      event: 'audiobook.queue.multivoice.resume_all_error',
+      error: err instanceof Error ? err.message : String(err),
+    }, 'Failed during resumeWaitingAudioDramaJobs pass.');
+  }
+  return resumedCount;
+}
+
 export async function processAudiobookQueue() {
   if (!globalWorkerState.__worker_booted) {
     globalWorkerState.__worker_booted = true;
@@ -298,6 +479,7 @@ export async function processAudiobookQueue() {
     await db.update(audiobookJobs)
       .set({ status: 'queued', progress: 0 })
       .where(eq(audiobookJobs.status, 'running'));
+    await resumeWaitingAudioDramaJobs();
   } else {
     // Reset any jobs that have been "running" for over 15 minutes without an update (stale crash recovery)
     const staleThreshold = Date.now() - 15 * 60 * 1000;
@@ -843,7 +1025,37 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
 
     let multiVoiceCharacters: MultiVoiceCastMember[] = [];
     if (selectedProfile?.workerMode === MULTI_VOICE_WORKER_MODE) {
-      const readiness = getCharacterMapReadiness(resolvedDocumentSettings.smartAudioCharacters);
+      let readiness = getCharacterMapReadiness(resolvedDocumentSettings.smartAudioCharacters);
+      if (!readiness.ready && readiness.unassigned.length > 0 && readiness.map) {
+        const metrics = await getDocumentCharacterUsageMetrics(bookId, userId, testNamespace, readiness.map);
+        const autoResult = autoAssignMinorCharacterVoices({
+          characterMap: readiness.map,
+          characterUsageMetrics: metrics,
+        });
+        if (autoResult.assigned.length > 0) {
+          serverLogger.info({
+            event: 'audiobook.queue.multivoice.auto_assigned_voices',
+            bookId,
+            assigned: autoResult.assigned,
+          }, 'Auto-assigned recyclable voices to unassigned characters before chapter loop.');
+
+          const [currentDoc] = await db
+            .select({ dataJson: documentSettings.dataJson })
+            .from(documentSettings)
+            .where(and(eq(documentSettings.documentId, job.documentId), eq(documentSettings.userId, userId)))
+            .limit(1);
+          const currentSettings = currentDoc?.dataJson
+            ? (typeof currentDoc.dataJson === 'string' ? JSON.parse(currentDoc.dataJson) : currentDoc.dataJson)
+            : {};
+          currentSettings.smartAudioCharacters = autoResult.updatedMap;
+          await db.update(documentSettings)
+            .set({ dataJson: JSON.stringify(currentSettings) })
+            .where(and(eq(documentSettings.documentId, job.documentId), eq(documentSettings.userId, userId)));
+          resolvedDocumentSettings.smartAudioCharacters = autoResult.updatedMap;
+          readiness = getCharacterMapReadiness(autoResult.updatedMap);
+        }
+      }
+
       if (!readiness.ready || readiness.map?.profileId !== selectedProfile.id) {
         serverLogger.info({ event: 'audiobook.queue.multivoice.waiting_for_voices', bookId }, 'Job is paused waiting for user to map voices in UI');
         await updateClaimedAudiobookJob(job.id, 'running', {
@@ -1118,7 +1330,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
             const { multiVoiceResult, resolvedWorkerResult } = recovery.result;
             
             if (multiVoiceResult?.unknownSpeakers?.length) {
-              serverLogger.warn({ event: 'audiobook.queue.multivoice.unknown_speakers', bookId, speakers: multiVoiceResult.unknownSpeakers }, 'Defaulted unknown speakers to Narrator');
+              serverLogger.warn({ event: 'audiobook.queue.multivoice.unknown_speakers', bookId, speakers: multiVoiceResult.unknownSpeakers }, 'Detected unknown speakers in chapter');
               const [currentDocSettings] = await db
                 .select({ dataJson: documentSettings.dataJson })
                 .from(documentSettings)
@@ -1127,23 +1339,59 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
               if (currentDocSettings) {
                 const currentSettings = typeof currentDocSettings.dataJson === 'string' ? JSON.parse(currentDocSettings.dataJson) : (currentDocSettings.dataJson || {});
                 
-                const currentMap = currentSettings.smartAudioCharacters || { schemaVersion: 1, status: 'partial', scannedAt: Date.now(), entries: {} };
-                let modifiedMap = false;
+                const currentMap: SmartAudioCharacterMap = currentSettings.smartAudioCharacters || { schemaVersion: 1, status: 'partial', scannedAt: Date.now(), entries: {} };
                 for (const unknownName of multiVoiceResult.unknownSpeakers) {
                   if (!currentMap.entries[unknownName]) {
+                    const firstSpeakerSeg = multiVoiceResult.segments.find((s: MultiVoiceSegment) => s.speaker.toLowerCase() === unknownName.toLowerCase());
                     currentMap.entries[unknownName] = {
                       name: unknownName,
-                      description: `Auto-detected missing speaker: ${unknownName}`,
-                      sampleText: '',
+                      description: `Auto-detected minor character: ${unknownName}`,
+                      sampleText: firstSpeakerSeg?.text?.slice(0, 500) || '',
                     };
-                    modifiedMap = true;
                   }
                 }
-                
-                if (modifiedMap) {
-                  currentMap.status = 'partial';
-                  currentSettings.smartAudioCharacters = currentMap;
+
+                // Automatically assign recyclable English voices to any unassigned minor characters
+                const metrics = await getDocumentCharacterUsageMetrics(bookId, userId, testNamespace, currentMap);
+                const autoResult = autoAssignMinorCharacterVoices({
+                  characterMap: currentMap,
+                  characterUsageMetrics: metrics,
+                });
+
+                if (autoResult.assigned.length > 0) {
+                  serverLogger.info({
+                    event: 'audiobook.queue.multivoice.auto_assigned_voices',
+                    bookId,
+                    chapter: chapter.index,
+                    assigned: autoResult.assigned,
+                  }, 'Auto-assigned recyclable voices to newly detected minor characters.');
+
+                  // Remap segments that were temporarily assigned Narrator voice to the newly assigned voice
+                  const assignedVoiceByName = new Map<string, string>();
+                  for (const a of autoResult.assigned) {
+                    assignedVoiceByName.set(a.characterName.toLowerCase(), a.voiceId);
+                  }
+                  for (const seg of multiVoiceResult.segments) {
+                    const assignedVoice = assignedVoiceByName.get(seg.speaker.toLowerCase());
+                    if (assignedVoice) {
+                      seg.voiceId = assignedVoice;
+                    }
+                  }
+                  for (const a of autoResult.assigned) {
+                    if (!multiVoiceCharacters.some((c) => c.name.toLowerCase() === a.characterName.toLowerCase())) {
+                      multiVoiceCharacters.push({
+                        name: a.characterName,
+                        voiceId: a.voiceId,
+                        aliases: [],
+                      });
+                    }
+                  }
+                  multiVoiceResult.taggedText = renderVoiceSegments(multiVoiceResult.segments);
+                  resolvedWorkerResult.text = multiVoiceResult.taggedText;
                 }
+
+                currentSettings.smartAudioCharacters = autoResult.updatedMap;
+                resolvedDocumentSettings.smartAudioCharacters = autoResult.updatedMap;
                 
                 const newFlags = [...(currentSettings.smartAudioReviewFlags || [])];
                 newFlags.push({

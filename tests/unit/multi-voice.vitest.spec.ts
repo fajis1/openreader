@@ -4,12 +4,18 @@ import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import {
+  autoAssignMinorCharacterVoices,
   buildMultiVoiceCast,
   finalizeSmartAudioCharacterMap,
   estimateSpeakerSegmentAtTime,
   getDuplicateVoiceAssignments,
   getNarratorVoiceId,
   getCharacterMapReadiness,
+  KOKORO_AMERICAN_FEMALE_VOICES,
+  KOKORO_AMERICAN_MALE_VOICES,
+  KOKORO_BRITISH_FEMALE_VOICES,
+  KOKORO_BRITISH_MALE_VOICES,
+  KOKORO_RECYCLABLE_ENGLISH_VOICES,
   mergeExtractedCharacters,
   normalizeSmartAudioCharacterMap,
   parseVoiceTaggedText,
@@ -385,5 +391,202 @@ describe('LitRPG source and production wiring', () => {
     expect(scanRoute).toContain("profile.workerMode !== MULTI_VOICE_WORKER_MODE");
     expect(defaults.profiles.find((profile) => profile.name === 'LitRPG')?.workerMode).toBe('standard');
     expect(defaults.profiles.find((profile) => profile.name === 'LitRPG Audio Drama')?.workerMode).toBe('multi-voice');
+  });
+});
+
+describe('LitRPG automatic minor character voice recycling', () => {
+  test('protects Narrator, initial cast, and high-volume speakers while assigning recyclable English voices', () => {
+    const characterMap = {
+      schemaVersion: 1 as const,
+      status: 'partial' as const,
+      scannedAt: 1000,
+      profileId: 'litrpg-drama',
+      entries: {
+        Narrator: {
+          name: 'Narrator',
+          description: 'Primary narrator',
+          sampleText: 'Once upon a time',
+          voiceId: 'af_heart',
+          aliasFor: null,
+        },
+        Hero: {
+          name: 'Hero',
+          description: 'Main protagonist',
+          sampleText: 'I will protect everyone!',
+          voiceId: 'am_onyx',
+          aliasFor: null,
+        },
+        Heroine: {
+          name: 'Heroine',
+          description: 'Lead female adventurer',
+          sampleText: 'Let us venture forth.',
+          voiceId: 'af_bella',
+          aliasFor: null,
+        },
+        Paely: {
+          name: 'Paely',
+          description: 'A young girl from the village',
+          sampleText: '',
+          voiceId: null,
+          aliasFor: null,
+        },
+        Leland: {
+          name: 'Leland',
+          description: 'A male blacksmith',
+          sampleText: '',
+          voiceId: null,
+          aliasFor: null,
+        },
+        Don: {
+          name: 'Don',
+          description: '',
+          sampleText: 'He shouted from the gate.',
+          voiceId: null,
+          aliasFor: null,
+        },
+      },
+    };
+
+    const characterUsageMetrics = {
+      Hero: { spokenLength: 40000, chapterCount: 20 },
+      Heroine: { spokenLength: 60000, chapterCount: 25 },
+      Narrator: { spokenLength: 200000, chapterCount: 30 },
+    };
+
+    const result = autoAssignMinorCharacterVoices({
+      characterMap,
+      characterUsageMetrics,
+      mainCharacterThreshold: 0.05,
+    });
+
+    // Main characters and Narrator voices are protected
+    expect(result.protectedVoices).toContain('af_heart');
+    expect(result.protectedVoices).toContain('am_onyx');
+    expect(result.protectedVoices).toContain('af_bella');
+
+    // 3 characters were assigned
+    expect(result.assigned).toHaveLength(3);
+    const assignedNames = result.assigned.map((a) => a.characterName);
+    expect(assignedNames).toEqual(expect.arrayContaining(['Paely', 'Leland', 'Don']));
+
+    // Assigned voices must be from recyclable English voices and NOT protected
+    for (const assignment of result.assigned) {
+      expect((KOKORO_RECYCLABLE_ENGLISH_VOICES as readonly string[])).toContain(assignment.voiceId);
+      expect(result.protectedVoices).not.toContain(assignment.voiceId);
+    }
+
+    // Gender heuristics: Paely is female, Leland and Don are male
+    const paelyVoice = result.updatedMap.entries.Paely.voiceId!;
+    const lelandVoice = result.updatedMap.entries.Leland.voiceId!;
+    const donVoice = result.updatedMap.entries.Don.voiceId!;
+
+    expect([
+      ...KOKORO_AMERICAN_FEMALE_VOICES,
+      ...KOKORO_BRITISH_FEMALE_VOICES,
+    ]).toContain(paelyVoice);
+
+    expect([
+      ...KOKORO_AMERICAN_MALE_VOICES,
+      ...KOKORO_BRITISH_MALE_VOICES,
+    ]).toContain(lelandVoice);
+
+    expect([
+      ...KOKORO_AMERICAN_MALE_VOICES,
+      ...KOKORO_BRITISH_MALE_VOICES,
+    ]).toContain(donVoice);
+
+    // Map status becomes complete and ready
+    expect(result.updatedMap.status).toBe('complete');
+    expect(getCharacterMapReadiness(result.updatedMap).ready).toBe(true);
+  });
+
+  test('distributes minor character voice assignments across recyclable voices using LFU balancing', () => {
+    const entries: Record<string, any> = {
+      Narrator: {
+        name: 'Narrator',
+        description: 'Story narrator',
+        sampleText: 'Chapter 1',
+        voiceId: 'af_heart',
+        aliasFor: null,
+      },
+    };
+
+    // Add 10 unassigned minor male characters
+    for (let i = 1; i <= 10; i++) {
+      entries[`Villager_${i}`] = {
+        name: `Villager_${i}`,
+        description: 'A male town guard',
+        sampleText: '',
+        voiceId: null,
+        aliasFor: null,
+      };
+    }
+
+    const characterMap = {
+      schemaVersion: 1 as const,
+      status: 'partial' as const,
+      scannedAt: 1000,
+      entries,
+    };
+
+    const result = autoAssignMinorCharacterVoices({ characterMap });
+    expect(result.assigned).toHaveLength(10);
+
+    // Count distinct voices assigned
+    const assignedVoices = new Set(result.assigned.map((a) => a.voiceId));
+    expect(assignedVoices.size).toBeGreaterThanOrEqual(8);
+    expect(result.updatedMap.status).toBe('complete');
+  });
+
+  test('filters assignments to targetCharacters when provided', () => {
+    const characterMap = {
+      schemaVersion: 1 as const,
+      status: 'partial' as const,
+      scannedAt: 1000,
+      entries: {
+        Narrator: {
+          name: 'Narrator',
+          voiceId: 'af_heart',
+          aliasFor: null,
+        },
+        Paely: {
+          name: 'Paely',
+          description: 'A girl',
+          voiceId: null,
+          aliasFor: null,
+        },
+        Leland: {
+          name: 'Leland',
+          description: 'A boy',
+          voiceId: null,
+          aliasFor: null,
+        },
+      },
+    };
+
+    const result = autoAssignMinorCharacterVoices({
+      characterMap,
+      targetCharacters: ['Paely'],
+    });
+
+    expect(result.assigned).toHaveLength(1);
+    expect(result.assigned[0].characterName).toBe('Paely');
+    expect(result.updatedMap.entries.Paely.voiceId).toBeTruthy();
+    expect(result.updatedMap.entries.Leland.voiceId).toBeNull();
+    expect(result.updatedMap.status).toBe('partial');
+  });
+
+  test('production worker wires auto-assign, usage metrics, and resume hooks', () => {
+    const workerCode = fs.readFileSync(
+      path.join(process.cwd(), 'src/lib/server/audiobooks/worker.ts'),
+      'utf8',
+    );
+
+    expect(workerCode).toContain('getDocumentCharacterUsageMetrics(');
+    expect(workerCode).toContain('resumeWaitingAudioDramaJobs(');
+    expect(workerCode).toContain('autoAssignMinorCharacterVoices(');
+    expect(workerCode).toContain('await resumeWaitingAudioDramaJobs();');
+    expect(workerCode).toContain("event: 'audiobook.queue.multivoice.auto_assigned_voices'");
+    expect(workerCode).toContain("event: 'audiobook.queue.multivoice.requeued_waiting_job'");
   });
 });
