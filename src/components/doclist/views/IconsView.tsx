@@ -13,6 +13,7 @@ interface IconsViewProps {
   onScanDoc?: (doc: DocumentListDocument) => void;
   onInspectDoc?: (doc: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
+  onExportToAbs?: (doc: DocumentListDocument) => void;
   isAudiobookView?: boolean;
 }
 
@@ -21,6 +22,7 @@ export function IconsView({
   iconSize,
   onDeleteDoc,
   onMergeIntoFolder,
+  onExportToAbs,
   isAudiobookView,
 }: IconsViewProps) {
   const { setVisibleOrder, clear } = useDocumentSelection();
@@ -71,6 +73,7 @@ export function IconsView({
             iconSize={iconSize}
             onDelete={onDeleteDoc}
             onMergeIntoFolder={onMergeIntoFolder}
+            onExportToAbs={onExportToAbs}
             isAudiobookView={isAudiobookView}
           />
         ))}
@@ -78,3 +81,4 @@ export function IconsView({
     </div>
   );
 }
+

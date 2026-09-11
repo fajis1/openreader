@@ -46,6 +46,7 @@ import { BookPronunciationInspectorModal } from './BookPronunciationInspectorMod
 import { MultiVoiceCharacterModal } from './MultiVoiceCharacterModal';
 import { DocumentSelectionModal } from '@/components/documents/DocumentSelectionModal';
 import { PDFIcon } from '@/components/icons/Icons';
+import { AudiobookshelfModal } from '@/components/audiobooks/AudiobookshelfModal';
 import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import type { SmartAudioProfile } from '@/types/client';
@@ -258,6 +259,8 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
     defaultSelected: false,
     onConfirmAction: () => {},
   });
+  // Audiobookshelf export state: set to a doc to open the ABS modal for it
+  const [absExportDoc, setAbsExportDoc] = useState<DocumentListDocument | null>(null);
 
   useEffect(() => {
     // Also check if there's an old legacy localStorage batch, clear it.
@@ -1078,6 +1081,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               onScanDoc={handleScanDoc}
               onInspectDoc={handleInspectDoc}
               onMergeIntoFolder={handleMergeIntoFolder}
+              onExportToAbs={setAbsExportDoc}
               isAudiobookView={sidebarFilter === 'audiobooks'}
             />
           )}
@@ -1094,6 +1098,7 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               onScanDoc={handleScanDoc}
               onInspectDoc={handleInspectDoc}
               onMergeIntoFolder={handleMergeIntoFolder}
+              onExportToAbs={setAbsExportDoc}
               isAudiobookView={sidebarFilter === 'audiobooks'}
             />
           )}
@@ -1105,10 +1110,22 @@ function DocumentListInner({ brand, appActions }: DocumentListInnerProps) {
               onScanDoc={handleScanDoc}
               onInspectDoc={handleInspectDoc}
               onMergeIntoFolder={handleMergeIntoFolder}
+              onExportToAbs={setAbsExportDoc}
               isAudiobookView={sidebarFilter === 'audiobooks'}
             />
           )}
         </DocumentUploader>
+      )}
+
+      {/* Audiobookshelf export modal — opened from any card/row's 📚 button */}
+      {absExportDoc && (
+        <AudiobookshelfModal
+          open={true}
+          onClose={() => setAbsExportDoc(null)}
+          bookId={absExportDoc.id}
+          initialTitle={absExportDoc.name.replace(/\.[^/.]+$/, '')}
+          documentType={absExportDoc.type}
+        />
       )}
 
       <CreateFolderDialog

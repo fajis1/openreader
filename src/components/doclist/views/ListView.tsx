@@ -24,6 +24,7 @@ interface ListViewProps {
   onScanDoc?: (doc: DocumentListDocument) => void;
   onInspectDoc?: (doc: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
+  onExportToAbs?: (doc: DocumentListDocument) => void;
   isAudiobookView?: boolean;
 }
 
@@ -85,6 +86,7 @@ function DocRow({
   onScanDoc,
   onInspectDoc,
   onMergeIntoFolder,
+  onExportToAbs,
   isAudiobookView,
 }: {
   doc: DocumentListDocument;
@@ -92,6 +94,7 @@ function DocRow({
   onScanDoc?: (d: DocumentListDocument) => void;
   onInspectDoc?: (d: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
+  onExportToAbs?: (d: DocumentListDocument) => void;
   isAudiobookView?: boolean;
 }) {
   const selection = useDocumentSelection();
@@ -276,6 +279,19 @@ function DocRow({
                 </svg>
               )}
             </button>
+            {onExportToAbs && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onExportToAbs(doc); }}
+                className="flex items-center justify-center w-7 h-7 text-emerald-500 hover:bg-accent-wash transition-colors rounded-sm"
+                aria-label={`Add ${doc.name} to Audiobookshelf`}
+                title="Add to Audiobookshelf"
+              >
+                {/* Music note / ABS icon */}
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
+                </svg>
+              </button>
+            )}
           </>
         )}
         {!isAudiobookView && (
@@ -357,6 +373,7 @@ export function ListView({
   onScanDoc,
   onInspectDoc,
   onMergeIntoFolder,
+  onExportToAbs,
   isAudiobookView,
 }: ListViewProps) {
   const { setVisibleOrder, clear } = useDocumentSelection();
@@ -372,6 +389,7 @@ export function ListView({
 
   return (
     <div onClick={handleBackgroundClick} className="flex-1 min-h-0 overflow-y-auto">
+      {/* grid-cols: checkbox | name | kind | size | modified | actions (min-content grows with buttons) */}
       <div className="sticky top-0 z-10 bg-surface border-b border-line-soft grid grid-cols-[36px_minmax(0,1fr)_44px_72px_104px_min-content] sm:grid-cols-[36px_minmax(0,1fr)_56px_96px_140px_min-content]">
         <div className="flex items-center justify-center pl-2">
           {/* Header checkbox could go here in the future if a select-all feature is needed */}
@@ -391,6 +409,7 @@ export function ListView({
             onScanDoc={onScanDoc}
             onInspectDoc={onInspectDoc}
             onMergeIntoFolder={onMergeIntoFolder}
+            onExportToAbs={onExportToAbs}
             isAudiobookView={isAudiobookView}
           />
         ))}

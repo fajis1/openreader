@@ -19,6 +19,7 @@ interface GalleryViewProps {
   onScanDoc?: (doc: DocumentListDocument) => void;
   onInspectDoc?: (doc: DocumentListDocument) => void;
   onMergeIntoFolder: (sources: DocumentListDocument[], target: DocumentListDocument) => void;
+  onExportToAbs?: (doc: DocumentListDocument) => void;
   isAudiobookView?: boolean;
 }
 
@@ -160,6 +161,7 @@ export function GalleryView({
   onScanDoc,
   onInspectDoc,
   onMergeIntoFolder,
+  onExportToAbs,
   isAudiobookView,
 }: GalleryViewProps) {
   const { setVisibleOrder } = useDocumentSelection();
@@ -298,6 +300,17 @@ export function GalleryView({
                     >
                       {isDownloadingAudiobook ? 'Preparing...' : 'Download M4B'}
                     </Button>
+                    {onExportToAbs && (
+                      <Button
+                        onClick={() => onExportToAbs(activeDoc)}
+                        variant="secondary"
+                        size="sm"
+                        className="flex-1 whitespace-nowrap text-emerald-500"
+                        title="Add to Audiobookshelf"
+                      >
+                        📚 Audiobookshelf
+                      </Button>
+                    )}
                   </>
                 )}
                 <ButtonLink href={openHref || '/app'} prefetch={false} variant={activeHasAudiobook ? 'secondary' : 'primary'} size="sm" className="flex-1">

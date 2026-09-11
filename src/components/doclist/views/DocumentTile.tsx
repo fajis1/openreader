@@ -19,6 +19,7 @@ interface DocumentTileProps {
   onInspectDoc?: (doc: DocumentListDocument) => void;
   /** Fired when two unfoldered docs are dropped together → caller should open a "create folder" dialog. */
   onMergeIntoFolder: (source: DocumentListDocument[], target: DocumentListDocument) => void;
+  onExportToAbs?: (doc: DocumentListDocument) => void;
   isAudiobookView?: boolean;
 }
 
@@ -73,6 +74,7 @@ export function DocumentTile({
   onScanDoc,
   onInspectDoc,
   onMergeIntoFolder,
+  onExportToAbs,
   isAudiobookView,
 }: DocumentTileProps) {
   const href = isAudiobookView ? `/api/audiobook?bookId=${encodeURIComponent(doc.id)}&format=m4b` : `/${doc.type}/${encodeURIComponent(doc.id)}`;
@@ -292,6 +294,19 @@ export function DocumentTile({
                 </svg>
               )}
             </button>
+            {onExportToAbs && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onExportToAbs(doc); }}
+                className={`${TRASH_BTN_CLASSES[iconSize]} flex items-center justify-center text-emerald-500 hover:bg-accent-wash transition-colors`}
+                aria-label={`Add ${doc.name} to Audiobookshelf`}
+                title="Add to Audiobookshelf"
+              >
+                {/* Audiobookshelf / headphones icon */}
+                <svg className={TRASH_ICON_CLASSES[iconSize]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
+                </svg>
+              </button>
+            )}
           </>
         )}
         {!isAudiobookView && (
