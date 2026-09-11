@@ -56,3 +56,19 @@ test('repeated remember is idempotent and preserves the existing definition', as
   expect(await rememberApprovedPronunciations('book', 'owner')).toMatchObject({ saved: 0, alreadyKnown: 1 });
   expect(mocks.update).not.toHaveBeenCalled();
 });
+
+test('overwrites broken dictionary entries containing whitespace or malformed IPA', async () => {
+  const existing = {
+    smartAudioLexicon: {
+      profileId: 'profile',
+      entries: {
+        'λόγος': { term: 'λόγος', pronunciation: '/loʊ ɡoʊs/', definition: 'word', language: 'koine_greek' },
+      },
+    },
+  };
+  mocks.reads.push([approved], [{ dataJson: JSON.stringify(existing) }]);
+  expect(await rememberApprovedPronunciations('book', 'owner')).toMatchObject({ saved: 1, skipped: 0 });
+  expect(mocks.update).toHaveBeenCalledTimes(1);
+  const saved = JSON.parse(mocks.update.mock.calls[0][0].dataJson);
+  expect(saved.smartAudioLexicon.entries['λόγος'].pronunciation).toBe('/lɒɡɒs/');
+});

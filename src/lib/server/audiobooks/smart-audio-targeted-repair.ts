@@ -20,6 +20,7 @@ export class SmartAudioTargetedRepairError extends SmartAudioOutputValidationErr
  * response (including source coverage and speaker identities) before recording. */
 export async function repairSmartAudioWorkerPronunciations(value: unknown, input: {
   profile: SmartAudioProfile; sourceText: string; dictionary: Record<string, string>; signal: AbortSignal;
+  onPronunciationCorrections?: (corrections: Record<string, string>) => void | Promise<void>;
 }) {
   input.signal.throwIfAborted();
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
@@ -41,6 +42,36 @@ export async function repairSmartAudioWorkerPronunciations(value: unknown, input
       // reconstruction: those remain available through the human review tool.
       assertPronunciationRepair(text, repaired.proposedText);
       changed ||= repaired.proposedText !== text;
+
+      if (diagnostics.findings?.length) {
+        const corrections: Record<string, string> = {};
+        for (const finding of diagnostics.findings) {
+          let dictWord = finding.dictionaryWord;
+          const replacement = finding.replacement;
+          if (replacement && (finding.outcome === 'resolved' || !finding.reasons?.length)) {
+            const match = /\[([^\]]+)\]\(\/([^/]+)\/\)/u.exec(replacement);
+            if (match) {
+              if (!dictWord && input.dictionary[match[1]]) {
+                dictWord = match[1];
+              }
+              if (dictWord) {
+                const targetWord = dictWord;
+                const fixedIpa = `/${match[2]}/`;
+                const matchedKey = Object.keys(input.dictionary).find(k => k === targetWord || k.toLowerCase() === targetWord.toLowerCase());
+                const targetKey = matchedKey || targetWord;
+                if (input.dictionary[targetKey] && input.dictionary[targetKey] !== fixedIpa) {
+                  input.dictionary[targetKey] = fixedIpa;
+                  corrections[targetKey] = fixedIpa;
+                }
+              }
+            }
+          }
+        }
+        if (Object.keys(corrections).length > 0 && input.onPronunciationCorrections) {
+          await input.onPronunciationCorrections(corrections);
+        }
+      }
+
       return repaired.proposedText;
     } catch {
       input.signal.throwIfAborted();

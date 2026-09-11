@@ -546,18 +546,22 @@ describe('LitRPG automatic minor character voice recycling', () => {
       entries: {
         Narrator: {
           name: 'Narrator',
+          description: 'The story narrator',
+          sampleText: '',
           voiceId: 'af_heart',
           aliasFor: null,
         },
         Paely: {
           name: 'Paely',
           description: 'A girl',
+          sampleText: '',
           voiceId: null,
           aliasFor: null,
         },
         Leland: {
           name: 'Leland',
           description: 'A boy',
+          sampleText: '',
           voiceId: null,
           aliasFor: null,
         },

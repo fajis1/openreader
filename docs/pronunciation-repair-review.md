@@ -53,9 +53,23 @@ Background generation isolates unrecoverable chapter failures instead of abortin
 the entire audiobook:
 
 - If a chapter fails targeted pronunciation repair (`SmartAudioTargetedRepairError`)
-  or TTS synthesis, the failure artifacts (`*__rejected.txt` and
-  `*__pronunciation_failure.json`) are retained, and the worker advances to
-  subsequent chapters.
+  or final validation recovery (`SmartAudioOutputValidationError`), or encounters TTS
+  synthesis failures, the failure artifacts (`*__rejected.txt` and
+  `*__pronunciation_failure.json`) are retained, the chapter is marked for review,
+  and the worker advances to subsequent chapters without aborting the job.
+- When the targeted pronunciation fixer repairs a malformed dictionary pronunciation
+  (such as compacting spaced phonemes `/siːk lənd/` $\to$ `/siːklənd/`), the corrected
+  IPA is immediately updated in memory, synchronized to the user's active Smart Audio
+  profile (`updateSmartAudioProfilePronunciations`), and written to the book's
+  `bookLexicon` so subsequent chapters and reconciliation passes do not re-apply the
+  malformed pronunciation.
+- Single-word dictionary lookups (`buildPronunciationLookup`) automatically compact
+  whitespace between syllables or phonemes for single words, ensuring dictionary entries
+  comply with Kokoro single-word token alignment.
+- When remembering approved pronunciations (`rememberApprovedPronunciations`), existing
+  dictionary entries with broken or spaced IPA are overwritten with the approved
+  repair and propagated to the active profile, while valid conflicting pronunciations
+  remain untouched.
 - The audiobook job completes with a review-required status message indicating how
   many chapters require manual attention.
 - **Download Gating**: Full-book combined assembly (`GET` / `POST /api/audiobook`)

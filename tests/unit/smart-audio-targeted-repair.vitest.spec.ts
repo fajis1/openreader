@@ -73,3 +73,20 @@ test('aborted targeted recovery does not save a failed chapter or request furthe
   })).rejects.toThrow('Aborted');
   expect(onUnrecoverable).not.toHaveBeenCalled(); expect(requestRepair).not.toHaveBeenCalled();
 });
+
+test('updates dictionary in memory and invokes onPronunciationCorrections callback', async () => {
+  const dictionary: Record<string, string> = { 'Seekland': '/siːk lənd/' };
+  const onCorrections = vi.fn();
+  const result = await repairSmartAudioWorkerPronunciations(
+    { status: 'success', cleaned_text: 'Welcome to [Seekland](/siːk lənd/).' },
+    {
+      ...input,
+      sourceText: 'Welcome to Seekland.',
+      dictionary,
+      onPronunciationCorrections: onCorrections,
+    },
+  );
+  expect(result).toEqual({ status: 'success', cleaned_text: 'Welcome to [Seekland](/siːklənd/).' });
+  expect(dictionary['Seekland']).toBe('/siːklənd/');
+  expect(onCorrections).toHaveBeenCalledWith({ Seekland: '/siːklənd/' });
+});

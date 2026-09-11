@@ -5,6 +5,7 @@ import {
   findSmartAudioProfileById,
   mergeGeneratedPronunciationsIntoLatestProfile,
   readSmartAudioProfilesDocument,
+  updateSmartAudioProfilePronunciations,
 } from '@/lib/server/smart-audio-profiles';
 import { eq, and, asc, lt, inArray, sql, or } from 'drizzle-orm';
 import { db } from '@/db';
@@ -73,6 +74,7 @@ import {
   hasConfirmedSmartAudioEndMatterHint,
   isScholarLikeSmartAudioMode,
   resolveSmartAudioWorkerResult,
+  SmartAudioOutputValidationError,
   stripSmartAudioInputMarkers,
   validateSmartAudioOutput,
 } from '@/lib/shared/smart-audio-cleanup';
@@ -1260,8 +1262,37 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
                 await check();
                 const timer = setInterval(() => { void check().catch(() => controller.abort()); }, 1000);
                 try {
-                  return await repairSmartAudioWorkerPronunciations(candidate, { profile: currentSelectedProfile,
-                    sourceText: cleanupSourceText, dictionary: currentPronunciations, signal: controller.signal });
+                  return await repairSmartAudioWorkerPronunciations(candidate, {
+                    profile: currentSelectedProfile,
+                    sourceText: cleanupSourceText,
+                    dictionary: currentPronunciations,
+                    signal: controller.signal,
+                    onPronunciationCorrections: async (corrections) => {
+                      Object.assign(currentPronunciations, corrections);
+                      if (currentSelectedProfile?.id) {
+                        await updateSmartAudioProfilePronunciations(userId, currentSelectedProfile.id, corrections);
+                      }
+                      if (bookLexicon) {
+                        let lexiconModified = false;
+                        for (const [word, ipa] of Object.entries(corrections)) {
+                          const existing = bookLexicon.entries[word];
+                          if (!existing || existing.pronunciation !== ipa) {
+                            bookLexicon.entries[word] = {
+                              term: word,
+                              pronunciation: ipa,
+                              definition: existing?.definition ?? null,
+                              language: /\p{Script=Hebrew}/u.test(word) ? 'biblical_hebrew' : 'koine_greek',
+                              approvedRepair: true,
+                            };
+                            lexiconModified = true;
+                          }
+                        }
+                        if (lexiconModified) {
+                          await writeBookLexicon(userId, doc.id, bookLexicon).catch(() => {});
+                        }
+                      }
+                    },
+                  });
                 } catch (error) {
                   if (controller.signal.aborted) throw new AudiobookJobStoppedError();
                   throw error;
@@ -1467,7 +1498,7 @@ async function processSingleAudiobookJob(job: typeof audiobookJobs.$inferSelect)
         } catch (e) {
           if (e instanceof AudiobookJobStoppedError) throw e;
 
-          if (e instanceof SmartAudioTargetedRepairError) {
+          if (e instanceof SmartAudioTargetedRepairError || e instanceof SmartAudioOutputValidationError) {
             serverLogger.warn({
               event: 'audiobook.queue.chapter_held_for_review',
               jobId: job.id,

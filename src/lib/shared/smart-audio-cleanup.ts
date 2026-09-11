@@ -107,8 +107,13 @@ function buildPronunciationLookup(pronunciations: Record<string, string>): Pronu
   const canonicalAccentFolded = new Map<string, { word: string; pronunciation: string } | null>();
   for (const [rawWord, rawPronunciation] of Object.entries(pronunciations)) {
     const word = rawWord.trim().normalize('NFC');
-    const pronunciation = typeof rawPronunciation === 'string' ? rawPronunciation.trim() : '';
+    let pronunciation = typeof rawPronunciation === 'string' ? rawPronunciation.trim() : '';
     if (!word || /\s/u.test(word) || !/^\/[^/\r\n]+\/$/u.test(pronunciation)) continue;
+    // For a confirmed single word (no whitespace), compact any whitespace between phonemes or syllables.
+    // E.g. "/siːk lənd/" -> "/siːklənd/" so it complies with Kokoro single-word token alignment.
+    const inner = pronunciation.slice(1, -1).replace(/\s+/gu, '');
+    if (!inner) continue;
+    pronunciation = `/${inner}/`;
     setUniquePronunciation(exact, word, pronunciation);
     const foldedWord = word.toLocaleLowerCase();
     setUniquePronunciation(folded, foldedWord, pronunciation);
@@ -249,6 +254,7 @@ function rewriteSmartAudioPronunciationTags(
       assertGreekInflectionEnding(termWords[0].word, termWords[0].pronunciation.slice(1, -1));
       return `[${termWords[0].word}](${termWords[0].pronunciation})`;
     }
+
 
     if (termWords.length !== ipaWords.length) {
       throw new SmartAudioOutputValidationError(

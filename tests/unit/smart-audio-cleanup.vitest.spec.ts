@@ -273,6 +273,13 @@ describe('Smart Audio cleanup contract', () => {
     )).toBe('[WORD](/gemini/)');
   });
 
+  test('compacts phoneme/syllable whitespace for single-word dictionary entries', () => {
+    expect(reconcileSmartAudioPronunciations(
+      '[Seekland](/wrong/)',
+      { 'Seekland': '/siːk lənd/' },
+    )).toBe('[Seekland](/siːklənd/)');
+  });
+
   test('treats Scholar and bibliography-catcher as the same structural mode', () => {
     expect(isScholarLikeSmartAudioMode('scholar')).toBe(true);
     expect(isScholarLikeSmartAudioMode('bibliography-catcher')).toBe(true);

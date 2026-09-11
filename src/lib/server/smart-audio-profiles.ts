@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { userPreferences } from '@/db/schema';
 import { eq, sql } from 'drizzle-orm';
 import type { SmartAudioProfile } from '@/types/client';
+import { serverLogger } from '@/lib/server/logger';
 import {
   DEFAULT_CLEANUP_AI_MODEL,
   resolveCleanupAiModels,
@@ -627,4 +628,46 @@ export function findSmartAudioProfileById(
   const normalizedId = (profileId || '').trim();
   if (!normalizedId) return profilesDocument.profiles[0] ?? null;
   return profilesDocument.profiles.find((profile) => profile.id === normalizedId) ?? profilesDocument.profiles[0] ?? null;
+}
+
+export async function updateSmartAudioProfilePronunciations(
+  userId: string | null | undefined,
+  profileId: string,
+  corrections: Record<string, string>,
+): Promise<boolean> {
+  if (!userId || !profileId || Object.keys(corrections).length === 0) return false;
+  try {
+    const doc = await readSmartAudioProfilesDocument(userId);
+    const profileIndex = doc.profiles.findIndex((p) => p.id === profileId);
+    if (profileIndex < 0) return false;
+
+    let modified = false;
+    const profile = doc.profiles[profileIndex];
+    const pronunciations = { ...(profile.pronunciations || {}) };
+
+    for (const [term, fixedIpa] of Object.entries(corrections)) {
+      if (pronunciations[term] && pronunciations[term] !== fixedIpa) {
+        pronunciations[term] = fixedIpa;
+        modified = true;
+      }
+    }
+
+    if (!modified) return false;
+
+    doc.profiles[profileIndex] = {
+      ...profile,
+      pronunciations,
+    };
+
+    await writeSmartAudioProfilesDocument(userId, doc);
+    return true;
+  } catch (error) {
+    serverLogger.warn({
+      event: 'smart_audio.profile.update_pronunciations_error',
+      userId,
+      profileId,
+      error: error instanceof Error ? error.message : String(error),
+    }, 'Failed to persist corrected pronunciations into smart audio profile.');
+    return false;
+  }
 }

@@ -3,6 +3,8 @@ import { db } from '@/db';
 import { batchRefineChanges, batchRefineRuns, documentSettings } from '@/db/schema';
 import { PRONUNCIATION_REPAIR_RULE } from '@/lib/shared/pronunciation-issues';
 import { approvedPronunciationCandidates } from '@/lib/shared/remember-approved-pronunciations';
+import { isKokoroCompatiblePronunciation } from '@/lib/shared/kokoro-pronunciation-policy';
+import { updateSmartAudioProfilePronunciations } from '@/lib/server/smart-audio-profiles';
 import type { SmartAudioBookLexicon } from '@/types/document-settings';
 import { assertPronunciationBookIdle } from './pronunciation-repairs';
 
@@ -35,8 +37,13 @@ export async function rememberApprovedPronunciations(bookId: string, userId: str
     for (const [term, pronunciation] of Object.entries(candidates.entries)) {
       const current = entries[term];
       if (current) {
-        if (current.pronunciation !== pronunciation) { skipped++; continue; }
-        if (current.approvedRepair) { alreadyKnown++; continue; }
+        if (current.pronunciation !== pronunciation) {
+          const isCurrentBroken = /\s/u.test(current.pronunciation.slice(1, -1)) || !isKokoroCompatiblePronunciation(current.pronunciation);
+          if (!isCurrentBroken) { skipped++; continue; }
+        } else if (current.approvedRepair) {
+          alreadyKnown++;
+          continue;
+        }
       }
       entries[term] = { ...current, term, pronunciation, definition: current?.definition ?? null,
         language: /\p{Script=Hebrew}/u.test(term) ? 'biblical_hebrew' : 'koine_greek', approvedRepair: true };
@@ -56,7 +63,10 @@ export async function rememberApprovedPronunciations(bookId: string, userId: str
       )).returning({ id: documentSettings.documentId })
       : await db.insert(documentSettings).values({ documentId: bookId, userId, dataJson, clientUpdatedAtMs: 0, updatedAt: Date.now() })
         .onConflictDoNothing().returning({ id: documentSettings.documentId });
-    if (updated.length) return result;
+    if (updated.length) {
+      await updateSmartAudioProfilePronunciations(userId, profileId, candidates.entries);
+      return result;
+    }
   }
   throw new Error('Book settings changed while remembering pronunciations. Please try again.');
 }
